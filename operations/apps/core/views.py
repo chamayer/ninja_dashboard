@@ -8063,6 +8063,14 @@ def admin_jobs(request: HttpRequest) -> HttpResponse:
         host_no_port = request.get_host().split(":")[0]
         ingest_public_url = f"{request.scheme}://{host_no_port}:8090"
 
+    active_queue = _operator_job_runs(limit=200)
+    active_by_job = {
+        run["job_key"]: run for run in active_queue
+        if run["status"] in {"queued", "running"}
+    }
+    for job in jobs:
+        job["active_run"] = active_by_job.get(job["id"])
+
     return render(
         request,
         "admin_jobs.html",
@@ -8076,27 +8084,32 @@ def admin_jobs(request: HttpRequest) -> HttpResponse:
             "active_status": status_filter,
             "recent_runs": recent_runs,
             "ingest_public_url": ingest_public_url,
+            "active_job_count": len(active_by_job),
         },
     )
 
 
 @login_required
+@require_admin
 @require_POST
 def admin_jobs_run(request: HttpRequest, job_id: str) -> HttpResponse:
     entry = _JOB_INDEX.get(job_id)
     if not entry:
         messages.error(request, f"Unknown job '{job_id}'.")
         return redirect("admin_jobs")
-    ok, note = _dispatch_job(entry)
-    (messages.success if ok else messages.error)(request, f"{entry['name']} → {note}")
-    return redirect(request.META.get("HTTP_REFERER") or reverse("admin_jobs"))
+    run_id, created = _enqueue_operator_job(job_id, request.user.id)
+    if created:
+        messages.success(request, f"{entry['name']} is queued. Follow its progress in Job status.")
+    else:
+        messages.info(request, f"{entry['name']} is already queued or running.")
+    return redirect(reverse("admin_job_status") + f"?run={run_id}")
 
 
 @login_required
+@require_admin
 @require_POST
 def admin_jobs_run_all(request: HttpRequest) -> HttpResponse:
-    """Fire every job in the catalog, or every job in a category if
-    ``category`` is supplied on the POST body."""
+    """Queue a controlled batch; it executes one job at a time."""
     category = (request.POST.get("category") or "").strip().lower()
     targets = [
         j for j in _JOB_CATALOG
@@ -8105,23 +8118,21 @@ def admin_jobs_run_all(request: HttpRequest) -> HttpResponse:
     if not targets:
         messages.warning(request, f"No jobs matched category '{category or 'all'}'.")
         return redirect(request.META.get("HTTP_REFERER") or reverse("admin_jobs"))
-    fired = 0
-    failed = 0
+    batch_id = uuid.uuid4()
+    queued = 0
+    already_active = 0
     for entry in targets:
-        ok, _note = _dispatch_job(entry)
-        if ok:
-            fired += 1
+        _run_id, created = _enqueue_operator_job(entry["id"], request.user.id, batch_id=batch_id)
+        if created:
+            queued += 1
         else:
-            failed += 1
+            already_active += 1
     scope = category or "all"
-    if failed:
-        messages.warning(
-            request,
-            f"Fired {fired} job(s) in '{scope}'; {failed} failed to dispatch — see the ingest log.",
-        )
-    else:
-        messages.success(request, f"Fired {fired} job(s) in '{scope}'.")
-    return redirect(request.META.get("HTTP_REFERER") or reverse("admin_jobs"))
+    note = f"Queued {queued} job{'s' if queued != 1 else ''} for {scope}. They will run one at a time."
+    if already_active:
+        note += f" {already_active} already active job{'s' if already_active != 1 else ''} were kept."
+    messages.success(request, note)
+    return redirect(reverse("admin_job_status") + f"?batch={batch_id}")
 
 
 def _dispatch_job(entry: dict) -> tuple[bool, str]:
@@ -8137,6 +8148,138 @@ def _dispatch_job(entry: dict) -> tuple[bool, str]:
         return False, f"HTTP {exc.code}: {exc.reason}"
     except URLError as exc:
         return False, f"network error: {exc.reason}"
+
+
+def _enqueue_operator_job(
+    job_key: str, user_id: int, *, batch_id: uuid.UUID | None = None
+) -> tuple[uuid.UUID, bool]:
+    """Create, or coalesce with, one active registered Jobs request."""
+    with transaction.atomic(), connection.cursor() as cur:
+        cur.execute("SET LOCAL operations.tenant_id = 1")
+        cur.execute(
+            """
+            INSERT INTO operations.operator_job_runs
+                (id, tenant_id, job_key, batch_id, requested_by_id)
+            VALUES (%s, 1, %s, %s, %s)
+            ON CONFLICT (tenant_id, job_key) WHERE status IN ('queued', 'running')
+            DO NOTHING RETURNING id
+            """,
+            (uuid.uuid4(), job_key, batch_id, user_id),
+        )
+        row = cur.fetchone()
+        if row:
+            return row[0], True
+        cur.execute(
+            """SELECT id FROM operations.operator_job_runs
+                 WHERE tenant_id = 1 AND job_key = %s
+                   AND status IN ('queued', 'running')
+                 ORDER BY requested_at DESC LIMIT 1""",
+            (job_key,),
+        )
+        row = cur.fetchone()
+    if row is None:
+        raise RuntimeError("Unable to create or find the requested job")
+    return row[0], False
+
+
+def _operator_job_runs(*, limit: int = 100, run_id: str = "", batch_id: str = "") -> list[dict]:
+    clauses = ["tenant_id = 1"]
+    params: list[object] = []
+    if run_id:
+        clauses.append("id = %s")
+        params.append(run_id)
+    if batch_id:
+        clauses.append("batch_id = %s")
+        params.append(batch_id)
+    params.append(limit)
+    with transaction.atomic(), connection.cursor() as cur:
+        cur.execute("SET LOCAL operations.tenant_id = 1")
+        cur.execute(
+            f"""SELECT id, job_key, batch_id, requested_at, started_at, completed_at,
+                        status, attempts, rows_touched, error
+                   FROM operations.operator_job_runs
+                  WHERE {' AND '.join(clauses)}
+                  ORDER BY requested_at DESC LIMIT %s""",
+            params,
+        )
+        rows = cur.fetchall()
+    labels = {entry["id"]: entry["name"] for entry in _JOB_CATALOG}
+    status_labels = {
+        "queued": "Queued", "running": "Running", "completed": "Completed",
+        "failed": "Failed", "stalled": "Needs attention", "cancelled": "Cancelled",
+    }
+    return [
+        {
+            "id": row[0], "job_key": row[1], "name": labels.get(row[1], row[1]),
+            "batch_id": row[2], "requested_at": row[3], "started_at": row[4],
+            "completed_at": row[5], "status": row[6], "status_label": status_labels.get(row[6], row[6]),
+            "attempts": row[7], "rows_touched": row[8], "error": row[9],
+        }
+        for row in rows
+    ]
+
+
+@login_required
+@require_admin
+def admin_job_status(request: HttpRequest) -> HttpResponse:
+    return render(
+        request,
+        "admin_job_status.html",
+        {
+            "admin_group": "integrations", "admin_tab": "jobs",
+            "runs": _operator_job_runs(
+                run_id=(request.GET.get("run") or "").strip(),
+                batch_id=(request.GET.get("batch") or "").strip(),
+            ),
+        },
+    )
+
+
+@login_required
+@require_admin
+@require_POST
+def admin_job_cancel(request: HttpRequest, run_id: uuid.UUID) -> HttpResponse:
+    """Queued work can be cancelled; a running collector is never killed."""
+    with transaction.atomic(), connection.cursor() as cur:
+        cur.execute("SET LOCAL operations.tenant_id = 1")
+        cur.execute(
+            """UPDATE operations.operator_job_runs
+                   SET status = 'cancelled', completed_at = NOW(),
+                       error = 'Cancelled before work started.'
+                 WHERE tenant_id = 1 AND id = %s AND status = 'queued'""",
+            (run_id,),
+        )
+        cancelled = cur.rowcount
+    if cancelled:
+        messages.success(request, "Queued run cancelled.")
+    else:
+        messages.info(request, "This run has already started or finished and cannot be stopped safely.")
+    return redirect(request.META.get("HTTP_REFERER") or reverse("admin_job_status"))
+
+
+@login_required
+@require_admin
+@require_POST
+def admin_job_retry(request: HttpRequest, run_id: uuid.UUID) -> HttpResponse:
+    """Retry only a terminal run by placing a new durable request."""
+    with transaction.atomic(), connection.cursor() as cur:
+        cur.execute("SET LOCAL operations.tenant_id = 1")
+        cur.execute(
+            """SELECT job_key FROM operations.operator_job_runs
+                 WHERE tenant_id = 1 AND id = %s
+                   AND status IN ('failed', 'stalled')""",
+            (run_id,),
+        )
+        row = cur.fetchone()
+    if row is None:
+        messages.info(request, "Only failed or stalled runs can be retried.")
+        return redirect(request.META.get("HTTP_REFERER") or reverse("admin_job_status"))
+    new_id, created = _enqueue_operator_job(row[0], request.user.id)
+    if created:
+        messages.success(request, "Retry queued. Follow the new run in Job status.")
+    else:
+        messages.info(request, "An equivalent run is already queued or running.")
+    return redirect(reverse("admin_job_status") + f"?run={new_id}")
 
 
 # ─────────────────────────────────────────────────────────────────────
@@ -9516,6 +9659,12 @@ def findings_admin_health(request: HttpRequest) -> HttpResponse:
     assessments = _condition_assessment_display("admin", (finding.id for finding in findings))
     for finding in findings:
         finding.assessment = assessments.get(str(finding.id))
+        details = finding.finding_details or {}
+        finding.job_status_url = (
+            reverse("admin_job_status")
+            if details.get("queue_key") == "operator.jobs"
+            else ""
+        )
 
     finding_types = FindingType.objects.filter(finding_class="admin").order_by("name")
     condition_profile = None

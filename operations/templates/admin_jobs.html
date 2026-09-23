@@ -102,6 +102,7 @@
             {% endif %}
         </div>
     </div>
+    <a href="{% url 'admin_job_status' %}" class="run-all-primary" style="background:#334155; text-decoration:none;">Job status{% if active_job_count %} ({{ active_job_count }}){% endif %}</a>
     <a href="{% url 'targeted_refresh' %}" class="run-all-primary" style="background:#0f766e; text-decoration:none;">Targeted refresh</a>
     <form method="post" action="{% url 'admin_jobs_run_all' %}"
           onsubmit="return confirm('Fire every job right now? This will call the ingest container once per job.');">
@@ -160,6 +161,9 @@
                 {% endif %}
             </div>
             <div class="desc">{{ j.description }}</div>
+            {% if j.active_run %}
+                <div class="err-preview" style="color:#1d4ed8;">{{ j.active_run.status_label }} — <a href="{% url 'admin_job_status' %}?run={{ j.active_run.id }}">view progress</a></div>
+            {% endif %}
             {% if j.last_error %}
                 <div class="err-preview">Last error: {{ j.last_error }}</div>
             {% endif %}
@@ -181,7 +185,7 @@
             {% else %}
             <form method="post" action="{% url 'admin_jobs_run' job_id=j.id %}">
                 {% csrf_token %}
-                <button type="submit">Run now</button>
+                <button type="submit">{% if j.active_run %}View run{% else %}Run now{% endif %}</button>
             </form>
             {% endif %}
         </div>

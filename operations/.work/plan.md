@@ -1,4 +1,98 @@
-# Issues queue operator model and coverage correction
+# Durable Jobs queue and status
+
+## Status
+
+**Discovery and migration design in progress.** This supersedes the completed
+Issues-page plan below. Existing unrelated untracked root `.work/probe_*` and
+bootstrap files must remain untouched.
+
+## Goal
+
+Make every operator-triggered collection and evaluator run durable,
+capacity-safe, observable, and recoverable. Provide an operator-facing Job
+status page linked from Jobs, with clear queued/running/succeeded/failed/stalled
+state and useful recovery guidance.
+
+## Confirmed problem
+
+`/admin/jobs/` currently POSTs directly to ingest `/run/*` endpoints. Most
+endpoints create untracked daemon threads and immediately return HTTP 202.
+Jobs then infers state from the last completed `run_log` row, so it cannot show
+a queued run, a failed start, or an active worker.
+
+On 2026-09-23, "Run all in this category" launched five evaluator endpoints
+concurrently. The ingest service has a four-connection PostgreSQL pool. The
+pool became saturated and later work, including Patch classifier requests,
+timed out before a run record could be written.
+
+`operations.source_run_queue` has the relevant lifecycle fields but is
+source-specific and its worker invokes source collection. It must not be
+misused as an evaluator queue. `operations.source_action_requests` is for
+external Hudu mutations and is also not suitable.
+
+## Decisions
+
+- Create one registered durable job-run queue for operator-demand jobs; source
+  collection and evaluator jobs are distinct registered job kinds.
+- Run-all is a durable batch processed sequentially by default in a documented
+  dependency order; it must not fire a concurrent HTTP request per catalog row.
+- Job requests receive a durable ID before returning to Django. Equivalent
+  pending/running jobs are coalesced and link to the existing run.
+- Persist leases, attempts, errors, timestamps, row counts, initiator, batch
+  membership, and correlated `run_log` history. A stale run is terminal until
+  an operator explicitly retries it.
+- Allow operators to cancel Queued work, including remaining queued batch
+  items. Running work is not forcibly stopped: the status page must state that
+  it cannot safely be interrupted mid-run.
+- Jobs remains the catalog. A new Job status page is the operational surface;
+  it must show current/recent work and a concise next action, with detailed
+  diagnostics restricted to administrators.
+
+## Scope
+
+- Reviewed Django migration for a durable queue, batch membership, indexes,
+  RLS, ownership, and grants.
+- Shared registered job catalog, ingest dispatcher/worker and bounded
+  concurrency, Jobs enqueue flow, status page/detail/retry routes, navigation,
+  health reporting, tests, decision record, and release notes.
+
+## Steps
+
+1. Inventory every Jobs entry, completion evidence, coalescing key, and safe
+   run-all dependency order.
+2. Add the reviewed queue schema and worker claim/finalize contract.
+3. Route Run now/Run all through enqueue; retain legacy endpoints only for
+   scheduler compatibility.
+4. Build the status page: current queue, recent runs, batches, filters,
+   auto-refresh, errors, durations, rows, retry, and clear recovery guidance.
+5. Add queue health and regression tests, including the Patch-classifier
+   pool-exhaustion case.
+6. Validate locally, then obtain separate approval for migration, commit,
+   push/deployment, and production verification.
+
+## Checkpoint and next action
+
+Implemented locally: migration 0178 adds the tenant-scoped durable Jobs queue,
+active-request coalescing indexes, RLS/grants, and queue-health registration.
+Jobs now enqueues individual runs and sequential batches; the ingest scheduler
+claims one run at a time, while an independent watchdog marks expired runs
+Needs attention. Job status provides live queued/running/completed/failed state
+with safe queued cancellation and terminal retry. Existing Admin Health now
+reports the Jobs queue when it is delayed, failed, or stalled and links to Job
+status. Operator wording avoids transport and pool jargon.
+
+Validation so far: migration autodetection, Django checks, template loading,
+Python compilation, focused queue/Issues tests (58 passed), targeted Ruff, and
+diff check. The full Ruff run has pre-existing unrelated violations. No
+production mutation, migration, commit, or push has occurred.
+
+Next: complete final code review, run the remaining focused ingest checks, then
+obtain separate approval for release versioning, commit/push, automatic
+deployment with migration 0178, and production status-workflow verification.
+
+---
+
+# Superseded plan: Issues queue operator model and coverage correction
 
 ## Status
 

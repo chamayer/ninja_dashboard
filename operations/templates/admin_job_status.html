@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+
+{% block title %}Job status{% endblock %}
+
+{% block content %}
+<meta http-equiv="refresh" content="15">
+<style>
+  .job-status-head { display:flex; justify-content:space-between; align-items:baseline; gap:1rem; flex-wrap:wrap; margin-bottom:1rem; }
+  .job-status-head h1 { margin:0; font-size:1.35rem; }
+  .job-status-table { width:100%; border-collapse:collapse; background:var(--surface); border:1px solid var(--border); border-radius:6px; overflow:hidden; }
+  .job-status-table th,.job-status-table td { padding:.65rem .75rem; border-bottom:1px solid var(--border); text-align:left; vertical-align:top; }
+  .job-status-table th { color:var(--muted); font-size:.72rem; text-transform:uppercase; letter-spacing:.05em; }
+  .job-state { font-weight:700; } .job-state.queued { color:#1d4ed8; } .job-state.running { color:#7c3aed; } .job-state.completed { color:#15803d; } .job-state.failed,.job-state.stalled { color:#b91c1c; } .job-state.cancelled { color:#64748b; }
+  .job-error { color:#991b1b; max-width:38ch; white-space:normal; }
+  .job-cancel { border:1px solid var(--border); border-radius:4px; background:#fff; padding:.3rem .55rem; cursor:pointer; }
+</style>
+
+<div class="job-status-head">
+  <div><h1>Job status</h1><div class="muted">Updates every 15 seconds. Queued work runs one at a time.</div></div>
+  <a href="{% url 'admin_jobs' %}">Back to Jobs</a>
+</div>
+
+{% if runs %}
+<table class="job-status-table">
+  <thead><tr><th>Job</th><th>Status</th><th>Requested</th><th>Started</th><th>Finished</th><th>Result</th><th>Action</th></tr></thead>
+  <tbody>{% for run in runs %}<tr>
+    <td><strong>{{ run.name }}</strong>{% if run.batch_id %}<br><span class="muted">Batch run</span>{% endif %}</td>
+    <td><span class="job-state {{ run.status }}">{{ run.status_label }}</span>{% if run.status == 'running' %}<br><span class="muted">Do not close the worker while this is running.</span>{% endif %}</td>
+    <td>{{ run.requested_at|date:"Y-m-d H:i:s" }}</td><td>{{ run.started_at|date:"Y-m-d H:i:s"|default:"—" }}</td><td>{{ run.completed_at|date:"Y-m-d H:i:s"|default:"—" }}</td>
+    <td>{% if run.rows_touched is not None %}{{ run.rows_touched }} updated{% endif %}{% if run.error %}<div class="job-error">{{ run.error }}</div>{% endif %}</td>
+    <td>{% if run.status == 'queued' %}<form method="post" action="{% url 'admin_job_cancel' run.id %}">{% csrf_token %}<button class="job-cancel" type="submit">Cancel</button></form>{% elif run.status == 'running' %}<span class="muted">Cannot safely stop</span>{% elif run.status == 'failed' or run.status == 'stalled' %}<form method="post" action="{% url 'admin_job_retry' run.id %}">{% csrf_token %}<button class="job-cancel" type="submit">Retry</button></form>{% else %}—{% endif %}</td>
+  </tr>{% endfor %}</tbody>
+</table>
+{% else %}<p class="muted">No requested Jobs runs match this view.</p>{% endif %}
+{% endblock %}

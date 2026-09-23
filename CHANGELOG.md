@@ -2,6 +2,22 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.126.9] — 2026-09-23 — Durable Jobs status
+
+### Added
+
+- Added a durable, single-worker queue for Jobs-run source collection and
+  evaluators, with queued/running/completed/failed/stalled lifecycle records.
+- Added Job status with live progress, batch visibility, safe queued-run
+  cancellation, and retry for failed or stalled work.
+
+### Changed
+
+- Run now and Run all now queue work instead of launching concurrent,
+  untracked ingest threads.
+- Added independent stalled-run detection and Admin Health reporting for
+  delayed, failed, or stalled Jobs work.
+
 ## [0.126.8] — 2026-09-23 — Patching inactive label
 
 ### Changed

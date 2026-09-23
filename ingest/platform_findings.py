@@ -30,6 +30,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from psycopg import sql
+from shared.conditions.contracts import Condition, EvaluationCoverage, Participant
 
 from ingest import db
 from ingest.cmdb_findings import (
@@ -38,7 +39,6 @@ from ingest.cmdb_findings import (
     _upsert,
 )
 from ingest.conditions import record_assessment
-from shared.conditions.contracts import Condition, EvaluationCoverage, Participant
 
 log = logging.getLogger(__name__)
 
@@ -200,6 +200,48 @@ def _eval_stalled_queues(
 
     keys: list[str] = []
     for queue_key, table_name, max_age_m, max_depth in registry:
+        if table_name == "operations.operator_job_runs":
+            cur.execute(
+                """
+                SELECT count(*) FILTER (WHERE status = 'queued'),
+                       EXTRACT(EPOCH FROM (now() - min(requested_at)
+                         FILTER (WHERE status = 'queued'))) / 60,
+                       count(*) FILTER (WHERE status IN ('failed', 'stalled'))
+                  FROM operations.operator_job_runs
+                 WHERE tenant_id = %s
+                """,
+                (TENANT_ID,),
+            )
+            depth, oldest_age_m, failed_count = cur.fetchone()
+            depth = depth or 0
+            oldest_age_m = float(oldest_age_m or 0)
+            over_depth = bool(max_depth) and depth > max_depth
+            over_age = bool(max_age_m) and oldest_age_m > max_age_m
+            if not (over_depth or over_age or failed_count):
+                continue
+            key = f"software_queue_stalled:{queue_key}"
+            keys.append(key)
+            counts["software_queue_stalled"] += 1
+            if dry_run:
+                continue
+            finding_id = _upsert(
+                cur, tenant_id=TENANT_ID, finding_type_id=finding_type_id,
+                client_id=None, subject_type="source_binding",
+                subject_id=_subject("queue", queue_key), condition_key=key,
+                severity="high" if failed_count or (over_depth and over_age) else "medium",
+                now=now,
+                details={
+                    "queue_key": queue_key, "pending_depth": depth,
+                    "oldest_pending_minutes": round(oldest_age_m, 1),
+                    "failed_or_stalled": failed_count,
+                    "max_pending_age_m": max_age_m, "max_depth": max_depth,
+                },
+            )
+            _record_platform_assessment(
+                cur, finding_id, key, "software_queue_stalled", _subject("queue", queue_key), now,
+                measured=True,
+            )
+            continue
         if not _queue_is_measurable(cur, table_name):
             counts["queues_skipped"] += 1
             log.warning(

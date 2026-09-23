@@ -40,7 +40,7 @@ from ingest.activities import ingest as activities_ingest
 from ingest.agent_compliance import ingest as agent_compliance_ingest
 from ingest.agent_compliance import review_digest
 from ingest.source_observations import is_identity_source, run_source_observations
-from ingest import source_actions, source_run_queue
+from ingest import operator_job_queue, source_actions, source_run_queue
 from ingest.inventory import software as software_ingest
 from ingest.inventory import queue as software_queue
 from ingest.runlog import run_log
@@ -2523,6 +2523,24 @@ def main() -> None:
         "interval",
         minutes=1,
         id="source_action_requests",
+        max_instances=1,
+    )
+    # Operator-triggered Jobs work is durable and intentionally serialized.
+    # The queue must not compete with every catalog entry at once for the
+    # ingest connection pool.
+    scheduler.add_job(
+        operator_job_queue.process_next,
+        "interval",
+        seconds=10,
+        id="operator_job_queue",
+        max_instances=1,
+    )
+    # Separate from the worker: a wedged run must still become visible.
+    scheduler.add_job(
+        operator_job_queue.recover_stale,
+        "interval",
+        minutes=1,
+        id="operator_job_queue_stale_recovery",
         max_instances=1,
     )
     # Catches hangs the startup reaper cannot: process alive, work stuck.

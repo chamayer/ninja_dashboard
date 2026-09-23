@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load human_labels %}
 
 {% block title %}Admin Health{% endblock %}
 
@@ -110,6 +111,9 @@
                 <td style="padding: 0.5rem;" class="muted">{{ f.first_detected_at }}</td>
                 <td style="padding: 0.5rem;" class="muted">{{ f.last_detected_at }}</td>
                 <td style="padding: 0.5rem;">
+                    {% if f.job_status_url %}
+                    <a href="{{ f.job_status_url }}">Open Job status</a>
+                    {% endif %}
                     {% if f.status == "open" %}
                     <form method="post" action="{% url 'admin_finding_acknowledge' f.id %}" style="display: inline;">
                         {% csrf_token %}
