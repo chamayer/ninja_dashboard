@@ -2,6 +2,15 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.126.8] — 2026-09-23 — Patching inactive label
+
+### Changed
+
+- Added the reviewed `conditions-taxonomy-5` policy version, renaming the
+  patching-stalled Issue to `Patching inactive`.
+- Shows the age of the latest patch observation as `Patching inactive (Xd)`
+  in the Issues queue, or the configured threshold as `Xd+` when unavailable.
+
 ## [0.126.7] — 2026-09-23 — Category-first Issues navigation
 
 ### Changed

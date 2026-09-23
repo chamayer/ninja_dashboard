@@ -626,3 +626,13 @@ filtered queryset as the displayed queue. No schema, source, or production
 change is in scope. Validation: 55 focused queue tests, Django checks,
 template loading, compilation, and diff check pass. Next action: obtain
 separate commit and push authorization if the local change is approved.
+
+Patching-inactive wording correction complete locally. The immutable
+`conditions-taxonomy-5` policy version changes the stable Issue label from
+`Patch activity overdue` to `Patching inactive`; the Issues queue appends the
+latest patch-evidence age as `(Xd)`, or the configured threshold as `(Xd+)`
+when that evidence has no timestamp. Migration 0177 creates the version
+inactive, preserving governed review and activation. Validation: 56 focused
+queue tests, policy payload digest, migration autodetection, Django checks,
+and diff check pass. Next action: commit/push if approved; deploy migration
+and activate only through the governed Operations policy workflow.

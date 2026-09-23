@@ -3413,6 +3413,8 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
     confidence_filter = request.GET.get("confidence", "")
     client_filter = request.GET.get("client", "")
     platform_filter = request.GET.get("platform", "")
+    os_filter = request.GET.get("os", "")
+    computer_type_filter = request.GET.get("computer_type", "")
     online_filter = request.GET.get("online", "")
     attention_filter = request.GET.get("attention", "")
     legacy_response_filter = request.GET.get("response", "")
@@ -3538,6 +3540,13 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
         qs = qs.filter(client__slug=client_filter)
     if platform_filter:
         qs = qs.filter(finding_details__platform=platform_filter)
+    if os_filter or computer_type_filter:
+        scoped_devices = Device.objects.filter(tenant_id=1, deleted_at__isnull=True)
+        if os_filter:
+            scoped_devices = scoped_devices.filter(os_name=os_filter)
+        if computer_type_filter in {"server", "workstation", "unknown"}:
+            scoped_devices = scoped_devices.filter(device_role=computer_type_filter)
+        qs = qs.filter(subject_type="device", subject_id__in=scoped_devices.values("id"))
     if subject_id_filter:
         # Filter to findings targeting a specific subject (device / client
         # / etc.). Used by Device Detail's "Issue → Issues page" clickthru.
@@ -4735,12 +4744,28 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
             )
         row["duplicate_candidates"] = candidates
 
+    patch_activity_threshold = get_device_status_policy()["patch_activity_days"]
+
+    def _patching_inactive_label(details: dict) -> str:
+        """Show the age of stale patch evidence without making it policy state."""
+        observed_at = details.get("last_patch_seen_at") or details.get("last_patch_activity_at")
+        if isinstance(observed_at, str):
+            observed_at = parse_datetime(observed_at)
+        if isinstance(observed_at, datetime):
+            if timezone.is_naive(observed_at):
+                observed_at = timezone.make_aware(observed_at, dt_timezone.utc)
+            age_days = max(1, (timezone.now() - observed_at).days)
+            return f"Patching inactive ({age_days}d)"
+        return f"Patching inactive ({patch_activity_threshold}d+)"
+
     # Resolve operator labels before both HTML and CSV rendering. CSV must
     # use the same taxonomy projection as the page and cannot rely on fields
     # added later in the response path.
     for row in findings_with_detail:
         condition = profile.definitions.get(row["f"].finding_type.name) if profile else None
         row["issue_label"] = condition["label"] if condition else "Unclassified issue"
+        if row["f"].finding_type.name == "patching_stalled":
+            row["issue_label"] = _patching_inactive_label(row["f"].finding_details or {})
         type_group = next(
             (group for group in issue_type_groups.values()
              if row["f"].finding_type.name in group["types"]),
@@ -5077,6 +5102,7 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
         for group in issue_type_groups.values()
     ]
     clients = Client.objects.filter(tenant_id=1, deleted_at__isnull=True).order_by("display_name")
+    os_choices = list(Device.objects.filter(tenant_id=1, deleted_at__isnull=True).exclude(os_name="").order_by("os_name").values_list("os_name", flat=True).distinct())
 
     page_query = request.GET.copy()
     page_query.pop("page", None)
@@ -5112,6 +5138,9 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
                 "",
             ),
             "active_platform": platform_filter,
+            "active_os": os_filter,
+            "os_choices": os_choices,
+            "active_computer_type": computer_type_filter,
             "active_online": online_filter,
             "active_attention": attention_filter,
             "attention_choices": OPERATOR_ATTENTION_CHOICES,

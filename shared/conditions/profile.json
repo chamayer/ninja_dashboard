@@ -479,7 +479,7 @@
     },
     {
       "name": "patching_stalled",
-      "label": "Patch activity overdue",
+      "label": "Patching inactive",
       "category": "Updates & Support",
       "type": "Patching not progressing",
       "lifecycle": "active",

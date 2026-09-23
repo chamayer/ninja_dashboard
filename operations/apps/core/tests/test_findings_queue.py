@@ -302,6 +302,12 @@ def test_patching_workflows_use_human_labels_and_actions():
     assert views._PATCHING_WORKFLOW["patch_approval_backlog"]["note"] == "Review the client deployment"
 
 
+def test_patching_inactive_label_shows_observed_or_threshold_age():
+    source = Path("apps/core/views.py").read_text(encoding="utf-8")
+    assert 'return f"Patching inactive ({age_days}d)"' in source
+    assert 'return f"Patching inactive ({patch_activity_threshold}d+)"' in source
+
+
 class _FindingActionUser:
     is_authenticated = True
 
