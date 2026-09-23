@@ -9,6 +9,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from psycopg_pool import PoolTimeout
+
 from ingest import db
 
 log = logging.getLogger(__name__)
@@ -34,18 +36,24 @@ def process_next() -> dict[str, int]:
 
 
 def recover_stale() -> int:
-    with db.transaction() as cur:
-        cur.execute("SET LOCAL operations.tenant_id = 1")
-        cur.execute(
-            f"""
-            UPDATE {_TABLE}
-               SET status = 'stalled', completed_at = NOW(), lease_expires_at = NULL,
-                   error = 'Run stopped responding. Review and retry when ready.'
-             WHERE tenant_id = 1 AND status = 'running'
-               AND lease_expires_at < NOW()
-            """
-        )
-        return cur.rowcount
+    try:
+        with db.transaction() as cur:
+            cur.execute("SET LOCAL operations.tenant_id = 1")
+            cur.execute(
+                f"""
+                UPDATE {_TABLE}
+                   SET status = 'stalled', completed_at = NOW(), lease_expires_at = NULL,
+                       error = 'Run stopped responding. Review and retry when ready.'
+                 WHERE tenant_id = 1 AND status = 'running'
+                   AND lease_expires_at < NOW()
+                """
+            )
+            return cur.rowcount
+    except PoolTimeout:
+        # Capacity is temporarily unavailable (for example, during startup
+        # bootstrap). Leave work visibly queued and try again next cadence.
+        log.warning("operator jobs waiting for database capacity")
+        return 0
 
 
 def _claim_next() -> dict[str, Any] | None:
