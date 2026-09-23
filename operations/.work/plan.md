@@ -615,3 +615,14 @@ schema, query, source, or production change is in scope. Validation: 55
 focused queue tests, Django checks, template loading, and diff check pass.
 Next action: obtain separate commit and push authorization if the local change
 is approved.
+
+Category-first Issues navigation complete locally. Opening a top-level
+Category selects it and displays its paginated rows immediately. Type is a
+subtle in-place refinement only when more than one populated Type exists; its
+count is the direct filter link. Category summaries show only useful nonzero
+state counts, and a single-state Type has no redundant state chooser. The
+redundant top and table-result headings are removed. Counts use the same
+filtered queryset as the displayed queue. No schema, source, or production
+change is in scope. Validation: 55 focused queue tests, Django checks,
+template loading, compilation, and diff check pass. Next action: obtain
+separate commit and push authorization if the local change is approved.

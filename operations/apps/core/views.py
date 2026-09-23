@@ -3722,7 +3722,8 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
     # database counts below and keeps the potentially very large finding set
     # out of Python memory.
     show_finding_rows = bool(
-        type_filter
+        category_filter
+        or type_filter
         or issue_filter
         or active_group_key
         or device_id_filter
@@ -4901,7 +4902,7 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
             filename_stem="affected_devices",
         )
     state_counts_by_type: dict[str, dict[str, int]] = {}
-    for finding_id, finding_type_name in governed_qs.values_list("id", "finding_type__name"):
+    for finding_id, finding_type_name in database_qs.values_list("id", "finding_type__name"):
         attention = operator_states.get(str(finding_id), {}).get("attention", ATTENTION_PENDING)
         counts = state_counts_by_type.setdefault(
             finding_type_name,
@@ -4920,11 +4921,14 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
             for row in database_qs.values("finding_type__name").annotate(n=Count("id"))
         }
 
-    def _group_link(category_key: str, type_key: str, attention: str = "") -> str:
+    def _group_link(category_key: str, type_key: str = "", attention: str = "") -> str:
         params = request.GET.copy()
         params.pop("page", None)
         params["category"] = category_key
-        params["type"] = type_key
+        if type_key:
+            params["type"] = type_key
+        else:
+            params.pop("type", None)
         params.pop("issue", None)
         params.pop("response", None)
         if attention:
@@ -4979,16 +4983,26 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
                 }
             )
         if category_types:
+            category_state_counts = {
+                state: sum(item["state_counts"][state] for item in category_types)
+                for state in ("needs_action", "blocked", "pending")
+            }
             issue_group_headers.append(
                 {
                     "key": category["key"],
                     "label": category["label"],
                     "current_count": sum(item["current_count"] for item in category_types),
                     "unresolved_count": sum(item["unresolved_count"] for item in category_types),
-                    "state_counts": {
-                        state: sum(item["state_counts"][state] for item in category_types)
-                        for state in ("needs_action", "blocked", "pending")
-                    },
+                    "state_counts": category_state_counts,
+                    "state_summary": [
+                        {"label": label, "count": category_state_counts[state]}
+                        for state, label in (
+                            ("needs_action", "Needs action"),
+                            ("blocked", "Blocked"),
+                            ("pending", "Pending"),
+                        )
+                        if category_state_counts[state]
+                    ],
                     # Keep the default queue compact. A selected Type, Issue,
                     # or Category remains open so a drilldown never appears to
                     # have disappeared.
@@ -4996,6 +5010,8 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
                         category["key"] == category_filter
                         or any(item["expanded"] for item in category_types)
                     ),
+                    "href": _group_link(category["key"]),
+                    "show_type_rows": len(category_types) > 1,
                     "types": category_types,
                 }
             )

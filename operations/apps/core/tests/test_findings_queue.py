@@ -141,16 +141,15 @@ def test_findings_queue_template_exposes_device_csv_and_grouped_types():
     assert "table_finding" in template
     assert "sort_links.finding" in template
     assert "issues-group-navigation" in template
-    assert "Issues summary" in template
+    assert 'aria-label="Unfiltered Issues totals"' in template
     assert "Filtered results" in template
     assert "issues-column-filter" in template
-    assert "Clear column filters" in template
     assert "More filters" in template
     assert "issues-results-intro" in template
     assert "current_result_summary" in template
     assert '<select name="issue" id="issues-issue-filter">' in template
     assert "issue_choices" in template
-    assert "issues-type-link" in template
+    assert "issues-type-row" in template
     assert "json_script:\"issue-taxonomy-data\"" in template
     assert "card.count }} / {{ card.total" not in template
     assert "card.percentage" not in template
@@ -273,11 +272,11 @@ def test_issue_work_status_uses_one_operator_label_without_a_repeated_reason():
     assert "operator_next_step" not in template
 
 
-def test_expanded_type_state_links_are_stacked_for_scanning():
+def test_optional_type_state_links_are_stacked_for_scanning():
     template = Path("templates/findings_queue.html").read_text(encoding="utf-8")
 
-    assert ".issues-type-group { min-width:0; }" in template
-    assert ".issues-type-link > span { min-width:0; overflow:hidden; text-overflow:ellipsis; }" in template
+    assert ".issues-type-row-label { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }" in template
+    assert ".issues-type-count" in template
     assert ".issues-state-links { display:grid;" in template
     assert ".issues-state-links a { display:block; }" in template
 
@@ -516,13 +515,17 @@ def test_targeted_refresh_uses_the_same_ingest_and_evaluator_paths_as_issues():
     assert "targeted_refresh" in urls
 
 
-def test_issue_categories_are_collapsed_until_a_drilldown_is_selected():
+def test_issue_categories_open_rows_without_requiring_a_type_drilldown():
     source = Path("apps/core/views.py").read_text(encoding="utf-8")
     template = Path("templates/findings_queue.html").read_text(encoding="utf-8")
     assert '"expanded": bool(' in source
-    assert ".issues-type-link" in template
+    assert "category_filter\n        or type_filter" in source
+    assert 'data-category-url="{{ category.href }}"' in template
+    assert "window.location.assign(group.dataset.categoryUrl)" in template
+    assert ".issues-type-row" in template
+    assert "issues-type-count" in template
     assert "white-space:nowrap" in template
-    assert '<details class="issues-category-group"{% if category.expanded %} open{% endif %}>' in template
+    assert '<details class="issues-category-group"{% if category.expanded %} open{% endif %} data-category-url="{{ category.href }}"' in template
 
 
 def test_findings_queue_csv_projects_operator_labels_without_internal_owner_columns():

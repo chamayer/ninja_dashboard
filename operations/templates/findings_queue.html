@@ -50,11 +50,13 @@
     .issues-category-heading::before { content:"▸"; color:var(--muted); }
     .issues-category-group[open] .issues-category-heading::before { content:"▾"; }
     .issues-category-heading strong { margin-right:auto; }
-    .issues-type-links { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:.35rem; padding:.45rem; align-items:start; }
-    .issues-type-group { min-width:0; }
-    .issues-type-link { display:flex; align-items:center; justify-content:space-between; gap:.5rem; min-width:0; padding:.45rem .55rem; border:1px solid transparent; border-radius:4px; color:inherit; text-decoration:none; background:var(--surface); white-space:nowrap; }
-    .issues-type-link > span { min-width:0; overflow:hidden; text-overflow:ellipsis; }
-    .issues-type-link:hover, .issues-type-link.is-selected { border-color:var(--accent); background:#eff6ff; }
+    .issues-category-select { color:inherit; text-decoration:none; }
+    .issues-category-select:hover { color:var(--accent); }
+    .issues-type-rows { display:grid; gap:.18rem; padding:.35rem .55rem .5rem; }
+    .issues-type-row { display:flex; align-items:center; justify-content:space-between; gap:.5rem; min-width:0; color:var(--muted); font-size:.78rem; }
+    .issues-type-row-label { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .issues-type-count { color:inherit; font-weight:600; text-decoration:none; white-space:nowrap; }
+    .issues-type-count:hover { color:var(--accent); text-decoration:underline; }
     .issues-state-links { display:grid; gap:.2rem; padding:.35rem .55rem .55rem; }
     .issues-state-links a { display:block; }
     .issues-results-intro {
@@ -173,7 +175,7 @@
     }
     @media (max-width: 480px) {
         .issues-summary { grid-template-columns: 1fr; }
-        .issues-type-links { grid-template-columns:1fr; }
+        .issues-type-row { align-items:flex-start; }
     }
 </style>
 
@@ -187,9 +189,7 @@
                title="Download every matching issue row for the current filters">⤓ Issues CSV</a>
         </div>
     </div>
-    <h2 class="section-label" style="margin-top:1.25rem;">Issues summary</h2>
-    <p class="muted" style="margin:.25rem 0 .7rem;">Unfiltered totals. Select a card to open that population in the queue.</p>
-    <section class="issues-summary" aria-label="Issues summary">
+    <section class="issues-summary" aria-label="Unfiltered Issues totals" style="margin-top:1rem;">
         {% for card in fleet_summary_cards %}
         <a class="tile issues-summary-card {{ card.tile_class }}" href="{{ card.href }}">
             <span class="issues-summary-label">{{ card.label }}</span>
@@ -202,7 +202,7 @@
 
 <div class="card issues-results-intro">
     <h2>Filtered results</h2>
-    <p class="muted" style="margin:0 0 .55rem;">The Issues summary above is not affected by filters. The results below are.</p>
+    <p class="muted" style="margin:0 0 .55rem;">Fleet totals above are not affected by filters. The results below are.</p>
     {% if active_group_key %}
     <p class="muted" style="margin-top:0;">Showing every device with this finding type and the same {{ active_group_key|humanize_label }} evidence value.</p>
     {% elif active_device_id %}
@@ -249,23 +249,19 @@
 
 <div class="card">
     {% if findings or issue_group_headers %}
-    <h2 class="section-label">Filtered results <span>({{ response_matching }} matching)</span></h2>
-    <p class="muted" style="margin:.35rem 0 .6rem;">{{ total_matching }} matching rows. Open a Type below to review its rows; column filtering and sorting apply across the complete selected dataset. <a href="?{{ table_clear_query }}">Clear column filters</a></p>
     <div class="issues-group-navigation" aria-label="Issue groups">
         {% for category in issue_group_headers %}
-        <details class="issues-category-group"{% if category.expanded %} open{% endif %}>
+        <details class="issues-category-group"{% if category.expanded %} open{% endif %} data-category-url="{{ category.href }}"{% if category.expanded %} data-category-selected="true"{% endif %}>
             <summary class="issues-category-heading">
-                <strong>{{ category.label }}</strong>
-                <span class="muted">{{ category.current_count }} shown · {{ category.unresolved_count }} unresolved · {{ category.state_counts.needs_action }} needs action · {{ category.state_counts.blocked }} blocked · {{ category.state_counts.pending }} pending</span>
+                <strong><a class="issues-category-select" href="{{ category.href }}">{{ category.label }}</a></strong>
+                <span class="muted">{{ category.current_count }}{% for state in category.state_summary %} · {{ state.count }} {{ state.label|lower }}{% endfor %}</span>
             </summary>
-            <div class="issues-type-links">
+            {% if category.show_type_rows %}<div class="issues-type-rows">
                 {% for group in category.types %}
-                <div class="issues-type-group">
-                    <a class="issues-type-link{% if group.expanded %} is-selected{% endif %}" href="{{ group.href }}">
-                        <span>{{ group.label }}</span>
-                        <span class="muted">{{ group.current_count }} shown · {{ group.unresolved_count }} unresolved</span>
-                    </a>
-                    {% if group.state_links %}
+                <div class="issues-type-row">
+                    <span class="issues-type-row-label">{{ group.label }}</span>
+                    <a class="issues-type-count" href="{{ group.href }}">{{ group.current_count }}</a>
+                    {% if group.state_links|length > 1 %}
                     <details class="issues-state-controls">
                         <summary>Review by state</summary>
                         <div class="issues-state-links">
@@ -275,11 +271,11 @@
                     {% endif %}
                 </div>
                 {% endfor %}
-            </div>
+            </div>{% endif %}
         </details>
         {% endfor %}
     </div>
-    {% if not findings %}<p class="muted">Select a Type above to open its rows.</p>{% endif %}
+    {% if not findings %}<p class="muted">Select a Category above to open its rows.</p>{% endif %}
     {% if findings %}
     <form id="issues-table-filter-form" method="get">
         {% for key, value in table_base_params %}<input type="hidden" name="{{ key }}" value="{{ value }}">{% endfor %}
@@ -450,6 +446,13 @@
     });
     if (typeFilter) typeFilter.addEventListener('change', updateIssues);
     updateTypes();
+    document.querySelectorAll('.issues-category-group[data-category-url]').forEach(function(group) {
+        group.addEventListener('toggle', function() {
+            if (group.open && !group.dataset.categorySelected) {
+                window.location.assign(group.dataset.categoryUrl);
+            }
+        });
+    });
     var toggle = document.getElementById('bulk-toggle-all');
     var cbs = document.querySelectorAll('.bulk-cb');
     var actions = document.querySelectorAll('.bulk-action');

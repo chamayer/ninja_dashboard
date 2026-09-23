@@ -2,6 +2,15 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.126.7] — 2026-09-23 — Category-first Issues navigation
+
+### Changed
+
+- Opening an Issues Category now displays its paginated rows without a
+  required Type drilldown.
+- Made Type an optional compact refinement with a directly clickable count,
+  and removed redundant single-state controls and summary headings.
+
 ## [0.126.6] — 2026-09-23 — Compact Issues summary
 
 ### Changed
