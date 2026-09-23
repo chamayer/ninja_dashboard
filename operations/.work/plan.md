@@ -606,3 +606,12 @@ use the same merged Context contract. No schema, source, or production change
 is in scope. Validation: 55 focused queue tests, Django checks, template
 loading, compilation, import-order lint, and diff check pass. Next action:
 obtain separate commit and push authorization if the local change is approved.
+
+Fleet-summary card refinement complete locally. The unfiltered Issues summary
+now reuses the shared compact tile pattern: blue for neutral totals and
+software decisions, red for Needs action, amber for Blocked, yellow for
+Pending, and gray for Paused. Counts and destinations are unchanged. No
+schema, query, source, or production change is in scope. Validation: 55
+focused queue tests, Django checks, template loading, and diff check pass.
+Next action: obtain separate commit and push authorization if the local change
+is approved.

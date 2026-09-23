@@ -8,53 +8,40 @@
 <style>
     .issues-summary {
         display: grid;
-        grid-template-columns: repeat(3, minmax(0, 1fr));
-        gap: .65rem;
+        grid-template-columns: repeat(auto-fit, minmax(145px, 1fr));
+        gap: .45rem;
     }
     .issues-summary-card {
-        display: block;
-        min-height: 8.4rem;
-        padding: .85rem 1rem;
-        border: 1px solid var(--border);
-        border-radius: 6px;
-        color: inherit;
-        text-decoration: none;
-        background: var(--surface);
+        min-height: 0;
+        padding: .5rem .65rem;
     }
-    .issues-summary-card:hover { background: #f8fafc; }
     .issues-summary-label {
         display: block;
         color: var(--muted);
-        font-size: .76rem;
+        font-size: .68rem;
         font-weight: 700;
         letter-spacing: .03em;
         text-transform: uppercase;
     }
     .issues-summary-value {
         display: block;
-        margin-top: .2rem;
+        margin-top: .12rem;
         color: #1e40af;
-        font-size: 1.7rem;
+        font-size: 1.35rem;
         font-weight: 700;
         line-height: 1.1;
     }
     .issues-summary-note {
         display: block;
-        margin-top: .35rem;
+        margin-top: .16rem;
         color: var(--muted);
-        font-size: .72rem;
+        font-size: .66rem;
         line-height: 1.25;
     }
-    .issues-severity-breakdown {
-        display: grid;
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-        gap: .18rem .55rem;
-        margin-top: .6rem;
-        color: var(--muted);
-        font-size: .7rem;
-    }
-    .issues-severity-item strong { color: var(--text); }
-    .issues-summary-card--decisions { border-left: 4px solid #7c3aed; }
+    .issues-summary-card.tile-alert .issues-summary-value { color:#dc2626; }
+    .issues-summary-card.tile-warn .issues-summary-value { color:#ea580c; }
+    .issues-summary-card.tile-medium .issues-summary-value { color:#a16207; }
+    .issues-summary-card.tile-low .issues-summary-value { color:#6b7280; }
     .issues-group-navigation { display:grid; gap:.55rem; margin:.7rem 0 1rem; }
     .issues-category-group { border:1px solid var(--border); border-radius:5px; background:var(--surface-subtle,#f8fafc); }
     .issues-category-heading { display:flex; justify-content:space-between; gap:.75rem; padding:.55rem .7rem; cursor:pointer; list-style:none; }
@@ -204,7 +191,7 @@
     <p class="muted" style="margin:.25rem 0 .7rem;">Unfiltered totals. Select a card to open that population in the queue.</p>
     <section class="issues-summary" aria-label="Issues summary">
         {% for card in fleet_summary_cards %}
-        <a class="issues-summary-card{% if card.label == 'Software decisions' %} issues-summary-card--decisions{% endif %}" href="{{ card.href }}">
+        <a class="tile issues-summary-card {{ card.tile_class }}" href="{{ card.href }}">
             <span class="issues-summary-label">{{ card.label }}</span>
             <span class="issues-summary-value">{{ card.value }}</span>
             <span class="issues-summary-note">{{ card.note }}</span>

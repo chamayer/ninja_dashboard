@@ -3677,36 +3677,42 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
             "value": len(fleet_ids),
             "note": "open, acknowledged, or paused Issues",
             "href": "?status=active",
+            "tile_class": "tile-accent",
         },
         {
             "label": "Needs action",
             "value": fleet_counts[ATTENTION_NEEDS_ACTION],
             "note": "current evidence permits action",
             "href": "?status=active&attention=needs_action",
+            "tile_class": "tile-alert",
         },
         {
             "label": "Blocked",
             "value": fleet_counts[ATTENTION_BLOCKED],
             "note": "a prerequisite prevents action",
             "href": "?status=active&attention=blocked",
+            "tile_class": "tile-warn",
         },
         {
             "label": "Pending",
             "value": fleet_counts[ATTENTION_PENDING],
             "note": "assessment or source data is missing",
             "href": "?status=active&attention=pending",
+            "tile_class": "tile-medium",
         },
         {
             "label": "Paused",
             "value": fleet_counts[ATTENTION_PAUSED],
             "note": "paused by an operator",
             "href": "?status=paused",
+            "tile_class": "tile-low",
         },
         {
             "label": "Software decisions",
             "value": fleet_policy_count,
             "note": "separate decision workflow",
             "href": reverse("software_decisions_queue") + "?decision=pending",
+            "tile_class": "tile-accent",
         },
     ]
 

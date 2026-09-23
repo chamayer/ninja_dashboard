@@ -2,6 +2,13 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.126.6] — 2026-09-23 — Compact Issues summary
+
+### Changed
+
+- Made unfiltered Issues summary cards compact and color-coded by operator
+  state while preserving their fleet-wide counts and destinations.
+
 ## [0.126.5] — 2026-09-23 — Issues table clarity
 
 ### Changed
