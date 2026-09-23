@@ -16,6 +16,7 @@ production rather than raise:
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 import pytest
 
@@ -76,7 +77,11 @@ def _stub_classifier(monkeypatch) -> list[str]:
     for name in ("run_intel_matcher_once", "run_intel_winget_once",
                  "run_intel_chocolatey_once"):
         monkeypatch.setattr(main, name, lambda n=name: called.append(n))
-    monkeypatch.setattr(main, "software_classify", lambda tenant_id: called.append("classify") or 0)
+    monkeypatch.setattr(
+        main,
+        "software_classify",
+        lambda tenant_id, incremental=False: called.append("classify") or 0,
+    )
     # The matview refresh talks to the database; it is not under test here.
     monkeypatch.setattr(main.db, "pool", _Pool(None))
     return called
@@ -88,6 +93,20 @@ def test_scheduled_run_skips_the_already_scheduled_intel_steps(monkeypatch) -> N
     main.run_software_classify_scheduled()
 
     assert called == ["classify"]
+
+
+def test_scheduled_run_uses_the_incremental_classifier(monkeypatch) -> None:
+    called = _stub_classifier(monkeypatch)
+    modes: list[bool] = []
+    monkeypatch.setattr(
+        main,
+        "software_classify",
+        lambda tenant_id, incremental=False: modes.append(incremental) or called.append("classify") or 0,
+    )
+
+    main.run_software_classify_scheduled()
+
+    assert modes == [True]
 
 
 def test_manual_run_still_enriches_intel_first(monkeypatch) -> None:
@@ -156,3 +175,21 @@ def test_it_reads_the_operations_run_log_not_the_ninja_core_one(monkeypatch) -> 
     assert "operations.run_log" in statement
     assert "ninja_core.run_log" not in statement
     assert "software_classifier" in statement
+
+
+def test_full_rebuild_catchup_filters_for_full_runs(monkeypatch) -> None:
+    pool = _Pool((_NOW,))
+    monkeypatch.setattr(main.db, "pool", pool)
+
+    assert main.software_classify_overdue(168, now=_NOW, mode="full") is False
+
+    statement = " ".join(pool.cursor.statements)
+    assert "subject_ref->>'mode'" in statement
+
+
+def test_scheduler_registers_a_separate_full_rebuild_cadence() -> None:
+    source = Path(main.__file__).read_text(encoding="utf-8")
+
+    assert "software_classify_full_rebuild_cycle" in source
+    assert "SOFTWARE_CLASSIFY_FULL_REBUILD_HOURS" in source
+    assert 'args=["software-classify-full"]' in source

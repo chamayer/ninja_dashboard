@@ -55,6 +55,10 @@ class Settings(BaseSettings):
     # faster intel one. Intel enrichment reaches it through the separately
     # scheduled matcher/Winget/Chocolatey jobs.
     SOFTWARE_CLASSIFY_SCHEDULE_HOURS: int = Field(default=24, ge=1, le=168)
+    # Global software rules, decisions, and intelligence can change without an
+    # installation changing. Reconcile those inputs fleet-wide weekly while
+    # the routine classifier handles material installation changes each day.
+    SOFTWARE_CLASSIFY_FULL_REBUILD_HOURS: int = Field(default=168, ge=24, le=720)
     SOFTWARE_QUEUE_ENABLED: bool = False
     SOFTWARE_QUEUE_POLL_MINUTES: int = Field(default=5, ge=1, le=60)
     SOFTWARE_QUEUE_WORKER_BATCH: int = Field(default=3, ge=1, le=20)

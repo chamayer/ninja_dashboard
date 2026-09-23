@@ -82,6 +82,57 @@ external Hudu mutations and is also not suitable.
 
 ## Checkpoint and next action
 
+Current scope: split the routine Software classifier (no intel refresh) from
+the fleet-wide rebuild. Ninja refreshes inventory timestamps on every sweep,
+so a timestamp watermark would still classify the whole fleet. Add a reviewed
+per-installation classifier marker keyed to the existing material hash and
+active/stale state. Routine runs evaluate only records whose material state
+has changed since they were last classified, and reconcile only that safe
+scope. Retain an explicit full-rebuild Job for changed global rules,
+decisions, and intelligence; the auto-intel path uses that full rebuild. The
+initial incremental run after the migration deliberately establishes its
+markers across the fleet once. Next: implement the marker migration,
+scoped-classifier safety boundary, explicit full job, factual job stages, and
+focused regression coverage. No commit, push, deploy, or production migration
+is authorized in this scope.
+
+Additional approved software scope: schedule the routine incremental
+classifier daily and the authoritative full rebuild weekly by default, with a
+mode-specific startup catch-up. All classifier modes must be mutually
+exclusive in the durable queue so a full rebuild never races an incremental or
+auto-intel run. Legacy HTTP triggers must enqueue the registered Jobs work
+rather than start an untracked classifier thread.
+
+Implementation complete locally: migration 0181 adds the reviewed marker
+columns and an initial-work index. The routine no-intel job now classifies
+only installations whose material hash or active/stale state changed, and it
+may resolve only findings tied to that changed scope. Product and version
+findings remain open while an unchanged installation still exposes them. Full
+and auto-intel runs remain authoritative fleet rebuilds and advance markers in
+bounded batches, so the next routine run does not repeat a rebuild. Jobs now
+offers the explicit **Software classifier (full rebuild)** entry and reports
+the number of changed installations for routine work. Validation: Python
+compilation; targeted Ruff; 36 ingest safety/schedule tests passed (one
+environment skip); 2 Jobs tests passed; Django checks; migration autodetection;
+and diff check. The first deployed routine run after 0181 establishes markers
+across the fleet once. Next: review the migration and behavior, then obtain
+explicit approval for a commit and a push/deployment that includes migration
+0181.
+
+Software operating-model completion: the routine no-intel classifier runs at
+`SOFTWARE_CLASSIFY_SCHEDULE_HOURS` (24 hours by default); the independent
+`SOFTWARE_CLASSIFY_FULL_REBUILD_HOURS` setting runs a full reconciliation
+weekly by default and has its own mode-specific startup catch-up. Software
+decisions queue a coalesced full rebuild only after their transaction commits.
+The durable queue prevents incremental, full, and auto-intel classifier modes
+from overlapping. Legacy classifier HTTP triggers now enqueue tracked work.
+Validation after this addition: compilation, targeted Ruff, 36 ingest tests
+passed with one environment skip, 2 Jobs tests passed, Django checks,
+migration autodetection, and diff check. No commit, push, deployment, or
+production migration has occurred. Next action: obtain explicit approval to
+commit and push the reviewed migration and software workflow release; only
+then plan the shared evaluator framework as a separate scope.
+
 Released through `edf1767`: migration 0178 adds the tenant-scoped durable Jobs queue,
 active-request coalescing indexes, RLS/grants, and queue-health registration.
 Jobs now enqueues individual runs and sequential batches; the ingest scheduler

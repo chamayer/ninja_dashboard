@@ -29,6 +29,12 @@ def test_operator_jobs_use_a_durable_queue_and_separate_stall_watchdog():
     assert "stage_updated_at" in progress_migration
     assert "operator_job_events" in workflow_migration
     assert "heartbeat_at" in workflow_migration
+    assert '"software-classify-full"' in queue
+    assert "incremental=True" in queue
+    assert "_SOFTWARE_CLASSIFIER_JOBS" in queue
+    assert "job_key <> ALL" in queue
+    assert "software-classify-full" in Path("apps/core/views.py").read_text(encoding="utf-8")
+    assert "_queue_software_rebuild_after_commit" in Path("apps/core/views.py").read_text(encoding="utf-8")
 
 
 def test_jobs_status_uses_operator_language_and_safe_controls():

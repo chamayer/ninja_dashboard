@@ -7850,42 +7850,42 @@ _INGEST_BASE_URL = os.environ.get("INGEST_BASE_URL", "http://ingest:8090")
 _JOB_CATALOG: list[dict] = [
     # Source ingest — Ninja patch cycle. status_key is a LIKE prefix
     # against run_log.kind so any per-instance source row surfaces.
-    {"id": "patches",            "name": "Ninja source cycle",   "category": "source ingest", "endpoint": "run/patches",   "status_key": "source.Ninja",         "status_source": "run_log_like",  "description": "Full Ninja API pull: devices, activities, patches, custom fields, matviews."},
-    {"id": "agent-observations", "name": "Agent observations",   "category": "source ingest", "endpoint": "run/agents",    "status_key": "source.",              "status_source": "run_log_like",  "description": "Fetch device inventory + agent presence from every source."},
-    {"id": "documentation-observations", "name": "Documentation observations", "category": "source ingest", "endpoint": "run/sources/enqueue", "status_key": "source.Hudu", "status_source": "run_log_like", "run_all": False, "description": "Refresh connected documentation records on their slower schedule."},
+    {"id": "patches",            "name": "Ninja source cycle",   "category": "source ingest", "endpoint": "run/patches",   "status_key": "source.Ninja",         "status_source": "run_log_like",  "description": "Refresh computers, patches, and activity from Ninja."},
+    {"id": "agent-observations", "name": "Agent observations",   "category": "source ingest", "endpoint": "run/agents",    "status_key": "source.",              "status_source": "run_log_like",  "description": "Refresh agent records from connected security and support tools."},
+    {"id": "documentation-observations", "name": "Documentation observations", "category": "source ingest", "endpoint": "run/sources/enqueue", "status_key": "source.Hudu", "status_source": "run_log_like", "run_all": False, "description": "Refresh documentation records from Hudu."},
     # Evaluators
-    {"id": "software-classify",  "name": "Software classifier (+ auto-intel)", "category": "evaluators", "endpoint": "run/software-classify", "status_key": "software_classifier", "status_source": "run_log", "description": "Run intel matcher + catalog enrichers then the software finding classifier."},
-    # Same underlying job as the entry above, minus the intel pre-steps, so it
-    # writes the same run_log kind and is held out of "run all": firing both
-    # would start two concurrent classifier passes over the same findings, and
-    # nothing in ingest serializes them.
-    {"id": "software-classify-only", "name": "Software classifier (no intel refresh)", "category": "evaluators", "endpoint": "run/software-classify-only", "status_key": "software_classifier", "status_source": "run_log", "run_all": False, "description": "Re-emit software findings from the intel already stored. The same path the scheduler runs; use it when the enriching job above would spend ~41 minutes on a matcher pass you do not need."},
-    {"id": "patch-classify",     "name": "Patch classifier",     "category": "evaluators", "endpoint": "run/patch-classify",    "status_key": "patch_findings",   "status_source": "run_log", "description": "Emit patch findings from the current patch inventory."},
-    {"id": "platform-evaluate",  "name": "Platform evaluator",   "category": "evaluators", "endpoint": "run/platform-evaluate", "status_key": "platform_evaluator", "status_source": "run_log", "description": "Refresh coverage, identity, and lifecycle findings."},
-    {"id": "resolver",           "name": "Identity resolver",    "category": "evaluators", "endpoint": "run/resolver",          "status_key": "identity_resolver", "status_source": "run_log", "description": "Merge candidate resolver + layered-entity write path."},
-    {"id": "parity-check",       "name": "Parity check",         "category": "evaluators", "endpoint": "run/parity-check",      "status_key": "parity_check",     "status_source": "run_log", "description": "Cross-check ingest state against derived operational reality."},
+    {"id": "software-classify",  "name": "Software classifier (+ auto-intel)", "category": "evaluators", "endpoint": "run/software-classify", "status_key": "software_classifier", "status_source": "run_log", "description": "Refresh software intelligence, then update software findings."},
+    # Routine classifier work omits intel and reconciles only installations
+    # whose material state changed. It stays out of Run all because the full
+    # auto-intel path and full rebuild use the same classifier output.
+    {"id": "software-classify-only", "name": "Software classifier (no intel refresh)", "category": "evaluators", "endpoint": "run/software-classify-only", "status_key": "software_classifier", "status_source": "run_log", "run_all": False, "description": "Update changed software findings using intelligence already on hand."},
+    {"id": "software-classify-full", "name": "Software classifier (full rebuild)", "category": "evaluators", "endpoint": "", "status_key": "software_classifier", "status_source": "run_log", "run_all": False, "description": "Rebuild every software finding after a rule, decision, or intelligence-wide change."},
+    {"id": "patch-classify",     "name": "Patch classifier",     "category": "evaluators", "endpoint": "run/patch-classify",    "status_key": "patch_findings",   "status_source": "run_log", "description": "Update patch findings from current Ninja patch data."},
+    {"id": "platform-evaluate",  "name": "Platform evaluator",   "category": "evaluators", "endpoint": "run/platform-evaluate", "status_key": "platform_evaluator", "status_source": "run_log", "description": "Update computer, coverage, identity, and lifecycle findings."},
+    {"id": "resolver",           "name": "Identity resolver",    "category": "evaluators", "endpoint": "run/resolver",          "status_key": "identity_resolver", "status_source": "run_log", "description": "Match source records to the right computer."},
+    {"id": "parity-check",       "name": "Parity check",         "category": "evaluators", "endpoint": "run/parity-check",      "status_key": "parity_check",     "status_source": "run_log", "description": "Find gaps between collected data and Operations."},
     {"id": "agent-compliance", "name": "Agent compliance", "category": "evaluators", "endpoint": "run/agent-compliance", "status_key": "agent_compliance", "status_source": "run_log", "run_all": False, "description": "Refresh the legacy agent-compliance bridge when it is enabled."},
     {"id": "agent-compliance-evaluate", "name": "Agent compliance review", "category": "evaluators", "endpoint": "run/agent-compliance/evaluate", "status_key": "agent_compliance.evaluate", "status_source": "run_log", "run_all": False, "description": "Reassess the legacy agent-compliance bridge when it is enabled."},
     # Intel connectors
-    {"id": "intel-kev",          "name": "Intel: CISA KEV",           "category": "intel", "endpoint": "run/intel-kev",         "status_key": "cisa_kev",   "status_source": "intel", "description": "CISA Known Exploited Vulnerabilities feed (~1,200 CVEs)."},
-    {"id": "intel-nvd",          "name": "Intel: NVD (CVE feed)",     "category": "intel", "endpoint": "run/intel-nvd",         "status_key": "nvd",        "status_source": "intel", "description": "NIST NVD v2 CVE delta pull."},
-    {"id": "intel-cpe-dict",     "name": "Intel: CPE dictionary",     "category": "intel", "endpoint": "run/intel-cpe-dict",    "status_key": "cpe_dict",   "status_source": "intel", "description": "NIST CPE 2.3 vendor / product dictionary for CVE matching."},
-    {"id": "intel-epss",         "name": "Intel: EPSS scores",        "category": "intel", "endpoint": "run/intel-epss",        "status_key": "epss",       "status_source": "intel", "description": "FIRST.org EPSS exploit-likelihood scores."},
-    {"id": "intel-matcher",      "name": "Intel: title × CVE matcher","category": "intel", "endpoint": "run/intel-matcher",     "status_key": "matcher",    "status_source": "intel", "description": "Match installed products to CPE entries and populate cve_match."},
-    {"id": "intel-winget",       "name": "Intel: Winget enrichment",  "category": "intel", "endpoint": "run/intel-winget",      "status_key": "winget",     "status_source": "intel", "description": "Per-product tags + publisher from Windows Package Manager."},
-    {"id": "intel-chocolatey",   "name": "Intel: Chocolatey enrichment","category": "intel","endpoint": "run/intel-chocolatey", "status_key": "chocolatey", "status_source": "intel", "description": "Per-product tags from the Chocolatey community feed."},
-    {"id": "intel-capability",   "name": "Intel: capability projection", "category": "intel", "endpoint": "run/intel-capability", "status_key": "capability_match", "status_source": "intel", "description": "Project vetted and candidate software capability evidence from catalog rules."},
-    {"id": "intel-lolrmm",       "name": "Intel: LOLRMM corpus",       "category": "intel", "endpoint": "run/intel-lolrmm", "status_key": "lolrmm", "status_source": "intel", "description": "Refresh the LOLRMM corpus and exact one-to-one local product matches."},
-    {"id": "intel-otx",          "name": "Intel: AlienVault OTX",     "category": "intel", "endpoint": "run/intel-otx",         "status_key": "otx",        "status_source": "intel", "description": "Community threat-intel pulses from OTX."},
-    {"id": "intel-abusech",      "name": "Intel: abuse.ch",           "category": "intel", "endpoint": "run/intel-abusech",     "status_key": "abusech",    "status_source": "intel", "description": "MalwareBazaar + ThreatFox recent dump files."},
-    {"id": "intel-endoflife",    "name": "Intel: end-of-life",         "category": "intel", "endpoint": "run/intel-endoflife",   "status_key": "endoflife",  "status_source": "intel", "description": "Refresh supported-version and end-of-life data."},
-    {"id": "intel-category",     "name": "Intel: software categories", "category": "intel", "endpoint": "run/intel-category",    "status_key": "category_match", "status_source": "intel", "description": "Refresh software-category evidence from catalog data."},
+    {"id": "intel-kev",          "name": "Intel: CISA KEV",           "category": "intel", "endpoint": "run/intel-kev",         "status_key": "cisa_kev",   "status_source": "intel", "description": "Refresh CISA's list of actively exploited vulnerabilities."},
+    {"id": "intel-nvd",          "name": "Intel: NVD (CVE feed)",     "category": "intel", "endpoint": "run/intel-nvd",         "status_key": "nvd",        "status_source": "intel", "description": "Refresh vulnerability details from NIST's NVD."},
+    {"id": "intel-cpe-dict",     "name": "Intel: CPE dictionary",     "category": "intel", "endpoint": "run/intel-cpe-dict",    "status_key": "cpe_dict",   "status_source": "intel", "description": "Refresh the software identification catalog used for CVE matching."},
+    {"id": "intel-epss",         "name": "Intel: EPSS scores",        "category": "intel", "endpoint": "run/intel-epss",        "status_key": "epss",       "status_source": "intel", "description": "Refresh exploit-likelihood scores from EPSS."},
+    {"id": "intel-matcher",      "name": "Intel: title × CVE matcher","category": "intel", "endpoint": "run/intel-matcher",     "status_key": "matcher",    "status_source": "intel", "description": "Match installed software to known vulnerabilities."},
+    {"id": "intel-winget",       "name": "Intel: Winget enrichment",  "category": "intel", "endpoint": "run/intel-winget",      "status_key": "winget",     "status_source": "intel", "description": "Improve software records from Windows Package Manager."},
+    {"id": "intel-chocolatey",   "name": "Intel: Chocolatey enrichment","category": "intel","endpoint": "run/intel-chocolatey", "status_key": "chocolatey", "status_source": "intel", "description": "Improve software records from Chocolatey."},
+    {"id": "intel-capability",   "name": "Intel: capability projection", "category": "intel", "endpoint": "run/intel-capability", "status_key": "capability_match", "status_source": "intel", "description": "Update known software capabilities from catalog rules."},
+    {"id": "intel-lolrmm",       "name": "Intel: LOLRMM corpus",       "category": "intel", "endpoint": "run/intel-lolrmm", "status_key": "lolrmm", "status_source": "intel", "description": "Refresh remote-management tool detection data."},
+    {"id": "intel-otx",          "name": "Intel: AlienVault OTX",     "category": "intel", "endpoint": "run/intel-otx",         "status_key": "otx",        "status_source": "intel", "description": "Refresh threat intelligence from AlienVault OTX."},
+    {"id": "intel-abusech",      "name": "Intel: abuse.ch",           "category": "intel", "endpoint": "run/intel-abusech",     "status_key": "abusech",    "status_source": "intel", "description": "Refresh malware intelligence from MalwareBazaar and ThreatFox."},
+    {"id": "intel-endoflife",    "name": "Intel: end-of-life",         "category": "intel", "endpoint": "run/intel-endoflife",   "status_key": "endoflife",  "status_source": "intel", "description": "Refresh software support dates from endoflife.date."},
+    {"id": "intel-category",     "name": "Intel: software categories", "category": "intel", "endpoint": "run/intel-category",    "status_key": "category_match", "status_source": "intel", "description": "Update software categories from catalog data."},
     # Notifications
-    {"id": "notifications-dispatch", "name": "Notifications dispatch", "category": "notifications", "endpoint": "run/notifications/dispatch", "status_key": "notifications_dispatch", "status_source": "run_log", "description": "Deliver queued notifications."},
-    {"id": "notifications-digest",   "name": "Notifications digest",   "category": "notifications", "endpoint": "run/notifications/digest",   "status_key": "notifications_digest",   "status_source": "run_log", "description": "Send scheduled digest routes."},
-    {"id": "retention-history", "name": "History cleanup", "category": "maintenance", "endpoint": "", "status_key": "retention.observation_history", "status_source": "run_log", "run_all": False, "description": "Remove closed historical observations after the configured retention period."},
-    {"id": "software-enqueue-orgs", "name": "Software inventory schedule", "category": "maintenance", "endpoint": "", "status_key": "", "status_source": "run_log", "run_all": False, "description": "Schedule the next background software-inventory sweep."},
-    {"id": "software-queue-drain", "name": "Software inventory worker", "category": "maintenance", "endpoint": "", "status_key": "", "status_source": "run_log", "run_all": False, "description": "Process the background software-inventory queue."},
+    {"id": "notifications-dispatch", "name": "Notifications dispatch", "category": "notifications", "endpoint": "run/notifications/dispatch", "status_key": "notifications_dispatch", "status_source": "run_log", "description": "Send notifications that are ready to go out."},
+    {"id": "notifications-digest",   "name": "Notifications digest",   "category": "notifications", "endpoint": "run/notifications/digest",   "status_key": "notifications_digest",   "status_source": "run_log", "description": "Send scheduled notification summaries."},
+    {"id": "retention-history", "name": "History cleanup", "category": "maintenance", "endpoint": "", "status_key": "retention.observation_history", "status_source": "run_log", "run_all": False, "description": "Remove closed history that has reached its retention date."},
+    {"id": "software-enqueue-orgs", "name": "Software inventory schedule", "category": "maintenance", "endpoint": "", "status_key": "", "status_source": "run_log", "run_all": False, "description": "Queue the next scheduled Ninja software inventory sweep."},
+    {"id": "software-queue-drain", "name": "Software inventory worker", "category": "maintenance", "endpoint": "", "status_key": "", "status_source": "run_log", "run_all": False, "description": "Process queued Ninja software inventory work."},
 ]
 
 _JOB_INDEX = {j["id"]: j for j in _JOB_CATALOG}
@@ -8198,6 +8198,19 @@ def _enqueue_operator_job(
     if row is None:
         raise RuntimeError("Unable to create or find the requested job")
     return row[0], False
+
+
+def _queue_software_rebuild_after_commit(user_id: int) -> None:
+    """Queue one full rebuild after a software decision is durable."""
+    def enqueue() -> None:
+        try:
+            _enqueue_operator_job("software-classify-full", user_id)
+        except Exception:
+            # A decision remains authoritative if the queue is transiently
+            # unavailable; the scheduled full rebuild will reconcile it.
+            log.exception("Could not queue software full rebuild after decision")
+
+    transaction.on_commit(enqueue)
 
 
 def _operator_job_runs(*, limit: int = 100, run_id: str = "", batch_id: str = "") -> list[dict]:
@@ -10986,6 +10999,7 @@ def org_software_decide(request: HttpRequest, org_slug: str) -> HttpResponse:
             "decided_at": timezone.now(),
         },
     )
+    _queue_software_rebuild_after_commit(request.user.id)
     # Follow only a relative ``next``; an unvalidated one (and HTTP_REFERER,
     # which is attacker-settable) is an open redirect.
     nxt = request.POST.get("next") or ""
@@ -13431,6 +13445,7 @@ def software_decision_bulk(request: HttpRequest) -> HttpResponse:
         f"{len(canonical_names)} product(s) + {len(publishers)} publisher(s).",
     )
     _refresh_software_risk_matview()
+    _queue_software_rebuild_after_commit(request.user.id)
     return redirect(_safe_next(request, "software_decisions_queue"))
 
 
@@ -13576,6 +13591,7 @@ def software_decision_create(request: HttpRequest) -> HttpResponse:
         + (" Created." if created else " Updated."),
     )
     _refresh_software_risk_matview()
+    _queue_software_rebuild_after_commit(request.user.id)
     next_url = request.POST.get("next") or ""
     # Only follow relative URLs to avoid open-redirects.
     if next_url.startswith("/") and not next_url.startswith("//"):

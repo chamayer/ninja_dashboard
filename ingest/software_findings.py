@@ -36,7 +36,6 @@ from shared.conditions.contracts import (
     Condition,
     EvaluationCoverage,
     Participant,
-    Readiness,
     Signal,
 )
 
@@ -97,8 +96,13 @@ def _load_config(cur, tenant_id: int) -> dict:
     return merged
 
 
-def classify(tenant_id: int = _TENANT_ID) -> int:
-    """Run the software classifier. Returns count of findings upserted."""
+def classify(tenant_id: int = _TENANT_ID, *, incremental: bool = False) -> int:
+    """Run the software classifier and return the number of findings upserted.
+
+    The routine classifier consumes only installations whose material state has
+    changed since it last reconciled them.  A full run remains authoritative
+    for changes to fleet-wide rules, decisions, or intelligence.
+    """
     now = datetime.now(timezone.utc)
     error: str | None = None
     affected = 0
@@ -106,6 +110,20 @@ def classify(tenant_id: int = _TENANT_ID) -> int:
     try:
         with db.pool.connection() as conn, conn.cursor() as cur:
             cur.execute(f"SET LOCAL operations.tenant_id = {tenant_id}")
+            incremental_scope = _incremental_scope(cur, tenant_id) if incremental else None
+            if incremental and incremental_scope == []:
+                log.info("software_findings: no changed installations to classify")
+                return 0
+            # An older schema can briefly be visible while Operations applies
+            # this release's migration.  Full reconciliation is safe; claiming
+            # an empty incremental scope would silently skip work.
+            if incremental and incremental_scope is None:
+                log.warning("software_findings: incremental marker unavailable; running full reconciliation")
+                incremental = False
+            marker_scope = (
+                incremental_scope if incremental else _full_reconciliation_scope(cur, tenant_id)
+            )
+            scoped_device_ids = sorted({row[1] for row in incremental_scope or []})
             rules = _load_rules(cur)
             catalog = _load_catalog(cur, tenant_id)
             decisions = _load_decisions(cur, tenant_id)
@@ -155,8 +173,9 @@ def classify(tenant_id: int = _TENANT_ID) -> int:
                        ON p.id = sv.product_id
                 WHERE sic.tenant_id = %s AND sic.stale_since IS NULL
                   AND sic.deleted_at IS NULL
+                  AND (%s OR sic.device_id = ANY(%s::uuid[]))
                 """,
-                (tenant_id,),
+                (tenant_id, not incremental, scoped_device_ids),
             )
             installs = cur.fetchall()
 
@@ -463,7 +482,12 @@ def classify(tenant_id: int = _TENANT_ID) -> int:
                 })
             if not capability_ready or not settings.CAPABILITY_REVIEW_FINDINGS_ENABLED:
                 preserve_types.add("capability_review_candidate")
-            _auto_resolve(cur, tenant_id, emitted_keys, now, preserve_types)
+            _auto_resolve(
+                cur, tenant_id, emitted_keys, now, preserve_types,
+                device_ids=scoped_device_ids if incremental else None,
+            )
+            if marker_scope is not None:
+                _mark_incremental_scope(cur, marker_scope)
 
     except Exception as exc:
         error = str(exc)[:2000]
@@ -478,15 +502,91 @@ def classify(tenant_id: int = _TENANT_ID) -> int:
                         (id, tenant_id, kind, subject_ref, started_at,
                          ended_at, ok, rows, error)
                     VALUES (gen_random_uuid(), %s, 'software_classifier',
-                            '{}'::jsonb, %s, NOW(), %s, %s, %s)
+                            jsonb_build_object('mode', %s), %s, NOW(), %s, %s, %s)
                     """,
-                    (tenant_id, now, error is None, affected, error or ""),
+                    (tenant_id, "incremental" if incremental else "full", now, error is None, affected, error or ""),
                 )
         except Exception:
             log.exception("software_findings: run_log write failed")
 
     log.info("software_findings: tenant=%d affected=%d", tenant_id, affected)
     return affected
+
+
+def incremental_pending_count(tenant_id: int = _TENANT_ID) -> int | None:
+    """Return the number of installations awaiting routine classification.
+
+    ``None`` means the reviewed marker migration is not available yet, so the
+    caller must describe the run as a safe full reconciliation instead.
+    """
+    with db.pool.connection() as conn, conn.cursor() as cur:
+        cur.execute(f"SET LOCAL operations.tenant_id = {tenant_id}")
+        scope = _incremental_scope(cur, tenant_id)
+        return None if scope is None else len(scope)
+
+
+def _incremental_scope(cur, tenant_id: int) -> list[tuple] | None:
+    """Return immutable installation state requiring routine reconciliation."""
+    required = ("classifier_material_hash", "classifier_active")
+    if not all(_column_exists(cur, "operations.software_installations_current", column)
+               for column in required):
+        return None
+    return _installation_scope(cur, tenant_id, changed_only=True)
+
+
+def _full_reconciliation_scope(cur, tenant_id: int) -> list[tuple] | None:
+    """Return every installation state covered by a successful full rebuild."""
+    required = ("classifier_material_hash", "classifier_active")
+    if not all(_column_exists(cur, "operations.software_installations_current", column)
+               for column in required):
+        return None
+    return _installation_scope(cur, tenant_id, changed_only=False)
+
+
+def _installation_scope(cur, tenant_id: int, *, changed_only: bool) -> list[tuple]:
+    where = """
+           AND (
+               classifier_material_hash IS DISTINCT FROM material_hash
+               OR classifier_active IS DISTINCT FROM
+                  (stale_since IS NULL AND deleted_at IS NULL)
+           )
+    """ if changed_only else ""
+    cur.execute(
+        f"""
+        SELECT installation_uuid, device_id, material_hash,
+               (stale_since IS NULL AND deleted_at IS NULL) AS active
+          FROM operations.software_installations_current
+         WHERE tenant_id = %s {where}
+        """,
+        (tenant_id,),
+    )
+    return list(cur.fetchall())
+
+
+def _mark_incremental_scope(cur, scope: list[tuple]) -> None:
+    """Advance markers only when the exact state selected by this run remains."""
+    # A first run can establish markers for the whole fleet.  Batch exact-state
+    # updates instead of issuing one round trip per installation, while still
+    # refusing to mark an installation that changed after it was selected.
+    for offset in range(0, len(scope), 1_000):
+        batch = scope[offset:offset + 1_000]
+        values = ", ".join(["(%s::uuid, %s::bytea, %s::boolean)"] * len(batch))
+        params: list = []
+        for installation_id, _device_id, material, active in batch:
+            params.extend((installation_id, material, active))
+        cur.execute(
+            f"""
+            UPDATE operations.software_installations_current installation
+               SET classifier_material_hash = selected.material_hash,
+                   classifier_active = selected.active
+              FROM (VALUES {values}) AS selected(installation_uuid, material_hash, active)
+             WHERE installation.installation_uuid = selected.installation_uuid
+               AND installation.material_hash IS NOT DISTINCT FROM selected.material_hash
+               AND (installation.stale_since IS NULL AND installation.deleted_at IS NULL)
+                   IS NOT DISTINCT FROM selected.active
+            """,
+            params,
+        )
 
 
 # ── loaders ─────────────────────────────────────────────────────────────
@@ -1178,7 +1278,7 @@ def _emit_scoped(cur, tenant_id, ft_id, client_id, device_id, canonical_key,
 
 def _auto_resolve(
     cur, tenant_id: int, emitted_keys: set[str], now: datetime,
-    preserve_types: set[str] | None = None,
+    preserve_types: set[str] | None = None, device_ids: list | None = None,
 ) -> None:
     """Close any open software finding NOT emitted this run — the install
     is gone or a decision approved it."""
@@ -1188,6 +1288,8 @@ def _auto_resolve(
     # than treating no output as proof that every condition is gone.
     if not emitted_keys:
         return
+    full_reconciliation = device_ids is None
+    scoped_device_ids = device_ids or []
     cur.execute(
         """
         UPDATE operations.findings f
@@ -1213,6 +1315,51 @@ def _auto_resolve(
           AND f.status IN ('open', 'acknowledged')
            AND NOT (f.condition_key = ANY(%s::text[]))
            AND NOT (ft.name = ANY(%s::text[]))
+           -- Routine reconciliation may close only a finding tied to an
+           -- installation that changed. A product/version subject remains
+           -- open while an unchanged installation still exposes it elsewhere.
+           AND (
+               %s
+               OR EXISTS (
+                   SELECT 1 FROM operations.condition_participants scoped
+                    WHERE scoped.tenant_id = f.tenant_id
+                      AND scoped.row_kind = 'entity'
+                      AND scoped.finding_id = f.id
+                      AND scoped.participant_kind = 'device'
+                      AND scoped.participant_id = ANY(%s::uuid[])
+               )
+           )
+           AND (
+               %s OR NOT (
+                   f.subject_type = 'software_product'
+                   AND EXISTS (
+                   SELECT 1
+                     FROM operations.software_installations_current installation
+                     JOIN catalog.software_versions version
+                       ON version.id = installation.software_version_id
+                     JOIN catalog.products product ON product.id = version.product_id
+                    WHERE installation.tenant_id = f.tenant_id
+                      AND installation.stale_since IS NULL
+                      AND installation.deleted_at IS NULL
+                      AND product.product_uuid = f.subject_id
+                   )
+               )
+           )
+           AND (
+               %s OR NOT (
+                   f.subject_type = 'software_version'
+                   AND EXISTS (
+                   SELECT 1
+                     FROM operations.software_installations_current installation
+                     JOIN catalog.software_versions version
+                       ON version.id = installation.software_version_id
+                    WHERE installation.tenant_id = f.tenant_id
+                      AND installation.stale_since IS NULL
+                      AND installation.deleted_at IS NULL
+                      AND version.version_uuid = f.subject_id
+                   )
+               )
+           )
            AND to_regclass('operations.condition_assessments') IS NOT NULL
            AND EXISTS (
                SELECT 1
@@ -1252,5 +1399,9 @@ def _auto_resolve(
                   )
            )
         """,
-        (now, now, tenant_id, list(emitted_keys), list(preserve_types)),
+        (
+            now, now, tenant_id, list(emitted_keys), list(preserve_types),
+            full_reconciliation, scoped_device_ids,
+            full_reconciliation, full_reconciliation,
+        ),
     )

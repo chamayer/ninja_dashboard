@@ -581,7 +581,9 @@ def run_software_classify_once(*, with_intel_pre_steps: bool = True) -> None:
             except Exception:
                 log.exception("Best-effort intel step failed: %s", step_name)
     try:
-        affected = software_classify(tenant_id=1)
+        affected = software_classify(
+            tenant_id=1, incremental=not with_intel_pre_steps
+        )
         log.info("Software classifier complete: affected=%d", affected)
     except Exception:
         log.exception("Software classifier failed")
@@ -605,8 +607,10 @@ def run_software_classify_scheduled() -> None:
     run_software_classify_once(with_intel_pre_steps=False)
 
 
-def software_classify_overdue(schedule_hours: int, now: datetime | None = None) -> bool:
-    """True when the classifier's last run is older than its schedule.
+def software_classify_overdue(
+    schedule_hours: int, now: datetime | None = None, *, mode: str | None = None
+) -> bool:
+    """True when the selected classifier mode's last run is overdue.
 
     Deliberately not `should_catch_up()`: that helper reads
     `ninja_core.run_log` on `domain`/`status`/`finished_at`, while the
@@ -614,7 +618,9 @@ def software_classify_overdue(schedule_hours: int, now: datetime | None = None) 
     `ended_at`. Passing 'software_classifier' to it would match no row,
     return False, and disable this catch-up silently.
 
-    Returns True when there is no successful run at all. That differs from
+    ``mode=None`` covers every classifier run; ``mode='full'`` checks only
+    authoritative rebuilds. Returns True when there is no successful run at
+    all. That differs from
     `should_catch_up`, which returns False for a never-run domain to avoid
     kicking a fresh install; here a missing row is the exact condition we
     need to correct, and the classifier reads existing tables rather than
@@ -627,9 +633,12 @@ def software_classify_overdue(schedule_hours: int, now: datetime | None = None) 
                 """
                 SELECT ended_at FROM operations.run_log
                 WHERE kind = 'software_classifier' AND ok
+                  AND (%s IS NULL OR subject_ref->>'mode' = %s)
                 ORDER BY started_at DESC
                 LIMIT 1
                 """
+                ,
+                (mode, mode),
             )
             row = cur.fetchone()
     except Exception:
@@ -965,21 +974,14 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             if not _READY.is_set():
                 self._respond(503, b"still starting - try again shortly\n")
                 return
-            threading.Thread(target=run_software_classify_once, daemon=True).start()
-            self._respond(202, b"software classify scheduled (with intel enrichment)\n")
+            operator_job_queue.enqueue_automatic("software-classify")
+            self._respond(202, b"software classifier queued (with intel refresh)\n")
         elif self.path == "/run/software-classify-only":
             if not _READY.is_set():
                 self._respond(503, b"still starting - try again shortly\n")
                 return
-            # The classifier without the intel pre-steps -- the same path the
-            # scheduler uses. Exposed because the enriching endpoint above
-            # front-loads the matcher, whose cost grew ~10.9x with the CPE
-            # backfill, so "re-run the classifier" and "refresh intel then
-            # classify" are different jobs with very different durations. An
-            # operator who has just changed a decision or a rule wants this
-            # one; without it the only reachable option was the slow path.
-            threading.Thread(target=run_software_classify_scheduled, daemon=True).start()
-            self._respond(202, b"software classify scheduled (classifier only)\n")
+            operator_job_queue.enqueue_automatic("software-classify-only")
+            self._respond(202, b"software classifier queued (changed software only)\n")
         elif self.path == "/run/intel-capability":
             if not _READY.is_set():
                 self._respond(503, b"still starting - try again shortly\n")
@@ -2667,6 +2669,17 @@ def main() -> None:
         args=["software-classify-only"],
         max_instances=1,
     )
+    # A material-change marker makes routine runs small, but it cannot see a
+    # global rule, decision, or intelligence change. A separate full rebuild
+    # preserves eventual fleet-wide reconciliation on a predictable cadence.
+    scheduler.add_job(
+        operator_job_queue.enqueue_automatic,
+        "interval",
+        hours=settings.SOFTWARE_CLASSIFY_FULL_REBUILD_HOURS,
+        id="software_classify_full_rebuild_cycle",
+        args=["software-classify-full"],
+        max_instances=1,
+    )
     if settings.INTEL_ENABLED:
         scheduler.add_job(
             operator_job_queue.enqueue_automatic,
@@ -2852,6 +2865,17 @@ def main() -> None:
         operator_job_queue.enqueue_automatic("software-classify-only")
     else:
         log.info("No software classifier catch-up needed (recent successful run)")
+
+    if software_classify_overdue(
+        settings.SOFTWARE_CLASSIFY_FULL_REBUILD_HOURS, mode="full"
+    ):
+        log.info(
+            "Catch-up: full software rebuild has no successful run in %dh; queuing",
+            settings.SOFTWARE_CLASSIFY_FULL_REBUILD_HOURS,
+        )
+        operator_job_queue.enqueue_automatic("software-classify-full")
+    else:
+        log.info("No full software rebuild catch-up needed (recent successful run)")
 
     # Intel catch-up on startup. Any connector with no successful run
     # in ``operations.intel_ingest_status`` fires immediately in the

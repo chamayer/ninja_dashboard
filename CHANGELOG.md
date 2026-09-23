@@ -2,6 +2,24 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.126.14] — 2026-09-23 — Software classifier workflow
+
+### Added
+
+- Added migration 0181 to persist the installation material state last
+  reconciled by the Software Classifier.
+- Added a separate **Software classifier (full rebuild)** Job and a weekly
+  full-rebuild cadence, configurable with `SOFTWARE_CLASSIFY_FULL_REBUILD_HOURS`.
+
+### Changed
+
+- The routine no-intel classifier now evaluates only software installations
+  whose material state changed; it retains safe, scope-limited reconciliation.
+- Full, auto-intel, and incremental classifier modes are mutually exclusive in
+  the durable Jobs queue.
+- Software decisions queue a coalesced full rebuild after their transaction
+  commits, and legacy classifier URLs now enqueue tracked Jobs work.
+
 ## [0.126.13] — 2026-09-23 — Jobs workflow controls
 
 ### Added

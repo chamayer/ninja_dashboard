@@ -33,6 +33,12 @@ _JOB_LANES = {
     "software-queue-drain": "collection",
 }
 
+_SOFTWARE_CLASSIFIER_JOBS = (
+    "software-classify",
+    "software-classify-only",
+    "software-classify-full",
+)
+
 
 def lane_for(job_key: str) -> str:
     """Return the registered worker lane for a durable Jobs definition."""
@@ -215,6 +221,15 @@ def _claim_next(lane: str) -> dict[str, Any] | None:
             WITH candidate AS (
                 SELECT id FROM {_TABLE}
                  WHERE tenant_id = 1 AND lane = %s AND status = 'queued'
+                   AND (
+                       job_key <> ALL(%s::text[])
+                       OR NOT EXISTS (
+                           SELECT 1 FROM {_TABLE} running
+                            WHERE running.tenant_id = 1
+                              AND running.status = 'running'
+                              AND running.job_key = ANY(%s::text[])
+                       )
+                   )
                  ORDER BY priority DESC, requested_at, id
                  FOR UPDATE SKIP LOCKED LIMIT 1
             )
@@ -227,7 +242,7 @@ def _claim_next(lane: str) -> dict[str, Any] | None:
              WHERE job.id = candidate.id
             RETURNING job.id, job.job_key
             """,
-            (lane,),
+            (lane, list(_SOFTWARE_CLASSIFIER_JOBS), list(_SOFTWARE_CLASSIFIER_JOBS)),
         )
         row = cur.fetchone()
     return {"id": row[0], "job_key": row[1]} if row else None
@@ -260,6 +275,7 @@ def _execute(job_key: str, progress: JobProgress) -> int | None:
     functions intentionally raise, allowing the durable record to show failure.
     """
     from ingest import main
+    from ingest.software_findings import incremental_pending_count
     from ingest.intel import (
         abusech,
         capability_match,
@@ -279,7 +295,14 @@ def _execute(job_key: str, progress: JobProgress) -> int | None:
         "patch-classify": ("Classifying patch state", lambda: main.patch_classify(tenant_id=1)),
         "platform-evaluate": ("Evaluating platform conditions", lambda: main.platform_evaluate(tenant_id=1)),
         "parity-check": ("Checking operational parity", lambda: main.parity_check_run(tenant_id=1)),
-        "software-classify-only": ("Classifying installed software", lambda: main.software_classify(tenant_id=1)),
+        "software-classify-only": (
+            "Classifying changed software",
+            lambda: main.software_classify(tenant_id=1, incremental=True),
+        ),
+        "software-classify-full": (
+            "Rebuilding all software findings",
+            lambda: main.software_classify(tenant_id=1, incremental=False),
+        ),
         "resolver": ("Resolving computer identity", lambda: main.run_identity_resolver_once()),
         "patches": ("Collecting Ninja information", lambda: main.run_patching_once()),
         "agent-observations": ("Collecting agent observations", lambda: main.run_agent_observations_once()),
@@ -307,6 +330,15 @@ def _execute(job_key: str, progress: JobProgress) -> int | None:
     }
     if job_key == "software-classify":
         return _software_classify_with_intel(progress, matcher, winget, chocolatey, main)
+    if job_key == "software-classify-only":
+        pending = incremental_pending_count(tenant_id=1)
+        detail = (
+            "Evaluating changed software installations only."
+            if pending is None
+            else f"Evaluating {pending} changed software installation(s)."
+        )
+        progress.update("Classifying changed software", detail)
+        return int(jobs[job_key][1]())
     if job_key not in jobs:
         raise ValueError(f"Unknown registered job: {job_key}")
     stage, job = jobs[job_key]
@@ -328,7 +360,7 @@ def _software_classify_with_intel(
             progress.update(stage, "This stage does not publish a measurable work total.")
             job()
     progress.update("Classifying installed software", "This stage does not publish a measurable work total.")
-    result = main.software_classify(tenant_id=1)
+    result = main.software_classify(tenant_id=1, incremental=False)
     progress.update("Refreshing software views", "Making the completed classification available to operators.")
     with db.pool.connection() as conn, conn.cursor() as cur:
         cur.execute("REFRESH MATERIALIZED VIEW operations.v_software_safety")
