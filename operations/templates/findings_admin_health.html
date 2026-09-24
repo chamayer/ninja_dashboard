@@ -7,10 +7,6 @@
 <div class="card">
     <h1>Admin / Platform Health</h1>
     <p class="muted">Platform-level items: queue health, identity resolution backlogs, and other operational issues.</p>
-    <p><a href="?status=active&amp;type=client_name_conflict">Client name differences</a> <span class="muted">— mapped clients whose source now reports a different name.</span></p>
-    {% if active_type == "client_name_conflict" %}
-    <p class="muted">Each row compares the canonical Operations client name with the name reported by a mapped source group. Both the client and source are linked.</p>
-    {% endif %}
     {% if not condition_policy_available %}
     <div class="notice notice-warning" role="status">
         Condition policy is unavailable. Retained evidence is shown, but
@@ -86,10 +82,6 @@
             <tr style="text-align: left; border-bottom: 1px solid var(--border);">
                 <th style="padding: 0.5rem;">Severity</th>
                 <th style="padding: 0.5rem;">Type</th>
-                {% if active_type == "client_name_conflict" %}
-                <th style="padding: 0.5rem;">Canonical client</th>
-                <th style="padding: 0.5rem;">Mapped source group</th>
-                {% endif %}
                 <th style="padding: 0.5rem;">Condition key</th>
                 <th style="padding: 0.5rem;">Status</th>
                 <th style="padding: 0.5rem;">Assessment</th>
@@ -103,19 +95,6 @@
             <tr style="border-bottom: 1px solid var(--border);">
                 <td style="padding: 0.5rem;"><strong>{{ f.get_severity_display }}</strong></td>
                 <td style="padding: 0.5rem;">{{ f.finding_type.name }}</td>
-                {% if active_type == "client_name_conflict" %}
-                <td style="padding: 0.5rem;">
-                    {% if f.subject_client %}
-                    <a href="{% url 'org_index' f.subject_client.slug %}">{{ f.subject_client.display_name }}</a>
-                    {% elif f.client_name %}{{ f.client_name }}{% else %}<span class="muted">—</span>{% endif %}
-                </td>
-                <td style="padding: 0.5rem;">
-                    {% if f.observed_name %}
-                        {% if f.source_url %}<a href="{{ f.source_url }}">{{ f.source_name }}</a>{% else %}Source{% endif %}
-                        reports “{{ f.observed_name }}”
-                    {% else %}<span class="muted">—</span>{% endif %}
-                </td>
-                {% endif %}
                 <td style="padding: 0.5rem;"><code class="muted" style="font-size: 0.8rem;">{{ f.condition_key|truncatechars:40 }}</code></td>
                 <td style="padding: 0.5rem;">{{ f.status }}</td>
                 <td style="padding: 0.5rem; font-size: 0.8rem;">
@@ -139,15 +118,6 @@
                     <form method="post" action="{% url 'admin_finding_acknowledge' f.id %}" style="display: inline;">
                         {% csrf_token %}
                         <button type="submit" style="padding: 0.25rem 0.6rem; font-size: 0.8rem;">Ack</button>
-                    </form>
-                    {% endif %}
-                    {% if f.finding_type.name == "client_name_conflict" and f.status != "resolved" %}
-                    <form method="post" action="{% url 'admin_finding_apply_client_rename' f.id %}" style="display: inline;">
-                        {% csrf_token %}
-                        <button type="submit" style="padding: 0.25rem 0.6rem; font-size: 0.8rem;"
-                                title="Rename the client to the name the source reports. The URL is unchanged.">
-                            Apply source name
-                        </button>
                     </form>
                     {% endif %}
                 </td>

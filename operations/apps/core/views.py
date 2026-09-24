@@ -4483,6 +4483,18 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
         ).select_related("device", "device__client"):
             hudu_devices_by_asset.setdefault(link.external_id, []).append(link.device)
     may_archive_hudu = ARCHIVE_HUDU_ASSETS in available_finding_actions(request.user)
+    client_name_conflict_sources = {
+        (finding.finding_details or {}).get("source_id")
+        for finding in all_display_findings
+        if finding.finding_type.name == "client_name_conflict"
+        and (finding.finding_details or {}).get("source_id") is not None
+    }
+    source_names_by_id = {
+        source_id: name
+        for source_id, name in Source.objects.filter(id__in=client_name_conflict_sources).values_list(
+            "id", "name"
+        )
+    }
 
     def _display_row(f: Finding) -> dict:
         details = f.finding_details or {}
@@ -4518,6 +4530,11 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
             subject_label = f.client.display_name if f.client else "(unnamed client)"
             if f.client:
                 subject_url = reverse("org_index", kwargs={"org_slug": f.client.slug})
+            if f.finding_type.name == "client_name_conflict":
+                source_name = source_names_by_id.get(details.get("source_id"), "Source")
+                observed_name = details.get("observed_name") or "(unnamed group)"
+                context_parts.append(f"{source_name} reports “{observed_name}”")
+            else:
                 context_parts.append("client-wide")
         elif f.subject_type in (
             Finding.SubjectType.SOFTWARE_PRODUCT,
@@ -10112,6 +10129,13 @@ def admin_finding_apply_client_rename(request: HttpRequest, finding_id: str) -> 
         messages.error(request, "That action only applies to client rename findings.")
         return redirect("findings_admin_health")
 
+    messages.info(
+        request,
+        "Mapped source names are evidence, not a required client rename. "
+        "Review or exclude the client finding instead.",
+    )
+    return redirect("findings_admin_health")
+
     ref = finding.subject_ref or {}
     observed_name = (ref.get("observed_name") or "").strip()
     client_id = ref.get("client_id")
@@ -12522,7 +12546,10 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
 @login_required
 def sources_status(request: HttpRequest) -> HttpResponse:
     """Registry-driven source-instance health and row-based entity counts."""
+    from .client_workspace import client_source_references
+
     tenant_id = int(getattr(request, "tenant_id", 1))
+    source_filter = (request.GET.get("source") or "").strip()
     with transaction.atomic():  # noqa: SIM117 -- matches existing transaction/GUC pattern
         with connection.cursor() as cur:
             cur.execute("SET LOCAL operations.tenant_id = %s", (tenant_id,))
@@ -12635,6 +12662,11 @@ def sources_status(request: HttpRequest) -> HttpResponse:
             }
         )
 
+    source_options = sorted({source["name"] for source in sources})
+    if source_filter:
+        sources = [source for source in sources if source["name"] == source_filter]
+    source_references = client_source_references(source_name=source_filter)
+
     stale_count = sum(1 for s in sources if s["is_stale"] and not s["is_processing"])
     if wants_csv(request):
         return csv_response(
@@ -12661,6 +12693,9 @@ def sources_status(request: HttpRequest) -> HttpResponse:
             "admin_group": "integrations",
             "admin_tab": "sources",
             "sources": sources,
+            "source_references": source_references,
+            "source_options": source_options,
+            "active_source": source_filter,
             "recent_runs": recent_runs,
             "stale_count": stale_count,
         },

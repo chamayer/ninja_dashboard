@@ -38,6 +38,40 @@
     </div>
 </div>
 
+<div class="card">
+    <div style="display:flex; justify-content:space-between; align-items:baseline; gap:1rem; flex-wrap:wrap;">
+        <div>
+            <h2 style="margin:0;">Client source references</h2>
+            <p class="muted" style="margin:.25rem 0 0;">Every mapped source group and its canonical Operations client.</p>
+        </div>
+        <form method="get">
+            <label>Source
+                <select name="source" onchange="this.form.submit()">
+                    <option value="">All sources</option>
+                    {% for source_name in source_options %}<option value="{{ source_name }}"{% if active_source == source_name %} selected{% endif %}>{{ source_name }}</option>{% endfor %}
+                </select>
+            </label>
+        </form>
+    </div>
+    <table class="ops-table" style="margin-top:1rem;">
+        <thead><tr><th>Source</th><th>Reported group name</th><th>Canonical client</th><th>Source ID</th><th>Last observed</th><th>Link state</th></tr></thead>
+        <tbody>
+        {% for reference in source_references %}
+            <tr>
+                <td>{{ reference.source_name }}</td>
+                <td>{% if reference.observed_name %}<strong>{{ reference.observed_name }}</strong>{% else %}<span class="muted">No current group observation</span>{% endif %}</td>
+                <td><a href="{% url 'org_index' reference.client_slug %}">{{ reference.client_name }}</a></td>
+                <td><code>{{ reference.external_id }}</code>{% if reference.external_namespace %}<br><span class="muted">{{ reference.external_namespace }}</span>{% endif %}</td>
+                <td>{% if reference.observed_at %}{{ reference.observed_at|date:"Y-m-d H:i" }}{% else %}<span class="muted">—</span>{% endif %}</td>
+                <td>{% if reference.missing_since %}<span class="badge badge-high">Missing since {{ reference.missing_since|date:"Y-m-d" }}</span>{% else %}<span class="badge badge-low">Mapped</span>{% endif %}</td>
+            </tr>
+        {% empty %}
+            <tr><td colspan="6" class="muted">No client source references match this filter.</td></tr>
+        {% endfor %}
+        </tbody>
+    </table>
+</div>
+
 <div class="source-grid">
 {% for s in sources %}
 <div class="source-card {% if s.is_processing or s.has_pending %}active{% elif not s.is_stale %}ok{% else %}stale{% endif %}">

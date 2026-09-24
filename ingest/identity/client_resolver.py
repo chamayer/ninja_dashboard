@@ -6,9 +6,9 @@ from BLUEPRINT Track C.3:
 
     Rung 1 — id-link.  If operations.v_client_source_link has a row for
              (source, external_id) the observation already carries the
-             client_id from source_observations._load_client_links. A
-             name change on a mapped group DOES NOT re-match — it emits
-             a `client_name_conflict` finding for operator apply.
+             client_id from source_observations._load_client_links. The
+             source-reported group name remains visible as mapping evidence;
+             it does not re-match or rename the canonical client.
 
     Rung 2 — exact normalized-name match against Client.display_name
              or an enabled ClientNameAlias row. On a single match the
@@ -98,7 +98,6 @@ def drain_client_resolution() -> int:
         log.info("client_resolver: %d unattached org groups", len(rows))
 
         source_by_binding = _load_source_by_binding(cur)
-        source_ids_by_name = _load_source_ids_by_name(cur)
         for obs_id, binding_id, entity_key, platform, canonical_data, observed_at in rows:
             cd = canonical_data or {}
             group_name = (cd.get("name") or "").strip()
@@ -175,9 +174,11 @@ def drain_client_resolution() -> int:
                 admin=True,
             )
 
-        # Rung 1 drift check — any mapped link whose latest observed name
-        # no longer matches emits client_name_conflict.
-        _check_name_drift(cur, source_ids_by_name)
+        # A mapped name difference is a client-level finding. It is not a
+        # rematch or forced rename: operators can suppress it when the source
+        # label is intentionally different.
+        _check_name_drift(cur)
+        _retire_client_name_conflicts(cur)
 
     log.info("client_resolver: attached %d groups", attached)
     return attached
@@ -198,11 +199,6 @@ def _load_source_by_binding(cur) -> dict[uuid.UUID, int]:
         """,
         (_TENANT_ID,),
     )
-    return {row[0]: row[1] for row in cur.fetchall()}
-
-
-def _load_source_ids_by_name(cur) -> dict[str, int]:
-    cur.execute("SELECT name, id FROM operations.sources")
     return {row[0]: row[1] for row in cur.fetchall()}
 
 
@@ -570,28 +566,52 @@ def _record_resolver_assessment(
     )
 
 
-def _check_name_drift(cur, source_ids_by_name: dict[str, int]) -> None:
-    """A mapped link seeing a different display name = one-click apply finding.
+def _retire_client_name_conflicts(cur) -> None:
+    """Resolve legacy admin rows after client name differences moved to Findings.
 
-    This detector was suppressed down to a single open finding. It skipped the
-    finding when the observed source name matched *either* the canonical client
-    name or the stored `client_links.external_name` — while `_attach_group`
-    refreshed that column to the observed name on every sync, so the second
-    test largely compared the observed value against itself.
+    The entity-class ``client_name_conflict`` rows emitted below are the
+    operator-facing findings. Earlier releases wrote the same condition into
+    ``admin_findings`` and offered a forced client rename, which is retired.
+    """
+    ft_id = _finding_type_id(cur, "client_name_conflict")
+    if ft_id is None:
+        return
+    cur.execute(
+        """
+        UPDATE operations.admin_findings
+           SET status = 'resolved', resolved_at = NOW()
+         WHERE tenant_id = %s
+           AND finding_type_id = %s
+           AND status IN ('open', 'acknowledged', 'investigating', 'suppressed')
+        """,
+        (_TENANT_ID, ft_id),
+    )
 
-    Measured after the fix deployed: 1 open finding existed beforehand, dating
-    from 2026-07-13, and 50 more appeared on the first run afterwards. The
-    suppression was hiding 50 of 51 real drifts.
 
-    Note for anyone re-deriving this: these findings live in
-    `operations.admin_findings`, not `operations.findings`, and the comparison
-    uses `_norm()` (strips whitespace, hyphen, underscore, dot) rather than a
-    plain lowercase. Measuring either the wrong table or the wrong comparison
-    makes the detector look completely inert; it is not.
+def _resolve_entity_finding(cur, type_name: str, condition_key: str) -> None:
+    """Resolve an entity finding whose evidence no longer meets its condition."""
+    ft_id = _finding_type_id(cur, type_name)
+    if ft_id is None:
+        return
+    cur.execute(
+        """
+        UPDATE operations.findings
+           SET status = 'resolved', resolved_at = NOW()
+         WHERE tenant_id = %s
+           AND finding_type_id = %s
+           AND condition_key = %s
+           AND status IN ('open', 'acknowledged', 'investigating', 'suppressed')
+        """,
+        (_TENANT_ID, ft_id, condition_key),
+    )
 
-    `external_name` is gone with the table (migration 0123) and is deliberately
-    not reproduced — suppressing a drift is a decision that belongs to an
-    operator, recorded, not a side effect of the column being rewritten.
+
+def _check_name_drift(cur) -> None:
+    """Emit a client finding when a mapped source group uses another name.
+
+    Mapping and naming are distinct operator decisions. The source reference
+    remains attached to the canonical client; the finding is reviewable and
+    suppressible when the difference is intentional.
     """
     cur.execute(
         """
@@ -600,54 +620,58 @@ def _check_name_drift(cur, source_ids_by_name: dict[str, int]) -> None:
                    source_binding_id, entity_key,
                    canonical_data ->> 'name' AS observed_name,
                    canonical_data ->> 'normalized_name' AS observed_norm
-            FROM operations.entity_observation_current
-            WHERE tenant_id = %s AND entity_type = 'org'
-              AND client_id IS NOT NULL
-              AND active = TRUE
-            ORDER BY source_binding_id, entity_key, observed_at DESC
+              FROM operations.entity_observation_current
+             WHERE tenant_id = %s
+               AND entity_type = 'org'
+               AND client_id IS NOT NULL
+               AND active = TRUE
+             ORDER BY source_binding_id, entity_key, observed_at DESC
         )
-        SELECT cl.id, cl.client_id, cl.source_id, cl.external_id,
-               sb.id,
-               l.observed_name, l.observed_norm,
-               c.display_name
-        FROM operations.v_client_source_link cl
-        JOIN operations.source_bindings sb
-             ON sb.enabled
-        JOIN operations.source_instances si
-             ON si.id = sb.source_instance_id AND si.source_id = cl.source_id
-        JOIN latest l
-             ON l.source_binding_id = sb.id AND l.entity_key = cl.external_id
-        JOIN operations.clients c ON c.id = cl.client_id
-        WHERE cl.tenant_id = %s
+        SELECT link.id, link.client_id, link.source_id, link.external_id,
+               binding.id, latest.observed_name, latest.observed_norm,
+               client.display_name
+          FROM operations.v_client_source_link link
+          JOIN operations.source_bindings binding ON binding.enabled
+          JOIN operations.source_instances instance
+            ON instance.id = binding.source_instance_id
+           AND instance.source_id = link.source_id
+          JOIN latest
+            ON latest.source_binding_id = binding.id
+           AND latest.entity_key = link.external_id
+          JOIN operations.clients client ON client.id = link.client_id
+         WHERE link.tenant_id = %s
         """,
         (_TENANT_ID, _TENANT_ID),
     )
-    drift_rows = cur.fetchall()
-    for link_id, client_id, source_id, external_id, source_binding_id, \
-            observed_name, observed_norm, client_display in drift_rows:
+    for (
+        link_id,
+        client_id,
+        source_id,
+        external_id,
+        source_binding_id,
+        observed_name,
+        observed_norm,
+        client_display_name,
+    ) in cur.fetchall():
         if not observed_name:
             continue
-        client_norm = _norm(client_display)
-        obs_norm = observed_norm or _norm(observed_name)
-        if obs_norm == client_norm:
-            _resolve_finding(cur, "client_name_conflict", _cond_link(link_id))
+        condition_key = _cond_link(link_id)
+        if (observed_norm or _norm(observed_name)) == _norm(client_display_name):
+            _resolve_entity_finding(cur, "client_name_conflict", condition_key)
             continue
         _emit_finding(
-            cur, "client_name_conflict",
-            condition_key=_cond_link(link_id),
-            subject_ref={
-                "client_link_id": str(link_id),
+            cur,
+            "client_name_conflict",
+            condition_key=condition_key,
+            subject_ref={},
+            details={
                 "source_binding_id": str(source_binding_id),
-                "client_id": str(client_id),
                 "source_id": source_id,
                 "external_id": external_id,
-                "client_display_name": client_display,
+                "client_display_name": client_display_name,
                 "observed_name": observed_name,
             },
-            details={
-                "observed_normalized": obs_norm,
-                "client_normalized": client_norm,
-            },
             severity="medium",
-            admin=True,
+            admin=False,
+            client_id=client_id,
         )

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import timedelta
+from urllib.parse import urlencode
 
 from django.db import connection, transaction
 from django.db.models import Count, Q
@@ -314,6 +315,97 @@ def _source_updates(
     return updates
 
 
+def client_source_references(*, client_id=None, source_name: str = "") -> list[dict]:
+    """Return the current source-group references attached to canonical clients.
+
+    The link view is the canonical attachment. The reported group name remains
+    source evidence, so it is joined from the latest active org observation
+    rather than copied onto the client or the link.
+    """
+    where = ["link.tenant_id = 1"]
+    params: list = []
+    if client_id is not None:
+        where.append("link.client_id = %s")
+        params.append(str(client_id))
+    if source_name:
+        where.append("source.name = %s")
+        params.append(source_name)
+
+    with transaction.atomic(), connection.cursor() as cur:
+        cur.execute("SET LOCAL operations.tenant_id = 1")
+        cur.execute(
+            f"""
+            WITH latest_org AS (
+                SELECT DISTINCT ON (instance.source_id, observation.entity_key)
+                       instance.source_id,
+                       observation.entity_key,
+                       observation.canonical_data ->> 'name' AS observed_name,
+                       observation.observed_at
+                  FROM operations.entity_observation_current observation
+                  JOIN operations.source_bindings binding
+                    ON binding.id = observation.source_binding_id
+                  JOIN operations.source_instances instance
+                    ON instance.id = binding.source_instance_id
+                 WHERE observation.tenant_id = 1
+                   AND observation.entity_type = 'org'
+                   AND observation.active = TRUE
+                 ORDER BY instance.source_id, observation.entity_key,
+                          observation.observed_at DESC
+            )
+            SELECT link.client_id, client.display_name, client.slug,
+                   source.name, link.external_id, link.external_namespace,
+                   link.first_seen_at, link.last_seen_at, link.missing_since,
+                   latest_org.observed_name, latest_org.observed_at
+              FROM operations.v_client_source_link link
+              JOIN operations.clients client
+                ON client.id = link.client_id
+               AND client.tenant_id = link.tenant_id
+               AND client.deleted_at IS NULL
+              JOIN operations.sources source ON source.id = link.source_id
+              LEFT JOIN latest_org
+                ON latest_org.source_id = link.source_id
+               AND latest_org.entity_key = link.external_id
+             WHERE {' AND '.join(where)}
+             ORDER BY source.name, client.display_name, link.external_id
+            """,
+            params,
+        )
+        rows = cur.fetchall()
+
+    references = []
+    for row in rows:
+        (
+            client_id_value,
+            client_name,
+            client_slug,
+            source_name_value,
+            external_id,
+            external_namespace,
+            first_seen_at,
+            last_seen_at,
+            missing_since,
+            observed_name,
+            observed_at,
+        ) = row
+        references.append(
+            {
+                "client_id": client_id_value,
+                "client_name": client_name,
+                "client_slug": client_slug,
+                "source_name": source_name_value,
+                "external_id": external_id,
+                "external_namespace": external_namespace,
+                "first_seen_at": first_seen_at,
+                "last_seen_at": last_seen_at,
+                "missing_since": missing_since,
+                "observed_name": observed_name or "",
+                "observed_at": observed_at,
+                "source_url": f"{reverse('sources_status')}?{urlencode({'source': source_name_value})}",
+            }
+        )
+    return references
+
+
 def build_client_workspace(client, existing: dict, *, device_policy: dict | None = None) -> dict:
     """Build a cross-domain, client-scoped overview context."""
     locations, users, health = _shared_context()
@@ -326,6 +418,7 @@ def build_client_workspace(client, existing: dict, *, device_policy: dict | None
         health,
         source_delay_hours=device_policy["source_delay_hours"],
     )
+    source_references = client_source_references(client_id=client.id)
     any_delayed = any(source["delayed"] for source in source_updates)
     latest_update = max(
         (source["updated_at"] for source in source_updates if source["updated_at"]),
@@ -508,6 +601,7 @@ def build_client_workspace(client, existing: dict, *, device_policy: dict | None
         "location_count": locations.get(client.id, 0),
         "client_user_count": users.get(client.id, 0),
         "source_updates": source_updates,
+        "source_references": source_references,
         "workspace_updated_at": latest_update,
         "attention_groups": attention_groups,
         "client_domains": domains,
@@ -615,6 +709,7 @@ def build_client_directory(clients: list) -> dict:
                 "data_label": data_label,
                 "data_sort": data_sort,
                 "review_count": merge_reviews.get(client.id, 0),
+                "source_reference_count": len(client.source_links.all()),
                 "needs_attention": needs_attention,
             }
         )
