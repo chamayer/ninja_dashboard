@@ -9898,7 +9898,7 @@ def findings_admin_health(request: HttpRequest) -> HttpResponse:
     assessments = _condition_assessment_display("admin", (finding.id for finding in findings))
     for finding in findings:
         finding.assessment = assessments.get(str(finding.id))
-        details = finding.finding_details or {}
+        details = finding.details or {}
         finding.job_status_url = (
             reverse("admin_job_status")
             if details.get("queue_key") == "operator.jobs"
