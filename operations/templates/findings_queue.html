@@ -198,6 +198,7 @@
         </a>
         {% endfor %}
     </section>
+    <p class="muted" style="margin:.85rem 0 0;">Source, collector, and queue failures are handled separately in <a href="{% url 'findings_admin_health' %}">Admin health</a>.</p>
 </div>
 
 <div class="card issues-results-intro">
@@ -499,7 +500,4 @@
 })();
 </script>
 
-<div style="margin-top: 1rem;">
-    <a href="{% url 'findings_admin_health' %}" style="font-size: 0.85rem;">Admin / platform health items &rarr;</a>
-</div>
 {% endblock %}

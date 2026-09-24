@@ -135,7 +135,7 @@
         <td>{% if reference.observed_name %}<strong>{{ reference.observed_name }}</strong>{% else %}<span class="muted">No current group observation</span>{% endif %}</td>
         <td><code>{{ reference.external_id }}</code>{% if reference.external_namespace %}<br><span class="muted">{{ reference.external_namespace }}</span>{% endif %}</td>
         <td>{% if reference.observed_at %}{{ reference.observed_at|date:"Y-m-d H:i" }}{% else %}<span class="muted">—</span>{% endif %}</td>
-        <td>{% if reference.missing_since %}<span class="badge badge-high">Missing since {{ reference.missing_since|date:"Y-m-d" }}</span>{% else %}<span class="badge badge-low">Mapped</span>{% endif %}</td>
+        <td>{% if reference.missing_since %}<span class="badge badge-high">Missing since {{ reference.missing_since|date:"Y-m-d" }}</span>{% elif reference.name_differs %}<a class="badge badge-medium" href="{{ reference.name_difference_url }}">Name differs · review</a>{% else %}<span class="badge badge-low">Mapped</span>{% endif %}</td>
       </tr>
     {% empty %}
       <tr><td colspan="5" class="muted">No source references are mapped to this client.</td></tr>

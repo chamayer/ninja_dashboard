@@ -399,8 +399,13 @@ def client_source_references(*, client_id=None, source_name: str = "") -> list[d
                 "last_seen_at": last_seen_at,
                 "missing_since": missing_since,
                 "observed_name": observed_name or "",
+                "name_differs": bool(observed_name) and observed_name.casefold() != client_name.casefold(),
                 "observed_at": observed_at,
                 "source_url": f"{reverse('sources_status')}?{urlencode({'source': source_name_value})}",
+                "name_difference_url": (
+                    f"{reverse('findings_queue')}?"
+                    f"{urlencode({'category': 'inventory', 'type': 'client_name_differences', 'issue': 'client_name_conflict', 'client': client_slug})}"
+                ),
             }
         )
     return references
