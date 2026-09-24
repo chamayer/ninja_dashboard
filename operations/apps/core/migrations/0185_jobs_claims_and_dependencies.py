@@ -82,23 +82,23 @@ CREATE INDEX jobs_dependencies_waiting
 
 INSERT INTO operations.job_lane_limits (tenant_id, lane, capacity, policy_revision)
 VALUES
-    (1, 'collection', 1, encode(digest('jobs-resource-policy-v1', 'sha256'), 'hex')),
-    (1, 'evaluation', 1, encode(digest('jobs-resource-policy-v1', 'sha256'), 'hex')),
-    (1, 'software', 1, encode(digest('jobs-resource-policy-v1', 'sha256'), 'hex')),
-    (1, 'intelligence', 1, encode(digest('jobs-resource-policy-v1', 'sha256'), 'hex')),
-    (1, 'service', 1, encode(digest('jobs-resource-policy-v1', 'sha256'), 'hex'));
+    (1, 'collection', 1, '6916ebcadd2176ee5710feb3fb2c3ecb65754b2080df47cf005e75309a137275'),
+    (1, 'evaluation', 1, '6916ebcadd2176ee5710feb3fb2c3ecb65754b2080df47cf005e75309a137275'),
+    (1, 'software', 1, '6916ebcadd2176ee5710feb3fb2c3ecb65754b2080df47cf005e75309a137275'),
+    (1, 'intelligence', 1, '6916ebcadd2176ee5710feb3fb2c3ecb65754b2080df47cf005e75309a137275'),
+    (1, 'service', 1, '6916ebcadd2176ee5710feb3fb2c3ecb65754b2080df47cf005e75309a137275');
 INSERT INTO operations.job_resource_limits (resource_template, capacity, policy_revision)
 VALUES
-    ('execution:deployment', 2, encode(digest('jobs-resource-policy-v1', 'sha256'), 'hex')),
-    ('tenant:{tenant_id}:state', 1, encode(digest('jobs-resource-policy-v1', 'sha256'), 'hex')),
-    ('global:intel-cve-corpus', 1, encode(digest('jobs-resource-policy-v1', 'sha256'), 'hex')),
-    ('global:software-catalog', 1, encode(digest('jobs-resource-policy-v1', 'sha256'), 'hex')),
+    ('execution:deployment', 2, '6916ebcadd2176ee5710feb3fb2c3ecb65754b2080df47cf005e75309a137275'),
+    ('tenant:{tenant_id}:state', 1, '6916ebcadd2176ee5710feb3fb2c3ecb65754b2080df47cf005e75309a137275'),
+    ('global:intel-cve-corpus', 1, '6916ebcadd2176ee5710feb3fb2c3ecb65754b2080df47cf005e75309a137275'),
+    ('global:software-catalog', 1, '6916ebcadd2176ee5710feb3fb2c3ecb65754b2080df47cf005e75309a137275'),
     ('tenant:{tenant_id}:software-inventory', 1,
-     encode(digest('jobs-resource-policy-v1', 'sha256'), 'hex')),
+     '6916ebcadd2176ee5710feb3fb2c3ecb65754b2080df47cf005e75309a137275'),
     ('tenant:{tenant_id}:notification-delivery', 1,
-     encode(digest('jobs-resource-policy-v1', 'sha256'), 'hex')),
+     '6916ebcadd2176ee5710feb3fb2c3ecb65754b2080df47cf005e75309a137275'),
     ('tenant:{tenant_id}:legacy-agent-compliance', 1,
-     encode(digest('jobs-resource-policy-v1', 'sha256'), 'hex'));
+     '6916ebcadd2176ee5710feb3fb2c3ecb65754b2080df47cf005e75309a137275');
 
 DO $security$
 DECLARE jobs_table TEXT;

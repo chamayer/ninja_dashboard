@@ -19,6 +19,8 @@ def test_claim_migration_adds_tenant_scoped_limits_claims_and_dependencies():
     assert "ENABLE ROW LEVEL SECURITY" in sql
     assert "FORCE ROW LEVEL SECURITY" in sql
     assert "execution:deployment', 2" in sql
+    assert "6916ebcadd2176ee5710feb3fb2c3ecb65754b2080df47cf005e75309a137275" in sql
+    assert "digest(" not in sql
     assert "('collection', 1" not in sql
     assert "DROP TABLE" not in sql
 

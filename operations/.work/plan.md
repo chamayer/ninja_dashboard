@@ -632,6 +632,14 @@ proven. Current next action: add the converted Software admission API that
 uses the approved ranks atomically; retain existing version-0 admission until
 the later family conversion.
 
+Recovery checkpoint (2026-09-24): the production Operations container crash-looped
+after `6b1ef1f` when migration 0185 attempted to call PostgreSQL `digest()` while
+seeding the fixed Jobs resource-policy SHA-256. The production database does not
+provide that function. Recovery scope is limited to replacing the runtime hash
+calculation with the identical precomputed digest
+`6916ebcadd2176ee5710feb3fb2c3ecb65754b2080df47cf005e75309a137275`, adding a
+static guard, validating the migration, and issuing an approved recovery push.
+
 Migration 0186, `jobs_software_supersession`, completes the declared
 Software-only cross-key admission path for converted v1 Jobs. During its
 implementation, the existing request-to-run composite FK was found to require
