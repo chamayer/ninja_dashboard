@@ -640,6 +640,13 @@ calculation with the identical precomputed digest
 `6916ebcadd2176ee5710feb3fb2c3ecb65754b2080df47cf005e75309a137275`, adding a
 static guard, validating the migration, and issuing an approved recovery push.
 
+Findings correction (2026-09-24): active policy `conditions-taxonomy-6` exposes
+Client name differences, but its 49 live records are `AdminFinding` rows while
+the Issues queue reads only entity `Finding` rows. The approved scope is to
+render Admin-owned findings in the same policy taxonomy and selected-type
+Issues result, preserve their distinct ownership/actions, and include their
+counts in navigation. Do not convert or duplicate evidence between tables.
+
 Migration 0186, `jobs_software_supersession`, completes the declared
 Software-only cross-key admission path for converted v1 Jobs. During its
 implementation, the existing request-to-run composite FK was found to require

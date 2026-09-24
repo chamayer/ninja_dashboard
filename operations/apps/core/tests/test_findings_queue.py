@@ -45,6 +45,26 @@ def test_finding_type_groups_preserve_category_order_and_other_bucket():
     ]
 
 
+def test_operator_issue_type_groups_sort_by_operator_label():
+    groups = {
+        "zeta": {"value": "zeta", "label": "Zeta type", "types": {"zeta_issue"}},
+        "alpha": {"value": "alpha", "label": "Alpha type", "types": {"alpha_issue"}},
+    }
+
+    assert [
+        group["value"]
+        for group in views._operator_issue_type_groups(
+            [
+                SimpleNamespace(name="zeta_issue"),
+                SimpleNamespace(name="alpha_issue"),
+            ],
+            "",
+            [{"key": "inventory", "types": {"zeta_issue", "alpha_issue"}}],
+            groups,
+        )
+    ] == ["alpha", "zeta"]
+
+
 class _Cursor:
     def __init__(self):
         self.statement = ""

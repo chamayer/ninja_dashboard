@@ -274,13 +274,9 @@ def _issue_taxonomy() -> tuple[list[dict], dict[str, dict]]:
 
 
 def _operator_issue_taxonomy() -> tuple[list[dict], dict[str, dict]]:
-    """Return only finding types that the normal Issues queue can review."""
+    """Return every policy type for the unified Issues navigation."""
     categories, groups = _issue_taxonomy()
-    visible_types = set(
-        FindingType.objects.filter(finding_class=FindingType.FindingClass.ENTITY)
-        .exclude(name__in=_SOFTWARE_POLICY_CANDIDATE_TYPES)
-        .values_list("name", flat=True)
-    )
+    visible_types = set().union(*(group["types"] for group in groups.values()))
     operator_groups = {}
     for key, group in groups.items():
         types = group["types"] & visible_types
@@ -748,7 +744,7 @@ def _operator_issue_type_groups(
             continue
         if group["types"].intersection(available):
             result.append({**group, "types": sorted(group["types"].intersection(available))})
-    return result
+    return sorted(result, key=lambda group: group["label"].casefold())
 
 
 def _affected_device_rows(findings) -> list[dict]:
@@ -5178,6 +5174,79 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
             for row in database_qs.values("finding_type__name").annotate(n=Count("id"))
         }
 
+    # Admin-owned conditions are still Issues.  They retain their separate
+    # storage and admin-only controls, but must not disappear from the common
+    # operator taxonomy or make a selected policy type appear empty.
+    admin_count_qs = AdminFinding.objects.filter(tenant_id=1)
+    if status_filter in ("", "active"):
+        admin_count_qs = admin_count_qs.filter(status__in=_FINDING_ACTIVE_STATUSES)
+    elif status_filter == "open":
+        admin_count_qs = admin_count_qs.filter(status="open")
+    elif status_filter == "acknowledged":
+        admin_count_qs = admin_count_qs.filter(status__in=("acknowledged", "investigating"))
+    elif status_filter == "resolved":
+        admin_count_qs = admin_count_qs.filter(status__in=("resolved", "suppressed", "wontfix"))
+    if severity_filter:
+        admin_count_qs = admin_count_qs.filter(severity=severity_filter)
+    admin_type_counts = {
+        row["finding_type__name"]: row["n"]
+        for row in admin_count_qs.values("finding_type__name").annotate(n=Count("id"))
+    }
+    for finding_type_name, count in admin_type_counts.items():
+        current_type_counts[finding_type_name] = (
+            current_type_counts.get(finding_type_name, 0) + count
+        )
+
+    selected_admin_types = set()
+    if category_filter:
+        selected_admin_types.update(
+            next(
+                (item["types"] for item in issue_categories if item["key"] == category_filter),
+                set(),
+            )
+        )
+    if type_filter:
+        selected_admin_types = set(issue_type_groups.get(type_filter, {}).get("types", set()))
+    if issue_filter:
+        selected_admin_types = {issue_filter}
+    admin_findings = []
+    if selected_admin_types:
+        admin_rows = (
+            admin_count_qs.filter(finding_type__name__in=selected_admin_types)
+            .select_related("finding_type")
+            .order_by("-last_detected_at")[:200]
+        )
+        source_ids = {
+            (finding.subject_ref or {}).get("source_id")
+            for finding in admin_rows
+            if (finding.subject_ref or {}).get("source_id") is not None
+        }
+        source_names_by_id = {
+            str(source_id): name
+            for source_id, name in Source.objects.filter(id__in=source_ids).values_list("id", "name")
+        }
+        for finding in admin_rows:
+            ref = finding.subject_ref or {}
+            admin_findings.append(
+                {
+                    "finding": finding,
+                    "type_label": next(
+                        (
+                            group["label"]
+                            for group in issue_type_groups.values()
+                            if finding.finding_type.name in group["types"]
+                        ),
+                        finding.finding_type.name,
+                    ),
+                    "issue_label": profile.definitions.get(finding.finding_type.name, {}).get(
+                        "label", finding.finding_type.name
+                    ) if profile else finding.finding_type.name,
+                    "subject": ref.get("observed_name") or ref.get("client_display_name") or "Platform service",
+                    "source_name": source_names_by_id.get(str(ref.get("source_id")), ""),
+                    "admin_url": f"{reverse('findings_admin_health')}?type={finding.finding_type.name}",
+                }
+            )
+
     def _group_link(category_key: str, type_key: str = "", attention: str = "") -> str:
         params = request.GET.copy()
         params.pop("page", None)
@@ -5346,6 +5415,7 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
         {
             "page_obj": page,
             "findings": page.object_list,
+            "admin_findings": admin_findings,
             "finding_type_groups": finding_type_groups,
             "categories": categories,
             "clients": clients,

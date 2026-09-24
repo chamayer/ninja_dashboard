@@ -278,7 +278,27 @@
         </details>
         {% endfor %}
     </div>
-    {% if not findings %}<p class="muted">Select a Category above to open its rows.</p>{% endif %}
+    {% if not findings and not admin_findings %}<p class="muted">Select a Category above to open its rows.</p>{% endif %}
+    {% if admin_findings %}
+    <section class="card" style="margin:1rem 0 0; border-left:4px solid #b45309;">
+        <h2 style="margin-top:0;">Admin-owned issues</h2>
+        <p class="muted">These are platform, source, and client-reference findings. They are included here for one complete Issues view; their controls remain in Admin health.</p>
+        <table class="ops-table">
+            <thead><tr><th>Severity</th><th>Type</th><th>Issue</th><th>Subject</th><th>Source</th><th>Status</th><th></th></tr></thead>
+            <tbody>{% for row in admin_findings %}
+                <tr>
+                    <td>{{ row.finding.get_severity_display }}</td>
+                    <td>{{ row.type_label }}</td>
+                    <td>{{ row.issue_label }}</td>
+                    <td>{{ row.subject }}</td>
+                    <td>{{ row.source_name|default:"—" }}</td>
+                    <td>{{ row.finding.status }}</td>
+                    <td><a href="{{ row.admin_url }}">Admin controls</a></td>
+                </tr>
+            {% endfor %}</tbody>
+        </table>
+    </section>
+    {% endif %}
     {% if findings %}
     <form id="issues-table-filter-form" method="get">
         {% for key, value in table_base_params %}<input type="hidden" name="{{ key }}" value="{{ value }}">{% endfor %}
