@@ -9895,6 +9895,19 @@ def findings_admin_health(request: HttpRequest) -> HttpResponse:
 
     qs = qs.order_by("-last_detected_at")[:200]
     findings = list(qs)
+    client_ids = {
+        (finding.subject_ref or {}).get("client_id")
+        for finding in findings
+        if (finding.subject_ref or {}).get("client_id")
+    }
+    clients = {
+        str(client.id): client
+        for client in Client.objects.filter(
+            tenant_id=1,
+            id__in=client_ids,
+            deleted_at__isnull=True,
+        ).only("id", "slug", "display_name")
+    }
     source_ids = {
         (finding.subject_ref or {}).get("source_id")
         for finding in findings
@@ -9911,9 +9924,11 @@ def findings_admin_health(request: HttpRequest) -> HttpResponse:
         finding.assessment = assessments.get(str(finding.id))
         details = finding.details or {}
         ref = finding.subject_ref or {}
+        finding.subject_client = clients.get(str(ref.get("client_id")))
         finding.client_name = ref.get("client_display_name") or ""
         finding.observed_name = ref.get("observed_name") or ""
         finding.source_name = source_names.get(str(ref.get("source_id")), "")
+        finding.source_url = reverse("sources_status") if finding.source_name else ""
         finding.job_status_url = (
             reverse("admin_job_status")
             if details.get("queue_key") == "operator.jobs"
