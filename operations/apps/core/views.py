@@ -9895,10 +9895,25 @@ def findings_admin_health(request: HttpRequest) -> HttpResponse:
 
     qs = qs.order_by("-last_detected_at")[:200]
     findings = list(qs)
+    source_ids = {
+        (finding.subject_ref or {}).get("source_id")
+        for finding in findings
+        if (finding.subject_ref or {}).get("source_id") is not None
+    }
+    source_names = {
+        str(source_id): name
+        for source_id, name in Source.objects.filter(
+            id__in=source_ids
+        ).values_list("id", "name")
+    }
     assessments = _condition_assessment_display("admin", (finding.id for finding in findings))
     for finding in findings:
         finding.assessment = assessments.get(str(finding.id))
         details = finding.details or {}
+        ref = finding.subject_ref or {}
+        finding.client_name = ref.get("client_display_name") or ""
+        finding.observed_name = ref.get("observed_name") or ""
+        finding.source_name = source_names.get(str(ref.get("source_id")), "")
         finding.job_status_url = (
             reverse("admin_job_status")
             if details.get("queue_key") == "operator.jobs"
