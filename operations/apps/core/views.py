@@ -442,6 +442,123 @@ def _condition_response_ids(finding_ids) -> dict[str, set[str]]:
     return result
 
 
+def _fleet_condition_state_counts() -> dict[str, dict[str, int]]:
+    """Return fleet Issue counts by Type and operator attention in one query.
+
+    The collapsed Issues page has no rows to review.  Projecting every active
+    finding into Python just to populate its navigation counters made opening
+    that page proportional to the entire fleet (including one assessment
+    query per 1,000 findings).  Keep the same participant and Critical-priority
+    rules in the database and reserve per-finding state projection for an
+    actual review scope.
+    """
+    empty = {}
+    with connection.cursor() as cursor:
+        cursor.execute("SELECT to_regclass('operations.condition_assessments')")
+        if cursor.fetchone()[0] is None:
+            cursor.execute(
+                """
+                SELECT ft.name,
+                       CASE WHEN f.snoozed_until > now() THEN 'paused' ELSE 'pending' END,
+                       count(*)
+                  FROM operations.findings f
+                  JOIN operations.finding_types ft ON ft.id = f.finding_type_id
+                 WHERE f.tenant_id = 1
+                   AND f.status = ANY(%s)
+                   AND ft.name <> ALL(%s)
+                 GROUP BY ft.name, CASE WHEN f.snoozed_until > now() THEN 'paused' ELSE 'pending' END
+                """,
+                [list(_FINDING_ACTIVE_STATUSES), list(_SOFTWARE_POLICY_CANDIDATE_TYPES)],
+            )
+        else:
+            cursor.execute(
+                """
+                WITH active AS (
+                    SELECT f.id, f.finding_type_id, f.status, f.snoozed_until,
+                           f.severity, f.subject_type, f.subject_id
+                      FROM operations.findings f
+                      JOIN operations.finding_types ft ON ft.id = f.finding_type_id
+                     WHERE f.tenant_id = 1
+                       AND f.status = ANY(%s)
+                       AND ft.name <> ALL(%s)
+                ), expected AS (
+                    SELECT f.id,
+                           COALESCE(array_agg(DISTINCT cp.participant_kind || ':' || cp.participant_id::text || ':' || cp.participant_role
+                               ORDER BY cp.participant_kind || ':' || cp.participant_id::text || ':' || cp.participant_role)
+                               FILTER (WHERE cp.participant_role <> 'context'), ARRAY[]::text[]) AS participants
+                      FROM active f
+                 LEFT JOIN operations.condition_participants cp
+                        ON cp.tenant_id = 1 AND cp.row_kind = 'entity' AND cp.finding_id = f.id
+                     GROUP BY f.id
+                ), assessed AS (
+                    SELECT a.finding_id,
+                           bool_or(a.participant_kind = 'condition'
+                               AND (a.response->>'may_execute')::boolean IS TRUE) AS condition_execute,
+                           COALESCE(array_agg(DISTINCT a.participant_kind || ':' || a.participant_id::text || ':' || a.participant_role
+                               ORDER BY a.participant_kind || ':' || a.participant_id::text || ':' || a.participant_role)
+                               FILTER (WHERE a.participant_kind <> 'condition'), ARRAY[]::text[]) AS participants,
+                           COALESCE(array_agg(DISTINCT a.participant_kind || ':' || a.participant_id::text || ':' || a.participant_role
+                               ORDER BY a.participant_kind || ':' || a.participant_id::text || ':' || a.participant_role)
+                               FILTER (WHERE a.participant_kind <> 'condition'
+                                   AND (a.response->>'may_execute')::boolean IS TRUE), ARRAY[]::text[]) AS executable_participants,
+                           bool_or(a.response->>'disposition' = 'blocked') AS blocked
+                      FROM operations.condition_assessments a
+                      JOIN active f ON f.id = a.finding_id
+                     WHERE a.tenant_id = 1 AND a.row_kind = 'entity'
+                       AND a.participant_role <> 'context'
+                       AND a.policy_version = (SELECT version FROM operations.condition_policy_versions WHERE active ORDER BY version DESC LIMIT 1)
+                       AND a.assessed_at >= now() - (SELECT (policy->>'freshness_hours')::integer * interval '1 hour' FROM operations.condition_policy_versions WHERE active ORDER BY version DESC LIMIT 1)
+                     GROUP BY a.finding_id
+                ), classified AS MATERIALIZED (
+                    SELECT f.*, CASE
+                        WHEN f.snoozed_until > now() THEN 'paused'
+                        WHEN (e.participants = ARRAY[]::text[] AND COALESCE(a.condition_execute, false))
+                          OR (e.participants <> ARRAY[]::text[] AND a.participants = e.participants AND a.executable_participants = e.participants)
+                            THEN 'needs_action'
+                        WHEN COALESCE(a.blocked, false) THEN 'blocked'
+                        ELSE 'pending'
+                    END AS attention
+                      FROM active f
+                      JOIN expected e ON e.id = f.id
+                 LEFT JOIN assessed a ON a.finding_id = f.id
+                ), critical_subjects AS (
+                    SELECT subject_type, subject_id FROM classified
+                     WHERE severity = 'critical' AND attention = 'needs_action'
+                ), critical_participants AS (
+                    SELECT DISTINCT cp.participant_kind, cp.participant_id
+                      FROM operations.condition_participants cp
+                      JOIN classified f ON f.id = cp.finding_id
+                     WHERE cp.tenant_id = 1 AND cp.row_kind = 'entity'
+                       AND cp.participant_role <> 'context'
+                       AND f.severity = 'critical' AND f.attention = 'needs_action'
+                ), final AS (
+                    SELECT f.id, f.finding_type_id, CASE
+                        WHEN f.attention = 'needs_action'
+                         AND f.severity IN ('medium', 'low', 'info')
+                         AND (EXISTS (SELECT 1 FROM critical_subjects cs WHERE cs.subject_type = f.subject_type AND cs.subject_id = f.subject_id)
+                              OR EXISTS (
+                                  SELECT 1 FROM operations.condition_participants cp
+                                  JOIN critical_participants ccp
+                                    ON ccp.participant_kind = cp.participant_kind AND ccp.participant_id = cp.participant_id
+                                   WHERE cp.tenant_id = 1 AND cp.row_kind = 'entity'
+                                     AND cp.participant_role <> 'context' AND cp.finding_id = f.id
+                              )) THEN 'blocked'
+                        ELSE f.attention
+                    END AS attention
+                      FROM classified f
+                )
+                SELECT ft.name, final.attention, count(*)
+                  FROM final
+                  JOIN operations.finding_types ft ON ft.id = final.finding_type_id
+                 GROUP BY ft.name, final.attention
+                """,
+                [list(_FINDING_ACTIVE_STATUSES), list(_SOFTWARE_POLICY_CANDIDATE_TYPES)],
+            )
+        for finding_type, attention, count in cursor.fetchall():
+            empty.setdefault(finding_type, {})[attention] = count
+    return empty
+
+
 def _condition_operator_states(finding_ids, *, now=None) -> dict[str, dict[str, str]]:
     """Project retained findings into the operator Status/Attention model."""
     ids = [str(value) for value in finding_ids if value]
@@ -3629,22 +3746,64 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
     # Issues and must not inflate the Issues response counts or appear here.
     qs = qs.exclude(finding_type__name__in=_SOFTWARE_POLICY_CANDIDATE_TYPES)
 
+    # A collapsed queue is navigation, not a review scope.  Its fleet counters
+    # must not first materialize every finding and participant assessment.
+    show_finding_rows = bool(
+        category_filter
+        or type_filter
+        or issue_filter
+        or active_group_key
+        or device_id_filter
+        or subject_id_filter
+        or wants_csv(request)
+    )
+    # Filters outside the navigation taxonomy still need exact, filtered
+    # state counts. The fast set-based summary is only for the unfiltered
+    # collapsed landing page.
+    has_non_navigation_filter = any(
+        (
+            status_filter,
+            severity_filter,
+            confidence_filter,
+            client_filter,
+            platform_filter,
+            os_filter,
+            computer_type_filter,
+            online_filter,
+            q_filter,
+            request.GET.get("snoozed") == "0",
+        )
+    )
+    needs_per_finding_states = (
+        show_finding_rows or bool(attention_filter) or has_non_navigation_filter
+    )
+
     # Top cards are fleet-wide operator populations. They deliberately do not
-    # inherit any selected filters below them. Calculate that state once: an
-    # active Type selection is a subset of the fleet and can reuse the exact
-    # same projection, rather than recalculating every participant assessment.
+    # inherit selected filters. A review scope reuses the exact per-finding
+    # projection; the collapsed queue uses the set-based fleet summary above.
     fleet_governed_qs = Finding.objects.filter(
         tenant_id=1,
         status__in=_FINDING_ACTIVE_STATUSES,
     ).exclude(finding_type__name__in=_SOFTWARE_POLICY_CANDIDATE_TYPES)
-    fleet_ids = list(fleet_governed_qs.values_list("id", flat=True))
+    fleet_ids = (
+        list(fleet_governed_qs.values_list("id", flat=True))
+        if needs_per_finding_states
+        else []
+    )
     fleet_id_keys = {str(finding_id) for finding_id in fleet_ids}
     fleet_states = _condition_operator_states(fleet_ids)
+    fleet_state_counts_by_type = (
+        {} if needs_per_finding_states else _fleet_condition_state_counts()
+    )
 
     # Attention is separate from operator Status. Governed findings are
     # filtered only after all subject and evidence filters have been applied.
     governed_qs = qs
-    governed_ids = list(governed_qs.values_list("id", flat=True))
+    governed_ids = (
+        list(governed_qs.values_list("id", flat=True))
+        if needs_per_finding_states
+        else []
+    )
     governed_id_keys = {str(finding_id) for finding_id in governed_ids}
     operator_states = (
         {finding_id: fleet_states[finding_id] for finding_id in governed_id_keys}
@@ -3662,17 +3821,31 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
         qs = qs.filter(severity=severity_filter)
 
     actionable_qs = qs
-    fleet_counts = {
-        attention: sum(
-            1 for state in fleet_states.values() if state["attention"] == attention
-        )
-        for attention in (
-            ATTENTION_NEEDS_ACTION,
-            ATTENTION_BLOCKED,
-            ATTENTION_PENDING,
-            ATTENTION_PAUSED,
-        )
-    }
+    if needs_per_finding_states:
+        fleet_counts = {
+            attention: sum(
+                1 for state in fleet_states.values() if state["attention"] == attention
+            )
+            for attention in (
+                ATTENTION_NEEDS_ACTION,
+                ATTENTION_BLOCKED,
+                ATTENTION_PENDING,
+                ATTENTION_PAUSED,
+            )
+        }
+    else:
+        fleet_counts = {
+            attention: sum(
+                counts.get(attention, 0)
+                for counts in fleet_state_counts_by_type.values()
+            )
+            for attention in (
+                ATTENTION_NEEDS_ACTION,
+                ATTENTION_BLOCKED,
+                ATTENTION_PENDING,
+                ATTENTION_PAUSED,
+            )
+        }
     fleet_policy_qs = Finding.objects.filter(
         tenant_id=1,
         status__in=_FINDING_ACTIVE_STATUSES,
@@ -3730,15 +3903,6 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
     # headers. A Type/evidence selection opens rows; the unselected queue uses
     # database counts below and keeps the potentially very large finding set
     # out of Python memory.
-    show_finding_rows = bool(
-        category_filter
-        or type_filter
-        or issue_filter
-        or active_group_key
-        or device_id_filter
-        or subject_id_filter
-        or wants_csv(request)
-    )
     table_filter_keys = ("severity", "finding", "subject", "context", "status")
     table_filters = {
         key: (request.GET.get(f"table_{key}") or "").strip()
@@ -4943,15 +5107,24 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
             ],
             filename_stem="affected_devices",
         )
-    state_counts_by_type: dict[str, dict[str, int]] = {}
-    for finding_id, finding_type_name in database_qs.values_list("id", "finding_type__name"):
-        attention = operator_states.get(str(finding_id), {}).get("attention", ATTENTION_PENDING)
-        counts = state_counts_by_type.setdefault(
-            finding_type_name,
-            {"needs_action": 0, "blocked": 0, "pending": 0},
-        )
-        if attention in counts:
-            counts[attention] += 1
+    if needs_per_finding_states:
+        state_counts_by_type: dict[str, dict[str, int]] = {}
+        for finding_id, finding_type_name in database_qs.values_list("id", "finding_type__name"):
+            attention = operator_states.get(str(finding_id), {}).get("attention", ATTENTION_PENDING)
+            counts = state_counts_by_type.setdefault(
+                finding_type_name,
+                {"needs_action": 0, "blocked": 0, "pending": 0},
+            )
+            if attention in counts:
+                counts[attention] += 1
+    else:
+        state_counts_by_type = {
+            finding_type_name: {
+                state: counts.get(state, 0)
+                for state in ("needs_action", "blocked", "pending")
+            }
+            for finding_type_name, counts in fleet_state_counts_by_type.items()
+        }
     current_type_counts = {}
     for row in findings_with_detail:
         current_type_counts[row["f"].finding_type.name] = (

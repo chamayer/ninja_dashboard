@@ -241,6 +241,14 @@ def test_collapsed_queue_skips_affected_device_rollup_until_a_type_is_opened():
     assert "_affected_device_rows(matching_qs) if needs_affected_devices else []" in source
 
 
+def test_collapsed_queue_uses_set_based_fleet_state_summary():
+    source = Path("apps/core/views.py").read_text(encoding="utf-8")
+
+    assert "def _fleet_condition_state_counts()" in source
+    assert "needs_per_finding_states = (" in source
+    assert "else _fleet_condition_state_counts()" in source
+
+
 def test_filtered_issue_queue_reuses_the_fleet_operator_state_projection():
     source = Path("apps/core/views.py").read_text(encoding="utf-8")
 
