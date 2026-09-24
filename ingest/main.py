@@ -81,10 +81,26 @@ from ingest.identity.resolver import drain_resolution as _drain_resolution
 from ingest import scope_selector as _scope_selector
 from ingest.patches import ingest as patches_ingest
 from ingest.summary_views import refresh_device_troubleshooting_signal
+from shared.jobs_registry import validate_registry
 
 log = logging.getLogger("ingest.main")
 _AGENT_COMPLIANCE_LOCK = threading.Lock()
 _PATCH_CYCLE_LOCK_ID = 6_803_904_731_027_441
+
+# Independent schedule declarations keep readiness fail-closed if a registry
+# schedule is added or removed without updating this producer.
+SCHEDULED_OPERATOR_JOB_KEYS = frozenset(
+    {
+        "patches", "agent-observations", "documentation-observations",
+        "agent-compliance", "agent-compliance-evaluate", "resolver",
+        "platform-evaluate", "notifications-dispatch", "notifications-digest",
+        "retention-history", "software-enqueue-orgs", "software-queue-drain",
+        "software-classify-only", "software-classify-full", "intel-nvd",
+        "intel-cpe-dict", "intel-kev", "intel-epss", "intel-matcher",
+        "intel-winget", "intel-chocolatey", "intel-otx", "intel-abusech",
+        "intel-endoflife", "intel-capability", "intel-category", "intel-lolrmm",
+    }
+)
 
 
 def run_once() -> None:
@@ -2465,6 +2481,10 @@ def main() -> None:
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
     )
     install_log_safety()
+    validate_registry(
+        executable_keys=operator_job_queue.EXECUTABLE_JOB_KEYS,
+        scheduled_keys=SCHEDULED_OPERATOR_JOB_KEYS,
+    )
 
     # Bind HTTP server FIRST so /healthz is reachable before any
     # potentially-slow startup work. Keeps the Docker HEALTHCHECK

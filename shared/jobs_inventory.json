@@ -1,0 +1,2463 @@
+{
+  "schema_version": 2,
+  "purpose": "WP0 static source evidence; not the executable registry or a safety certification",
+  "coverage": {
+    "runtime_roots": [
+      "ingest/",
+      "operations/apps/"
+    ],
+    "excluded": [
+      "tests/",
+      "migrations/",
+      "comments",
+      "docstrings"
+    ],
+    "limitations": [
+      "No evaluation of configuration, dynamic imports or runtime SQL",
+      "Queue discovery uses qualified relation names containing queue or ending job_runs/action_requests",
+      "Consumer entries include readers and writers; SQL migrations/views require separate review",
+      "Handler contracts, transitive effects, kill safety and revision producers require the companion audit"
+    ],
+    "audit": "operations/.work/jobs-handler-audit.md"
+  },
+  "evidence": {
+    "schedules": [
+      {
+        "file": "ingest/main.py",
+        "owner": "main",
+        "id": "'patch_ingest_cycle'",
+        "callable": "operator_job_queue.enqueue_automatic",
+        "trigger": "'interval'",
+        "options": {
+          "hours": "settings.patch_ingest_schedule_hours",
+          "args": "['patches']"
+        },
+        "guards": []
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "main",
+        "id": "'agent_observations_cycle'",
+        "callable": "operator_job_queue.enqueue_automatic",
+        "trigger": "'interval'",
+        "options": {
+          "hours": "settings.AGENT_COMPLIANCE_SCHEDULE_HOURS",
+          "args": "['agent-observations']",
+          "max_instances": "1"
+        },
+        "guards": []
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "main",
+        "id": "'documentation_observations_cycle'",
+        "callable": "operator_job_queue.enqueue_automatic",
+        "trigger": "'interval'",
+        "options": {
+          "hours": "documentation_schedule_hours",
+          "args": "['documentation-observations']",
+          "max_instances": "1"
+        },
+        "guards": []
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "main",
+        "id": "'source_run_queue_stale_recovery'",
+        "callable": "source_run_queue.recover_stale",
+        "trigger": "'interval'",
+        "options": {
+          "minutes": "15"
+        },
+        "guards": []
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "main",
+        "id": "'source_action_requests'",
+        "callable": "source_actions.process_pending",
+        "trigger": "'interval'",
+        "options": {
+          "minutes": "1",
+          "max_instances": "1"
+        },
+        "guards": []
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "main",
+        "id": "f'operator_job_queue_{lane}'",
+        "callable": "operator_job_queue.process_next",
+        "trigger": "'interval'",
+        "options": {
+          "seconds": "10",
+          "args": "[lane]",
+          "max_instances": "1"
+        },
+        "guards": [
+          "for lane in operator_job_queue.WORKER_LANES"
+        ]
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "main",
+        "id": "'operator_job_queue_stale_recovery'",
+        "callable": "operator_job_queue.recover_stale",
+        "trigger": "'interval'",
+        "options": {
+          "minutes": "1",
+          "max_instances": "1"
+        },
+        "guards": []
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "main",
+        "id": "'run_log_stale_reaper'",
+        "callable": "runlog.reap_stale",
+        "trigger": "'interval'",
+        "options": {
+          "minutes": "30",
+          "max_instances": "1"
+        },
+        "guards": []
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "main",
+        "id": "'platform_health_findings'",
+        "callable": "_run_platform_findings",
+        "trigger": "'interval'",
+        "options": {
+          "minutes": "30",
+          "max_instances": "1"
+        },
+        "guards": []
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "main",
+        "id": "'agent_compliance_ingest_cycle'",
+        "callable": "operator_job_queue.enqueue_automatic",
+        "trigger": "'interval'",
+        "options": {
+          "hours": "settings.AGENT_COMPLIANCE_SCHEDULE_HOURS",
+          "args": "['agent-compliance']",
+          "max_instances": "1"
+        },
+        "guards": []
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "main",
+        "id": "'agent_compliance_evaluate_cycle'",
+        "callable": "operator_job_queue.enqueue_automatic",
+        "trigger": "'interval'",
+        "options": {
+          "hours": "settings.AGENT_COMPLIANCE_SCHEDULE_HOURS",
+          "args": "['agent-compliance-evaluate']",
+          "max_instances": "1"
+        },
+        "guards": []
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "main",
+        "id": "'identity_resolver_cycle'",
+        "callable": "operator_job_queue.enqueue_automatic",
+        "trigger": "'interval'",
+        "options": {
+          "minutes": "30",
+          "args": "['resolver']",
+          "max_instances": "1"
+        },
+        "guards": []
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "main",
+        "id": "'platform_evaluate_cycle'",
+        "callable": "operator_job_queue.enqueue_automatic",
+        "trigger": "'interval'",
+        "options": {
+          "hours": "4",
+          "args": "['platform-evaluate']",
+          "max_instances": "1"
+        },
+        "guards": []
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "main",
+        "id": "'notifications_dispatch_cycle'",
+        "callable": "operator_job_queue.enqueue_automatic",
+        "trigger": "'interval'",
+        "options": {
+          "minutes": "settings.NOTIFY_DISPATCH_SCHEDULE_MINUTES",
+          "args": "['notifications-dispatch']",
+          "max_instances": "1"
+        },
+        "guards": [
+          "settings.NOTIFY_ENABLED"
+        ]
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "main",
+        "id": "'notifications_digest_cycle'",
+        "callable": "operator_job_queue.enqueue_automatic",
+        "trigger": "'cron'",
+        "options": {
+          "hour": "settings.NOTIFY_DIGEST_HOUR",
+          "minute": "0",
+          "args": "['notifications-digest']",
+          "max_instances": "1"
+        },
+        "guards": [
+          "settings.NOTIFY_DIGEST_ENABLED"
+        ]
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "main",
+        "id": "'observation_history_retention_cycle'",
+        "callable": "operator_job_queue.enqueue_automatic",
+        "trigger": "'cron'",
+        "options": {
+          "hour": "int(getattr(settings, 'OBSERVATION_HISTORY_RETENTION_HOUR', 3))",
+          "minute": "0",
+          "args": "['retention-history']",
+          "max_instances": "1"
+        },
+        "guards": []
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "main",
+        "id": "'software_enqueue_orgs_cycle'",
+        "callable": "operator_job_queue.enqueue_automatic",
+        "trigger": "'interval'",
+        "options": {
+          "hours": "settings.SOFTWARE_INGEST_SCHEDULE_HOURS",
+          "args": "['software-enqueue-orgs']",
+          "max_instances": "1"
+        },
+        "guards": [
+          "settings.SOFTWARE_QUEUE_ENABLED"
+        ]
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "main",
+        "id": "'software_queue_drain_cycle'",
+        "callable": "operator_job_queue.enqueue_automatic",
+        "trigger": "'interval'",
+        "options": {
+          "minutes": "settings.SOFTWARE_QUEUE_POLL_MINUTES",
+          "args": "['software-queue-drain']",
+          "max_instances": "1"
+        },
+        "guards": [
+          "settings.SOFTWARE_QUEUE_ENABLED"
+        ]
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "main",
+        "id": "'software_classify_cycle'",
+        "callable": "operator_job_queue.enqueue_automatic",
+        "trigger": "'interval'",
+        "options": {
+          "hours": "settings.SOFTWARE_CLASSIFY_SCHEDULE_HOURS",
+          "args": "['software-classify-only']",
+          "max_instances": "1"
+        },
+        "guards": []
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "main",
+        "id": "'software_classify_full_rebuild_cycle'",
+        "callable": "operator_job_queue.enqueue_automatic",
+        "trigger": "'interval'",
+        "options": {
+          "hours": "settings.SOFTWARE_CLASSIFY_FULL_REBUILD_HOURS",
+          "args": "['software-classify-full']",
+          "max_instances": "1"
+        },
+        "guards": []
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "main",
+        "id": "'intel_nvd_cycle'",
+        "callable": "operator_job_queue.enqueue_automatic",
+        "trigger": "'interval'",
+        "options": {
+          "hours": "settings.INTEL_NVD_SCHEDULE_HOURS",
+          "args": "['intel-nvd']",
+          "max_instances": "1"
+        },
+        "guards": [
+          "settings.INTEL_ENABLED"
+        ]
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "main",
+        "id": "'intel_cpe_dict_cycle'",
+        "callable": "operator_job_queue.enqueue_automatic",
+        "trigger": "'interval'",
+        "options": {
+          "hours": "settings.INTEL_CATALOG_SCHEDULE_HOURS",
+          "args": "['intel-cpe-dict']",
+          "max_instances": "1"
+        },
+        "guards": [
+          "settings.INTEL_ENABLED"
+        ]
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "main",
+        "id": "'intel_kev_cycle'",
+        "callable": "operator_job_queue.enqueue_automatic",
+        "trigger": "'interval'",
+        "options": {
+          "hours": "settings.INTEL_KEV_SCHEDULE_HOURS",
+          "args": "['intel-kev']",
+          "max_instances": "1"
+        },
+        "guards": [
+          "settings.INTEL_ENABLED"
+        ]
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "main",
+        "id": "'intel_epss_cycle'",
+        "callable": "operator_job_queue.enqueue_automatic",
+        "trigger": "'interval'",
+        "options": {
+          "hours": "settings.INTEL_EPSS_SCHEDULE_HOURS",
+          "args": "['intel-epss']",
+          "max_instances": "1"
+        },
+        "guards": [
+          "settings.INTEL_ENABLED"
+        ]
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "main",
+        "id": "'intel_matcher_cycle'",
+        "callable": "operator_job_queue.enqueue_automatic",
+        "trigger": "'interval'",
+        "options": {
+          "hours": "settings.INTEL_MATCHER_SCHEDULE_HOURS",
+          "args": "['intel-matcher']",
+          "max_instances": "1"
+        },
+        "guards": [
+          "settings.INTEL_ENABLED"
+        ]
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "main",
+        "id": "'intel_winget_cycle'",
+        "callable": "operator_job_queue.enqueue_automatic",
+        "trigger": "'interval'",
+        "options": {
+          "hours": "settings.INTEL_CATALOG_SCHEDULE_HOURS",
+          "args": "['intel-winget']",
+          "max_instances": "1"
+        },
+        "guards": [
+          "settings.INTEL_ENABLED"
+        ]
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "main",
+        "id": "'intel_chocolatey_cycle'",
+        "callable": "operator_job_queue.enqueue_automatic",
+        "trigger": "'interval'",
+        "options": {
+          "hours": "settings.INTEL_CATALOG_SCHEDULE_HOURS",
+          "args": "['intel-chocolatey']",
+          "max_instances": "1"
+        },
+        "guards": [
+          "settings.INTEL_ENABLED"
+        ]
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "main",
+        "id": "'intel_otx_cycle'",
+        "callable": "operator_job_queue.enqueue_automatic",
+        "trigger": "'interval'",
+        "options": {
+          "hours": "settings.INTEL_OSINT_SCHEDULE_HOURS",
+          "args": "['intel-otx']",
+          "max_instances": "1"
+        },
+        "guards": [
+          "settings.INTEL_ENABLED"
+        ]
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "main",
+        "id": "'intel_abusech_cycle'",
+        "callable": "operator_job_queue.enqueue_automatic",
+        "trigger": "'interval'",
+        "options": {
+          "hours": "settings.INTEL_OSINT_SCHEDULE_HOURS",
+          "args": "['intel-abusech']",
+          "max_instances": "1"
+        },
+        "guards": [
+          "settings.INTEL_ENABLED"
+        ]
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "main",
+        "id": "'intel_endoflife_cycle'",
+        "callable": "operator_job_queue.enqueue_automatic",
+        "trigger": "'interval'",
+        "options": {
+          "hours": "settings.INTEL_CATALOG_SCHEDULE_HOURS",
+          "args": "['intel-endoflife']",
+          "max_instances": "1"
+        },
+        "guards": [
+          "settings.INTEL_ENABLED"
+        ]
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "main",
+        "id": "'intel_capability_cycle'",
+        "callable": "operator_job_queue.enqueue_automatic",
+        "trigger": "'interval'",
+        "options": {
+          "hours": "settings.INTEL_CAPABILITY_SCHEDULE_HOURS",
+          "args": "['intel-capability']",
+          "max_instances": "1"
+        },
+        "guards": [
+          "settings.INTEL_ENABLED"
+        ]
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "main",
+        "id": "'intel_category_cycle'",
+        "callable": "operator_job_queue.enqueue_automatic",
+        "trigger": "'interval'",
+        "options": {
+          "hours": "settings.INTEL_CATEGORY_SCHEDULE_HOURS",
+          "args": "['intel-category']",
+          "max_instances": "1"
+        },
+        "guards": [
+          "settings.INTEL_ENABLED"
+        ]
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "main",
+        "id": "'intel_lolrmm_cycle'",
+        "callable": "operator_job_queue.enqueue_automatic",
+        "trigger": "'interval'",
+        "options": {
+          "hours": "settings.INTEL_CATALOG_SCHEDULE_HOURS",
+          "args": "['intel-lolrmm']",
+          "max_instances": "1"
+        },
+        "guards": [
+          "settings.INTEL_ENABLED"
+        ]
+      }
+    ],
+    "http_routes": [
+      {
+        "file": "ingest/main.py",
+        "owner": "_Handler.do_GET",
+        "route": "/healthz",
+        "match": "comparison"
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "_Handler.do_GET",
+        "route": "/readyz",
+        "match": "comparison"
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "_Handler.do_GET",
+        "route": "/run/software/scoped",
+        "match": "comparison"
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "_Handler.do_GET",
+        "route": "/run/software/scoped?",
+        "match": "startswith"
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "_Handler.do_GET",
+        "route": "/run/software/enqueue",
+        "match": "comparison"
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "_Handler.do_GET",
+        "route": "/run/software/enqueue?",
+        "match": "startswith"
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "_Handler.do_GET",
+        "route": "/run/software/demand/",
+        "match": "startswith"
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "_Handler.do_GET",
+        "route": "/run/software/queue",
+        "match": "comparison"
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "_Handler.do_GET",
+        "route": "/run/sources",
+        "match": "comparison"
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "_Handler.do_GET",
+        "route": "/run/sources/enqueue",
+        "match": "comparison"
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "_Handler.do_GET",
+        "route": "/run/sources/enqueue?",
+        "match": "startswith"
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "_Handler.do_GET",
+        "route": "/run/sources/queue",
+        "match": "comparison"
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "_Handler.do_GET",
+        "route": "/run/sources/demand/",
+        "match": "startswith"
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "_Handler.do_GET",
+        "route": "/agent-compliance/action/",
+        "match": "startswith"
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "_Handler.do_GET",
+        "route": "/a/",
+        "match": "startswith"
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "_Handler.do_POST",
+        "route": "/run",
+        "match": "comparison"
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "_Handler.do_POST",
+        "route": "/run/patches",
+        "match": "comparison"
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "_Handler.do_POST",
+        "route": "/run/agent-compliance",
+        "match": "comparison"
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "_Handler.do_POST",
+        "route": "/run/agent-compliance-evaluate",
+        "match": "comparison"
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "_Handler.do_POST",
+        "route": "/run/resolver",
+        "match": "comparison"
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "_Handler.do_POST",
+        "route": "/run/agent-compliance-review-digest",
+        "match": "comparison"
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "_Handler.do_POST",
+        "route": "/run/notifications/dispatch",
+        "match": "comparison"
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "_Handler.do_POST",
+        "route": "/run/platform-evaluate",
+        "match": "comparison"
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "_Handler.do_POST",
+        "route": "/run/software-classify",
+        "match": "comparison"
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "_Handler.do_POST",
+        "route": "/run/software-classify-only",
+        "match": "comparison"
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "_Handler.do_POST",
+        "route": "/run/intel-capability",
+        "match": "comparison"
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "_Handler.do_POST",
+        "route": "/run/intel-category",
+        "match": "comparison"
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "_Handler.do_POST",
+        "route": "/run/intel-lolrmm",
+        "match": "comparison"
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "_Handler.do_POST",
+        "route": "/run/patch-classify",
+        "match": "comparison"
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "_Handler.do_POST",
+        "route": "/run/parity-check",
+        "match": "comparison"
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "_Handler.do_POST",
+        "route": "/run/notifications/digest",
+        "match": "comparison"
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "_Handler.do_POST",
+        "route": "/run/intel-nvd",
+        "match": "comparison"
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "_Handler.do_POST",
+        "route": "/run/intel-cpe-dict",
+        "match": "comparison"
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "_Handler.do_POST",
+        "route": "/run/intel-kev",
+        "match": "comparison"
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "_Handler.do_POST",
+        "route": "/run/intel-epss",
+        "match": "comparison"
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "_Handler.do_POST",
+        "route": "/run/intel-matcher",
+        "match": "comparison"
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "_Handler.do_POST",
+        "route": "/run/intel-winget",
+        "match": "comparison"
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "_Handler.do_POST",
+        "route": "/run/intel-chocolatey",
+        "match": "comparison"
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "_Handler.do_POST",
+        "route": "/run/intel-otx",
+        "match": "comparison"
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "_Handler.do_POST",
+        "route": "/run/intel-abusech",
+        "match": "comparison"
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "_Handler.do_POST",
+        "route": "/run/intel-endoflife",
+        "match": "comparison"
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "_Handler.do_POST",
+        "route": "/run/software/enqueue",
+        "match": "comparison"
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "_Handler.do_POST",
+        "route": "/run/software/enqueue?",
+        "match": "startswith"
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "_Handler.do_POST",
+        "route": "/run/software/scoped",
+        "match": "comparison"
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "_Handler.do_POST",
+        "route": "/run/software/scoped?",
+        "match": "startswith"
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "_Handler.do_POST",
+        "route": "/run/sources/enqueue",
+        "match": "comparison"
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "_Handler.do_POST",
+        "route": "/run/sources/enqueue?",
+        "match": "startswith"
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "_Handler.do_POST",
+        "route": "/bootstrap-metabase",
+        "match": "comparison"
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "_Handler.do_POST",
+        "route": "/agent-compliance/action/",
+        "match": "startswith"
+      }
+    ],
+    "threads": [
+      {
+        "file": "ingest/main.py",
+        "owner": "run_agent_compliance_once",
+        "expression": "threading.Thread(target=run_identity_resolver_once, daemon=True)",
+        "guards": []
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "schedule_agent_compliance_evaluate",
+        "expression": "threading.Thread(target=run_agent_compliance_evaluate_once, daemon=True)",
+        "guards": []
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "_Handler.do_POST",
+        "expression": "threading.Thread(target=run_patching_once, daemon=True)",
+        "guards": [
+          "self.path == '/run'"
+        ]
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "_Handler.do_POST",
+        "expression": "threading.Thread(target=run_patching_once, daemon=True)",
+        "guards": [
+          "not (self.path == '/run')",
+          "self.path == '/run/patches'"
+        ]
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "_Handler.do_POST",
+        "expression": "threading.Thread(target=run_agent_compliance_once, daemon=True)",
+        "guards": [
+          "not (self.path == '/run')",
+          "not (self.path == '/run/patches')",
+          "self.path == '/run/agent-compliance'"
+        ]
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "_Handler.do_POST",
+        "expression": "threading.Thread(target=run_agent_compliance_evaluate_once, daemon=True)",
+        "guards": [
+          "not (self.path == '/run')",
+          "not (self.path == '/run/patches')",
+          "not (self.path == '/run/agent-compliance')",
+          "self.path == '/run/agent-compliance-evaluate'"
+        ]
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "_Handler.do_POST",
+        "expression": "threading.Thread(target=run_identity_resolver_once, daemon=True)",
+        "guards": [
+          "not (self.path == '/run')",
+          "not (self.path == '/run/patches')",
+          "not (self.path == '/run/agent-compliance')",
+          "not (self.path == '/run/agent-compliance-evaluate')",
+          "self.path == '/run/resolver'"
+        ]
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "_Handler.do_POST",
+        "expression": "threading.Thread(target=run_review_digest_once, daemon=True)",
+        "guards": [
+          "not (self.path == '/run')",
+          "not (self.path == '/run/patches')",
+          "not (self.path == '/run/agent-compliance')",
+          "not (self.path == '/run/agent-compliance-evaluate')",
+          "not (self.path == '/run/resolver')",
+          "self.path == '/run/agent-compliance-review-digest'"
+        ]
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "_Handler.do_POST",
+        "expression": "threading.Thread(target=run_notifications_dispatch_once, daemon=True)",
+        "guards": [
+          "not (self.path == '/run')",
+          "not (self.path == '/run/patches')",
+          "not (self.path == '/run/agent-compliance')",
+          "not (self.path == '/run/agent-compliance-evaluate')",
+          "not (self.path == '/run/resolver')",
+          "not (self.path == '/run/agent-compliance-review-digest')",
+          "self.path == '/run/notifications/dispatch'"
+        ]
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "_Handler.do_POST",
+        "expression": "threading.Thread(target=run_platform_evaluate_once, daemon=True)",
+        "guards": [
+          "not (self.path == '/run')",
+          "not (self.path == '/run/patches')",
+          "not (self.path == '/run/agent-compliance')",
+          "not (self.path == '/run/agent-compliance-evaluate')",
+          "not (self.path == '/run/resolver')",
+          "not (self.path == '/run/agent-compliance-review-digest')",
+          "not (self.path == '/run/notifications/dispatch')",
+          "self.path == '/run/platform-evaluate'"
+        ]
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "_Handler.do_POST",
+        "expression": "threading.Thread(target=run_intel_capability_once, daemon=True)",
+        "guards": [
+          "not (self.path == '/run')",
+          "not (self.path == '/run/patches')",
+          "not (self.path == '/run/agent-compliance')",
+          "not (self.path == '/run/agent-compliance-evaluate')",
+          "not (self.path == '/run/resolver')",
+          "not (self.path == '/run/agent-compliance-review-digest')",
+          "not (self.path == '/run/notifications/dispatch')",
+          "not (self.path == '/run/platform-evaluate')",
+          "not (self.path == '/run/software-classify')",
+          "not (self.path == '/run/software-classify-only')",
+          "self.path == '/run/intel-capability'"
+        ]
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "_Handler.do_POST",
+        "expression": "threading.Thread(target=run_intel_category_once, daemon=True)",
+        "guards": [
+          "not (self.path == '/run')",
+          "not (self.path == '/run/patches')",
+          "not (self.path == '/run/agent-compliance')",
+          "not (self.path == '/run/agent-compliance-evaluate')",
+          "not (self.path == '/run/resolver')",
+          "not (self.path == '/run/agent-compliance-review-digest')",
+          "not (self.path == '/run/notifications/dispatch')",
+          "not (self.path == '/run/platform-evaluate')",
+          "not (self.path == '/run/software-classify')",
+          "not (self.path == '/run/software-classify-only')",
+          "not (self.path == '/run/intel-capability')",
+          "self.path == '/run/intel-category'"
+        ]
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "_Handler.do_POST",
+        "expression": "threading.Thread(target=run_intel_lolrmm_once, daemon=True)",
+        "guards": [
+          "not (self.path == '/run')",
+          "not (self.path == '/run/patches')",
+          "not (self.path == '/run/agent-compliance')",
+          "not (self.path == '/run/agent-compliance-evaluate')",
+          "not (self.path == '/run/resolver')",
+          "not (self.path == '/run/agent-compliance-review-digest')",
+          "not (self.path == '/run/notifications/dispatch')",
+          "not (self.path == '/run/platform-evaluate')",
+          "not (self.path == '/run/software-classify')",
+          "not (self.path == '/run/software-classify-only')",
+          "not (self.path == '/run/intel-capability')",
+          "not (self.path == '/run/intel-category')",
+          "self.path == '/run/intel-lolrmm'"
+        ]
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "_Handler.do_POST",
+        "expression": "threading.Thread(target=run_patch_classify_once, daemon=True)",
+        "guards": [
+          "not (self.path == '/run')",
+          "not (self.path == '/run/patches')",
+          "not (self.path == '/run/agent-compliance')",
+          "not (self.path == '/run/agent-compliance-evaluate')",
+          "not (self.path == '/run/resolver')",
+          "not (self.path == '/run/agent-compliance-review-digest')",
+          "not (self.path == '/run/notifications/dispatch')",
+          "not (self.path == '/run/platform-evaluate')",
+          "not (self.path == '/run/software-classify')",
+          "not (self.path == '/run/software-classify-only')",
+          "not (self.path == '/run/intel-capability')",
+          "not (self.path == '/run/intel-category')",
+          "not (self.path == '/run/intel-lolrmm')",
+          "self.path == '/run/patch-classify'"
+        ]
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "_Handler.do_POST",
+        "expression": "threading.Thread(target=run_parity_check_once, daemon=True)",
+        "guards": [
+          "not (self.path == '/run')",
+          "not (self.path == '/run/patches')",
+          "not (self.path == '/run/agent-compliance')",
+          "not (self.path == '/run/agent-compliance-evaluate')",
+          "not (self.path == '/run/resolver')",
+          "not (self.path == '/run/agent-compliance-review-digest')",
+          "not (self.path == '/run/notifications/dispatch')",
+          "not (self.path == '/run/platform-evaluate')",
+          "not (self.path == '/run/software-classify')",
+          "not (self.path == '/run/software-classify-only')",
+          "not (self.path == '/run/intel-capability')",
+          "not (self.path == '/run/intel-category')",
+          "not (self.path == '/run/intel-lolrmm')",
+          "not (self.path == '/run/patch-classify')",
+          "self.path == '/run/parity-check'"
+        ]
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "_Handler.do_POST",
+        "expression": "threading.Thread(target=run_notifications_digest_once, daemon=True)",
+        "guards": [
+          "not (self.path == '/run')",
+          "not (self.path == '/run/patches')",
+          "not (self.path == '/run/agent-compliance')",
+          "not (self.path == '/run/agent-compliance-evaluate')",
+          "not (self.path == '/run/resolver')",
+          "not (self.path == '/run/agent-compliance-review-digest')",
+          "not (self.path == '/run/notifications/dispatch')",
+          "not (self.path == '/run/platform-evaluate')",
+          "not (self.path == '/run/software-classify')",
+          "not (self.path == '/run/software-classify-only')",
+          "not (self.path == '/run/intel-capability')",
+          "not (self.path == '/run/intel-category')",
+          "not (self.path == '/run/intel-lolrmm')",
+          "not (self.path == '/run/patch-classify')",
+          "not (self.path == '/run/parity-check')",
+          "self.path == '/run/notifications/digest'"
+        ]
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "_Handler.do_POST",
+        "expression": "threading.Thread(target=run_intel_nvd_once, daemon=True)",
+        "guards": [
+          "not (self.path == '/run')",
+          "not (self.path == '/run/patches')",
+          "not (self.path == '/run/agent-compliance')",
+          "not (self.path == '/run/agent-compliance-evaluate')",
+          "not (self.path == '/run/resolver')",
+          "not (self.path == '/run/agent-compliance-review-digest')",
+          "not (self.path == '/run/notifications/dispatch')",
+          "not (self.path == '/run/platform-evaluate')",
+          "not (self.path == '/run/software-classify')",
+          "not (self.path == '/run/software-classify-only')",
+          "not (self.path == '/run/intel-capability')",
+          "not (self.path == '/run/intel-category')",
+          "not (self.path == '/run/intel-lolrmm')",
+          "not (self.path == '/run/patch-classify')",
+          "not (self.path == '/run/parity-check')",
+          "not (self.path == '/run/notifications/digest')",
+          "self.path == '/run/intel-nvd'"
+        ]
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "_Handler.do_POST",
+        "expression": "threading.Thread(target=run_intel_cpe_dict_once, daemon=True)",
+        "guards": [
+          "not (self.path == '/run')",
+          "not (self.path == '/run/patches')",
+          "not (self.path == '/run/agent-compliance')",
+          "not (self.path == '/run/agent-compliance-evaluate')",
+          "not (self.path == '/run/resolver')",
+          "not (self.path == '/run/agent-compliance-review-digest')",
+          "not (self.path == '/run/notifications/dispatch')",
+          "not (self.path == '/run/platform-evaluate')",
+          "not (self.path == '/run/software-classify')",
+          "not (self.path == '/run/software-classify-only')",
+          "not (self.path == '/run/intel-capability')",
+          "not (self.path == '/run/intel-category')",
+          "not (self.path == '/run/intel-lolrmm')",
+          "not (self.path == '/run/patch-classify')",
+          "not (self.path == '/run/parity-check')",
+          "not (self.path == '/run/notifications/digest')",
+          "not (self.path == '/run/intel-nvd')",
+          "self.path == '/run/intel-cpe-dict'"
+        ]
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "_Handler.do_POST",
+        "expression": "threading.Thread(target=run_intel_kev_once, daemon=True)",
+        "guards": [
+          "not (self.path == '/run')",
+          "not (self.path == '/run/patches')",
+          "not (self.path == '/run/agent-compliance')",
+          "not (self.path == '/run/agent-compliance-evaluate')",
+          "not (self.path == '/run/resolver')",
+          "not (self.path == '/run/agent-compliance-review-digest')",
+          "not (self.path == '/run/notifications/dispatch')",
+          "not (self.path == '/run/platform-evaluate')",
+          "not (self.path == '/run/software-classify')",
+          "not (self.path == '/run/software-classify-only')",
+          "not (self.path == '/run/intel-capability')",
+          "not (self.path == '/run/intel-category')",
+          "not (self.path == '/run/intel-lolrmm')",
+          "not (self.path == '/run/patch-classify')",
+          "not (self.path == '/run/parity-check')",
+          "not (self.path == '/run/notifications/digest')",
+          "not (self.path == '/run/intel-nvd')",
+          "not (self.path == '/run/intel-cpe-dict')",
+          "self.path == '/run/intel-kev'"
+        ]
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "_Handler.do_POST",
+        "expression": "threading.Thread(target=run_intel_epss_once, daemon=True)",
+        "guards": [
+          "not (self.path == '/run')",
+          "not (self.path == '/run/patches')",
+          "not (self.path == '/run/agent-compliance')",
+          "not (self.path == '/run/agent-compliance-evaluate')",
+          "not (self.path == '/run/resolver')",
+          "not (self.path == '/run/agent-compliance-review-digest')",
+          "not (self.path == '/run/notifications/dispatch')",
+          "not (self.path == '/run/platform-evaluate')",
+          "not (self.path == '/run/software-classify')",
+          "not (self.path == '/run/software-classify-only')",
+          "not (self.path == '/run/intel-capability')",
+          "not (self.path == '/run/intel-category')",
+          "not (self.path == '/run/intel-lolrmm')",
+          "not (self.path == '/run/patch-classify')",
+          "not (self.path == '/run/parity-check')",
+          "not (self.path == '/run/notifications/digest')",
+          "not (self.path == '/run/intel-nvd')",
+          "not (self.path == '/run/intel-cpe-dict')",
+          "not (self.path == '/run/intel-kev')",
+          "self.path == '/run/intel-epss'"
+        ]
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "_Handler.do_POST",
+        "expression": "threading.Thread(target=run_intel_matcher_once, daemon=True)",
+        "guards": [
+          "not (self.path == '/run')",
+          "not (self.path == '/run/patches')",
+          "not (self.path == '/run/agent-compliance')",
+          "not (self.path == '/run/agent-compliance-evaluate')",
+          "not (self.path == '/run/resolver')",
+          "not (self.path == '/run/agent-compliance-review-digest')",
+          "not (self.path == '/run/notifications/dispatch')",
+          "not (self.path == '/run/platform-evaluate')",
+          "not (self.path == '/run/software-classify')",
+          "not (self.path == '/run/software-classify-only')",
+          "not (self.path == '/run/intel-capability')",
+          "not (self.path == '/run/intel-category')",
+          "not (self.path == '/run/intel-lolrmm')",
+          "not (self.path == '/run/patch-classify')",
+          "not (self.path == '/run/parity-check')",
+          "not (self.path == '/run/notifications/digest')",
+          "not (self.path == '/run/intel-nvd')",
+          "not (self.path == '/run/intel-cpe-dict')",
+          "not (self.path == '/run/intel-kev')",
+          "not (self.path == '/run/intel-epss')",
+          "self.path == '/run/intel-matcher'"
+        ]
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "_Handler.do_POST",
+        "expression": "threading.Thread(target=run_intel_winget_once, daemon=True)",
+        "guards": [
+          "not (self.path == '/run')",
+          "not (self.path == '/run/patches')",
+          "not (self.path == '/run/agent-compliance')",
+          "not (self.path == '/run/agent-compliance-evaluate')",
+          "not (self.path == '/run/resolver')",
+          "not (self.path == '/run/agent-compliance-review-digest')",
+          "not (self.path == '/run/notifications/dispatch')",
+          "not (self.path == '/run/platform-evaluate')",
+          "not (self.path == '/run/software-classify')",
+          "not (self.path == '/run/software-classify-only')",
+          "not (self.path == '/run/intel-capability')",
+          "not (self.path == '/run/intel-category')",
+          "not (self.path == '/run/intel-lolrmm')",
+          "not (self.path == '/run/patch-classify')",
+          "not (self.path == '/run/parity-check')",
+          "not (self.path == '/run/notifications/digest')",
+          "not (self.path == '/run/intel-nvd')",
+          "not (self.path == '/run/intel-cpe-dict')",
+          "not (self.path == '/run/intel-kev')",
+          "not (self.path == '/run/intel-epss')",
+          "not (self.path == '/run/intel-matcher')",
+          "self.path == '/run/intel-winget'"
+        ]
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "_Handler.do_POST",
+        "expression": "threading.Thread(target=run_intel_chocolatey_once, daemon=True)",
+        "guards": [
+          "not (self.path == '/run')",
+          "not (self.path == '/run/patches')",
+          "not (self.path == '/run/agent-compliance')",
+          "not (self.path == '/run/agent-compliance-evaluate')",
+          "not (self.path == '/run/resolver')",
+          "not (self.path == '/run/agent-compliance-review-digest')",
+          "not (self.path == '/run/notifications/dispatch')",
+          "not (self.path == '/run/platform-evaluate')",
+          "not (self.path == '/run/software-classify')",
+          "not (self.path == '/run/software-classify-only')",
+          "not (self.path == '/run/intel-capability')",
+          "not (self.path == '/run/intel-category')",
+          "not (self.path == '/run/intel-lolrmm')",
+          "not (self.path == '/run/patch-classify')",
+          "not (self.path == '/run/parity-check')",
+          "not (self.path == '/run/notifications/digest')",
+          "not (self.path == '/run/intel-nvd')",
+          "not (self.path == '/run/intel-cpe-dict')",
+          "not (self.path == '/run/intel-kev')",
+          "not (self.path == '/run/intel-epss')",
+          "not (self.path == '/run/intel-matcher')",
+          "not (self.path == '/run/intel-winget')",
+          "self.path == '/run/intel-chocolatey'"
+        ]
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "_Handler.do_POST",
+        "expression": "threading.Thread(target=run_intel_otx_once, daemon=True)",
+        "guards": [
+          "not (self.path == '/run')",
+          "not (self.path == '/run/patches')",
+          "not (self.path == '/run/agent-compliance')",
+          "not (self.path == '/run/agent-compliance-evaluate')",
+          "not (self.path == '/run/resolver')",
+          "not (self.path == '/run/agent-compliance-review-digest')",
+          "not (self.path == '/run/notifications/dispatch')",
+          "not (self.path == '/run/platform-evaluate')",
+          "not (self.path == '/run/software-classify')",
+          "not (self.path == '/run/software-classify-only')",
+          "not (self.path == '/run/intel-capability')",
+          "not (self.path == '/run/intel-category')",
+          "not (self.path == '/run/intel-lolrmm')",
+          "not (self.path == '/run/patch-classify')",
+          "not (self.path == '/run/parity-check')",
+          "not (self.path == '/run/notifications/digest')",
+          "not (self.path == '/run/intel-nvd')",
+          "not (self.path == '/run/intel-cpe-dict')",
+          "not (self.path == '/run/intel-kev')",
+          "not (self.path == '/run/intel-epss')",
+          "not (self.path == '/run/intel-matcher')",
+          "not (self.path == '/run/intel-winget')",
+          "not (self.path == '/run/intel-chocolatey')",
+          "self.path == '/run/intel-otx'"
+        ]
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "_Handler.do_POST",
+        "expression": "threading.Thread(target=run_intel_abusech_once, daemon=True)",
+        "guards": [
+          "not (self.path == '/run')",
+          "not (self.path == '/run/patches')",
+          "not (self.path == '/run/agent-compliance')",
+          "not (self.path == '/run/agent-compliance-evaluate')",
+          "not (self.path == '/run/resolver')",
+          "not (self.path == '/run/agent-compliance-review-digest')",
+          "not (self.path == '/run/notifications/dispatch')",
+          "not (self.path == '/run/platform-evaluate')",
+          "not (self.path == '/run/software-classify')",
+          "not (self.path == '/run/software-classify-only')",
+          "not (self.path == '/run/intel-capability')",
+          "not (self.path == '/run/intel-category')",
+          "not (self.path == '/run/intel-lolrmm')",
+          "not (self.path == '/run/patch-classify')",
+          "not (self.path == '/run/parity-check')",
+          "not (self.path == '/run/notifications/digest')",
+          "not (self.path == '/run/intel-nvd')",
+          "not (self.path == '/run/intel-cpe-dict')",
+          "not (self.path == '/run/intel-kev')",
+          "not (self.path == '/run/intel-epss')",
+          "not (self.path == '/run/intel-matcher')",
+          "not (self.path == '/run/intel-winget')",
+          "not (self.path == '/run/intel-chocolatey')",
+          "not (self.path == '/run/intel-otx')",
+          "self.path == '/run/intel-abusech'"
+        ]
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "_Handler.do_POST",
+        "expression": "threading.Thread(target=run_intel_endoflife_once, daemon=True)",
+        "guards": [
+          "not (self.path == '/run')",
+          "not (self.path == '/run/patches')",
+          "not (self.path == '/run/agent-compliance')",
+          "not (self.path == '/run/agent-compliance-evaluate')",
+          "not (self.path == '/run/resolver')",
+          "not (self.path == '/run/agent-compliance-review-digest')",
+          "not (self.path == '/run/notifications/dispatch')",
+          "not (self.path == '/run/platform-evaluate')",
+          "not (self.path == '/run/software-classify')",
+          "not (self.path == '/run/software-classify-only')",
+          "not (self.path == '/run/intel-capability')",
+          "not (self.path == '/run/intel-category')",
+          "not (self.path == '/run/intel-lolrmm')",
+          "not (self.path == '/run/patch-classify')",
+          "not (self.path == '/run/parity-check')",
+          "not (self.path == '/run/notifications/digest')",
+          "not (self.path == '/run/intel-nvd')",
+          "not (self.path == '/run/intel-cpe-dict')",
+          "not (self.path == '/run/intel-kev')",
+          "not (self.path == '/run/intel-epss')",
+          "not (self.path == '/run/intel-matcher')",
+          "not (self.path == '/run/intel-winget')",
+          "not (self.path == '/run/intel-chocolatey')",
+          "not (self.path == '/run/intel-otx')",
+          "not (self.path == '/run/intel-abusech')",
+          "self.path == '/run/intel-endoflife'"
+        ]
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "_Handler.do_POST",
+        "expression": "threading.Thread(target=bootstrap_metabase, daemon=True)",
+        "guards": [
+          "not (self.path == '/run')",
+          "not (self.path == '/run/patches')",
+          "not (self.path == '/run/agent-compliance')",
+          "not (self.path == '/run/agent-compliance-evaluate')",
+          "not (self.path == '/run/resolver')",
+          "not (self.path == '/run/agent-compliance-review-digest')",
+          "not (self.path == '/run/notifications/dispatch')",
+          "not (self.path == '/run/platform-evaluate')",
+          "not (self.path == '/run/software-classify')",
+          "not (self.path == '/run/software-classify-only')",
+          "not (self.path == '/run/intel-capability')",
+          "not (self.path == '/run/intel-category')",
+          "not (self.path == '/run/intel-lolrmm')",
+          "not (self.path == '/run/patch-classify')",
+          "not (self.path == '/run/parity-check')",
+          "not (self.path == '/run/notifications/digest')",
+          "not (self.path == '/run/intel-nvd')",
+          "not (self.path == '/run/intel-cpe-dict')",
+          "not (self.path == '/run/intel-kev')",
+          "not (self.path == '/run/intel-epss')",
+          "not (self.path == '/run/intel-matcher')",
+          "not (self.path == '/run/intel-winget')",
+          "not (self.path == '/run/intel-chocolatey')",
+          "not (self.path == '/run/intel-otx')",
+          "not (self.path == '/run/intel-abusech')",
+          "not (self.path == '/run/intel-endoflife')",
+          "not (self.path == '/run/software/enqueue' or self.path.startswith('/run/software/enqueue?'))",
+          "not (self.path == '/run/software/scoped' or self.path.startswith('/run/software/scoped?'))",
+          "not (self.path == '/run/sources/enqueue' or self.path.startswith('/run/sources/enqueue?'))",
+          "self.path == '/bootstrap-metabase'"
+        ]
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "_Handler._handle_software_scoped",
+        "expression": "threading.Thread(target=run_software_scoped, args=(df,), daemon=True)",
+        "guards": []
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "_Handler._handle_software_enqueue",
+        "expression": "threading.Thread(target=_run, daemon=True)",
+        "guards": []
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "_start_http_server",
+        "expression": "threading.Thread(target=httpd.serve_forever, daemon=True)",
+        "guards": []
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "main",
+        "expression": "threading.Thread(target=run_patching_once, daemon=True)",
+        "guards": [
+          "should_catch_up('patches', settings.patch_ingest_schedule_hours)"
+        ]
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "main",
+        "expression": "threading.Thread(target=bootstrap_metabase, daemon=True)",
+        "guards": []
+      },
+      {
+        "file": "ingest/operator_job_queue.py",
+        "owner": "_process_next_in_lane",
+        "expression": "threading.Thread(target=_heartbeat_loop, args=(progress, stopped), daemon=True)",
+        "guards": []
+      },
+      {
+        "file": "ingest/source_run_queue.py",
+        "owner": "enqueue_and_run",
+        "expression": "threading.Thread(target=process_entry, args=(entry_id,), daemon=True)",
+        "guards": [
+          "entry_id"
+        ]
+      }
+    ],
+    "run_logs": [
+      {
+        "file": "ingest/activities/ingest.py",
+        "owner": "run",
+        "argument": "'activities'",
+        "local_binding": null
+      },
+      {
+        "file": "ingest/agent_compliance/ingest.py",
+        "owner": "run",
+        "argument": "'agent_compliance'",
+        "local_binding": null
+      },
+      {
+        "file": "ingest/agent_compliance/ingest.py",
+        "owner": "evaluate",
+        "argument": "'agent_compliance.evaluate'",
+        "local_binding": null
+      },
+      {
+        "file": "ingest/core/custom_fields.py",
+        "owner": "run",
+        "argument": "'core.custom_fields'",
+        "local_binding": null
+      },
+      {
+        "file": "ingest/core/device_health.py",
+        "owner": "run",
+        "argument": "'core.device_health'",
+        "local_binding": null
+      },
+      {
+        "file": "ingest/core/devices.py",
+        "owner": "_run",
+        "argument": "'core.devices'",
+        "local_binding": null
+      },
+      {
+        "file": "ingest/core/locations.py",
+        "owner": "run",
+        "argument": "'core.locations'",
+        "local_binding": null
+      },
+      {
+        "file": "ingest/core/organizations.py",
+        "owner": "run",
+        "argument": "'core.organizations'",
+        "local_binding": null
+      },
+      {
+        "file": "ingest/core/policies.py",
+        "owner": "run",
+        "argument": "'core.policies'",
+        "local_binding": null
+      },
+      {
+        "file": "ingest/inventory/software.py",
+        "owner": "run",
+        "argument": "domain",
+        "local_binding": "'inventory.software.scoped' if df else 'inventory.software'"
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "run_patching_once",
+        "argument": "'patch_cycle'",
+        "local_binding": null
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "run_review_digest_once",
+        "argument": "'agent_compliance.review_digest'",
+        "local_binding": null
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "run_observation_history_prune_once",
+        "argument": "'retention.observation_history'",
+        "local_binding": null
+      },
+      {
+        "file": "ingest/patches/ingest.py",
+        "owner": "run",
+        "argument": "'patches'",
+        "local_binding": null
+      },
+      {
+        "file": "ingest/policy_scope.py",
+        "owner": "sync_patching_enabled_policies",
+        "argument": "'policy_scope'",
+        "local_binding": null
+      },
+      {
+        "file": "ingest/software_catalog.py",
+        "owner": "project_software_catalog",
+        "argument": "'software.catalog'",
+        "local_binding": null
+      }
+    ],
+    "catalog": [
+      {
+        "file": "operations/apps/core/views.py",
+        "owner": "",
+        "id": "patches",
+        "name": "Ninja source cycle",
+        "category": "source ingest",
+        "endpoint": "run/patches",
+        "status_key": "source.Ninja",
+        "status_source": "run_log_like",
+        "description": "Refresh computers, patches, and activity from Ninja."
+      },
+      {
+        "file": "operations/apps/core/views.py",
+        "owner": "",
+        "id": "agent-observations",
+        "name": "Agent observations",
+        "category": "source ingest",
+        "endpoint": "run/agents",
+        "status_key": "source.",
+        "status_source": "run_log_like",
+        "description": "Refresh agent records from connected security and support tools."
+      },
+      {
+        "file": "operations/apps/core/views.py",
+        "owner": "",
+        "id": "documentation-observations",
+        "name": "Documentation observations",
+        "category": "source ingest",
+        "endpoint": "run/sources/enqueue",
+        "status_key": "source.Hudu",
+        "status_source": "run_log_like",
+        "run_all": false,
+        "description": "Refresh documentation records from Hudu."
+      },
+      {
+        "file": "operations/apps/core/views.py",
+        "owner": "",
+        "id": "software-classify",
+        "name": "Software classifier (+ auto-intel)",
+        "category": "evaluators",
+        "endpoint": "run/software-classify",
+        "status_key": "software_classifier",
+        "status_source": "run_log",
+        "description": "Refresh software intelligence, then update software findings."
+      },
+      {
+        "file": "operations/apps/core/views.py",
+        "owner": "",
+        "id": "software-classify-only",
+        "name": "Software classifier (no intel refresh)",
+        "category": "evaluators",
+        "endpoint": "run/software-classify-only",
+        "status_key": "software_classifier",
+        "status_source": "run_log",
+        "run_all": false,
+        "description": "Update changed software findings using intelligence already on hand."
+      },
+      {
+        "file": "operations/apps/core/views.py",
+        "owner": "",
+        "id": "software-classify-full",
+        "name": "Software classifier (full rebuild)",
+        "category": "evaluators",
+        "endpoint": "",
+        "status_key": "software_classifier",
+        "status_source": "run_log",
+        "run_all": false,
+        "description": "Rebuild every software finding after a rule, decision, or intelligence-wide change."
+      },
+      {
+        "file": "operations/apps/core/views.py",
+        "owner": "",
+        "id": "patch-classify",
+        "name": "Patch classifier",
+        "category": "evaluators",
+        "endpoint": "run/patch-classify",
+        "status_key": "patch_findings",
+        "status_source": "run_log",
+        "description": "Update patch findings from current Ninja patch data."
+      },
+      {
+        "file": "operations/apps/core/views.py",
+        "owner": "",
+        "id": "platform-evaluate",
+        "name": "Platform evaluator",
+        "category": "evaluators",
+        "endpoint": "run/platform-evaluate",
+        "status_key": "platform_evaluator",
+        "status_source": "run_log",
+        "description": "Update computer, coverage, identity, and lifecycle findings."
+      },
+      {
+        "file": "operations/apps/core/views.py",
+        "owner": "",
+        "id": "resolver",
+        "name": "Identity resolver",
+        "category": "evaluators",
+        "endpoint": "run/resolver",
+        "status_key": "identity_resolver",
+        "status_source": "run_log",
+        "description": "Match source records to the right computer."
+      },
+      {
+        "file": "operations/apps/core/views.py",
+        "owner": "",
+        "id": "parity-check",
+        "name": "Parity check",
+        "category": "evaluators",
+        "endpoint": "run/parity-check",
+        "status_key": "parity_check",
+        "status_source": "run_log",
+        "description": "Find gaps between collected data and Operations."
+      },
+      {
+        "file": "operations/apps/core/views.py",
+        "owner": "",
+        "id": "agent-compliance",
+        "name": "Agent compliance",
+        "category": "evaluators",
+        "endpoint": "run/agent-compliance",
+        "status_key": "agent_compliance",
+        "status_source": "run_log",
+        "run_all": false,
+        "legacy_bridge": true,
+        "description": "Refresh the legacy agent-compliance bridge when it is enabled."
+      },
+      {
+        "file": "operations/apps/core/views.py",
+        "owner": "",
+        "id": "agent-compliance-evaluate",
+        "name": "Agent compliance review",
+        "category": "evaluators",
+        "endpoint": "run/agent-compliance/evaluate",
+        "status_key": "agent_compliance.evaluate",
+        "status_source": "run_log",
+        "run_all": false,
+        "legacy_bridge": true,
+        "description": "Reassess the legacy agent-compliance bridge when it is enabled."
+      },
+      {
+        "file": "operations/apps/core/views.py",
+        "owner": "",
+        "id": "intel-kev",
+        "name": "Intel: CISA KEV",
+        "category": "intel",
+        "endpoint": "run/intel-kev",
+        "status_key": "cisa_kev",
+        "status_source": "intel",
+        "description": "Refresh CISA's list of actively exploited vulnerabilities."
+      },
+      {
+        "file": "operations/apps/core/views.py",
+        "owner": "",
+        "id": "intel-nvd",
+        "name": "Intel: NVD (CVE feed)",
+        "category": "intel",
+        "endpoint": "run/intel-nvd",
+        "status_key": "nvd",
+        "status_source": "intel",
+        "description": "Refresh vulnerability details from NIST's NVD."
+      },
+      {
+        "file": "operations/apps/core/views.py",
+        "owner": "",
+        "id": "intel-cpe-dict",
+        "name": "Intel: CPE dictionary",
+        "category": "intel",
+        "endpoint": "run/intel-cpe-dict",
+        "status_key": "cpe_dict",
+        "status_source": "intel",
+        "description": "Refresh the software identification catalog used for CVE matching."
+      },
+      {
+        "file": "operations/apps/core/views.py",
+        "owner": "",
+        "id": "intel-epss",
+        "name": "Intel: EPSS scores",
+        "category": "intel",
+        "endpoint": "run/intel-epss",
+        "status_key": "epss",
+        "status_source": "intel",
+        "description": "Refresh exploit-likelihood scores from EPSS."
+      },
+      {
+        "file": "operations/apps/core/views.py",
+        "owner": "",
+        "id": "intel-matcher",
+        "name": "Intel: title × CVE matcher",
+        "category": "intel",
+        "endpoint": "run/intel-matcher",
+        "status_key": "matcher",
+        "status_source": "intel",
+        "description": "Match installed software to known vulnerabilities."
+      },
+      {
+        "file": "operations/apps/core/views.py",
+        "owner": "",
+        "id": "intel-winget",
+        "name": "Intel: Winget enrichment",
+        "category": "intel",
+        "endpoint": "run/intel-winget",
+        "status_key": "winget",
+        "status_source": "intel",
+        "description": "Improve software records from Windows Package Manager."
+      },
+      {
+        "file": "operations/apps/core/views.py",
+        "owner": "",
+        "id": "intel-chocolatey",
+        "name": "Intel: Chocolatey enrichment",
+        "category": "intel",
+        "endpoint": "run/intel-chocolatey",
+        "status_key": "chocolatey",
+        "status_source": "intel",
+        "description": "Improve software records from Chocolatey."
+      },
+      {
+        "file": "operations/apps/core/views.py",
+        "owner": "",
+        "id": "intel-capability",
+        "name": "Intel: capability projection",
+        "category": "intel",
+        "endpoint": "run/intel-capability",
+        "status_key": "capability_match",
+        "status_source": "intel",
+        "description": "Update known software capabilities from catalog rules."
+      },
+      {
+        "file": "operations/apps/core/views.py",
+        "owner": "",
+        "id": "intel-lolrmm",
+        "name": "Intel: LOLRMM corpus",
+        "category": "intel",
+        "endpoint": "run/intel-lolrmm",
+        "status_key": "lolrmm",
+        "status_source": "intel",
+        "description": "Refresh remote-management tool detection data."
+      },
+      {
+        "file": "operations/apps/core/views.py",
+        "owner": "",
+        "id": "intel-otx",
+        "name": "Intel: AlienVault OTX",
+        "category": "intel",
+        "endpoint": "run/intel-otx",
+        "status_key": "otx",
+        "status_source": "intel",
+        "description": "Refresh threat intelligence from AlienVault OTX."
+      },
+      {
+        "file": "operations/apps/core/views.py",
+        "owner": "",
+        "id": "intel-abusech",
+        "name": "Intel: abuse.ch",
+        "category": "intel",
+        "endpoint": "run/intel-abusech",
+        "status_key": "abusech",
+        "status_source": "intel",
+        "description": "Refresh malware intelligence from MalwareBazaar and ThreatFox."
+      },
+      {
+        "file": "operations/apps/core/views.py",
+        "owner": "",
+        "id": "intel-endoflife",
+        "name": "Intel: end-of-life",
+        "category": "intel",
+        "endpoint": "run/intel-endoflife",
+        "status_key": "endoflife",
+        "status_source": "intel",
+        "description": "Refresh software support dates from endoflife.date."
+      },
+      {
+        "file": "operations/apps/core/views.py",
+        "owner": "",
+        "id": "intel-category",
+        "name": "Intel: software categories",
+        "category": "intel",
+        "endpoint": "run/intel-category",
+        "status_key": "category_match",
+        "status_source": "intel",
+        "description": "Update software categories from catalog data."
+      },
+      {
+        "file": "operations/apps/core/views.py",
+        "owner": "",
+        "id": "notifications-dispatch",
+        "name": "Notifications dispatch",
+        "category": "notifications",
+        "endpoint": "run/notifications/dispatch",
+        "status_key": "notifications_dispatch",
+        "status_source": "run_log",
+        "description": "Send notifications that are ready to go out."
+      },
+      {
+        "file": "operations/apps/core/views.py",
+        "owner": "",
+        "id": "notifications-digest",
+        "name": "Notifications digest",
+        "category": "notifications",
+        "endpoint": "run/notifications/digest",
+        "status_key": "notifications_digest",
+        "status_source": "run_log",
+        "description": "Send scheduled notification summaries."
+      },
+      {
+        "file": "operations/apps/core/views.py",
+        "owner": "",
+        "id": "retention-history",
+        "name": "History cleanup",
+        "category": "maintenance",
+        "endpoint": "",
+        "status_key": "retention.observation_history",
+        "status_source": "run_log",
+        "run_all": false,
+        "description": "Remove closed history that has reached its retention date."
+      },
+      {
+        "file": "operations/apps/core/views.py",
+        "owner": "",
+        "id": "software-enqueue-orgs",
+        "name": "Software inventory schedule",
+        "category": "maintenance",
+        "endpoint": "",
+        "status_key": "",
+        "status_source": "run_log",
+        "run_all": false,
+        "description": "Queue the next scheduled Ninja software inventory sweep."
+      },
+      {
+        "file": "operations/apps/core/views.py",
+        "owner": "",
+        "id": "software-queue-drain",
+        "name": "Software inventory worker",
+        "category": "maintenance",
+        "endpoint": "",
+        "status_key": "",
+        "status_source": "run_log",
+        "run_all": false,
+        "description": "Process queued Ninja software inventory work."
+      }
+    ],
+    "handlers": [
+      {
+        "file": "ingest/operator_job_queue.py",
+        "owner": "_execute",
+        "key": "patch-classify",
+        "expression": "('Classifying patch state', lambda: main.patch_classify(tenant_id=1))"
+      },
+      {
+        "file": "ingest/operator_job_queue.py",
+        "owner": "_execute",
+        "key": "platform-evaluate",
+        "expression": "('Evaluating platform conditions', lambda: main.platform_evaluate(tenant_id=1))"
+      },
+      {
+        "file": "ingest/operator_job_queue.py",
+        "owner": "_execute",
+        "key": "parity-check",
+        "expression": "('Checking operational parity', lambda: main.parity_check_run(tenant_id=1))"
+      },
+      {
+        "file": "ingest/operator_job_queue.py",
+        "owner": "_execute",
+        "key": "software-classify-only",
+        "expression": "('Classifying changed software', lambda: main.software_classify(tenant_id=1, incremental=True))"
+      },
+      {
+        "file": "ingest/operator_job_queue.py",
+        "owner": "_execute",
+        "key": "software-classify-full",
+        "expression": "('Rebuilding all software findings', lambda: main.software_classify(tenant_id=1, incremental=False))"
+      },
+      {
+        "file": "ingest/operator_job_queue.py",
+        "owner": "_execute",
+        "key": "resolver",
+        "expression": "('Resolving computer identity', lambda: main.run_identity_resolver_once())"
+      },
+      {
+        "file": "ingest/operator_job_queue.py",
+        "owner": "_execute",
+        "key": "patches",
+        "expression": "('Collecting Ninja information', lambda: main.run_patching_once())"
+      },
+      {
+        "file": "ingest/operator_job_queue.py",
+        "owner": "_execute",
+        "key": "agent-observations",
+        "expression": "('Collecting agent observations', lambda: main.run_agent_observations_once())"
+      },
+      {
+        "file": "ingest/operator_job_queue.py",
+        "owner": "_execute",
+        "key": "documentation-observations",
+        "expression": "('Collecting documentation observations', lambda: main.run_documentation_observations_once())"
+      },
+      {
+        "file": "ingest/operator_job_queue.py",
+        "owner": "_execute",
+        "key": "agent-compliance",
+        "expression": "('Refreshing agent compliance', lambda: main.run_agent_compliance_once())"
+      },
+      {
+        "file": "ingest/operator_job_queue.py",
+        "owner": "_execute",
+        "key": "agent-compliance-evaluate",
+        "expression": "('Reviewing agent compliance', lambda: main.run_agent_compliance_evaluate_once())"
+      },
+      {
+        "file": "ingest/operator_job_queue.py",
+        "owner": "_execute",
+        "key": "retention-history",
+        "expression": "('Cleaning closed history', lambda: main.run_observation_history_prune_once())"
+      },
+      {
+        "file": "ingest/operator_job_queue.py",
+        "owner": "_execute",
+        "key": "software-enqueue-orgs",
+        "expression": "('Scheduling software inventory', lambda: main.enqueue_all_orgs_once())"
+      },
+      {
+        "file": "ingest/operator_job_queue.py",
+        "owner": "_execute",
+        "key": "software-queue-drain",
+        "expression": "('Collecting software inventory', lambda: main.run_software_queue_once())"
+      },
+      {
+        "file": "ingest/operator_job_queue.py",
+        "owner": "_execute",
+        "key": "notifications-dispatch",
+        "expression": "('Sending notifications', lambda: main.notify_dispatch(tenant_id=1))"
+      },
+      {
+        "file": "ingest/operator_job_queue.py",
+        "owner": "_execute",
+        "key": "notifications-digest",
+        "expression": "('Preparing notification digest', lambda: main.notify_send_digest(tenant_id=1))"
+      },
+      {
+        "file": "ingest/operator_job_queue.py",
+        "owner": "_execute",
+        "key": "intel-nvd",
+        "expression": "('Refreshing NVD intelligence', nvd.run_once)"
+      },
+      {
+        "file": "ingest/operator_job_queue.py",
+        "owner": "_execute",
+        "key": "intel-cpe-dict",
+        "expression": "('Refreshing CPE dictionary', cpe_dict.run_once)"
+      },
+      {
+        "file": "ingest/operator_job_queue.py",
+        "owner": "_execute",
+        "key": "intel-kev",
+        "expression": "('Refreshing exploited-vulnerability intelligence', cisa_kev.run_once)"
+      },
+      {
+        "file": "ingest/operator_job_queue.py",
+        "owner": "_execute",
+        "key": "intel-epss",
+        "expression": "('Refreshing exploit-likelihood scores', epss.run_once)"
+      },
+      {
+        "file": "ingest/operator_job_queue.py",
+        "owner": "_execute",
+        "key": "intel-matcher",
+        "expression": "('Matching software to vulnerabilities', matcher.run_once)"
+      },
+      {
+        "file": "ingest/operator_job_queue.py",
+        "owner": "_execute",
+        "key": "intel-winget",
+        "expression": "('Refreshing Windows package intelligence', winget.run_once)"
+      },
+      {
+        "file": "ingest/operator_job_queue.py",
+        "owner": "_execute",
+        "key": "intel-chocolatey",
+        "expression": "('Refreshing Chocolatey intelligence', chocolatey.run_once)"
+      },
+      {
+        "file": "ingest/operator_job_queue.py",
+        "owner": "_execute",
+        "key": "intel-capability",
+        "expression": "('Projecting software capabilities', capability_match.run_once)"
+      },
+      {
+        "file": "ingest/operator_job_queue.py",
+        "owner": "_execute",
+        "key": "intel-lolrmm",
+        "expression": "('Refreshing remote-management intelligence', lolrmm.run_once)"
+      },
+      {
+        "file": "ingest/operator_job_queue.py",
+        "owner": "_execute",
+        "key": "intel-otx",
+        "expression": "('Refreshing threat intelligence', otx.run_once)"
+      },
+      {
+        "file": "ingest/operator_job_queue.py",
+        "owner": "_execute",
+        "key": "intel-abusech",
+        "expression": "('Refreshing malware intelligence', abusech.run_once)"
+      },
+      {
+        "file": "ingest/operator_job_queue.py",
+        "owner": "_execute",
+        "key": "intel-endoflife",
+        "expression": "('Refreshing end-of-life intelligence', lambda: main.run_intel_endoflife_once())"
+      },
+      {
+        "file": "ingest/operator_job_queue.py",
+        "owner": "_execute",
+        "key": "intel-category",
+        "expression": "('Refreshing software categories', category_match.run_once)"
+      },
+      {
+        "file": "ingest/operator_job_queue.py",
+        "owner": "_execute",
+        "key": "software-classify",
+        "expression": "_software_classify_with_intel(progress, matcher, winget, chocolatey, main)"
+      }
+    ],
+    "startup_calls": [
+      {
+        "file": "ingest/main.py",
+        "owner": "main",
+        "expression": "logging.basicConfig(level=settings.INGEST_LOG_LEVEL, format='%(asctime)s %(levelname)s %(name)s %(message)s')",
+        "guards": []
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "main",
+        "expression": "install_log_safety()",
+        "guards": []
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "main",
+        "expression": "_start_http_server()",
+        "guards": []
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "main",
+        "expression": "db.init(settings.postgres_dsn)",
+        "guards": []
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "main",
+        "expression": "migrations.apply_pending()",
+        "guards": []
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "main",
+        "expression": "runlog.reap_orphaned()",
+        "guards": []
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "main",
+        "expression": "operator_job_queue.recover_interrupted()",
+        "guards": []
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "main",
+        "expression": "min(settings.DOCUMENTATION_SCHEDULE_HOURS, 4)",
+        "guards": []
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "main",
+        "expression": "BackgroundScheduler()",
+        "guards": []
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "main",
+        "expression": "int(getattr(settings, 'OBSERVATION_HISTORY_RETENTION_HOUR', 3))",
+        "guards": []
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "main",
+        "expression": "getattr(settings, 'OBSERVATION_HISTORY_RETENTION_HOUR', 3)",
+        "guards": []
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "main",
+        "expression": "scheduler.start()",
+        "guards": []
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "main",
+        "expression": "should_catch_up('patches', settings.patch_ingest_schedule_hours)",
+        "guards": []
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "main",
+        "expression": "threading.Thread(target=run_patching_once, daemon=True).start()",
+        "guards": [
+          "should_catch_up('patches', settings.patch_ingest_schedule_hours)"
+        ]
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "main",
+        "expression": "threading.Thread(target=run_patching_once, daemon=True)",
+        "guards": [
+          "should_catch_up('patches', settings.patch_ingest_schedule_hours)"
+        ]
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "main",
+        "expression": "operator_job_queue.enqueue_automatic('agent-observations')",
+        "guards": []
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "main",
+        "expression": "load_sources()",
+        "guards": []
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "main",
+        "expression": "documentation_observations_overdue(documentation_sources, documentation_schedule_hours)",
+        "guards": []
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "main",
+        "expression": "operator_job_queue.enqueue_automatic('documentation-observations')",
+        "guards": [
+          "documentation_overdue"
+        ]
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "main",
+        "expression": "software_classify_overdue(settings.SOFTWARE_CLASSIFY_SCHEDULE_HOURS)",
+        "guards": []
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "main",
+        "expression": "operator_job_queue.enqueue_automatic('software-classify-only')",
+        "guards": [
+          "software_classify_overdue(settings.SOFTWARE_CLASSIFY_SCHEDULE_HOURS)"
+        ]
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "main",
+        "expression": "software_classify_overdue(settings.SOFTWARE_CLASSIFY_FULL_REBUILD_HOURS, mode='full')",
+        "guards": []
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "main",
+        "expression": "operator_job_queue.enqueue_automatic('software-classify-full')",
+        "guards": [
+          "software_classify_overdue(settings.SOFTWARE_CLASSIFY_FULL_REBUILD_HOURS, mode='full')"
+        ]
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "main",
+        "expression": "_intel_catchup()",
+        "guards": [
+          "settings.INTEL_ENABLED"
+        ]
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "main",
+        "expression": "threading.Thread(target=bootstrap_metabase, daemon=True).start()",
+        "guards": []
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "main",
+        "expression": "threading.Thread(target=bootstrap_metabase, daemon=True)",
+        "guards": []
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "main",
+        "expression": "_READY.set()",
+        "guards": []
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "main",
+        "expression": "threading.Event().wait()",
+        "guards": []
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "main",
+        "expression": "threading.Event()",
+        "guards": []
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "main",
+        "expression": "httpd.shutdown()",
+        "guards": []
+      }
+    ],
+    "admission_and_followup_calls": [
+      {
+        "file": "ingest/main.py",
+        "owner": "run_patching_once",
+        "expression": "refresh_after_collection('Ninja patch collection')"
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "run_ninja_observations_once",
+        "expression": "refresh_after_collection('Ninja observations collection')"
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "run_agent_observations_once",
+        "expression": "refresh_after_collection('agent observations collection')"
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "run_documentation_observations_once",
+        "expression": "refresh_after_collection('documentation observations collection')"
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "_Handler.do_POST",
+        "expression": "operator_job_queue.enqueue_automatic('software-classify')"
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "_Handler.do_POST",
+        "expression": "operator_job_queue.enqueue_automatic('software-classify-only')"
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "_Handler._handle_agent_compliance_action._respond_with_refresh",
+        "expression": "schedule_agent_compliance_evaluate(reason)"
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "_Handler._handle_sources_enqueue",
+        "expression": "source_run_queue.enqueue_and_run(src, reason='on_demand')"
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "main",
+        "expression": "operator_job_queue.enqueue_automatic('agent-observations')"
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "main",
+        "expression": "operator_job_queue.enqueue_automatic('documentation-observations')"
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "main",
+        "expression": "operator_job_queue.enqueue_automatic('software-classify-only')"
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "main",
+        "expression": "operator_job_queue.enqueue_automatic('software-classify-full')"
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "_intel_catchup",
+        "expression": "operator_job_queue.enqueue_automatic(job_key)"
+      },
+      {
+        "file": "ingest/source_run_queue.py",
+        "owner": "process_entry",
+        "expression": "refresh_after_collection(f'on-demand {df} collection')"
+      },
+      {
+        "file": "ingest/source_run_queue.py",
+        "owner": "enqueue_and_run",
+        "expression": "enqueue(source, reason)"
+      }
+    ],
+    "queues": [
+      {
+        "relation": "ninja_core.software_activity_queue",
+        "files": [
+          "ingest/inventory/queue.py"
+        ]
+      },
+      {
+        "relation": "ninja_core.software_demand_queue",
+        "files": [
+          "ingest/inventory/queue.py"
+        ]
+      },
+      {
+        "relation": "ninja_core.software_scheduled_queue",
+        "files": [
+          "ingest/inventory/queue.py"
+        ]
+      },
+      {
+        "relation": "operations.operator_job_runs",
+        "files": [
+          "ingest/operator_job_queue.py",
+          "ingest/platform_findings.py",
+          "operations/apps/core/views.py"
+        ]
+      },
+      {
+        "relation": "operations.queue_registry",
+        "files": [
+          "ingest/platform_findings.py"
+        ]
+      },
+      {
+        "relation": "operations.source_action_requests",
+        "files": [
+          "ingest/source_actions.py",
+          "operations/apps/core/conditions/reader.py",
+          "operations/apps/core/views.py"
+        ]
+      },
+      {
+        "relation": "operations.source_run_queue",
+        "files": [
+          "ingest/source_run_queue.py",
+          "operations/apps/core/views.py"
+        ]
+      }
+    ],
+    "consumers": [
+      {
+        "file": "ingest/condition_evidence.py",
+        "relations": [
+          "operations.run_log"
+        ]
+      },
+      {
+        "file": "ingest/core/devices.py",
+        "relations": [
+          "operations.run_log"
+        ]
+      },
+      {
+        "file": "ingest/evaluator.py",
+        "relations": [
+          "operations.run_log"
+        ]
+      },
+      {
+        "file": "ingest/inventory/queue.py",
+        "relations": [
+          "ninja_core.software_activity_queue",
+          "ninja_core.software_demand_queue",
+          "ninja_core.software_scheduled_queue"
+        ]
+      },
+      {
+        "file": "ingest/main.py",
+        "relations": [
+          "ninja_core.run_log",
+          "operations.run_log"
+        ]
+      },
+      {
+        "file": "ingest/metabase_bootstrap.py",
+        "relations": [
+          "ninja_core.run_log"
+        ]
+      },
+      {
+        "file": "ingest/operator_job_queue.py",
+        "relations": [
+          "operations.operator_job_events",
+          "operations.operator_job_runs"
+        ]
+      },
+      {
+        "file": "ingest/parity_check.py",
+        "relations": [
+          "operations.run_log"
+        ]
+      },
+      {
+        "file": "ingest/patch_findings.py",
+        "relations": [
+          "ninja_core.run_log",
+          "operations.run_log"
+        ]
+      },
+      {
+        "file": "ingest/platform_findings.py",
+        "relations": [
+          "ninja_core.run_log",
+          "operations.operator_job_runs",
+          "operations.queue_registry"
+        ]
+      },
+      {
+        "file": "ingest/runlog.py",
+        "relations": [
+          "ninja_core.run_log"
+        ]
+      },
+      {
+        "file": "ingest/software_findings.py",
+        "relations": [
+          "operations.run_log"
+        ]
+      },
+      {
+        "file": "ingest/source_actions.py",
+        "relations": [
+          "operations.source_action_requests"
+        ]
+      },
+      {
+        "file": "ingest/source_observations.py",
+        "relations": [
+          "operations.run_log"
+        ]
+      },
+      {
+        "file": "ingest/source_run_queue.py",
+        "relations": [
+          "operations.source_run_queue"
+        ]
+      },
+      {
+        "file": "operations/apps/core/conditions/reader.py",
+        "relations": [
+          "operations.source_action_requests"
+        ]
+      },
+      {
+        "file": "operations/apps/core/views.py",
+        "relations": [
+          "operations.operator_job_events",
+          "operations.operator_job_runs",
+          "operations.run_log",
+          "operations.source_action_requests",
+          "operations.source_run_queue"
+        ]
+      }
+    ],
+    "raw_run_log_writers": [
+      {
+        "file": "ingest/core/devices.py",
+        "sql": "INSERT INTO operations.run_log (id, tenant_id, kind, subject_ref, started_at, ended_at, ok, rows, error) VALUES (gen_random_uuid(), %s, 'source.Ninja', '{}'::jsonb, %s, NOW(), %s, %s, %s)"
+      },
+      {
+        "file": "ingest/evaluator.py",
+        "sql": "INSERT INTO operations.run_log (id, tenant_id, kind, subject_ref, started_at, ended_at, ok, rows, error) VALUES (%s, %s, 'platform_evaluator', %s::jsonb, %s, NOW(), %s, %s, %s)"
+      },
+      {
+        "file": "ingest/parity_check.py",
+        "sql": "INSERT INTO operations.run_log (id, tenant_id, kind, subject_ref, started_at, ended_at, ok, rows, error) VALUES (gen_random_uuid(), %s, 'parity_check', '{}'::jsonb, %s, NOW(), TRUE, %s, '')"
+      },
+      {
+        "file": "ingest/patch_findings.py",
+        "sql": "INSERT INTO operations.run_log (id, tenant_id, kind, subject_ref, started_at, ended_at, ok, rows, error) VALUES (gen_random_uuid(), %s, 'patch_findings', '{}'::jsonb, %s, NOW(), %s, %s, %s)"
+      },
+      {
+        "file": "ingest/software_findings.py",
+        "sql": "INSERT INTO operations.run_log (id, tenant_id, kind, subject_ref, started_at, ended_at, ok, rows, error) VALUES (gen_random_uuid(), %s, 'software_classifier', jsonb_build_object('mode', %s), %s, NOW(), %s, %s, %s)"
+      },
+      {
+        "file": "ingest/source_observations.py",
+        "sql": "INSERT INTO operations.run_log (id, tenant_id, kind, subject_ref, started_at, ended_at, ok, rows, error) VALUES (gen_random_uuid(), %s, %s, '{}'::jsonb, %s, NOW(), %s, %s, %s)"
+      }
+    ]
+  }
+}

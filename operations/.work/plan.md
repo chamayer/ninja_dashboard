@@ -1,874 +1,657 @@
-# Durable Jobs queue and status
+# Unified Jobs framework
 
 ## Status
 
-**Job telemetry implementation in progress.** This supersedes the completed
-Issues-page plan below. Existing unrelated untracked root `.work/probe_*` and
-bootstrap files must remain untouched.
+**Step 2.3 in progress; the resource/fairness policy is approved.** Step 2.2
+implementation is complete with a documented local-PostgreSQL validation
+limitation. WP0 has a useful
+partial inventory and focused source-discovery checks, but its full exit is
+not yet proven. ADR-0024's detailed contract and migration companion remain
+the design authority; the tenant boundary, root-completion rule, quiesced
+cutover direction, and constrained 2.2 activation scope are accepted.
+Preserve unrelated untracked root `.work/probe_*` and bootstrap files.
 
 ## Goal
 
-Make every operator-triggered and scheduled collection and evaluator run durable,
-capacity-safe, observable, and recoverable. Provide an operator-facing Job
-status page linked from Jobs, with clear queued/running/succeeded/failed/stalled
-state and useful recovery guidance.
+Make every scheduled, automatic, operator-requested, and system-maintenance
+operation governed by one Jobs framework. It must safely run independent work
+in parallel, serialize conflicting work, expose truthful status and progress,
+recover from failures and stalled execution, and explain exactly what an
+operator can do next.
 
-## Confirmed problem
-
-`/admin/jobs/` currently POSTs directly to ingest `/run/*` endpoints. Most
-endpoints create untracked daemon threads and immediately return HTTP 202.
-Jobs then infers state from the last completed `run_log` row, so it cannot show
-a queued run, a failed start, or an active worker.
-
-On 2026-09-23, "Run all in this category" launched five evaluator endpoints
-concurrently. The ingest service has a four-connection PostgreSQL pool. The
-pool became saturated and later work, including Patch classifier requests,
-timed out before a run record could be written.
-
-`operations.source_run_queue` has the relevant lifecycle fields but is
-source-specific and its worker invokes source collection. It must not be
-misused as an evaluator queue. `operations.source_action_requests` is for
-external Hudu mutations and is also not suitable.
-
-## Decisions
-
-- Create one registered durable job-run queue for operator-demand jobs; source
-  collection and evaluator jobs are distinct registered job kinds.
-- Run-all is a durable batch processed sequentially by default in a documented
-  dependency order; it must not fire a concurrent HTTP request per catalog row.
-- Job requests receive a durable ID before returning to Django. Equivalent
-  pending/running jobs are coalesced and link to the existing run.
-- Persist leases, attempts, errors, timestamps, row counts, initiator, batch
-  membership, and correlated `run_log` history. A stale run is terminal until
-  an operator explicitly retries it.
-- Allow operators to cancel Queued work, including remaining queued batch
-  items. Running work is not forcibly stopped: the status page must state that
-  it cannot safely be interrupted mid-run.
-- Jobs remains the catalog. A new Job activity page is the operational surface;
-  it must show operator and automatic work together, an honest lifecycle
-  indicator (queued, running, terminal), queue position and elapsed time, and
-  a concise next action, with detailed diagnostics restricted to administrators.
-- Scheduled work uses the same queue row with no requesting user and is shown
-  as **Automatic**. The page also retains recent run-log and connector history
-  so system work outside this queue is still visible rather than silently
-  omitted.
-- A queue status is only operator-facing progress when it is a recorded job
-  stage. Do not display arbitrary percentages. Each job records its current
-  stage, its last stage update, and an explicit "no measurable units" message
-  when the underlying producer has no reliable work total.
-
-## Scope
-
-- Reviewed Django migration for a durable queue, batch membership, indexes,
-  RLS, ownership, and grants.
-- Shared registered job catalog, ingest dispatcher/worker and bounded
-  concurrency, Jobs enqueue flow, status page/detail/retry routes, navigation,
-  health reporting, tests, decision record, and release notes.
-
-## Steps
-
-1. Inventory every Jobs entry, completion evidence, coalescing key, and safe
-   run-all dependency order.
-2. Add the reviewed queue schema and worker claim/finalize contract.
-3. Route Run now/Run all through enqueue; retain legacy endpoints only for
-   scheduler compatibility.
-4. Build the activity page: current queue, recent runs, batches, filters,
-   automatic origin, lifecycle progress, queue position, elapsed duration,
-   rows, retry, and clear recovery guidance.
-5. Add queue health and regression tests, including the Patch-classifier
-   pool-exhaustion case.
-6. Validate locally, then obtain separate approval for migration, commit,
-   push/deployment, and production verification.
-
-## Checkpoint and next action
-
-Current scope: split the routine Software classifier (no intel refresh) from
-the fleet-wide rebuild. Ninja refreshes inventory timestamps on every sweep,
-so a timestamp watermark would still classify the whole fleet. Add a reviewed
-per-installation classifier marker keyed to the existing material hash and
-active/stale state. Routine runs evaluate only records whose material state
-has changed since they were last classified, and reconcile only that safe
-scope. Retain an explicit full-rebuild Job for changed global rules,
-decisions, and intelligence; the auto-intel path uses that full rebuild. The
-initial incremental run after the migration deliberately establishes its
-markers across the fleet once. Next: implement the marker migration,
-scoped-classifier safety boundary, explicit full job, factual job stages, and
-focused regression coverage. No commit, push, deploy, or production migration
-is authorized in this scope.
-
-Additional approved software scope: schedule the routine incremental
-classifier daily and the authoritative full rebuild weekly by default, with a
-mode-specific startup catch-up. All classifier modes must be mutually
-exclusive in the durable queue so a full rebuild never races an incremental or
-auto-intel run. Legacy HTTP triggers must enqueue the registered Jobs work
-rather than start an untracked classifier thread.
-
-Implementation complete locally: migration 0181 adds the reviewed marker
-columns and an initial-work index. The routine no-intel job now classifies
-only installations whose material hash or active/stale state changed, and it
-may resolve only findings tied to that changed scope. Product and version
-findings remain open while an unchanged installation still exposes them. Full
-and auto-intel runs remain authoritative fleet rebuilds and advance markers in
-bounded batches, so the next routine run does not repeat a rebuild. Jobs now
-offers the explicit **Software classifier (full rebuild)** entry and reports
-the number of changed installations for routine work. Validation: Python
-compilation; targeted Ruff; 36 ingest safety/schedule tests passed (one
-environment skip); 2 Jobs tests passed; Django checks; migration autodetection;
-and diff check. The first deployed routine run after 0181 establishes markers
-across the fleet once. Next: review the migration and behavior, then obtain
-explicit approval for a commit and a push/deployment that includes migration
-0181.
-
-Software operating-model completion: the routine no-intel classifier runs at
-`SOFTWARE_CLASSIFY_SCHEDULE_HOURS` (24 hours by default); the independent
-`SOFTWARE_CLASSIFY_FULL_REBUILD_HOURS` setting runs a full reconciliation
-weekly by default and has its own mode-specific startup catch-up. Software
-decisions queue a coalesced full rebuild only after their transaction commits.
-The durable queue prevents incremental, full, and auto-intel classifier modes
-from overlapping. Legacy classifier HTTP triggers now enqueue tracked work.
-Validation after this addition: compilation, targeted Ruff, 36 ingest tests
-passed with one environment skip, 2 Jobs tests passed, Django checks,
-migration autodetection, and diff check. No commit, push, deployment, or
-production migration has occurred. Next action: obtain explicit approval to
-commit and push the reviewed migration and software workflow release; only
-then plan the shared evaluator framework as a separate scope.
-
-Current corrective scope: repair the deployed Job Cancel permission failure and
-make the Software classifier the first lane/mode implementation of the future
-evaluator framework. Migration 0182 will grant Operations queue update rights,
-move existing Software classifier rows to a dedicated Software lane, and
-supersede redundant queued classifier modes. Queue admission will use an
-explicit mode-priority policy; status will use lane-local queue positions and
-plain not-started/waiting/result wording with no placeholder dashes. No commit,
-push, deployment, or production migration is authorized yet.
-
-Implemented locally: migration 0182 grants Operations the queue update right,
-moves all Software classifier modes to the dedicated Software lane, and
-cancels queued narrower Software runs when a broader queued/running mode
-already covers them. Queue admission now serializes classifier requests with a
-transaction advisory lock and applies mode priority (incremental < full <
-auto-intel). Job activity now shows lane-local positions, a waiting reason,
-Not started/Not completed, an explicit queued result, and no placeholder dash
-for a missing action. Validation: compilation, targeted Ruff, 36 ingest tests
-with one environment skip, 2 Jobs tests, Django checks, migration autodetection,
-template loading, and diff check all pass. Next action: obtain explicit commit
-and push approval including reviewed migration 0182.
-
-Current corrective scope: Jobs catalog status must use the durable queue as
-the history authority for registered work, falling back to legacy `run_log`
-only when no queue record exists. This corrects completed resolver work being
-shown as "Never run." Agent compliance is an optional legacy bridge; when its
-feature flag is off, its catalog rows must say Disabled, explain why, and not
-offer a no-op Run now action. No migration is required. Next: validate the
-queue-first status projection, template behavior, and disabled bridge controls;
-then obtain separate commit and push approval.
-
-Implemented locally: the catalog now reads the latest durable queue row first
-for every registered job and uses `run_log` only as a historical fallback.
-Queue states render as queued/running/cancelled/ok rather than treating an
-absent legacy log row as "Never run." The disabled Agent compliance bridge and
-its review step now render as Disabled with a short explanation and no run
-button. Validation: Python compilation, 2 focused Jobs tests, Django checks,
-template loading, and `git diff --check` passed. Full Ruff remains blocked by
-70 pre-existing findings in `apps/core/views.py`; no automatic formatting was
-applied. No migration, commit, push, deployment, or production mutation has
-occurred. Next: obtain separate commit and push approval.
-
-Released through `edf1767`: migration 0178 adds the tenant-scoped durable Jobs queue,
-active-request coalescing indexes, RLS/grants, and queue-health registration.
-Jobs now enqueues individual runs and sequential batches; the ingest scheduler
-claims one run at a time, while an independent watchdog marks expired runs
-Needs attention. Job status provides live queued/running/completed/failed state
-with safe queued cancellation and terminal retry. Existing Admin Health now
-reports the Jobs queue when it is delayed, failed, or stalled and links to Job
-status. Operator wording avoids transport and pool jargon.
-
-Validation so far: migration autodetection, Django checks, template loading,
-Python compilation, focused queue/Issues tests (58 passed), targeted Ruff, and
-diff check. The full Ruff run has pre-existing unrelated violations. No
-production mutation, migration, commit, or push has occurred.
-
-Implemented locally: scheduled catalog work now enters the durable queue with
-a null requester and is displayed as **Automatic**. Job activity combines
-operator and automatic queue entries, shows lifecycle progress without
-inventing a percentage, queue position, elapsed time, cancellation/retry, and
-recent independent system history. The Jobs catalog now includes scheduled
-documentation, legacy bridge, end-of-life, category, and maintenance work.
-
-Validation: Django checks and template loading passed; 58 focused Operations
-tests and 36 ingest condition-safety tests passed; targeted Ruff, Python
-compilation, and diff checks passed. Full-repository Ruff still has unrelated
-pre-existing findings in the large Operations views module.
-
-Released as `dbc963c` / version 0.126.10 to both remotes. Automatic GitOps
-replacement completed; Operations and ingest became healthy. An approved
-manual migration check found no pending migrations and confirmed 0178 applied.
-
-Follow-up in progress: historical system activity currently truncates database
-errors and has no action despite a safe registered-job equivalent. Preserve the
-complete error behind an expandable detail control and allow **Retry** only
-for explicitly mapped failed history kinds. Do not guess a retry target for
-unmapped source or infrastructure records. No migration is required.
-
-Implemented locally: Job history now retains and displays the full stored
-error in an expandable control. Failed history rows provide **Retry** only
-when the run kind is explicitly mapped to a registered Job; Software
-Classifier maps to the no-intel refresh path used by its schedule. Validation:
-Django checks, template loading, and 58 focused Operations tests passed.
-Release prepared as version 0.126.11; no migration is required.
-
-Current work: replace the synthetic lifecycle bars with durable stage telemetry
-for every registered Job. Migration 0179 will add stage, detail, and update
-time fields to the existing tenant-scoped queue. Composite Software Classifier
-work will record its real matcher, enrichers, classifier, and view-refresh
-stages; all other registered jobs record their actual dispatched operation.
-No percentage is displayed unless a producer supplies a real total.
-
-Implemented locally and prepared as version 0.126.12: migration 0179 persists
-the current stage, explanatory detail, and last update for every durable Job.
-The worker updates those fields at every real dispatch boundary and renews its
-lease. Validation: Django checks, migration autodetection, template loading,
-58 focused Operations tests, 36 ingest safety tests, targeted Ruff,
-compilation, and diff checks passed. Next: commit/push with the reviewed
-migration and verify the rollout before treating the live status as updated.
-
----
-
-# Superseded plan: Issues queue operator model and coverage correction
-
-## Status
-
-**Default Issues-page performance correction in progress.** This supersedes the
-completed taxonomy rollout plan. The active taxonomy remains five Categories,
-34 Types, and 53 Issues. This work changes the operator projection, count
-semantics, assessment coverage, and Issues-page layout; it does not rename
-internal condition keys or alter the approved taxonomy.
-
-Repository baseline: `120d641` is current local and remote `master`.
-Pre-existing untracked `.work/probe_*` and bootstrap files are unrelated and
-must remain untouched. Production deployment of this exact baseline has not
-been independently reverified in this checkpoint.
-
-## Goal
-
-Create one understandable operator work queue that:
-
-- never makes retained findings appear to have disappeared;
-- distinguishes work needing action from work blocked by another condition or
-  pending current information;
-- keeps software policy decisions out of Issues;
-- exposes every nonempty Issue group before result pagination;
-- filters and sorts the complete matching dataset;
-- hides engine internals from operators while retaining administrator
-  diagnostics; and
-- remains visually compact enough for routine use.
+The framework is not a replacement for source evidence, findings, source
+actions, or domain queues. It is the shared control-plane contract for the
+execution of work that owns those domains.
 
 ## Confirmed baseline
 
-The latest read-only production review found:
+- `operations.operator_job_runs` is a durable queue for many collection,
+  evaluation, intelligence, notification, and maintenance jobs. It has lanes,
+  stages, heartbeats, retry/cancel controls, and queue-health reporting.
+- Software classification already proves the needed pattern: its three modes
+  have a dedicated lane and a mode-supersession policy.
+- The Jobs catalog and the durable queue were previously disconnected. Release
+  `e6bc64b` corrected the catalog to read queue history first and to label the
+  disabled Agent compliance bridge accurately.
+- `operations.source_run_queue` is a separate source-demand domain queue. It
+  immediately starts daemon threads, has independent lifecycle names, and is
+  not visible in the common Job activity page.
+- `operations.source_action_requests`, source queue recovery, run-log cleanup,
+  platform-health evaluation, and the scheduler itself have no common run
+  ledger or consistent operator surface.
+- APScheduler schedules are in memory. After a restart their cadence starts
+  again, and the UI cannot reliably state next due time, skipped cadence,
+  dependency wait, or why work is unavailable.
+- A fixed two-thread capacity semaphore and in-process execution mean a slow or
+  stuck function can still occupy scarce capacity. Marking its row stalled does
+  not stop the Python thread.
 
-| Category | Retained | Needs action | Blocked | Pending |
-| --- | ---: | ---: | ---: | ---: |
-| Inventory | 2,713 | 39 | 0 | 2,674 |
-| Agents & reporting | 4,239 | 0 | 127 | 4,112 |
-| Software & security | 12,002 | 0 | 0 | 12,002 |
-| Patching & support | 3,710 | 2,912 | 61 | 737 |
-| Data collection | 7 | 0 | 0 | 7 |
+## Success criteria
 
-There were 22,671 retained unresolved Issues: 2,951 needing action, 188
-blocked, and 19,532 pending. Another 1,799 active software policy
-candidates belonged in Software Decisions. There were 445,919 resolved
-historical findings.
+1. Every background operation has exactly one registered definition and an
+   unambiguous owner, technical key, plain-language name, description,
+   eligibility rule, cadence/trigger, lane, resource/concurrency key,
+   dependency policy, timeout, retry policy, progress contract, and run result
+   contract.
+2. Every invocation receives one durable Job run before work starts. This
+   includes scheduler work, Jobs-page requests, targeted refreshes, source
+   demand, source actions, and internal maintenance work.
+3. The Jobs catalog, Job activity, Admin Health, and API read the same durable
+   run and schedule state. `run_log` remains diagnostic evidence, not an
+   alternative lifecycle authority.
+4. A long, failed, or stalled job cannot silently block unrelated lanes. A
+   timeout is detected, shown, contained, and tied to a safe recovery path.
+5. Dependencies are explicit. A source refresh never races its required
+   resolver/evaluator; a dependent run is shown as waiting rather than simply
+   absent.
+6. Operators see simple terms: **Queued**, **Running**, **Completed**,
+   **Needs attention**, **Cancelled**, **Disabled**, or **Waiting for…**. The
+   technical key, stage, correlation ID, raw error, and policy details remain
+   available to administrators in the run detail.
+7. Existing source data, findings, notification behavior, operator decisions,
+   URLs, and retained run history survive the transition. No queue migration
+   deletes history or invents successful work.
 
-Fresh assessment coverage was incomplete: 2,480 Inventory, 1,303 Agents &
-reporting, all 12,002 Software & security, 695 Patching & support, and all
-seven Data collection findings lacked a fresh active-policy assessment. These
-findings were retained, not deleted. Their absence from actionable-only cards
-is both an assessment-coverage and presentation defect.
+## Non-goals
 
-At verification time, `conditions-taxonomy-4` was active and valid, all 53
-conditions were mapped exactly once, 6,410 current assessments existed, and
-all 6,359 required non-context participants represented by those assessments
-had coverage.
+- Do not merge source observations, source actions, findings, or audit history
+  into one table.
+- Do not expose raw internal failures or implementation terms as normal
+  operator labels.
+- Do not promise a percentage unless the producer supplies an honest total and
+  completed count.
+- Do not automatically retry external mutations, notifications, or a job whose
+  handler is not explicitly idempotent.
+- Do not retire Agent compliance or legacy parity schemas in this work. Their
+  retirement remains a separately approved destructive transition.
 
-## Approved operator vocabulary
+## Architectural decisions to record before implementation
 
-Do not expose **Response**, **Actionable**, **Unknown**, **Assessment
-disposition**, or **All retained** as operator terminology.
+Create ADR-0024, **Unified Jobs execution contract**, before the first
+migration. It must lock the following decisions.
 
-Summary labels:
+### One registry, two consumers
 
-- **Unresolved**
-- **Needs action**
-- **Blocked**
-- **Pending**
-- **Paused**
-- **Software decisions**
+Create a declarative registry in `shared/` so both images can import it:
 
-Filters:
+- Django reads only presentation, permissions, eligibility, and request
+  metadata.
+- Ingest maps an approved executable handler to the same technical key.
+- Registry metadata must not import Django or ingest implementation modules.
+- A startup validation compares registry keys, handler keys, schedules, Jobs
+  catalog entries, and database schedule rows. Any missing/duplicate key makes
+  the service not ready and creates an Admin Health condition after recovery.
 
-- **Status:** Open, Acknowledged, Paused, Resolved
-- **Attention:** All, Needs action, Blocked, Pending
+Each definition contains at least:
 
-`Paused` is an operator status, not an engine attention result. Internal
-policy values remain available for execution, audit, and diagnostics but map
-to the operator model as follows:
+`key`, `display_name`, `technical_name`, `description`, `owner`, `kind`,
+`lane`, `resource_keys`, `concurrency_scope`, `priority`, `schedule`,
+`capability/enablement`, `request_schema`, `idempotency_scope`,
+`supersession_policy`, `dependencies`, `timeout`, `retry_policy`,
+`progress_contract`, `result_contract`, `permission`, and `handler_version`.
 
-| Internal outcome | Operator presentation |
+### One execution ledger, linked domain queues
+
+Keep `operations.operator_job_runs` as the physical durable execution ledger
+for compatibility; do not rename it during the first framework release. Add
+the fields needed for the generic contract and refer to it as **Job run** in
+the UI/API.
+
+Source-demand and source-action rows remain their domain records because they
+hold source/action-specific payload and audit semantics. Add a one-to-one or
+explicit link to the Job run. This preserves source-specific query paths while
+giving every execution one lifecycle, event journal, timeout, and activity
+entry.
+
+### Durable schedule state
+
+The registry defines intended cadence; a tenant-scoped schedule-state table
+persists `enabled`, `last_requested_at`, `next_due_at`, `last_outcome`, and
+the configuration/definition revision. The scheduler becomes a lightweight
+leader-elected request producer, not the executor. It creates coalesced Job
+runs when due and records why a cadence was skipped or deferred.
+
+### Isolated workers and controlled cancellation
+
+Move execution out of the ingest HTTP/scheduler process into dedicated worker
+processes using the same ingest image. A worker claims one Job run, launches a
+bounded child execution, and records stage/heartbeat/result. The supervisor
+can terminate a timed-out child after a documented grace period without
+killing the scheduler or another lane.
+
+Queued work can be cancelled. Running work receives a cooperative cancellation
+request at declared safe checkpoints. A worker may force-stop only a handler
+that is explicitly marked kill-safe; otherwise it becomes **Needs attention**
+after timeout and its resource key remains protected until recovery is
+verified. No current handler is presumed kill-safe without review.
+
+### Resources, lanes, dependencies, and supersession
+
+Lanes are capacity and operator-explanation boundaries, not a substitute for
+locking. Every Job definition declares resource keys (for example
+`db-write`, `ninja-api`, `source:<platform>`, `software-classifier`, or
+`notifications`) and a concurrency scope (tenant, client, source, or fleet).
+The claim query atomically respects both the lane capacity and held resource
+keys.
+
+Dependencies use durable prerequisite requests and material revisions, not
+untracked threads. A dependent Job run is queued with a visible reason until
+its prerequisite succeeds with the needed freshness/revision. Supersession is
+declared per family: a broader run may cancel queued narrower work; it never
+silently stops running work.
+
+## Complete inventory and target treatment
+
+| Family | Registered work | Target treatment |
+| --- | --- | --- |
+| Collection | `patches`, `agent-observations`, `documentation-observations`, source-demand Ninja/SentinelOne/ScreenConnect/LogMeIn/Hudu and future enabled sources | One collection contract per source scope. Source-demand payload remains in `source_run_queue`, linked to its Job run. Serialize the same source/client scope; allow independent sources within proven API/DB capacity. |
+| Identity and evaluation | `resolver`, `platform-evaluate`, `patch-classify`, `parity-check` | Explicit dependency/freshness inputs. Resolver and evaluators become separately observable work; no evaluator bypasses the ledger. |
+| Software | `software-enqueue-orgs`, `software-queue-drain`, `software-classify-only`, `software-classify-full`, `software-classify` | Retain the current dedicated Software lane and incremental/full/auto-intel supersession. Link inventory batches to the classifier revision they make eligible. |
+| Intelligence | `intel-nvd`, `intel-cpe-dict`, `intel-kev`, `intel-epss`, `intel-matcher`, `intel-winget`, `intel-chocolatey`, `intel-capability`, `intel-lolrmm`, `intel-otx`, `intel-abusech`, `intel-endoflife`, `intel-category` | Use bounded intelligence/API resources. Material-change output requests a coalesced dependent full software classification only when its defined inputs changed. |
+| Notifications | `notifications-dispatch`, `notifications-digest` | Idempotent dispatch/digest stages with delivery audit links. Retry policy is explicit and never duplicates externally delivered messages. |
+| Retention and health | `retention-history`, source queue stale recovery, Jobs stale recovery, run-log stale recovery, platform-health findings | Register as internal maintenance jobs. Show them in Admin Job activity and Health, but do not offer normal operator Run now unless the handler is explicitly safe. |
+| Source actions | `source_actions.process_pending` plus individual external source actions | Retain `source_action_requests`; create linked Job runs for processing attempts. Per-action idempotency, retryability, and external correlation are mandatory. |
+| Legacy bridge | `agent-compliance`, `agent-compliance-evaluate`, review digest | Register only as an optional legacy capability. When disabled, show Disabled and do not enqueue periodic no-op work. When enabled, run through the same framework and replace its internal resolver thread with a durable dependency. |
+| Service/bootstrap | scheduler leader, migration/bootstrap, Metabase bootstrap, HTTP server | Surface health and startup events separately from normal work. Migration/bootstrap is never an operator Run now job. Metabase bootstrap must be explicitly registered as maintenance before it is exposed. |
+
+## Dependency contract
+
+The registry must declare and test this initial graph:
+
+```text
+Source collection
+  -> client/identity resolution when the source supplies identity signals
+  -> required derived refresh/projector
+  -> Platform evaluator or CMDB evaluator for the affected scope
+
+Ninja patch collection -> Patch classifier -> Platform evaluator
+Software inventory batch -> incremental Software classifier
+Intel material change -> coalesced full Software classifier
+Identity resolver -> Platform evaluator (affected scope)
+Platform evaluator -> notification dispatch remains cadence-driven
+Parity check, retention, and health -> independent; never block collection
+Agent compliance (only if enabled) -> Identity resolver -> its native successor
+```
+
+Each edge must name its freshness input, affected scope, coalescing key, and
+failure behavior. A failed prerequisite blocks the dependent run with a plain
+reason; it must not run against partial or stale data merely to make a card
+look current.
+
+## Data model and migration sequence
+
+All migrations require separate review and explicit production approval.
+
+1. **Registry and schedule state.** Add `operations.job_schedules` and a
+   registry-version table or immutable snapshot fields. Store definition key,
+   tenant, enabled/capability result, cadence, requested/next-due times, and
+   last request/outcome references. Add RLS, ownership, grants, indexes, and
+   queue-registry health coverage.
+2. **Generic Job-run contract.** Extend `operator_job_runs` with immutable
+   definition revision, trigger (`automatic`, `operator`, `dependency`,
+   `recovery`), request payload, idempotency key, correlation ID, parent/root
+   run IDs, dependency state/reason, cancellation request fields, timeout,
+   started/finished resource metadata, structured sanitized result, and
+   terminal reason. Backfill only factual defaults for existing rows.
+3. **Resource claims and event journal.** Add a tenant-scoped resource-claim
+   table and append-only Job event records for requested, deferred, claimed,
+   stage, checkpoint, cancellation, retry, timeout, finish, and recovery.
+   Enforce append-only writes through role grants/trigger policy; retain the
+   current event table only if it can meet that contract.
+4. **Domain queue links.** Add nullable Job-run foreign keys to source-demand
+   and source-action records. Backfill no fictional links. New work must write
+   both records atomically before execution.
+5. **Compatibility views/API.** Preserve current Jobs URLs and existing
+   status readers during migration. Add stable admin views rather than making
+   downstream consumers query mutable table details. Do not delete `run_log`.
+6. **Cutover and cleanup.** Remove direct daemon-thread entry points only after
+   every registered path and regression test uses the framework. Retire
+   obsolete indexes/columns in a later, separately reviewed migration.
+
+## Implementation work packages
+
+## Exact execution order and model selection
+
+Run these steps in order. The assigned agent continues automatically to the
+next step after a passing validation. It pauses only at an item marked
+**Approval gate**, a genuine design contradiction, a failed safety invariant,
+or a validation failure it cannot resolve. Do not substitute a lower-tier
+model for a step marked Astra.
+
+| Step | Work | Model and reasoning | Required exit before continuing |
+| --- | --- | --- | --- |
+| 0.1 | Verify the current branch, plan, Docker packaging, untracked-user-work boundary, and all existing Job/queue tests. | **Luna Medium** | Confirmed baseline and no overwritten user work. |
+| 0.2 | Generate the complete machine-checked inventory of scheduler entries, `/run/*` routes, direct threads, queues, handlers, catalog rows, run-log kinds, and consumers. | **Luna Medium** | Inventory is complete; registry-completeness test fails for an intentionally omitted fixture. |
+| 0.3 | Run the approved read-only production measurements and summarize durations, depth, duplicate requests, timeouts, deadlocks, and run-log-only history. | **Luna Medium** | Redacted measurement artifact and documented capacity assumptions. |
+| 1.1 | Reconcile inventory/measurements with the proposed architecture; decide the exact registry contract, Job-run extensions, schedule-state schema, resource claims, worker isolation, cancellation model, and compatibility path. Write ADR-0024. | **Astra High** | ADR-0024 and migration design are internally consistent and reviewed against RLS, source queues, source actions, and all consumers. |
+| 1.2 | Review ADR-0024, the proposed SQL migrations, destructive/compatibility implications, Compose worker topology, and rollback plan. | **Astra High** | **Approval gate:** user explicitly approves the architecture and reviewed migrations before any schema or worker-service change. |
+| 2.1 | Implement the shared declarative registry, Django/ingest registry validation, capability model, technical/operator labels, and registry completeness tests. | **Sol High** | Both services load the same definitions; missing, duplicate, or unhandled keys fail readiness/tests. |
+| 2.2 | Implement additive schedule-state and generic Job-run migrations, RLS/grants, request/coalescing API, schedule leader election, and migration tests. | **Astra High** | Concurrent request/schedule tests prove idempotency, restart safety, tenant isolation, and no raw-row caller remains. |
+| 2.2a | Close the missing Step 2.3 policy inputs: initial deployment/lane capacities, Job resource mapping, priority aging, dependency activation boundary, and supersession policy. | **Astra High** | **Approval gate:** user explicitly approves `jobs-resource-policy-review.md`; no enforcement uses proposed values before approval. |
+| 2.3 | Implement atomic resource claims, lane capacity, priority aging, dependency wait/release, and declarative supersession. | **Astra High** | Deadlock, contention, dependency, and Software-mode regression tests pass. |
+| 3.1 | Add the worker service/entry point, child-process supervisor, health checks, packaging, and local integration fixture. | **Astra High** | Scheduler/HTTP remain responsive while a test job is running; Compose and Docker review pass. |
+| 3.2 | Implement factual progress, checkpoints, cooperative cancellation, timeout/grace, safe kill eligibility, orphan recovery, and retry rules. | **Astra High** | Hang, restart, cancellation, and no-double-execution tests pass without falsely completing a run. |
+| 4.1 | Migrate existing durable evaluation, Software, intelligence, notification, and retention handlers to the registry without changing their business results. | **Sol High** | Per-family compatibility and run-history tests pass. |
+| 4.2 | Migrate source-demand work from direct daemon threads to linked source Job runs, retaining source queue records and scoped forms. | **Sol High** | Every on-demand source run has linked domain/Job records and no direct execution thread. |
+| 4.3 | Link source-action attempts and internal maintenance work to Job runs; apply explicit idempotency and retry contracts. | **Sol High** | Source-action and maintenance failure/retry tests pass. |
+| 4.4 | Capability-gate the legacy bridge and replace its resolver thread with a durable dependency when enabled. | **Sol High** | Disabled bridge creates no schedule/run noise; enabled bridge follows the declared dependency graph. |
+| 5.1 | Implement and validate the full dependency graph, scope/revision freshness checks, and evaluator/notification recovery safety. | **Astra High** | Failure-injection suite proves no partial data evaluation, premature recovery, or duplicate notification/action. |
+| 6.1 | Build the unified Jobs home, activity filters, detail/timeline, plain-language status, safe actions, admin diagnostics, and source/health links. | **Sol High** | Request/UI/permission tests prove every status and link uses the authoritative Job run. |
+| 6.2 | Apply visual polish, copy review, accessibility checks, and documentation/runbook updates. | **Luna Medium** | Operator wording is consistent and no internal diagnostics leak to ordinary operators. |
+| 7.1 | Run full repository validation, migration/order review, deployment-readiness audit, and a focused code/design review. | **Astra High** | **Approval gate:** user approves commit, push, deployment, and the exact reviewed migrations. |
+| 7.2 | After approved rollout, run read-only production reconciliation, health checks, query-plan review, and operator smoke tests. | **Sol High** | Results are recorded; unresolved rollout defects return to their owning step. |
+| 7.3 | Review the observation period and approve removal of direct-thread/status compatibility paths, if warranted. | **Astra High** | **Approval gate:** no cleanup or legacy retirement occurs without separate explicit authorization. |
+
+The practical cost-saving rule is simple: Luna does bounded discovery, test,
+documentation, and presentation work; Sol implements well-specified code;
+Astra owns architecture, migrations, concurrency, worker lifecycle, failure
+safety, and final review.
+
+### WP0 — Freeze the catalog and baseline
+
+- Generate a checked-in registry inventory from every APScheduler entry,
+  `/run/*` endpoint, direct thread start, queue processor, targeted refresh,
+  and startup catch-up.
+- For each entry record current handler, owner, source/action tables, run-log
+  kind, cadence, current concurrency, maximum observed duration, safe retry,
+  cancellation checkpoint, prerequisites, output, and consumer surface.
+- Run read-only production measurements for queue depth, duration percentiles,
+  duplicate requests, stale runs, deadlocks, source demand, and run-log-only
+  activity. Redact customer data from the artifact.
+- Add a registry completeness test that fails for any unregistered scheduled
+  or HTTP-triggered background handler.
+
+Exit: a reviewed inventory with no unknown background execution path.
+
+### WP1 — ADR, registry, and capability model
+
+- Create ADR-0024 and `shared` registry definitions.
+- Define user-facing labels plus short descriptions; retain technical keys in
+  admin detail instead of replacing them with vague names.
+- Define permissions: ordinary operators request only scoped, safe work;
+  administrators request fleet work, retry, cancel queued work, and see raw
+  diagnostics; system work has no Run now control unless specifically allowed.
+- Define capability checks for disabled source instances, notification flags,
+  intel, and legacy Agent compliance. Disabled means not schedulable and has a
+  stated reason, not "Never run."
+
+Exit: Django and ingest load one validated definition set without importing one
+another's runtime code.
+
+### WP2 — Durable request, schedule, and resource foundations
+
+- Implement reviewed migrations 1–3 above.
+- Build transaction-safe request/coalescing APIs used by Django, scheduler,
+  dependency triggers, and recovery. Do not let any caller insert raw rows.
+- Implement persistent schedule reconciliation with a PostgreSQL advisory-lock
+  scheduler leader. It must calculate next due time deterministically across
+  restarts, coalesce missed ticks, and never enqueue work solely because a
+  container restarted.
+- Implement atomic lane/resource claim and release, priority aging, dependency
+  waits, and explicit queue position within the relevant lane/resource scope.
+
+Exit: synthetic jobs prove no duplicate claim, no cross-lane starvation, and
+correct restart/cadence behavior.
+
+### WP3 — Worker isolation, progress, timeout, and recovery
+
+- Add a dedicated worker entry point/service in Compose using the ingest image;
+  verify Docker packaging and health checks.
+- Move execution from scheduler threads to the worker supervisor and bounded
+  child process model. The scheduler and HTTP server must remain responsive
+  during a long job.
+- Add progress/checkpoint helpers that record only real stage and count data.
+- Implement cancellation request, cooperative checkpoints, timeout/grace,
+  terminal **Needs attention**, resource containment, retry eligibility, and
+  manual recovery controls.
+- Add a startup/restart reconciliation routine that distinguishes an orphaned
+  child from a still-live worker before marking a run terminal.
+
+Exit: intentionally hung test handlers do not prevent unrelated collection or
+evaluation from progressing, and no false completed state is possible.
+
+### WP4 — Migrate work families in safe dependency order
+
+1. Migrate current `operator_job_runs` families (evaluation, Software,
+   intelligence, notification, retention) onto the registry without changing
+   their business behavior.
+2. Move source demand from daemon threads to linked source Job runs. Preserve
+   source queue records, source-specific payload, scoped selector forms, and
+   source health semantics.
+3. Link source action processing and enforce per-action retry/idempotency.
+4. Move internal cleanup/health work to registered maintenance runs.
+5. Replace legacy HTTP `/run/*` execution with request creation or a redirect
+   to the correct scoped form. Keep compatibility endpoints only while callers
+   are audited; they must never create an untracked thread.
+6. Gate the Agent compliance bridge by capability. If enabled, migrate its
+   resolver follow-up into an explicit dependency; if disabled, do not schedule
+   it.
+
+Exit: the completeness test proves every known work family starts through the
+framework and all prior direct thread routes are removed or intentionally
+disabled.
+
+### WP5 — Dependencies, supersession, and correctness rules
+
+- Implement the dependency graph above using revision/scope evidence, not a
+  blanket "run everything" chain.
+- Generalize Software mode supersession into declarative per-family policies.
+- Define collection and source concurrency by source/client scope and verify
+  API rate limits, DB-write load, and resolver/evaluator consistency.
+- Make evaluator outcomes safe under retries: no premature recovery, duplicate
+  notifications, source action duplication, or loss of operator decisions.
+- Add failure injection for deadlocks, database pool exhaustion, source API
+  timeout, worker restart, partial source collection, and dependency failure.
+
+Exit: each registered dependency and supersession rule has a direct regression
+test and an operator-visible waiting explanation.
+
+### WP6 — Operator and administrator surfaces
+
+- Replace the split Jobs catalog/Job activity status model with one Jobs home:
+  compact category summary, registered work list, capability/schedule state,
+  and a link to filtered activity.
+- Job activity supports all jobs, source/client scope, lane, origin, status,
+  owner, correlation/batch, time range, and technical key filters. It includes
+  current and historical work without a silent record cap.
+- Detail view shows plain status, start/end/elapsed, wait reason, honest
+  progress, scope, result, next action, event timeline, safe Retry/Cancel, and
+  administrator-only diagnostics/error/correlation data.
+- Provide direct links from source health, targeted refresh, source-action
+  pages, Admin Health, findings/evaluators, and affected client/device pages to
+  the relevant Job run or filtered activity.
+- Admin Health emits deduplicated, actionable findings for schedule failure,
+  disabled-required work, queue age/depth, repeated failure, timeout, registry
+  mismatch, and unmet dependency. Each finding links to its Job detail.
+
+Exit: an operator can answer what is running, what is waiting, why, what it
+affects, and what they can safely do in one place.
+
+### WP7 — Cutover, performance, and retirement review
+
+- Run read-only production query-plan/duration review for activity and health
+  queries; add only measured indexes/partitioning/retention policy.
+- Verify all containers, migrations, scheduler leader, worker health, queue
+  health, registry validation, catalog/API behavior, and each job family after
+  rollout.
+- Run a dual-read reconciliation while old status paths remain: durable Job
+  runs versus source queue/run-log evidence must be explained, not silently
+  overwritten.
+- Remove obsolete direct threads and duplicate status readers only after an
+  approved production observation period. Treat Agent compliance retirement as
+  a separate destructive project.
+
+Exit: one authoritative execution lifecycle with documented compatibility and
+no untracked background work.
+
+## Required tests and validation
+
+- Registry completeness and handler/catalog/schedule parity.
+- Tenant/RLS/grant tests for every new table/view and role.
+- Request idempotency, concurrent coalescing, lane/resource claim, priority
+  aging, dependency wait/release, and supersession tests.
+- Scheduler-leader, restart, missed cadence, disabled capability, and next-due
+  tests.
+- Worker heartbeat, timeout, cooperative cancel, forced-stop eligibility,
+  orphan recovery, retry safety, and no-double-execution tests.
+- Per-family integration tests for collection, source demand, resolver,
+  evaluator, Software, intel, notification, source action, retention, and the
+  disabled/enabled legacy bridge.
+- UI/API/CSV smoke tests for labels, filters, detail visibility, diagnostics
+  permissions, and links.
+- Python compilation/import tests, targeted Ruff, Django checks,
+  `makemigrations --check`, migration drift/order review, `git diff --check`,
+  Compose/Dockerfile review, and full relevant ingest/Operations suites.
+- Before production: backup/review of migrations; after production: read-only
+  health, queue, schedule, job-family, and query-plan verification.
+
+## Risks and safeguards
+
+| Risk | Safeguard |
 | --- | --- |
-| Complete, current, and permitted | Needs action |
-| A prerequisite or overriding condition prevents useful action | Blocked |
-| Missing, stale, incomplete, or unknown evidence/assessment | Pending |
-| Future snooze set by an operator | Paused status |
-
-Rows outside Needs action show one short reason, such as “Identity
-unresolved,” “Computer offline,” “Source unavailable,” or “Patch data
-incomplete.” Explanations must not become long state labels.
-
-## Count contract
-
-### Unfiltered fleet summary
-
-The top row contains exactly six compact clickable cards using the approved
-summary labels. It is fleet-wide and never changes with filters below it.
-
-For unresolved Issues, excluding Software Decisions:
-
-`Unresolved = Needs action + Blocked + Pending + Paused`
-
-- **Unresolved:** open or acknowledged Issues, including paused Issues.
-- **Needs action:** unresolved, not paused, with a current complete assessment
-  permitting action.
-- **Blocked:** unresolved, not paused, with a current assessment identifying a
-  prerequisite or overriding condition.
-- **Pending:** unresolved, not paused, with no current complete decision.
-- **Paused:** unresolved with an active operator snooze.
-- **Software decisions:** active policy candidates in their separate workflow
-  and never included in the other five cards.
-
-Every card links to its complete population. Counts use one captured
-scope/time and must satisfy the conservation rule.
-
-### Filtered workspace
-
-Everything below a clear **Filtered results** boundary follows selected
-filters. Its compact summary contains only matching issue rows, affected
-Computers, affected clients, and the selected Status/Attention scope.
-
-Category and Type headers show both current matches and unresolved totals when
-the Attention filter would otherwise make a nonempty group look empty.
-Actionable-only Category cards must not serve as inventory totals.
-
-## Work packages
-
-### WP1 - Reconcile the baseline and freeze behavior
-
-- Preserve unrelated user work and compare `27d59cc` with this contract.
-- Capture counts by condition, Category, Type, Status, Attention, severity,
-  snooze state, and Software Decisions membership.
-- Add failing behavior tests for terminology, count conservation, complete
-  group visibility, dataset-wide sorting, and filter clearing.
-
-Exit: reproducible baseline and tests demonstrating each current defect.
-
-### WP2 - Create one operator-state projection
-
-- Add one shared projection mapping internal assessments and operator handling
-  into Status, Attention, and a short human reason.
-- Keep Status, Attention, and Severity independent.
-- Map unresolved findings lacking a fresh complete assessment to Pending;
-  never hide them or treat them as actionable.
-- Use the projection in cards, filters, groups, rows, CSVs, Computer links, and
-  count queries.
-- Retain technical values only for policy execution, audit, and admin views.
-
-Exit: every unresolved Issue has exactly one Attention state and counts
-conserve.
-
-### WP3 - Restore complete assessment coverage
-
-- Build a 53-condition ownership matrix: finding producer, assessment
-  producer, participants, evidence, freshness authority, reevaluation trigger,
-  and recovery authority.
-- Reassess retained findings when source collection succeeds, evidence or
-  participants change, policy changes, or freshness expires.
-- Add safe backlog reconciliation that does not recreate findings, alter
-  operator handling, or clear findings without current type-specific recovery
-  evidence.
-- Fail closed when required source coverage is unhealthy.
-- Expose missing/stale assessment counts in admin diagnostics.
-
-Exit: every eligible retained finding has a fresh assessment or a specific
-observable coverage reason.
-
-### WP4 - Separate Software Decisions
-
-- Exclude policy candidates from Issues tables, groups, totals, CSVs, bulk
-  actions, and the Unresolved count.
-- Make `/software/decisions/` their sole queue and card destination.
-- Link relevant Computer and software-detail surfaces to that workflow.
-- Keep vulnerabilities, malicious software, unsupported software, protection
-  conflicts, and other genuine incidents in Issues.
-
-Exit: each software finding belongs to exactly one workflow.
-
-### WP5 - Simplify the page
-
-Use four visual zones only:
-
-1. Page title and exports.
-2. Six-card unfiltered fleet summary.
-3. Filtered results controls and compact result summary.
-4. Hierarchical grouped results.
-
-Remove duplicate Category tiles, repeated summaries, separate table-filter
-cards, policy explanations, severity mini-dashboards, and competing counts.
-
-Primary filters: Category, Type, Issue, Attention.
-
-Secondary **More filters**: Status, Severity, Client, Platform, Online state,
-Search. Category -> Type -> Issue remains dependent and defaults to All.
-
-Exit: the page reads top-to-bottom without knowledge of the condition engine.
-
-### WP6 - Make every Issue group visible
-
-- Render five stable Category headings and every nonempty Type as a collapsed
-  header before finding pagination.
-- Show current matching and unresolved counts on Type headers.
-- Keep empty Types in the Type filter without cluttering the group list.
-- Expand the selected Type and paginate only its findings; never paginate the
-  group-header list.
-- Open the relevant group for Type/Issue filters and Computer/evidence
-  drilldowns; keep the general queue collapsed.
-- Remove duplicate group-navigation cards and duplicate table group headers.
-- Ensure sorting cannot hide rows or remove expansion controls.
-
-Exit: all nonempty groups remain discoverable regardless of finding volume.
-
-### WP7 - Make table filtering and sorting dataset-wide
-
-- Keep scope filters above the table; put value filters under the corresponding
-  headers for Severity, Finding, Subject, Evidence, Context, Status, and date.
-- Provide Apply and **Clear**; Clear removes all `table_*` parameters while
-  preserving scope filters.
-- Filter and sort the complete selected group before pagination.
-- Use database-backed expressions and deterministic ID ordering; do not sort
-  only one page or materialize the whole queue with per-row queries.
-- Bulk-load identity candidates, source links, device context, and assessments.
-- Make filtered counts, pagination, HTML, and CSV share one query contract.
-
-Exit: behavior remains correct beyond 500 rows, totals match rows, and Clear
-works.
-
-### WP8 - Hide internals and complete admin diagnostics
-
-Remove from operator HTML and CSV:
-
-- assessment disposition;
-- policy/taxonomy version and digest;
-- participant or device scope internals;
-- rule names, internal blockers, and policy reasoning;
-- reevaluation keys and coverage implementation details.
-
-The administrator-only Conditions/Platform Health surface retains:
-
-- condition key and finding ID;
-- policy version and digest validity;
-- participants and scopes;
-- raw disposition, rules, blockers, and reasoning;
-- producer, assessment age, and coverage;
-- retained/fresh/missing counts for all 53 conditions; and
-- links to the operator finding and relevant evidence.
-
-Exit: operators see concise state and evidence; administrators retain complete
-auditability.
-
-## Required regressions
-
-- Sorting must not suppress headers while leaving rows hidden.
-- Clear must remove every `table_*` parameter.
-- Table filters must update matching totals.
-- Nonempty Categories must not appear empty because cards count only actionable
-  work.
-- Software Decisions must not inflate Issues.
-- Static string-presence tests are insufficient; request/behavior tests are
-  required.
-
-## Expected files
-
-- `operations/apps/core/views.py`
-- `operations/templates/findings_queue.html`
-- `operations/apps/core/conditions/live.py` or a focused projection module
-- `operations/apps/core/tests/test_findings_queue.py`
-- condition/evaluator producers and tests identified by WP3
-- `ingest/evaluator.py` and source-specific producers where required
-- admin condition-health views/templates/tests
-- an Operations decision record for the durable state/count contract
-- root `VERSION` and `CHANGELOG.md` only for an approved release
-
-Do not add a migration unless a durable schema or measured index need is
-demonstrated. Any migration requires explicit review before push/deployment.
-
-## Validation
-
-- Behavioral tests for Status/Attention mapping and short reasons.
-- Conservation tests for all five unresolved states.
-- Complete 5-Category/34-Type/53-Issue coverage.
-- A greater-than-500-row fixture proving every group header remains visible.
-- Dataset-wide sorting, filtering, pagination, and Clear behavior.
-- Software Decisions exclusion and no double counting.
-- HTML/CSV proof that operator surfaces contain no engine internals.
-- Admin permission and diagnostic coverage tests.
-- Producer reconciliation tests, including unhealthy-source and zero-emission
-  recovery cases.
-- Query-count checks and representative PostgreSQL performance review.
-- `manage.py check`, migration drift/plan review, targeted Ruff/compilation,
-  focused Operations and ingest tests, and `git diff --check`.
-- Read-only production reconciliation after deployment: card conservation,
-  Category/Type totals, assessment coverage, links/CSVs, and service health.
-
-## Out of scope
-
-- Renaming internal condition keys or changing the approved taxonomy.
-- Deleting or rewriting retained or resolved findings.
-- Changing severity predicates merely to improve displayed counts.
-- A general operator policy/rule editor.
-- Production jobs, activation, migrations, deployment, commit, or push without
-  their separately required authorization.
-
-## Checkpoint and next action
-
-The operator vocabulary, count contract, and target information architecture
-are approved in this plan. Local implementation is complete from `120d641`.
-
-Implemented locally so far: the shared operator Status/Attention/reason
-projection; six conserved Issues summary cards; retained unresolved findings
-visible by default; primary and secondary filters; dataset-wide column Clear;
-complete Category/Type navigation before row pagination; operator-safe row
-and CSV state; Software Decisions exclusion/link routing; and administrator
-fresh-assessment coverage counts. The administrator coverage query now keys
-retained rows by condition_key and links each condition to its filtered Issues
-view. Evaluator coverage records measured platform and servicing scopes, uses
-Ready signals for measured evidence, and writes fresh recovery assessments
-before resolving absent findings. ADR-0023 records the durable operator
-state/count contract. The operator vocabulary is now Pending (not Awaiting
-data), and group headers expose Needs action, Blocked, and Pending counts with
-visible per-state controls. Blocked and Pending rows expose a concise reason,
-owner, and safe next-step link where one is available.
-Critical-priority blocking is also implemented per the approved rule: an
-active Critical finding in Needs action blocks only Medium, Low, and
-Informational findings sharing its canonical subject or participant; High,
-Paused, Pending, resolved, and already Blocked Critical findings do not block.
-Generic absent-result recovery no longer manufactures positive evidence;
-clearing remains dependent on producer-specific current recovery authority.
-Rendered labels are authoritative for selected-group sorting. The database
-Evidence and Context projections now cover the complete operator-visible text,
-including servicing, identity, Hudu, platform, software, and offline paths.
-The Identity subject projection uses the renderer's canonical-hostname
-selection. Database filters, HTML ordering/pagination, and CSV use that shared
-selected-scope ordering contract. PostgreSQL execution plans and cardinality
-remain to be measured against the deployed data.
-
-The Critical-priority projection is also enforced at operator Hudu action
-queueing, notification candidate selection, and notification send-time
-rechecks. Participant coverage and administrator coverage compare exact
-participant identity sets, excluding context participants.
-
-Validation: the focused Issues queue suite passes (37 tests); the full
-Operations suite passes (172 tests, 2 opt-in PostgreSQL tests skipped); Django
-checks, migration-drift checks, Python compilation, targeted Ruff checks, and
-`git diff --check` pass.
-`httpx==0.27.2` is now installed locally and the full ingest suite passes
-(246 passed, 57 skipped). The hardcoded-domain ratchet now documents the
-operator vocabulary and pre-existing dispatch definitions; the software
-read-model test now stubs the catalog projection introduced by its current
-implementation. The latest Pending terminology, conservative visibility, and
-Critical-priority corrections add focused queue coverage, and the Operations
-suite remains at 172 passed with two PostgreSQL tests skipped.
-
-Deployment verification on 2026-09-22: commit `d0ea05f` was pushed to both
-remotes; the Operations `/healthz` endpoint returned HTTP 200; the Operations,
-ingest, Postgres, and Metabase containers reported healthy; and all Django
-migrations reported applied. The first shell query incorrectly returned zero
-tenant rows because it omitted the required `operations.tenant_id` session
-context. A corrected read-only query under tenant 1 found 24,548 open and
-445,919 resolved Findings, 6,491 current-taxonomy assessments, successful
-recent source/evaluator runs, and 4,229 complete observation snapshots.
-
-Production reconciliation classified all 22,749 governed open Findings
-exactly once: 2,213 Needs action, 184 Blocked, and 20,352 Pending; 1,799
-Software decisions remain separate. It also exposed an O(n²) Critical-priority
-scan in the shared operator-state projection. The current local follow-up
-indexes rows by ID, reuses the selected projection for unfiltered fleet cards,
-and adds regression coverage. The first authenticated HTML smoke test also
-found a missing outer `{% endif %}` in `findings_queue.html`; the first CSV
-smoke test found unescaped `%` literals in a psycopg RawSQL expression. Both
-are corrected locally and covered by focused tests.
-
-Commit `82674f5` pushed the performance, template, and percent-literal
-corrections. Its authenticated smoke run found one additional RawSQL issue:
-PostgreSQL gives `||` higher precedence than `->>`, so every JSON-text
-extraction used as a concatenation operand must be parenthesized. The current
-local follow-up makes that correction across the Evidence projection and adds
-a regression test. Validation: 41 focused Issues tests pass; Django checks,
-migration-drift checks, Python compilation, targeted Ruff, and `git diff
---check` pass. No migration or production data mutation is required.
-
-Commit `ccfe5b5` pushed the RawSQL precedence correction to both remotes.
-After the automatic update, an authenticated read-only production HTML request
-returned HTTP 200 in 21.83 seconds. A scoped authenticated CSV export returned
-HTTP 200 in 16.414 seconds with the expected operator-facing columns and no
-engine-internal columns. A full-fleet CSV export did not complete within four
-minutes and was interrupted without any data mutation. This proves the page,
-template, and scoped CSV are correct, but full-export performance remains a
-separate follow-up.
-
-Local full-export optimization is complete: database annotations are now added
-only for requested column filters, rather than selecting every expensive
-rendered expression for every exported row, and `format=csv` returns before
-page-only affected-device summaries and collapsed-group aggregation. Sorting,
-column-filter, and CSV label contracts remain unchanged. Focused validation is
-41 tests passing with Django checks, migration-drift checks, compilation,
-targeted Ruff, and `git diff --check` passing.
-
-Commit `7c3dd75` pushed the full-fleet CSV optimization to both remotes. The
-authenticated read-only production export completed successfully in 40.188
-seconds for 22,749 rows, with the expected operator-facing headers and no
-engine-internal columns. This replaces the prior export that did not complete
-within four minutes. The default authenticated HTML request remains successful
-at 21.83 seconds. No migration or production data mutation was required.
-
-The full CSV export is now within an acceptable interactive-export window, but
-the default Issues page still spends 21.83 seconds evaluating every retained
-finding state solely to populate fleet cards and collapsed Type headers. The
-next scope is to replace that full per-finding projection on the unopened
-default page with aggregate state counts, while retaining exact per-finding
-Critical-priority evaluation for opened groups, filtering, and exports. No
-migration is in scope.
-
-The current local performance correction preserves the exact state model more
-directly: a Finding with no current non-context assessment is necessarily
-Pending, so the participant-completeness query now runs only for current
-assessment candidates. Production has 4,807 such candidates among 24,549
-active Findings; 19,742 are direct Pending rows. Focused validation passes
-(41 tests, Django checks, migration-drift checks, compilation, targeted Ruff,
-and `git diff --check`). Next action: commit/push this correction and measure
-the default authenticated Issues-page latency on production.
-
-Follow-up local fixes: Categories are collapsed by default and reopen for the
-selected drilldown; filtered database pages now replace their raw Finding
-objects with the enriched display rows before template rendering. The latter
-fixes the reproduced `NoReverseMatch` 500 from Type and column-filter requests
-whose action controls received an empty Finding ID. The default collapsed queue
-also no longer expands the complete Finding population through the expensive
-software-exposure view merely to calculate a rollup it does not display; opened
-Types and the explicit device CSV retain the full affected-Computer rollup.
-Next action: validate the complete correction, commit/push it, and rerun the
-authenticated production timing plus Type and column-filter smoke tests.
-
-Focused validation now passes: 44 Issues queue tests, Django checks,
-migration-drift checks, targeted Ruff, Python compilation, and `git diff
---check`. The Type navigation header is explicitly kept on one line. No
-migration or production data mutation is in scope. Next action: commit/push
-the corrected default queue, then run the authenticated production smoke tests.
-The Work status column now uses one human-facing state (Needs action, Blocked,
-Pending, Paused, or the lifecycle fallback) rather than a generic status plus
-a redundant explanation. A note remains only when it adds information, and the
-CSV uses the same Work status/Note contract. Expanded Type state links are
-stacked on separate lines for scanning. Each Type header and its expanded state
-links are one grid item, preventing an expanded list from taking a neighboring
-Type's grid cell; the header keeps only shown/unresolved totals because the
-expanded list carries state totals. Next action: validate this display
-correction together with the queue performance changes before commit.
-Filtered active queues now reuse the one exact fleet-state projection for the
-unfiltered summary cards; previously they recalculated the complete state model
-for both the selected Type and the fleet. Resolved-history scopes still receive
-their own projection because they are not a subset of the active fleet. Next
-action: validate the consolidated queue correction locally and in production.
-The affected-Computer rollup now runs only for the explicit device CSV. It is
-not needed to render the normal Issues table and previously added 6.4 seconds
-to selected-Type browsing through the fleet-wide software-exposure view. Next
-action: validate filtered identity review latency and the former column-filter
-500.
-For a selected single-condition Type or individual Issue, the default Group
-sort now uses the stable ID tie-breaker directly because every displayed Group
-and Issue label is equal; it avoids evaluating the expensive rendered-issue
-SQL merely to compare identical labels. Next action: validate that Type
-drilldown and the evidence column filter in production.
-Production verification complete on 2026-09-22: the default queue returned
-HTTP 200 in 13.879 seconds; the identity-review Type returned HTTP 200 in
-16.358 seconds; and the same Type with the Evidence column filter returned
-HTTP 200 in 11.378 seconds. The latter two requests previously exceeded the
-30-second probe window, and the filtered-page `NoReverseMatch` 500 no longer
-occurs. The running Operations container is healthy and includes commit
-`1ac4033`. Local validation for the final corrections: 48 focused Issues tests,
-Django checks, migration-drift checks, targeted Ruff, compilation, and diff
-checks all pass. The plan checkpoint is complete; this record remains local to
-avoid a documentation-only deploy commit.
-Pause only for a material product decision, conflicting user work, migration
-approval, production mutation, or separate commit/push authorization.
-
-Status-message clarity correction in progress. Scope: the Issues work-status
-cell and Patching policy-state labels. Decision: Pending means no operator can
-act until current information arrives; it must not name “Automatic
-reevaluation” as an owner. Status cells will show a short plain-language note
-and, only where useful, one clear next action. Patching will define In scope,
-Excluded, and Not managed where operators see their counts. Validation: focused
-queue/patching tests, Django checks, and template rendering checks. Next action:
-update the centralized guidance and patching copy.
-
-Implemented locally: Pending now states “Waiting for current information” and
-“Checked automatically when information updates,” with no fictitious automatic
-owner. Source, patch, and reporting routes name the responsible team and use
-short “Check …” actions. Patching scope tiles and their help text now define
-In scope (patching expected), Excluded (do not patch), and Not managed (no
-patch service). Next action: run focused validation and inspect every rendered
-status-message branch.
-
-Patching workflow clarity correction implemented locally. The five work items
-are now labeled by operator outcome: No patch installed yet, No recent patch
-activity, Restart required, Update repeatedly failing, and Approved updates
-not installed. Each Patching card includes a short next action; the last is
-explicitly marked client-level. Detail text and dashboard/client summaries use
-the same vocabulary. Next action: add focused label/rendering coverage and
-validate.
-
-Manual Computer retirement in progress. Scope: make the existing audited
-retirement operation visibly available from every non-retired Computer's
-Source records section to users with `operations.manage_lifecycle`; do not
-require a lifecycle finding or `pending_cleanup` status. Keep the required
-reason, confirmation, permission boundary, tenant scoping, evidence retention,
-and existing restore path. No migration, source mutation, or automatic
-lifecycle-policy change is in scope. Implemented locally: the Source records
-section now shows a Manual retirement control for every non-retired Computer
-to authorized operators; the existing post action remains the enforcement and
-audit boundary. `git diff --check` passes. Container-based validation is not
-available because the local Compose stack is stopped. Workstation Django checks
-cannot run under its Python 3.14 environment because `shared` is absent from
-its import path; the template-only Ruff invocation is inapplicable. Next
-action: validate with the supported Operations environment, then obtain
-separate commit and push approval.
-
-Issue workflow correction in progress. Scope: every operator-visible Issue
-gets a direct, one-click investigation destination from its queue row. Use
-the existing Computer, client, software, patch evidence, source health, merge,
-and Hudu surfaces where they are authoritative; provide a consistent
-operator-facing finding review fallback where a specialized surface does not
-exist. Keep the current row controls and bulk acknowledge, resolve, snooze,
-retire, and Hudu archive actions. Do not expose engine internals, weaken
-permissions, or add a schema migration. Implemented locally: every row now
-has a direct Review action. The review page uses the safe existing evidence
-summary and gives direct destinations for Computer/source records, client,
-software, client-scoped patch evidence, Hudu records, duplicate Computers, or
-source health; a source-health fallback keeps platform-level Issues reviewable.
-The existing per-row and bulk actions remain available. Validation: focused
-Issues tests pass (52), Django checks pass, all three changed templates load,
-Python compilation passes, and `git diff --check` passes. Next action: obtain
-separate commit and push approval; no migration or deployment action is in
-scope.
-
-Release preparation complete: VERSION and CHANGELOG are `0.126.2`; no migration
-is included. The validated workflow, status-copy, patching, and manual
-retirement changes are one operator-workflow release. Next action: commit and
-push the approved release without a manual redeploy.
-
-Issue action simplification in progress. Goal: make the Issues queue a review
-surface rather than an alert console. Scope: rename the column to Status; keep
-only its short state and one useful explanatory line; remove acknowledgement
-and manual resolution from row and bulk controls; replace the More expander
-with consistent direct Review, Pause, Exclude, and applicable specialized
-actions; and render historic acknowledged findings as Open in the operator
-queue without changing their audit history. Refresh is deliberately out of
-scope until an authenticated, safe, issue-scoped collection operation exists:
-the current ingest endpoints either start a whole source or require an
-ingest-specific scope selector. Exclude remains an explicit operator override
-and must retain a reason. No migration, source mutation, or deployment is in
-scope. The operator requires Refresh, so add an authenticated Operations
-endpoint that queues the existing Ninja software demand run for exactly the
-finding's linked Computer; do not make a broad source run look scoped. Show it
-only where a current Ninja device link exists. Validation: focused queue tests,
-Django checks, template rendering, compilation, and diff check. Next action:
-implement the queue, action, and scoped refresh contract locally.
-
-Implemented locally: Status replaces Work status and contains only the state,
-one useful detail, and a pause date. Acknowledged persisted findings render as
-Open in Issues while their audit history remains unchanged. Row and bulk
-controls now use one compact control style with no More expander; review,
-Pause, Exclude (reason required), Keep separate, Hudu archive, and Refresh are
-direct actions. Refresh is an authenticated Operations endpoint that resolves
-only a current Ninja-linked Computer and queues the existing `id=<ninja-id>`
-software demand run; it is unavailable for every other Issue, rather than
-claiming to refresh information it cannot collect. The dedicated Review page
-is investigation-only and no longer reintroduces acknowledgement or manual
-resolution. Validation passed: 53
-focused Issues tests, Django checks, both changed templates loaded, Python
-compilation, scoped import lint, and diff check. The full Ruff run remains
-blocked by 65 pre-existing violations in `apps/core/views.py`. Next action:
-release the approved `0.126.3` operator-workflow change; no migration is
-included.
-
-Targeted refresh and action-density correction in progress. Scope: give every
-Pending Issue the narrowest truthful Refresh action available (Computer data,
-specific source data, or reevaluation only when it can act on current
-evidence), keep its result explicit, reduce row controls to the table's visual
-scale, and keep Subject links pointed at the authoritative Computer, client,
-software, or source review surface. Do not present a fleet-wide collection as
-a Computer refresh or change source-derived state from Operations. No schema
-change or production action is in scope. Validation: focused queue tests,
-Django checks, template rendering, compilation, and diff check. Next action:
-map Pending subjects and existing collector/evaluator endpoints to safe
-targets.
-
-Implemented locally: Pending rows now expose Refresh through one shared
-dispatch path. It selects the narrowest available operation: current
-Ninja-linked Computer software data, the registered source named by the
-finding's evidence, or platform reevaluation when only already-collected
-evidence can be checked. Source-bound Subjects now link directly to Source
-health. The Actions column uses a compact fixed-width, single-line control
-set sized to the table row. Jobs now links to Targeted refresh, where an
-operator can search and select a Computer, choose a source, or request an
-explicit reevaluation; it calls the same functions as the Issue action. No
-schema change or production action was performed. Validation: focused queue
-tests, Django checks, template loading, compilation, and diff check pass.
-Next action: review the local behavior and obtain separate commit/push
-authorization.
-
-Main-table information-density correction complete locally. Finding remains the
-issue and Subject remains its affected object; condition-specific evidence and
-source/lifecycle timestamps are merged into Context, with no separate Evidence
-or Evidence date columns or controls. CSV and visible table filtering/sorting
-use the same merged Context contract. No schema, source, or production change
-is in scope. Validation: 55 focused queue tests, Django checks, template
-loading, compilation, import-order lint, and diff check pass. Next action:
-obtain separate commit and push authorization if the local change is approved.
-
-Fleet-summary card refinement complete locally. The unfiltered Issues summary
-now reuses the shared compact tile pattern: blue for neutral totals and
-software decisions, red for Needs action, amber for Blocked, yellow for
-Pending, and gray for Paused. Counts and destinations are unchanged. No
-schema, query, source, or production change is in scope. Validation: 55
-focused queue tests, Django checks, template loading, and diff check pass.
-Next action: obtain separate commit and push authorization if the local change
-is approved.
-
-Category-first Issues navigation complete locally. Opening a top-level
-Category selects it and displays its paginated rows immediately. Type is a
-subtle in-place refinement only when more than one populated Type exists; its
-count is the direct filter link. Category summaries show only useful nonzero
-state counts, and a single-state Type has no redundant state chooser. The
-redundant top and table-result headings are removed. Counts use the same
-filtered queryset as the displayed queue. No schema, source, or production
-change is in scope. Validation: 55 focused queue tests, Django checks,
-template loading, compilation, and diff check pass. Next action: obtain
-separate commit and push authorization if the local change is approved.
-
-Patching-inactive wording correction complete locally. The immutable
-`conditions-taxonomy-5` policy version changes the stable Issue label from
-`Patch activity overdue` to `Patching inactive`; the Issues queue appends the
-latest patch-evidence age as `(Xd)`, or the configured threshold as `(Xd+)`
-when that evidence has no timestamp. Migration 0177 creates the version
-inactive, preserving governed review and activation. Validation: 56 focused
-queue tests, policy payload digest, migration autodetection, Django checks,
-and diff check pass. Next action: commit/push if approved; deploy migration
-and activate only through the governed Operations policy workflow.
+| Killing a process leaves partial external or database work | Only terminate reviewed kill-safe handlers; all others require cooperative checkpoints and manual recovery. |
+| Duplicate work after restart or scheduler race | Durable idempotency keys, advisory leader lock, resource claims, and unique active scopes. |
+| One slow job blocks all work | Independent lane workers plus resource-specific limits; use measured capacity rather than global thread count. |
+| UI says success without evidence | Completion is written only by the worker after the handler returns a declared result; direct `run_log` is evidence, never lifecycle authority. |
+| Source-specific semantics are lost | Keep source/action queues as domain tables and link them to Job runs instead of flattening payloads. |
+| Legacy bridge creates no-op noise | Capability-gate it; disabled work does not schedule or expose a run button. |
+| Large migration breaks deployed queue | Additive migrations, compatibility readers, factual-only backfills, dual-read observation, and later cleanup. |
+
+## Files expected to change
+
+- New shared registry/contract module and tests under `shared/`.
+- `ingest/main.py`, a new scheduler/worker entry point, queue dispatcher,
+  source-demand and source-action adapters, config, and ingest tests.
+- `operations/apps/core/views.py`, models/migrations, Jobs/Admin Health APIs,
+  templates, URLs, permissions, and Operations tests.
+- `docker-compose.yml`, ingest Docker entry point/packaging, and operational
+  documentation/runbooks.
+- `operations/docs/decisions/0024-...`, `operations/docs/architecture.md`,
+  `operations/docs/runbooks/`, root `VERSION`, and `CHANGELOG.md` when a
+  reviewed implementation release is prepared.
+
+## Handoff instructions
+
+Work packages are sequential gates. The implementation agent must continue to
+the next approved work package without pausing after routine edits, tests, or
+documentation updates. Pause only for a genuine product decision, a reviewed
+migration/production approval boundary, a safety conflict, or a failed
+validation that cannot be resolved within the package. Keep this plan current
+with confirmed decisions, completed package exits, validation, and the next
+action; do not turn it into a transcript.
+
+## Current checkpoint and next action
+
+Repository baseline `e6bc64b`, branch `master`. The plan is modified. Task
+artifacts under `shared/`, Operations tests, Operations `.work/`, and the two
+ADR-0024 documents remain untracked, not checked in. Unrelated root
+`.work/probe_*` and bootstrap files remain untouched. No runtime code,
+schema, Compose, or deployment changes occurred in the drafting phase.
+
+The machine-checked inventory is now schema version 2. It scans executable
+Python under `ingest/` and `operations/apps/`, excluding tests, migrations,
+comments, and docstrings. It records 33 scheduler registrations, 49 route
+literals, 34 direct threads, 30 catalog/dispatcher keys, 16 `run_log` calls,
+seven qualified queue relations, 17 relation consumers, six direct run-log
+writers, startup calls, and follow-up/admission calls. Four focused tests pass,
+including independent synthetic source additions and category omission checks.
+It still cannot prove configuration-dependent dispatch, transitive SQL writes,
+external callers, handler retry/kill safety, or runtime result correctness.
+`jobs-handler-audit.md` records those explicit unknowns and the found
+partial-success/wrapper hazards. The measurement artifact remains partial as
+previously recorded. Source queues lack tenant columns; source-action migration
+0160 has a tenant column but no RLS. DESIGN section 5's automatic stale
+reset/retry conflicts with the proposed execution containment policy.
+
+Prepared `operations/docs/decisions/0024-unified-jobs-execution-contract.md`
+and `0024-unified-jobs-migration-design.md`. They define proposed request and
+coalescing identities, snapshots, durable schedules, dependency revisions,
+resource containment, worker fencing, domain attempt links, RLS/grants,
+read compatibility, cutover, and rollback requirements. DESIGN section 5's
+retry/reset policy is explicitly called out for proposed supersession.
+
+Prepared `operations/.work/jobs-schema-preparation.sql` and its review note.
+This is exact, rollback-terminated, inert M1/M2 preparation SQL outside the
+migration graph: it adds no runtime grants, enables no schedules, and rejects
+all nonlegacy contract versions. It covers immutable definition snapshots,
+same-tenant request/schedule/tick references, tenant-1 RLS for new tenant
+tables, and factual-only preflight checks. It does not provide the later
+resource/dependency/domain-link/transition/worker migration set, role audit,
+or activation; it has not been executed.
+
+Prepared `operations/.work/jobs-topology-review.md`. The current ingest image
+already packages `shared/` and all of `ingest/`, so a future worker module can
+use the same image. The current `ingest.main` command cannot be copied as a
+worker because it also starts HTTP, schedules, migrations, catch-up, and
+bootstrap. A future worker must override its command and inherited HTTP
+healthcheck. No replica/capacity/connection numbers were selected.
+
+Added `operations/.work/jobs-measure.sql`: aggregate-only, repeatable-read,
+read-only, statement/lock timeouts, stop-on-error, and rollback. Its interrupted
+invocation returned initial status and zero active duplicate groups only.
+The local tool session is unavailable; remote completion was not verified.
+No new complete measurement result is claimed. The report corrects omitted
+NVD/OTX/KEV/retention samples and identifies remaining evidence limitations.
+
+Validation is intentionally light per the user's request: source review
+against ADR-0012, glossary, DESIGN, queue migrations, current handlers,
+Dockerfiles, and entrypoints, plus document-reference and whitespace checks.
+No broad test suite, migration execution, or worker exercise was performed.
+Focused validation: `pytest apps/core/tests/test_jobs_inventory.py -q` (4
+passed), Ruff check/format of that test, Python compile of it, schema-draft
+inert/RLS/preparation-constraint static guards, and `git diff --check`.
+The inventory checks do not prove tenant isolation or failure recovery. The
+earlier missing-`apscheduler` test limitation remains.
+
+The user approved retaining tenant-1 execution initially, requiring
+workflow-root completion after required children, and a quiesced cutover with
+uncertain work reconciled manually. These are design choices, not migration
+or deployment approval. The user approved the step 1.2 architecture and the
+reviewed inert M1/M2 migration scope on 2026-09-24. That approval covers the
+ADR/migration design, handler audit, preparation SQL/review note, and worker
+topology review. It does not authorize executing a migration, enabling a
+schedule, adding workers, changing Compose, deployment, or choosing capacities.
+Resource/dependency/domain-link enforcement remains specified but intentionally
+deferred to later additive migrations. Step 2.1 is complete: added
+`shared/jobs_registry.py`, a standard-library-only registry of all 30 current
+durable operator-queue definitions and their current catalog/lane/capability/
+schedule metadata. Operations builds its static catalog and lane lookup from
+the registry; ingest uses it for lane lookup and validates independent handler
+and scheduled-key sets before readiness. Capability labels retain the legacy
+bridge wording and expose the same disabled state for Intel, notifications,
+and software-queue definitions. Resource keys remain empty and retry/kill
+metadata explicitly says unreviewed; no metadata is treated as enforcement.
+
+`test_jobs_registry.py` proves registry/catalog/handler/scheduler parity and
+rejection of missing, duplicate, and unregistered keys. The machine inventory
+continues to verify source-derived catalog/handler coverage after the catalog
+moved to `shared/`. Focused validation passed: Python compile; Ruff for the
+new/shared tests and registry; import-order review of `views.py`; and
+`pytest apps/core/tests/test_jobs_inventory.py apps/core/tests/test_jobs_registry.py
+apps/core/tests/test_operator_jobs.py -q` (12 passed). Full Ruff remains out
+of scope and reports pre-existing diagnostics in the large views/main/queue
+modules; no broad suite was run. `git diff --check` passed.
+
+Step 2.2 began on Astra High. Added Operations migration 0183,
+`jobs_contract_preparation`, implementing the approved inert M1/M2 storage:
+immutable global definition snapshots; nullable generic Job-run fields and
+same-tenant references; request, schedule, and schedule-event tables; forced
+tenant-1 RLS; no runtime table/function grants; and checks that permit only
+legacy contract version 0 and disabled schedules. It is intentionally
+irreversible rather than dropping potential retained ledger history. Added
+focused static migration checks. Python compilation and the Jobs focused suite
+passed (14 tests); Docker Compose configuration parses with only its existing
+obsolete-`version` warning. Local `psql` is unavailable, so no PostgreSQL DDL
+or migration execution was performed. No database, deployment, worker, or
+Compose state changed.
+
+The user then approved the narrow follow-on activation scope: version-1 Job
+admission, enabled schedule state, and explicit `EXECUTE` grants only for
+constrained request/coalescing and scheduler-leader APIs. Added Operations
+migration 0184, `jobs_admission_and_schedule_apis`. It replaces only the two
+preparation guards, adds immutable definition registration, tenant-context
+checked request/admission, schedule leader acquire/release, and due-schedule
+claim APIs, and grants no direct table access. The request API rejects missing
+snapshots, cross-tenant actors, malformed/null inputs, and top-level sensitive
+payload keys; it preserves the legacy active-row compatibility fence and
+requires conflicting legacy or differently scoped active work to drain.
+Schedule claims lock their schedule row and record a single configuration/due
+tick event. No schedule rows were seeded or enabled, no definition snapshots
+were registered, and no caller was switched to these APIs. Existing version-0
+writers remain unchanged for compatibility pending their family migrations;
+the current cross-key Software supersession writer cannot be replaced until
+the Step 2.3 declarative supersession API exists.
+
+Focused static validation now passes: Python compilation, targeted Ruff
+(`E`, `F`, `I`) for migrations/tests, and 17 Jobs migration/registry/queue
+tests. `git diff --check` passes (with only existing LF-to-CRLF warnings).
+Local `psql` remains unavailable, so neither migration nor a synthetic
+PostgreSQL concurrency/RLS test was run. No database, deployment, worker, or
+Compose state changed. The user directed that existing version-0 writers stay
+through Step 2.3 rather than adding an interim cross-key supersession policy.
+Accordingly, the Step 2.2 raw-writer exit means no direct table write may
+create a converted version-1 Job; legacy version-0 writers are explicit
+compatibility paths, not converted Jobs. Step 2.3 owns their replacement by
+the reviewed declarative supersession API.
+
+The Step 2.3 inspection found a plan gap: Step 1.1/1.2 did not close numeric
+capacity, resource mapping, priority-aging, or production dependency policy.
+The measurements remained partial, `resource_keys` were intentionally empty,
+and the topology review explicitly selected no process/connection budget.
+Added Step 2.2a and `operations/.work/jobs-resource-policy-review.md` as a
+separate approval package. It proposes the evidence-preserving initial ceiling
+of two total executions and one per lane, broad tenant-state exclusion, known
+global Intel/software-catalog resources, five-minute priority aging capped at
+100, generic dependency machinery with no production edges before Step 5.1,
+and only the existing Software classifier supersession ordering. These are
+proposals, not accepted decisions or active registry values. The user approved
+the complete Step 2.2a package on 2026-09-24. Its initial limits, resource
+mapping, priority aging, generic-only dependency boundary, and Software-only
+supersession policy are now approved Step 2.3 inputs. Current next action:
+implement additive enforcement schema and constrained APIs; do not convert
+existing version-0 producers or execute any migration.
+
+Step 2.3 implementation has started with migration 0185,
+`jobs_claims_and_dependencies`. It adds tenant-scoped lane limits, claim and
+dependency storage, policy-revision values, RLS and revokes, and restricted
+ingest-only v1 claim/release/dependency APIs. Claims lock every required
+resource in sorted identity order, preserve the approved two-slot deployment
+limit and one-per-lane limit, use the approved five-minute aging formula, and
+create no partial claim when capacity is unavailable. Dependencies reject
+cross-version/cycle input, block claim until released, and require a completed
+prerequisite to publish the exact output revision. The shared registry now
+records the approved resource templates, initial limits, and Software ranks,
+but no legacy producer consumes them.
+
+Focused validation passed: Python compilation; targeted Ruff (`E`, `F`, `I`)
+for the registry, 0185, and their tests; and 21 focused Jobs migration,
+registry, inventory, and queue tests. `git diff --check` passes with only the
+existing LF-to-CRLF warnings. Local PostgreSQL remains unavailable, so these
+SQL functions have not been executed and concurrency/RLS behavior is not
+proven. Current next action: add the converted Software admission API that
+uses the approved ranks atomically; retain existing version-0 admission until
+the later family conversion.
+
+Migration 0186, `jobs_software_supersession`, completes the declared
+Software-only cross-key admission path for converted v1 Jobs. During its
+implementation, the existing request-to-run composite FK was found to require
+the request and resolved run to share a definition/digest/scope, contradicting
+the approved broader-Software alias behavior. 0186 replaces only that FK with
+a same-tenant run reference; request rows retain their own immutable requested
+definition, digest, scope, input, and identity. Its restricted API validates
+the definition snapshot's declared Software family/rank, serializes the family
+with an advisory lock, aliases an equal-or-broader active run, cancels only
+queued narrower v1 runs with durable events, and never stops running work. It
+then delegates ordinary new-run admission to the constrained 0184 API. The
+registry now records `software-classifier` family metadata for the three
+approved modes. No existing version-0 writer invokes this API.
+
+Focused validation now passes: Python compilation, targeted Ruff (`E`, `F`,
+`I`) for touched registry/migrations/tests, and 23 focused Jobs migration,
+registry, inventory, and queue tests. `git diff --check` passes with existing
+LF-to-CRLF warnings only. Local PostgreSQL is still unavailable, so 0185/0186
+SQL has not run and their lock, RLS, FK-discovery, and concurrency behavior is
+not locally proven. Current next action: run the required small synthetic
+PostgreSQL claim/contention/dependency/supersession checks when a local test
+database is available; do not proceed to worker topology or convert a family
+until that Step 2.3 safety validation is evidenced.

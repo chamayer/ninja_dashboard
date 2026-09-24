@@ -70,8 +70,8 @@ def test_jobs_status_uses_operator_language_and_safe_controls():
     assert "admin_job_retry" in urls
     assert "queued_job_status" in views
     assert "operator_job_runs" in views
-    assert "legacy_bridge" in views
-    assert "Disabled — legacy bridge is not enabled." in views
+    assert "capability_state" in views
+    assert "disabled_reason" in views
     assert "The durable Jobs queue is the history authority" in views
     assert "No recorded run yet" in jobs_template
     assert "No run available" in jobs_template

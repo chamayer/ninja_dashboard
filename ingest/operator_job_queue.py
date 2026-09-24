@@ -14,6 +14,7 @@ from typing import Any
 from psycopg_pool import PoolTimeout
 
 from ingest import db
+from shared.jobs_registry import definition, validate_registry
 
 log = logging.getLogger(__name__)
 
@@ -21,20 +22,6 @@ _TABLE = "operations.operator_job_runs"
 _LEASE_MINUTES = 90
 _HEARTBEAT_SECONDS = 30
 _WORKER_CAPACITY = threading.BoundedSemaphore(2)
-
-_JOB_LANES = {
-    "patches": "collection",
-    "agent-observations": "collection",
-    "documentation-observations": "collection",
-    "notifications-dispatch": "service",
-    "notifications-digest": "service",
-    "retention-history": "service",
-    "software-enqueue-orgs": "service",
-    "software-queue-drain": "collection",
-    "software-classify": "software",
-    "software-classify-only": "software",
-    "software-classify-full": "software",
-}
 
 _SOFTWARE_CLASSIFIER_JOBS = (
     "software-classify",
@@ -47,12 +34,26 @@ _SOFTWARE_JOB_PRIORITY = {
     "software-classify": 3,
 }
 
+# Keep this independent from the registry so an omitted or extra dispatcher
+# handler prevents readiness instead of becoming an unreviewed live path.
+EXECUTABLE_JOB_KEYS = frozenset(
+    {
+        "patch-classify", "platform-evaluate", "parity-check", "software-classify-only",
+        "software-classify-full", "resolver", "patches", "agent-observations",
+        "documentation-observations", "agent-compliance", "agent-compliance-evaluate",
+        "retention-history", "software-enqueue-orgs", "software-queue-drain",
+        "notifications-dispatch", "notifications-digest", "intel-nvd", "intel-cpe-dict",
+        "intel-kev", "intel-epss", "intel-matcher", "intel-winget", "intel-chocolatey",
+        "intel-capability", "intel-lolrmm", "intel-otx", "intel-abusech",
+        "intel-endoflife", "intel-category", "software-classify",
+    }
+)
+validate_registry(executable_keys=EXECUTABLE_JOB_KEYS)
+
 
 def lane_for(job_key: str) -> str:
     """Return the registered worker lane for a durable Jobs definition."""
-    if job_key.startswith("intel-"):
-        return "intelligence"
-    return _JOB_LANES.get(job_key, "evaluation")
+    return definition(job_key).lane
 
 
 WORKER_LANES = ("collection", "evaluation", "software", "intelligence", "service")

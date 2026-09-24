@@ -16,7 +16,19 @@ from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied
 from django.core.paginator import Paginator
 from django.db import IntegrityError, connection, transaction
-from django.db.models import Case, CharField, Count, F, Func, OuterRef, Prefetch, Q, Subquery, Value, When
+from django.db.models import (
+    Case,
+    CharField,
+    Count,
+    F,
+    Func,
+    OuterRef,
+    Prefetch,
+    Q,
+    Subquery,
+    Value,
+    When,
+)
 from django.db.models.expressions import RawSQL
 from django.db.models.functions import Cast, Coalesce, Concat
 from django.http import HttpRequest, HttpResponse, JsonResponse
@@ -26,6 +38,7 @@ from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 from django.utils.text import slugify
 from django.views.decorators.http import require_GET, require_POST
+from shared.jobs_registry import capability_state, catalog_entries, definition, validate_registry
 
 from . import capability as capability_evidence
 from . import category as category_evidence
@@ -258,6 +271,35 @@ def _issue_taxonomy() -> tuple[list[dict], dict[str, dict]]:
             }
         )
     return categories, type_groups
+
+
+def _operator_issue_taxonomy() -> tuple[list[dict], dict[str, dict]]:
+    """Return only finding types that the normal Issues queue can review."""
+    categories, groups = _issue_taxonomy()
+    visible_types = set(
+        FindingType.objects.filter(finding_class=FindingType.FindingClass.ENTITY)
+        .exclude(name__in=_SOFTWARE_POLICY_CANDIDATE_TYPES)
+        .values_list("name", flat=True)
+    )
+    operator_groups = {}
+    for key, group in groups.items():
+        types = group["types"] & visible_types
+        if not types:
+            continue
+        operator_groups[key] = {
+            **group,
+            "types": types,
+            "issues": tuple(issue for issue in group["issues"] if issue["value"] in types),
+            "legacy_types": group["legacy_types"],
+        }
+    operator_categories = []
+    for category in categories:
+        category_types = set().union(
+            *(group["types"] for group in operator_groups.values() if group["category"] == category["key"]),
+        ) if any(group["category"] == category["key"] for group in operator_groups.values()) else set()
+        if category_types:
+            operator_categories.append({**category, "types": category_types})
+    return operator_categories, operator_groups
 
 
 def _condition_assessment_display(row_kind: str, finding_ids) -> dict[str, dict]:
@@ -3553,7 +3595,7 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
     q_filter = (request.GET.get("q") or "").strip()
     profile = None
     try:
-        issue_categories, issue_type_groups = _issue_taxonomy()
+        issue_categories, issue_type_groups = _operator_issue_taxonomy()
         profile = load_active_profile()
         condition_policy_available = True
     except RuntimeError:
@@ -8037,46 +8079,8 @@ _INGEST_BASE_URL = os.environ.get("INGEST_BASE_URL", "http://ingest:8090")
 # keep the UI groupable; last-run status is looked up per-category with
 # a small helper query (intel jobs use intel_ingest_status; everything
 # else uses run_log).
-_JOB_CATALOG: list[dict] = [
-    # Source ingest — Ninja patch cycle. status_key is a LIKE prefix
-    # against run_log.kind so any per-instance source row surfaces.
-    {"id": "patches",            "name": "Ninja source cycle",   "category": "source ingest", "endpoint": "run/patches",   "status_key": "source.Ninja",         "status_source": "run_log_like",  "description": "Refresh computers, patches, and activity from Ninja."},
-    {"id": "agent-observations", "name": "Agent observations",   "category": "source ingest", "endpoint": "run/agents",    "status_key": "source.",              "status_source": "run_log_like",  "description": "Refresh agent records from connected security and support tools."},
-    {"id": "documentation-observations", "name": "Documentation observations", "category": "source ingest", "endpoint": "run/sources/enqueue", "status_key": "source.Hudu", "status_source": "run_log_like", "run_all": False, "description": "Refresh documentation records from Hudu."},
-    # Evaluators
-    {"id": "software-classify",  "name": "Software classifier (+ auto-intel)", "category": "evaluators", "endpoint": "run/software-classify", "status_key": "software_classifier", "status_source": "run_log", "description": "Refresh software intelligence, then update software findings."},
-    # Routine classifier work omits intel and reconciles only installations
-    # whose material state changed. It stays out of Run all because the full
-    # auto-intel path and full rebuild use the same classifier output.
-    {"id": "software-classify-only", "name": "Software classifier (no intel refresh)", "category": "evaluators", "endpoint": "run/software-classify-only", "status_key": "software_classifier", "status_source": "run_log", "run_all": False, "description": "Update changed software findings using intelligence already on hand."},
-    {"id": "software-classify-full", "name": "Software classifier (full rebuild)", "category": "evaluators", "endpoint": "", "status_key": "software_classifier", "status_source": "run_log", "run_all": False, "description": "Rebuild every software finding after a rule, decision, or intelligence-wide change."},
-    {"id": "patch-classify",     "name": "Patch classifier",     "category": "evaluators", "endpoint": "run/patch-classify",    "status_key": "patch_findings",   "status_source": "run_log", "description": "Update patch findings from current Ninja patch data."},
-    {"id": "platform-evaluate",  "name": "Platform evaluator",   "category": "evaluators", "endpoint": "run/platform-evaluate", "status_key": "platform_evaluator", "status_source": "run_log", "description": "Update computer, coverage, identity, and lifecycle findings."},
-    {"id": "resolver",           "name": "Identity resolver",    "category": "evaluators", "endpoint": "run/resolver",          "status_key": "identity_resolver", "status_source": "run_log", "description": "Match source records to the right computer."},
-    {"id": "parity-check",       "name": "Parity check",         "category": "evaluators", "endpoint": "run/parity-check",      "status_key": "parity_check",     "status_source": "run_log", "description": "Find gaps between collected data and Operations."},
-    {"id": "agent-compliance", "name": "Agent compliance", "category": "evaluators", "endpoint": "run/agent-compliance", "status_key": "agent_compliance", "status_source": "run_log", "run_all": False, "legacy_bridge": True, "description": "Refresh the legacy agent-compliance bridge when it is enabled."},
-    {"id": "agent-compliance-evaluate", "name": "Agent compliance review", "category": "evaluators", "endpoint": "run/agent-compliance/evaluate", "status_key": "agent_compliance.evaluate", "status_source": "run_log", "run_all": False, "legacy_bridge": True, "description": "Reassess the legacy agent-compliance bridge when it is enabled."},
-    # Intel connectors
-    {"id": "intel-kev",          "name": "Intel: CISA KEV",           "category": "intel", "endpoint": "run/intel-kev",         "status_key": "cisa_kev",   "status_source": "intel", "description": "Refresh CISA's list of actively exploited vulnerabilities."},
-    {"id": "intel-nvd",          "name": "Intel: NVD (CVE feed)",     "category": "intel", "endpoint": "run/intel-nvd",         "status_key": "nvd",        "status_source": "intel", "description": "Refresh vulnerability details from NIST's NVD."},
-    {"id": "intel-cpe-dict",     "name": "Intel: CPE dictionary",     "category": "intel", "endpoint": "run/intel-cpe-dict",    "status_key": "cpe_dict",   "status_source": "intel", "description": "Refresh the software identification catalog used for CVE matching."},
-    {"id": "intel-epss",         "name": "Intel: EPSS scores",        "category": "intel", "endpoint": "run/intel-epss",        "status_key": "epss",       "status_source": "intel", "description": "Refresh exploit-likelihood scores from EPSS."},
-    {"id": "intel-matcher",      "name": "Intel: title × CVE matcher","category": "intel", "endpoint": "run/intel-matcher",     "status_key": "matcher",    "status_source": "intel", "description": "Match installed software to known vulnerabilities."},
-    {"id": "intel-winget",       "name": "Intel: Winget enrichment",  "category": "intel", "endpoint": "run/intel-winget",      "status_key": "winget",     "status_source": "intel", "description": "Improve software records from Windows Package Manager."},
-    {"id": "intel-chocolatey",   "name": "Intel: Chocolatey enrichment","category": "intel","endpoint": "run/intel-chocolatey", "status_key": "chocolatey", "status_source": "intel", "description": "Improve software records from Chocolatey."},
-    {"id": "intel-capability",   "name": "Intel: capability projection", "category": "intel", "endpoint": "run/intel-capability", "status_key": "capability_match", "status_source": "intel", "description": "Update known software capabilities from catalog rules."},
-    {"id": "intel-lolrmm",       "name": "Intel: LOLRMM corpus",       "category": "intel", "endpoint": "run/intel-lolrmm", "status_key": "lolrmm", "status_source": "intel", "description": "Refresh remote-management tool detection data."},
-    {"id": "intel-otx",          "name": "Intel: AlienVault OTX",     "category": "intel", "endpoint": "run/intel-otx",         "status_key": "otx",        "status_source": "intel", "description": "Refresh threat intelligence from AlienVault OTX."},
-    {"id": "intel-abusech",      "name": "Intel: abuse.ch",           "category": "intel", "endpoint": "run/intel-abusech",     "status_key": "abusech",    "status_source": "intel", "description": "Refresh malware intelligence from MalwareBazaar and ThreatFox."},
-    {"id": "intel-endoflife",    "name": "Intel: end-of-life",         "category": "intel", "endpoint": "run/intel-endoflife",   "status_key": "endoflife",  "status_source": "intel", "description": "Refresh software support dates from endoflife.date."},
-    {"id": "intel-category",     "name": "Intel: software categories", "category": "intel", "endpoint": "run/intel-category",    "status_key": "category_match", "status_source": "intel", "description": "Update software categories from catalog data."},
-    # Notifications
-    {"id": "notifications-dispatch", "name": "Notifications dispatch", "category": "notifications", "endpoint": "run/notifications/dispatch", "status_key": "notifications_dispatch", "status_source": "run_log", "description": "Send notifications that are ready to go out."},
-    {"id": "notifications-digest",   "name": "Notifications digest",   "category": "notifications", "endpoint": "run/notifications/digest",   "status_key": "notifications_digest",   "status_source": "run_log", "description": "Send scheduled notification summaries."},
-    {"id": "retention-history", "name": "History cleanup", "category": "maintenance", "endpoint": "", "status_key": "retention.observation_history", "status_source": "run_log", "run_all": False, "description": "Remove closed history that has reached its retention date."},
-    {"id": "software-enqueue-orgs", "name": "Software inventory schedule", "category": "maintenance", "endpoint": "", "status_key": "", "status_source": "run_log", "run_all": False, "description": "Queue the next scheduled Ninja software inventory sweep."},
-    {"id": "software-queue-drain", "name": "Software inventory worker", "category": "maintenance", "endpoint": "", "status_key": "", "status_source": "run_log", "run_all": False, "description": "Process queued Ninja software inventory work."},
-]
+_JOB_CATALOG: list[dict] = list(catalog_entries())
+validate_registry(catalog_keys=(entry["id"] for entry in _JOB_CATALOG))
 
 _JOB_INDEX = {j["id"]: j for j in _JOB_CATALOG}
 _SOFTWARE_CLASSIFIER_JOBS = (
@@ -8090,15 +8094,7 @@ _SOFTWARE_JOB_PRIORITY = {
 
 
 def _job_lane(job_key: str) -> str:
-    if job_key in _SOFTWARE_CLASSIFIER_JOBS:
-        return "software"
-    if job_key.startswith("intel-"):
-        return "intelligence"
-    if job_key in {"patches", "agent-observations", "documentation-observations", "software-queue-drain"}:
-        return "collection"
-    if job_key in {"notifications-dispatch", "notifications-digest", "retention-history", "software-enqueue-orgs"}:
-        return "service"
-    return "evaluation"
+    return definition(job_key).lane
 
 
 @login_required
@@ -8106,8 +8102,13 @@ def admin_jobs(request: HttpRequest) -> HttpResponse:
     """List every schedulable job with last-run status and a run-now button."""
     category_filter = (request.GET.get("category") or "").strip().lower()
     status_filter = (request.GET.get("status") or "").strip().lower()
-    agent_compliance_enabled = os.environ.get("AGENT_COMPLIANCE_ENABLED", "false").strip().lower() in {
-        "1", "true", "yes", "on",
+    enabled_capabilities = {
+        "always": True,
+        "legacy_agent_compliance": os.environ.get("AGENT_COMPLIANCE_ENABLED", "false").strip().lower() in {"1", "true", "yes", "on"},
+        "intel": os.environ.get("INTEL_ENABLED", "false").strip().lower() in {"1", "true", "yes", "on"},
+        "notifications": os.environ.get("NOTIFY_ENABLED", "false").strip().lower() in {"1", "true", "yes", "on"},
+        "notification_digest": os.environ.get("NOTIFY_DIGEST_ENABLED", "false").strip().lower() in {"1", "true", "yes", "on"},
+        "software_queue": os.environ.get("SOFTWARE_QUEUE_ENABLED", "false").strip().lower() in {"1", "true", "yes", "on"},
     }
 
     intel_status: dict[str, dict] = {}
@@ -8256,12 +8257,12 @@ def admin_jobs(request: HttpRequest) -> HttpResponse:
     categories = set()
     for entry in list(_JOB_CATALOG) + dynamic_source_entries:
         categories.add(entry["category"])
-        disabled_reason = ""
-        if entry.get("legacy_bridge") and not agent_compliance_enabled:
-            # These bridge jobs no-op when disabled.  Do not offer a Run now
-            # control or call their empty history a failed schedule.
+        available, availability_label = capability_state(entry["id"], enabled_capabilities)
+        disabled_reason = "" if available else availability_label
+        if not available:
+            # Disabled definitions have no executable capability. Do not offer
+            # Run now or treat their retained history as a failed schedule.
             status = {}
-            disabled_reason = "Disabled — legacy bridge is not enabled."
         else:
             # A catalog job is registered work when it has a durable queue
             # history.  Keep run_log as a fallback for pre-queue/direct runs
