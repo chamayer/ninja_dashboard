@@ -755,6 +755,15 @@ activation audit event; the redundant review action is removed. Historical
 review data and function remain untouched. Next action: run focused checks,
 then request approval to commit and deploy the migration.
 
+Deployment-driven policy checkpoint (2026-09-25): approved to remove the
+remaining activation action and reason requirement. Migration 0204 makes the
+validated policy-creation function activate the committed version in the same
+transaction, retains structural validation, serialization, and assessment
+invalidation, and activates already-committed taxonomy 7. The Django Admin
+policy form no longer exposes review or activation actions; a manually created
+policy is committed/active in one audited save. Next action: validate the
+function and admin changes, then request approval to commit/push/deploy.
+
 Migration 0186, `jobs_software_supersession`, completes the declared
 Software-only cross-key admission path for converted v1 Jobs. During its
 implementation, the existing request-to-run composite FK was found to require
