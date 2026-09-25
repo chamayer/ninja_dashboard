@@ -653,7 +653,7 @@ def _check_name_drift(cur) -> None:
            AND NOT latest.is_placeholder
         ), peers AS (
             SELECT client_id,
-                   count(DISTINCT COALESCE(NULLIF(observed_norm, ''), lower(observed_name))) AS distinct_name_count,
+                   count(DISTINCT observed_name) AS distinct_name_count,
                    array_agg(DISTINCT observed_name ORDER BY observed_name) AS peer_names
               FROM observed
              WHERE observed_name <> ''

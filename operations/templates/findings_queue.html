@@ -284,15 +284,15 @@
         <h2 style="margin-top:0;">Admin-owned issues</h2>
         <p class="muted">These are platform, source, and client-reference findings. They are included here for one complete Issues view; their controls remain in Admin health.</p>
         <table class="ops-table">
-            <thead><tr><th>Severity</th><th>Type</th><th>Issue</th><th>Canonical client</th><th>Current source names</th><th>Finding source</th><th>Source reference</th><th>Status</th><th></th></tr></thead>
+            <thead><tr><th>Severity</th><th>Type</th><th>Issue</th><th>Canonical client</th><th>Source reports</th><th>Conflicts with</th><th>Source reference</th><th>Status</th><th></th></tr></thead>
             <tbody>{% for row in admin_findings %}
                 <tr>
                     <td>{{ row.finding.get_severity_display }}</td>
                     <td>{{ row.type_label }}</td>
                     <td>{{ row.issue_label }}</td>
                     <td>{% if row.client_url %}<a href="{{ row.client_url }}">{{ row.client_name }}</a>{% else %}{{ row.client_name }}{% endif %}</td>
-                    <td>{{ row.observed_name }}</td>
-                    <td>{{ row.source_name|default:"—" }}</td>
+                    <td>{% if row.source_name %}<strong>{{ row.source_name }}</strong>: {% endif %}{{ row.observed_name }}</td>
+                    <td>{% if row.conflicting_references %}<ul style="margin:0; padding-left:1.1rem;">{% for reference in row.conflicting_references %}<li><strong>{{ reference.source_name }}</strong>: {{ reference.observed_name }}</li>{% endfor %}</ul>{% else %}—{% endif %}</td>
                     <td><code>{{ row.source_reference|default:"—" }}</code></td>
                     <td>{{ row.finding.status }}</td>
                     <td><a href="{{ row.admin_url }}">{{ row.admin_label }}</a></td>

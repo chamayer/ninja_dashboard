@@ -11,7 +11,7 @@ from django.urls import reverse
 from django.utils import timezone
 
 from .device_status import get_device_status_policy
-from .models import Finding, MergeCandidate
+from .models import AdminFinding, Finding, MergeCandidate
 from .templatetags.human_labels import humanize_label
 
 ACTIVE_FINDING_STATUSES = ("open", "acknowledged", "investigating")
@@ -336,7 +336,7 @@ def client_source_references(*, client_id=None, source_name: str = "") -> list[d
         cur.execute(
             f"""
             SELECT link.source_link_id, link.client_id, client.display_name, client.slug,
-                   source.name, link.external_id, link.external_namespace,
+                   link.source_id, source.name, link.external_id, link.external_namespace,
                    link.first_seen_at, link.last_seen_at, link.missing_since,
                    link.observed_name, link.observed_at,
                    link.mapping_state, link.provenance
@@ -360,6 +360,7 @@ def client_source_references(*, client_id=None, source_name: str = "") -> list[d
             client_id_value,
             client_name,
             client_slug,
+            source_id,
             source_name_value,
             external_id,
             external_namespace,
@@ -377,6 +378,7 @@ def client_source_references(*, client_id=None, source_name: str = "") -> list[d
                 "client_id": client_id_value,
                 "client_name": client_name,
                 "client_slug": client_slug,
+                "source_id": source_id,
                 "source_name": source_name_value,
                 "external_id": external_id,
                 "external_namespace": external_namespace,
@@ -616,10 +618,112 @@ def build_client_workspace(client, existing: dict, *, device_policy: dict | None
     return result
 
 
-def build_client_directory(clients: list) -> dict:
+def _client_identity_inventory(source_references: list[dict]) -> dict[str, dict]:
+    """Return compact, source-specific identity evidence per client.
+
+    The directory is an operational summary, not a source-record dump. Only
+    literal cross-source differences and mappings awaiting review earn a
+    second evidence line.
+    """
+    references_by_client: dict[str, list[dict]] = {}
+    references_by_link: dict[str, dict] = {}
+    for reference in source_references:
+        references_by_client.setdefault(str(reference["client_id"]), []).append(reference)
+        references_by_link[str(reference["source_link_id"])] = reference
+
+    findings: list[tuple[str, dict, dict]] = []
+    for finding in AdminFinding.objects.filter(
+        tenant_id=1,
+        status__in=ACTIVE_FINDING_STATUSES,
+        finding_type__name="client_name_conflict",
+    ).only("subject_ref", "details"):
+        ref = finding.subject_ref or {}
+        findings.append((str(ref.get("client_id") or ""), ref, finding.details or {}))
+    for finding in Finding.objects.filter(
+        tenant_id=1,
+        status__in=ACTIVE_FINDING_STATUSES,
+        finding_type__name="client_name_conflict",
+    ).only("client_id", "finding_details"):
+        findings.append((str(finding.client_id or ""), {}, finding.finding_details or {}))
+
+    result: dict[str, dict] = {}
+    for client_id, references in references_by_client.items():
+        review_count = sum(reference["mapping_state"] == "review" for reference in references)
+        result[client_id] = {
+            "source_reference_count": len(references),
+            "review_count": review_count,
+            "exceptions": [],
+            "exception_keys": set(),
+        }
+
+    for client_id, subject_ref, details in findings:
+        inventory = result.get(client_id)
+        if not inventory:
+            continue
+        source_link_id = details.get("source_link_id") or subject_ref.get("client_link_id")
+        reported = references_by_link.get(str(source_link_id))
+        if reported is None:
+            source_id = details.get("source_id") or subject_ref.get("source_id")
+            external_id = details.get("external_id") or subject_ref.get("external_id")
+            reported = next(
+                (
+                    reference
+                    for reference in references_by_client[client_id]
+                    if str(reference.get("external_id")) == str(external_id)
+                    and str(reference.get("source_id", "")) == str(source_id)
+                ),
+                None,
+            )
+        if not reported or not reported["observed_name"]:
+            continue
+        for peer in references_by_client[client_id]:
+            if (
+                peer["source_name"] == reported["source_name"]
+                or not peer["observed_name"]
+                or peer["observed_name"] == reported["observed_name"]
+            ):
+                continue
+            key = (
+                reported["source_name"],
+                reported["observed_name"],
+                peer["source_name"],
+                peer["observed_name"],
+            )
+            if key in inventory["exception_keys"]:
+                continue
+            inventory["exception_keys"].add(key)
+            inventory["exceptions"].append(
+                {
+                    "source_name": reported["source_name"],
+                    "reported_name": reported["observed_name"],
+                    "peer_source_name": peer["source_name"],
+                    "peer_name": peer["observed_name"],
+                }
+            )
+
+    for inventory in result.values():
+        exception_count = len(inventory["exceptions"])
+        summary = []
+        if exception_count:
+            summary.append(
+                f"{exception_count} name difference{'s' if exception_count != 1 else ''}"
+            )
+        if inventory["review_count"]:
+            summary.append(
+                f"{inventory['review_count']} mapping{'s' if inventory['review_count'] != 1 else ''} to review"
+            )
+        inventory["summary"] = " · ".join(summary) or "Consistent"
+        inventory["exception_count"] = exception_count
+        inventory["total"] = exception_count + inventory["review_count"]
+        del inventory["exception_keys"]
+    return result
+
+
+def build_client_directory(clients: list, *, source_references: list[dict]) -> dict:
     """Build the sortable fleet client-directory rows."""
     locations, users, health = _shared_context()
     stats_by_client, _ = _issue_rollup()
+    identity_inventory = _client_identity_inventory(source_references)
     merge_reviews = {
         row["client_id"]: row["n"]
         for row in MergeCandidate.objects.filter(
@@ -646,6 +750,17 @@ def build_client_directory(clients: list) -> dict:
             data_state, data_label, data_sort = "on_track", "Current", 0
 
         client_stats = stats_by_client.get(client.id, {})
+        identity = identity_inventory.get(
+            str(client.id),
+            {
+                "source_reference_count": 0,
+                "review_count": 0,
+                "exception_count": 0,
+                "total": 0,
+                "exceptions": [],
+                "summary": "No source client records",
+            },
+        )
         domains = []
         domain_specs = (
             (
@@ -690,7 +805,10 @@ def build_client_directory(clients: list) -> dict:
                     "href": href,
                 }
             )
-        needs_attention = any(STATE_PRIORITY.get(domain["state"], 0) > 0 for domain in domains)
+        needs_attention = (
+            any(STATE_PRIORITY.get(domain["state"], 0) > 0 for domain in domains)
+            or identity["total"] > 0
+        )
         attention_count += int(needs_attention)
         rows.append(
             {
@@ -703,7 +821,8 @@ def build_client_directory(clients: list) -> dict:
                 "data_label": data_label,
                 "data_sort": data_sort,
                 "review_count": merge_reviews.get(client.id, 0),
-                "source_reference_count": len(client.source_links.all()),
+                "source_reference_count": identity["source_reference_count"],
+                "source_identity": identity,
                 "needs_attention": needs_attention,
             }
         )

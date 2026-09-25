@@ -808,6 +808,35 @@ observation reads. Migration 0206 grants that owner only `SELECT` on the
 decision history table it joins; the app continues to access it only through
 the permitted effective projection.
 
+Client mapping recovery and usability checkpoint (2026-09-25): completed in
+`0c3e37b`, pushed to both remotes and deployed by Portainer. Migration 0206
+applied successfully; `ninja-operations` is healthy and the effective mapping
+view returns 320 rows when queried as `operations_app` with tenant context.
+The Issues UI now exposes complete attached source-name evidence and deep-links
+to the matching Operations mapping decision. Focused client-workspace/findings
+tests (67), Django checks, migration-drift checks, focused lint, and diff
+checks passed. No new restricted-view error appeared in the post-deploy logs.
+
+Conflict presentation correction (2026-09-25): the legacy Admin rows are real
+client-name mismatches, not invalid data. The prior UI flattened every source
+group attached to a client, which implied unrelated groups were part of one
+conflict. Render the finding's reported source name separately and list only
+different literal names from other sources as explicit comparisons.
+
+Exact-name comparison correction (2026-09-25): normalization is permitted for
+identity attachment, but it must not suppress a client-name finding. The
+resolver and Issues comparison now treat any non-identical reported source
+names as different, including punctuation, spacing, hyphenation, and case.
+
+Client directory inventory evidence (2026-09-25): preserve the status
+dashboard and add an exception-first source-identity summary to its existing
+directory. Healthy clients remain one row. A client with literal cross-source
+name differences, a review mapping, or no source record gets a compact second
+line with only the relevant source names; no source IDs, expansion, or page
+transition is needed to understand the exception. Reuse the effective mapping
+projection and active client-name findings; do not infer expected-source
+absence until a client-source coverage policy exists.
+
 Migration 0186, `jobs_software_supersession`, completes the declared
 Software-only cross-key admission path for converted v1 Jobs. During its
 implementation, the existing request-to-run composite FK was found to require

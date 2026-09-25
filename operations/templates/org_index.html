@@ -237,7 +237,7 @@
       <button class="control-chip active" data-directory-filter="all" type="button">All {{ all_client_count }}</button>
       <button class="control-chip" data-directory-filter="attention" type="button">Open items {{ directory_attention }}</button>
       <button class="control-chip" data-directory-filter="delayed" type="button">Data delayed {{ directory_delayed }}</button>
-      <button class="control-chip" data-directory-filter="review" type="button">Identity matches</button>
+      <button class="control-chip" data-directory-filter="identity" type="button">Source identity</button>
       <label>Search<input id="directory-search" type="search" placeholder="Search clients…"></label>
       <button class="reset-control" id="directory-reset" type="button">Reset</button>
     </div>
@@ -254,17 +254,18 @@
         <th><button class="sort-button" data-key="software" type="button">Software</button></th>
         <th><button class="sort-button" data-key="inventory" type="button">Inventory</button></th>
         <th><button class="sort-button" data-key="data" type="button">Data</button></th>
-        <th><button class="sort-button" data-key="review" type="button">Identity matches</button></th>
+        <th><button class="sort-button" data-key="identity" type="button">Source identity</button></th>
       </tr></thead>
       <tbody>
       {% for row in directory_rows %}
-        <tr data-name="{{ row.client.display_name|lower }}" data-devices="{{ row.devices }}" data-locations="{{ row.locations }}" data-users="{{ row.users }}" data-patching="{{ row.domains.0.state }}" data-compliance="{{ row.domains.1.state }}" data-software="{{ row.domains.2.state }}" data-inventory="{{ row.domains.3.state }}" data-data="{{ row.data_sort }}" data-review="{{ row.review_count }}" data-attention="{{ row.needs_attention|yesno:'1,0' }}" data-delayed="{% if row.data_state == 'delayed' %}1{% else %}0{% endif %}">
+        <tr class="directory-row" data-name="{{ row.client.display_name|lower }}" data-devices="{{ row.devices }}" data-locations="{{ row.locations }}" data-users="{{ row.users }}" data-patching="{{ row.domains.0.state }}" data-compliance="{{ row.domains.1.state }}" data-software="{{ row.domains.2.state }}" data-inventory="{{ row.domains.3.state }}" data-data="{{ row.data_sort }}" data-identity="{{ row.source_identity.total }}" data-attention="{{ row.needs_attention|yesno:'1,0' }}" data-delayed="{% if row.data_state == 'delayed' %}1{% else %}0{% endif %}">
           <td><a class="row-title" href="{% url 'org_index' org_slug=row.client.slug %}">{{ row.client.display_name }}</a><a class="row-detail" href="{% url 'org_index' org_slug=row.client.slug %}#source-references">{{ row.source_reference_count }} source reference{{ row.source_reference_count|pluralize }} →</a></td>
           <td><a href="{% url 'org_devices' org_slug=row.client.slug %}"><strong>{{ row.devices }}</strong></a></td><td>{{ row.locations }}</td><td>{{ row.users }}</td>
           {% for domain in row.domains %}<td class="domain-cell"><a class="row-title" href="{{ domain.href }}"><span class="state-dot dot-{{ domain.state }}"></span>{{ domain.state_label }}</a><span class="row-detail">{{ domain.count }} open</span></td>{% endfor %}
           <td><span class="row-title"><span class="state-dot dot-{{ row.data_state }}"></span>{{ row.data_label }}</span></td>
-          <td>{% if row.review_count %}<a class="row-title" href="{% url 'merge_candidates_queue' %}">{{ row.review_count }} pending</a>{% else %}<a class="muted" href="{% url 'client_requirements_config' row.client.slug %}">Open configuration →</a>{% endif %}</td>
+          <td><span class="row-title">{{ row.source_identity.summary }}</span><span class="row-detail">{{ row.source_reference_count }} source client record{{ row.source_reference_count|pluralize }}</span></td>
         </tr>
+        {% if row.source_identity.exceptions %}<tr class="directory-evidence"><td colspan="10"><span class="muted">Source names:</span>{% for exception in row.source_identity.exceptions %} <strong>{{ exception.source_name }}</strong> “{{ exception.reported_name }}” ↔ <strong>{{ exception.peer_source_name }}</strong> “{{ exception.peer_name }}”{% if not forloop.last %} ·{% endif %}{% endfor %}</td></tr>{% endif %}
       {% endfor %}
       </tbody>
     </table>
@@ -299,13 +300,13 @@
   }
   function setupDirectory() {
     const table=document.querySelector("#directory-table"); if(!table) return;
-    const key="operationsClientDirectoryControls"; const saved=read(key); const body=table.tBodies[0]; const rows=Array.from(body.rows); const search=document.querySelector("#directory-search"), empty=document.querySelector("#directory-empty"), chips=Array.from(document.querySelectorAll("[data-directory-filter]"));
+    const key="operationsClientDirectoryControls"; const saved=read(key); const body=table.tBodies[0]; const rows=Array.from(body.querySelectorAll("tr.directory-row")); const details=new Map(rows.map((row) => [row, row.nextElementSibling && row.nextElementSibling.classList.contains("directory-evidence") ? row.nextElementSibling : null])); const search=document.querySelector("#directory-search"), empty=document.querySelector("#directory-empty"), chips=Array.from(document.querySelectorAll("[data-directory-filter]"));
     let filter=saved.filter || "all", sort=saved.sort || "name", direction=saved.direction || "asc"; search.value=saved.search || "";
-    function value(row,field) { if(["devices","locations","users","data","review"].includes(field)) return Number(row.dataset[field]); if(["patching","compliance","software","inventory"].includes(field)) return stateRank[row.dataset[field]]; return row.dataset[field] || ""; }
+    function value(row,field) { if(["devices","locations","users","data","identity"].includes(field)) return Number(row.dataset[field]); if(["patching","compliance","software","inventory"].includes(field)) return stateRank[row.dataset[field]]; return row.dataset[field] || ""; }
     function render() {
       const query=search.value.trim().toLowerCase(); let visible=0;
       rows.sort((a,b) => { const av=value(a,sort), bv=value(b,sort); const result=typeof av === "number" ? av-bv : String(av).localeCompare(String(bv)); return (direction === "asc" ? result : -result) || a.dataset.name.localeCompare(b.dataset.name); }).forEach((row) => {
-        body.appendChild(row); const matchFilter=filter === "all" || (filter === "attention" && row.dataset.attention === "1") || (filter === "delayed" && row.dataset.delayed === "1") || (filter === "review" && Number(row.dataset.review) > 0); const show=matchFilter && (!query || row.dataset.name.includes(query)); row.hidden=!show; if(show) visible++;
+        body.appendChild(row); const detail=details.get(row); if(detail) body.appendChild(detail); const matchFilter=filter === "all" || (filter === "attention" && row.dataset.attention === "1") || (filter === "delayed" && row.dataset.delayed === "1") || (filter === "identity" && Number(row.dataset.identity) > 0); const show=matchFilter && (!query || row.dataset.name.includes(query)); row.hidden=!show; if(detail) detail.hidden=!show; if(show) visible++;
       });
       chips.forEach((chip) => chip.classList.toggle("active",chip.dataset.directoryFilter === filter)); table.querySelectorAll("th").forEach((th) => { const button=th.querySelector("[data-key]"); th.setAttribute("aria-sort",button && button.dataset.key === sort ? (direction === "asc" ? "ascending" : "descending") : "none"); }); empty.style.display=visible ? "none" : "block"; sessionStorage.setItem(key,JSON.stringify({filter,search:search.value,sort,direction}));
     }

@@ -1841,8 +1841,9 @@ def org_index(request: HttpRequest, org_slug: str) -> HttpResponse:
             )
             .order_by("-device_count", "display_name")
         )
+        source_references = client_source_references()
         source_names_by_client: dict = {}
-        for reference in client_source_references():
+        for reference in source_references:
             source_names_by_client.setdefault(reference["client_id"], set()).add(
                 reference["source_name"]
             )
@@ -1877,7 +1878,11 @@ def org_index(request: HttpRequest, org_slug: str) -> HttpResponse:
         ctx["open_finding_count"] = Finding.objects.filter(
             tenant_id=1, status__in=_FINDING_ACTIVE_STATUSES
         ).count()
-        ctx.update(build_client_directory(clients_with_counts))
+        ctx.update(
+            build_client_directory(
+                clients_with_counts, source_references=source_references
+            )
+        )
     return render(request, "org_index.html", ctx)
 
 
@@ -5265,10 +5270,20 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
                 ),
                 None,
             )
-            source_names = " · ".join(
-                f"{reference['source_name']}: {reference['observed_name'] or '(not reported)'}"
-                for reference in references
+            reported_name = (
+                (matching_reference or {}).get("observed_name")
+                or ref.get("observed_name")
+                or "(not reported)"
             )
+
+            conflicting_references = [
+                reference
+                for reference in references
+                if matching_reference
+                and reference["source_name"] != matching_reference["source_name"]
+                and reference["observed_name"]
+                and reference["observed_name"] != reported_name
+            ]
             admin_findings.append(
                 {
                     "finding": finding,
@@ -5291,11 +5306,8 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
                     "client_url": (
                         reverse("org_index", kwargs={"org_slug": client.slug}) if client else ""
                     ),
-                    "observed_name": source_names or (
-                        ref.get("observed_name")
-                        or " ↔ ".join((finding.details or {}).get("source_group_names") or [])
-                        or "(not reported)"
-                    ),
+                    "observed_name": reported_name,
+                    "conflicting_references": conflicting_references,
                     "source_name": source_name,
                     "source_reference": source_reference,
                     "admin_url": (
