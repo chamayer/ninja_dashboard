@@ -730,6 +730,13 @@ empty value, correctly leaving device drill-through disabled for an admin-only
 finding. The failed transaction rolled back. Next action: validate, deploy the
 revised seed, and confirm 0202 completes before activating taxonomy version 7.
 
+Fifth recovery checkpoint (2026-09-25): the finding-type row and bridge now
+pass, but the policy creation function requires every registered finding type
+to appear in both policy definitions and taxonomy exactly once. The 0202 seed
+now adds the matching definition as well as the taxonomy membership. The full
+migration remains transactional and rolled back. Next action: validate, push,
+and verify successful startup before any policy activation.
+
 Migration 0186, `jobs_software_supersession`, completes the declared
 Software-only cross-key admission path for converted v1 Jobs. During its
 implementation, the existing request-to-run composite FK was found to require

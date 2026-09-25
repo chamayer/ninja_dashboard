@@ -97,6 +97,18 @@ def seed_finding_type_and_policy(apps, schema_editor):
             policy = json.loads(policy)
         policy = json.loads(json.dumps(policy))
         policy["version"] = NEW_VERSION
+        definitions = policy.setdefault("definitions", [])
+        if not any(item.get("name") == "client_source_group_merge" for item in definitions):
+            definitions.append(
+                {
+                    "name": "client_source_group_merge",
+                    "label": "Duplicate source groups mapped to one client",
+                    "category": "Records & Matching",
+                    "type": "Client matching",
+                    "lifecycle": "active",
+                    "rules": [],
+                }
+            )
         for category in policy["issue_taxonomy"]:
             for type_item in category.get("types", []):
                 if type_item.get("key") == "client_source_mapping":
