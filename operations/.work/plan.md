@@ -724,6 +724,12 @@ explicit non-device exposure setting. The migration transaction again rolled
 back, so no partial type, policy, or decision data was retained. Next action:
 validate and push this final registry-contract correction, then verify health.
 
+Fourth recovery checkpoint (2026-09-25): production additionally requires a
+non-null `drilldown_evidence_key`. The mapping type now supplies the contract's
+empty value, correctly leaving device drill-through disabled for an admin-only
+finding. The failed transaction rolled back. Next action: validate, deploy the
+revised seed, and confirm 0202 completes before activating taxonomy version 7.
+
 Migration 0186, `jobs_software_supersession`, completes the declared
 Software-only cross-key admission path for converted v1 Jobs. During its
 implementation, the existing request-to-run composite FK was found to require

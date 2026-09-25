@@ -74,13 +74,14 @@ def seed_finding_type_and_policy(apps, schema_editor):
             INSERT INTO operations.finding_types
                 (name, default_severity, finding_class, source_module,
                  subject_scope, creates_device_exposure, auto_resolvable,
-                 suppressed_by_approval, runbook_path, description)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, '', %s)
+                 suppressed_by_approval, drilldown_evidence_key, runbook_path,
+                 description)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, '', %s)
             ON CONFLICT (name) DO NOTHING
             """,
             [
                 "client_source_group_merge", "medium", "admin",
-                "platform.client_resolver", "device", False, True, False,
+                "platform.client_resolver", "device", False, True, False, "",
                 "Two source groups with the same normalized name are mapped to one client. Review whether they are duplicate source groups.",
             ],
         )
