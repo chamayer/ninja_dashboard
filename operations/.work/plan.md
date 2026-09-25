@@ -709,6 +709,14 @@ relations and the latest active org observation, preserving the same scoped
 join and decision semantics. Next action: validate, commit/push the correction,
 then verify the automatic redeploy, migrations, health, and active policy.
 
+Second recovery checkpoint (2026-09-25): the corrected alias bridge executed,
+but 0202 then failed to seed its new admin finding type because the production
+registry requires non-null `subject_scope`. The row is now seeded with the
+existing required registry value (`device`) and explicitly disabled device
+exposure; admin findings do not bind device subjects. The migration transaction
+rolled back, so the revised 0202 remains safe to retry. Next action: validate,
+push the corrective commit, and verify startup/migration completion.
+
 Migration 0186, `jobs_software_supersession`, completes the declared
 Software-only cross-key admission path for converted v1 Jobs. During its
 implementation, the existing request-to-run composite FK was found to require
