@@ -647,6 +647,34 @@ render Admin-owned findings in the same policy taxonomy and selected-type
 Issues result, preserve their distinct ownership/actions, and include their
 counts in navigation. Do not convert or duplicate evidence between tables.
 
+Client mapping overhaul (2026-09-24): approved to replace fragmented legacy
+client-name handling with a native, single-authority mapping decision model.
+Scope: mapping provenance and audit, effective source-to-client mapping read
+model, source-to-source comparison evidence, evaluator outcomes for explicit,
+automatic, unmapped, ambiguous, split/merged, placeholder, and withdrawn
+groups, Admin → Integrations → Client mappings, client reference display, and
+findings only for review-required states. Do not add a second authority beside
+the current source-link relationship or silently infer split/merge mappings.
+Current checkpoint: deployed `14135f5` exposes Admin findings in Issues but
+its client-name row lacks source-to-source comparison; local uncommitted row
+formatting work must be replaced, not committed. Next action: document the
+mapping-state contract/ADR and audit current source-link and legacy alias
+provenance before additive schema work.
+
+Mapping decision surface checkpoint (2026-09-25): additive migration 0201,
+effective mapping view, Operations Integrations → Client mappings route, and
+audited decision action are implemented locally. The action uses a restricted
+security-definer database function so the Operations role cannot write the
+decision table directly; each decision supersedes the prior current record.
+The table now exposes explicit, automatic, ignored, and review states with
+  reason/provenance. Source-observation evidence is included in the effective
+  view and consumed by both the mappings surface and client references.
+  Focused queue/workspace tests, template loading, Django checks, migration
+  consistency, and Python compilation pass. Local PostgreSQL is unavailable,
+  so migration SQL/RLS/function execution remains unverified. Next action:
+  review the migration diff and request approval for one logical commit; do
+  not push or deploy without separate approval.
+
 Migration 0186, `jobs_software_supersession`, completes the declared
 Software-only cross-key admission path for converted v1 Jobs. During its
 implementation, the existing request-to-run composite FK was found to require

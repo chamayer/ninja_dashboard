@@ -284,14 +284,16 @@
         <h2 style="margin-top:0;">Admin-owned issues</h2>
         <p class="muted">These are platform, source, and client-reference findings. They are included here for one complete Issues view; their controls remain in Admin health.</p>
         <table class="ops-table">
-            <thead><tr><th>Severity</th><th>Type</th><th>Issue</th><th>Subject</th><th>Source</th><th>Status</th><th></th></tr></thead>
+            <thead><tr><th>Severity</th><th>Type</th><th>Issue</th><th>Canonical client</th><th>Source client name</th><th>Source</th><th>Source reference</th><th>Status</th><th></th></tr></thead>
             <tbody>{% for row in admin_findings %}
                 <tr>
                     <td>{{ row.finding.get_severity_display }}</td>
                     <td>{{ row.type_label }}</td>
                     <td>{{ row.issue_label }}</td>
-                    <td>{{ row.subject }}</td>
+                    <td>{% if row.client_url %}<a href="{{ row.client_url }}">{{ row.client_name }}</a>{% else %}{{ row.client_name }}{% endif %}</td>
+                    <td>{{ row.observed_name }}</td>
                     <td>{{ row.source_name|default:"—" }}</td>
+                    <td><code>{{ row.source_reference|default:"—" }}</code></td>
                     <td>{{ row.finding.status }}</td>
                     <td><a href="{{ row.admin_url }}">Admin controls</a></td>
                 </tr>

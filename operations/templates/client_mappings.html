@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+
+{% block content %}
+{% include "_admin_tabs.html" %}
+<div class="card">
+  <h1>Client mappings</h1>
+  <p class="muted">Review source references attached to each client. Decisions are audited and replace only the current mapping state.</p>
+  <table class="ops-table">
+    <thead><tr><th>Client</th><th>Source</th><th>Source name</th><th>Source reference</th><th>State</th><th>Provenance</th><th>Reason</th><th>Decided</th><th>Decision</th></tr></thead>
+    <tbody>
+      {% for source_link_id, client_slug, client_name, source_name, external_id, observed_name, observed_at, state, provenance, reason, decided_at in rows %}
+      <tr>
+        <td><a href="{% url 'org_index' org_slug=client_slug %}">{{ client_name }}</a></td><td>{{ source_name }}</td><td>{{ observed_name|default:"(not reported)" }}</td><td><code>{{ external_id }}</code></td><td>{{ state }}</td><td>{{ provenance|default:"—" }}</td><td>{{ reason|default:"—" }}</td><td>{{ decided_at|default:"—" }}</td>
+        <td><form method="post" action="{% url 'client_mapping_decide' source_link_id %}">{% csrf_token %}<select name="state" aria-label="Mapping state"><option value="explicit"{% if state == "explicit" %} selected{% endif %}>explicit</option><option value="automatic"{% if state == "automatic" %} selected{% endif %}>automatic</option><option value="ignored"{% if state == "ignored" %} selected{% endif %}>ignored</option><option value="review"{% if state == "review" %} selected{% endif %}>review</option></select><input name="reason" value="{{ reason|default:'' }}" maxlength="500" required aria-label="Decision reason"><button type="submit">Save</button></form></td>
+      </tr>
+      {% empty %}<tr><td colspan="9">No mappings found.</td></tr>{% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

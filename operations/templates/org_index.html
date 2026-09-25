@@ -127,15 +127,14 @@
   <h2>Source references</h2>
   <p class="muted">The source groups mapped to this canonical client. A reported group name is source evidence; it does not rename the client.</p>
   <table class="ops-table">
-    <thead><tr><th>Source</th><th>Reported group name</th><th>Source ID</th><th>Last observed</th><th>Link state</th></tr></thead>
+    <thead><tr><th>Source</th><th>Source ID</th><th>Mapping state</th><th>Provenance</th><th>Link state</th></tr></thead>
     <tbody>
     {% for reference in source_references %}
       <tr>
         <td><a href="{{ reference.source_url }}">{{ reference.source_name }}</a></td>
-        <td>{% if reference.observed_name %}<strong>{{ reference.observed_name }}</strong>{% else %}<span class="muted">No current group observation</span>{% endif %}</td>
         <td><code>{{ reference.external_id }}</code>{% if reference.external_namespace %}<br><span class="muted">{{ reference.external_namespace }}</span>{% endif %}</td>
-        <td>{% if reference.observed_at %}{{ reference.observed_at|date:"Y-m-d H:i" }}{% else %}<span class="muted">—</span>{% endif %}</td>
-        <td>{% if reference.missing_since %}<span class="badge badge-high">Missing since {{ reference.missing_since|date:"Y-m-d" }}</span>{% elif reference.name_differs %}<a class="badge badge-medium" href="{{ reference.name_difference_url }}">Name differs · review</a>{% else %}<span class="badge badge-low">Mapped</span>{% endif %}</td>
+        <td>{{ reference.mapping_state }}</td><td>{{ reference.mapping_provenance|default:"—" }}</td>
+        <td>{% if reference.missing_since %}<span class="badge badge-high">Missing since {{ reference.missing_since|date:"Y-m-d" }}</span>{% else %}<span class="badge badge-low">Mapped</span>{% endif %}</td>
       </tr>
     {% empty %}
       <tr><td colspan="5" class="muted">No source references are mapped to this client.</td></tr>

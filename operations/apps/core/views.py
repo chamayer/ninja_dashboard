@@ -4735,7 +4735,15 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
             if f.finding_type.name == "client_name_conflict":
                 source_name = source_names_by_id.get(details.get("source_id"), "Source")
                 observed_name = details.get("observed_name") or "(unnamed group)"
-                context_parts.append(f"{source_name} reports “{observed_name}”")
+                peer_names = [
+                    str(name).strip()
+                    for name in (details.get("peer_source_names") or [])
+                    if str(name).strip()
+                ]
+                if len(peer_names) > 1:
+                    context_parts.append("Source names: " + " ↔ ".join(peer_names))
+                else:
+                    context_parts.append(f"{source_name} reports “{observed_name}”")
             else:
                 context_parts.append("client-wide")
         elif f.subject_type in (
@@ -5225,8 +5233,20 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
             str(source_id): name
             for source_id, name in Source.objects.filter(id__in=source_ids).values_list("id", "name")
         }
+        client_ids = {
+            ref.get("client_id")
+            for finding in admin_rows
+            if (ref := (finding.subject_ref or {})).get("client_id")
+        }
+        clients_by_id = {
+            str(client.id): client
+            for client in Client.objects.filter(
+                tenant_id=1, id__in=client_ids, deleted_at__isnull=True
+            ).only("id", "slug", "display_name")
+        }
         for finding in admin_rows:
             ref = finding.subject_ref or {}
+            client = clients_by_id.get(str(ref.get("client_id")))
             admin_findings.append(
                 {
                     "finding": finding,
@@ -5241,8 +5261,17 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
                     "issue_label": profile.definitions.get(finding.finding_type.name, {}).get(
                         "label", finding.finding_type.name
                     ) if profile else finding.finding_type.name,
-                    "subject": ref.get("observed_name") or ref.get("client_display_name") or "Platform service",
+                    "client_name": (
+                        client.display_name
+                        if client
+                        else ref.get("client_display_name") or "(unmapped client)"
+                    ),
+                    "client_url": (
+                        reverse("org_index", kwargs={"org_slug": client.slug}) if client else ""
+                    ),
+                    "observed_name": ref.get("observed_name") or "(not reported)",
                     "source_name": source_names_by_id.get(str(ref.get("source_id")), ""),
+                    "source_reference": ref.get("external_id") or "",
                     "admin_url": f"{reverse('findings_admin_health')}?type={finding.finding_type.name}",
                 }
             )
@@ -10132,6 +10161,48 @@ def patching_queue(request: HttpRequest) -> HttpResponse:
             "page_query": page_query.urlencode(),
         },
     )
+
+
+@login_required
+@require_admin
+@require_POST
+def client_mapping_decide(request: HttpRequest, source_link_id: str) -> HttpResponse:
+    state = (request.POST.get("state") or "").strip()
+    reason = (request.POST.get("reason") or "").strip()
+    if state not in {"explicit", "automatic", "ignored", "review"} or not reason:
+        messages.error(request, "A valid decision and reason are required.")
+        return redirect("client_mappings")
+    with transaction.atomic(), connection.cursor() as cur:
+        cur.execute("SET LOCAL operations.tenant_id = 1")
+        cur.execute(
+            "SELECT operations.decide_client_source_mapping_v1(1, %s, %s, %s, %s)",
+            [source_link_id, state, reason, request.user.pk],
+        )
+    messages.success(request, "Client mapping decision recorded.")
+    return redirect("client_mappings")
+
+
+@login_required
+@require_admin
+def client_mappings(request: HttpRequest) -> HttpResponse:
+    """Operations surface for effective client/source mapping decisions."""
+    with transaction.atomic(), connection.cursor() as cur:
+        cur.execute("SET LOCAL operations.tenant_id = 1")
+        cur.execute(
+            """
+            SELECT mapping.source_link_id, client.slug, client.display_name, source.name,
+                   mapping.external_id, mapping.observed_name, mapping.observed_at,
+                   mapping.mapping_state, mapping.provenance,
+                   mapping.decision_reason, mapping.decided_at
+              FROM operations.v_client_source_mapping_effective mapping
+              JOIN operations.clients client ON client.id = mapping.client_id
+              JOIN operations.sources source ON source.id = mapping.source_id
+             WHERE mapping.tenant_id = 1
+             ORDER BY client.display_name, source.name, mapping.external_id
+            """
+        )
+        rows = cur.fetchall()
+    return render(request, "client_mappings.html", {"admin_group": "integrations", "admin_tab": "client-mappings", "rows": rows})
 
 
 @login_required

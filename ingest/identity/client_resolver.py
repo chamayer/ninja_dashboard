@@ -626,11 +626,11 @@ def _check_name_drift(cur) -> None:
                AND client_id IS NOT NULL
                AND active = TRUE
              ORDER BY source_binding_id, entity_key, observed_at DESC
-        )
-        SELECT link.id, link.client_id, link.source_id, link.external_id,
-               binding.id, latest.observed_name, latest.observed_norm,
-               client.display_name
-          FROM operations.v_client_source_link link
+        ), observed AS (
+            SELECT link.source_link_id, link.client_id, link.source_id, link.external_id,
+                   binding.id AS source_binding_id, latest.observed_name, latest.observed_norm,
+                   link.mapping_state
+          FROM operations.v_client_source_mapping_effective link
           JOIN operations.source_bindings binding ON binding.enabled
           JOIN operations.source_instances instance
             ON instance.id = binding.source_instance_id
@@ -638,8 +638,20 @@ def _check_name_drift(cur) -> None:
           JOIN latest
             ON latest.source_binding_id = binding.id
            AND latest.entity_key = link.external_id
-          JOIN operations.clients client ON client.id = link.client_id
          WHERE link.tenant_id = %s
+        ), peers AS (
+            SELECT client_id,
+                   count(DISTINCT COALESCE(NULLIF(observed_norm, ''), lower(observed_name))) AS distinct_name_count,
+                   array_agg(DISTINCT observed_name ORDER BY observed_name) AS peer_names
+              FROM observed
+             WHERE observed_name <> ''
+             GROUP BY client_id
+        )
+        SELECT observed.source_link_id, observed.client_id, observed.source_id, observed.external_id,
+               observed.source_binding_id, observed.observed_name, observed.observed_norm,
+               observed.mapping_state, peers.distinct_name_count, peers.peer_names
+          FROM observed
+          JOIN peers ON peers.client_id = observed.client_id
         """,
         (_TENANT_ID, _TENANT_ID),
     )
@@ -651,12 +663,17 @@ def _check_name_drift(cur) -> None:
         source_binding_id,
         observed_name,
         observed_norm,
-        client_display_name,
+        mapping_state,
+        distinct_name_count,
+        peer_names,
     ) in cur.fetchall():
         if not observed_name:
             continue
         condition_key = _cond_link(link_id)
-        if (observed_norm or _norm(observed_name)) == _norm(client_display_name):
+        if mapping_state in {"explicit", "ignored"}:
+            _resolve_entity_finding(cur, "client_name_conflict", condition_key)
+            continue
+        if distinct_name_count < 2:
             _resolve_entity_finding(cur, "client_name_conflict", condition_key)
             continue
         _emit_finding(
@@ -668,10 +685,10 @@ def _check_name_drift(cur) -> None:
                 "source_binding_id": str(source_binding_id),
                 "source_id": source_id,
                 "external_id": external_id,
-                "client_display_name": client_display_name,
                 "observed_name": observed_name,
+                "peer_source_names": peer_names,
             },
-            severity="medium",
+            severity="low" if mapping_state == "automatic" else "medium",
             admin=False,
             client_id=client_id,
         )

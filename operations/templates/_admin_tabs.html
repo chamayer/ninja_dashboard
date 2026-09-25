@@ -66,6 +66,8 @@ Config / Integrations page. Views must set:
     <span class="at-group">Integrations</span>
     <a class="at-tab {% if admin_tab == 'sources' %}active{% endif %}"
        href="{% url 'sources_status' %}">Sources</a>
+    <a class="at-tab {% if admin_tab == 'client-mappings' %}active{% endif %}"
+       href="{% url 'client_mappings' %}">Client mappings</a>
     <a class="at-tab {% if admin_tab == 'coverage' %}active{% endif %}"
        href="{% url 'fleet_coverage' %}">Coverage</a>
     <a class="at-tab {% if admin_tab == 'ingest' %}active{% endif %}"

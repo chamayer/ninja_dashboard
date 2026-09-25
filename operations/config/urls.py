@@ -33,6 +33,8 @@ from apps.core.views import (
     admin_jobs_run_all,
     attribute_visibility_config,
     classifier_config,
+    client_mappings,
+    client_mapping_decide,
     client_candidate_accept,
     client_candidate_detail,
     client_candidate_exclude,
@@ -109,6 +111,8 @@ from apps.core.views import (
 urlpatterns = [
     path("", home, name="home"),
     path("healthz", healthz, name="healthz"),
+    path("admin/integrations/client-mappings/", client_mappings, name="client_mappings"),
+    path("admin/integrations/client-mappings/<uuid:source_link_id>/decide/", client_mapping_decide, name="client_mapping_decide"),
     path("orgs/<slug:org_slug>/", org_index, name="org_index"),
     path("orgs/<slug:org_slug>/devices/", org_devices, name="org_devices"),
     path("orgs/<slug:org_slug>/devices/<uuid:device_id>/", device_detail, name="device_detail"),

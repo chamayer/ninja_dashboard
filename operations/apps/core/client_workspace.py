@@ -335,36 +335,17 @@ def client_source_references(*, client_id=None, source_name: str = "") -> list[d
         cur.execute("SET LOCAL operations.tenant_id = 1")
         cur.execute(
             f"""
-            WITH latest_org AS (
-                SELECT DISTINCT ON (instance.source_id, observation.entity_key)
-                       instance.source_id,
-                       observation.entity_key,
-                       observation.canonical_data ->> 'name' AS observed_name,
-                       observation.observed_at
-                  FROM operations.entity_observation_current observation
-                  JOIN operations.source_bindings binding
-                    ON binding.id = observation.source_binding_id
-                  JOIN operations.source_instances instance
-                    ON instance.id = binding.source_instance_id
-                 WHERE observation.tenant_id = 1
-                   AND observation.entity_type = 'org'
-                   AND observation.active = TRUE
-                 ORDER BY instance.source_id, observation.entity_key,
-                          observation.observed_at DESC
-            )
             SELECT link.client_id, client.display_name, client.slug,
                    source.name, link.external_id, link.external_namespace,
                    link.first_seen_at, link.last_seen_at, link.missing_since,
-                   latest_org.observed_name, latest_org.observed_at
-              FROM operations.v_client_source_link link
+                   link.observed_name, link.observed_at,
+                   link.mapping_state, link.provenance
+              FROM operations.v_client_source_mapping_effective link
               JOIN operations.clients client
                 ON client.id = link.client_id
                AND client.tenant_id = link.tenant_id
                AND client.deleted_at IS NULL
               JOIN operations.sources source ON source.id = link.source_id
-              LEFT JOIN latest_org
-                ON latest_org.source_id = link.source_id
-               AND latest_org.entity_key = link.external_id
              WHERE {' AND '.join(where)}
              ORDER BY source.name, client.display_name, link.external_id
             """,
@@ -386,6 +367,8 @@ def client_source_references(*, client_id=None, source_name: str = "") -> list[d
             missing_since,
             observed_name,
             observed_at,
+            mapping_state,
+            mapping_provenance,
         ) = row
         references.append(
             {
@@ -401,6 +384,8 @@ def client_source_references(*, client_id=None, source_name: str = "") -> list[d
                 "observed_name": observed_name or "",
                 "name_differs": bool(observed_name) and observed_name.casefold() != client_name.casefold(),
                 "observed_at": observed_at,
+                "mapping_state": mapping_state,
+                "mapping_provenance": mapping_provenance or "",
                 "source_url": f"{reverse('sources_status')}?{urlencode({'source': source_name_value})}",
                 "name_difference_url": (
                     f"{reverse('findings_queue')}?"
