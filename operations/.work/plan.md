@@ -737,6 +737,24 @@ now adds the matching definition as well as the taxonomy membership. The full
 migration remains transactional and rolled back. Next action: validate, push,
 and verify successful startup before any policy activation.
 
+Policy activation simplification (2026-09-25): approved to remove the
+mandatory separate review gate that prevents a completed policy from becoming
+live. Scope: retain validation, the required activation reason, advisory lock,
+assessment invalidation, and audit record; remove only the prerequisite review
+lookup/function condition and the redundant Django Admin review action. Keep
+historical review data intact and do not grant a new role or bypass policy
+  validation. Validation: migration consistency, Django checks, targeted policy
+  tests, and review of the generated function SQL. Next action: implement the
+  additive migration and simplified activation action.
+
+Activation simplification checkpoint (2026-09-25): migration 0203 replaces
+the activation function with the same validity check, advisory lock, and
+assessment invalidation but no review-table prerequisite. The sole Django
+Admin action retains permission and required-reason checks and writes the
+activation audit event; the redundant review action is removed. Historical
+review data and function remain untouched. Next action: run focused checks,
+then request approval to commit and deploy the migration.
+
 Migration 0186, `jobs_software_supersession`, completes the declared
 Software-only cross-key admission path for converted v1 Jobs. During its
 implementation, the existing request-to-run composite FK was found to require
