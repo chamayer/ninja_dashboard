@@ -700,6 +700,15 @@ PostgreSQL is unavailable, so migration SQL, alias backfill, RLS, and evaluator
 queries remain unexecuted. Next action: review and request separate approval
 for the logical completion commit; do not push or deploy without approval.
 
+Production recovery checkpoint (2026-09-25): automatic deployment of
+`adecf55` applied 0201 but Operations crash-looped while 0202 tried to read
+the `security_invoker` client-link view as `operations_migrate`, which has no
+grant on that view. The migration transaction rolled back. The corrective
+migration revision now performs the alias bridge through the owned base
+relations and the latest active org observation, preserving the same scoped
+join and decision semantics. Next action: validate, commit/push the correction,
+then verify the automatic redeploy, migrations, health, and active policy.
+
 Migration 0186, `jobs_software_supersession`, completes the declared
 Software-only cross-key admission path for converted v1 Jobs. During its
 implementation, the existing request-to-run composite FK was found to require

@@ -14,25 +14,53 @@ NEW_VERSION = "conditions-taxonomy-7"
 
 
 BRIDGE_SQL = r"""
+WITH latest_org_observation AS (
+    SELECT DISTINCT ON (
+        observation.tenant_id,
+        observation.source_instance_id,
+        observation.external_namespace,
+        observation.external_id
+    )
+           observation.tenant_id,
+           observation.source_instance_id,
+           observation.external_namespace,
+           observation.external_id,
+           observation.canonical_data ->> 'name' AS observed_name
+      FROM operations.entity_observation_current observation
+     WHERE observation.tenant_id = 1
+       AND observation.entity_type = 'org'
+       AND observation.active
+     ORDER BY observation.tenant_id,
+              observation.source_instance_id,
+              observation.external_namespace,
+              observation.external_id,
+              observation.observed_at DESC
+)
 INSERT INTO operations.client_source_mapping_decisions
     (tenant_id, source_link_id, state, provenance, reason, decided_by_id)
 SELECT link.tenant_id,
-       link.source_link_id,
+       link.id,
        CASE WHEN alias.tier IN ('manual', 'seed', 'alignment')
             THEN 'explicit' ELSE 'automatic' END,
        'legacy_alias',
        'Imported enabled ' || alias.tier || ' client name alias: ' || alias.alias,
        NULL
-  FROM operations.v_client_source_mapping_effective link
+  FROM operations.entity_source_links link
+  JOIN latest_org_observation observation
+    ON observation.tenant_id = link.tenant_id
+   AND observation.source_instance_id = link.source_instance_id
+   AND observation.external_namespace = link.external_namespace
+   AND observation.external_id = link.external_id
   JOIN operations.client_name_aliases alias
     ON alias.tenant_id = link.tenant_id
-   AND alias.client_id = link.client_id
+   AND alias.client_id = link.entity_id
    AND alias.enabled
    AND alias.normalized_name = regexp_replace(
-       lower(coalesce(link.observed_name, '')), '[\s\-_.]', '', 'g'
+       lower(coalesce(observation.observed_name, '')), '[\s\-_.]', '', 'g'
    )
  WHERE link.tenant_id = 1
-   AND link.observed_name IS NOT NULL
+   AND link.entity_class_id = 'client'
+   AND observation.observed_name IS NOT NULL
 ON CONFLICT (tenant_id, source_link_id) WHERE superseded_at IS NULL DO NOTHING;
 """
 
