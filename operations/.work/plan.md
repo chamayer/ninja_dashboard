@@ -773,6 +773,25 @@ which is the approved mapping evidence projection and is readable by
 client workspace and findings tests, then request approval to deploy the
 recovery.
 
+Client-page recovery checkpoint (2026-09-25): completed and deployed in
+`481708d` (pushed to `origin` and `a-m-rose`). Validation passed: Django
+checks, migration-drift check, 67 focused client-workspace/findings tests,
+Ruff F checks, and diff check. Portainer deployed the same config hash;
+`ninja-operations` is healthy and `/healthz` returns 200. An unauthenticated
+request to `/orgs/all-data-health/` now returns the expected 302 login
+redirect, with no new restricted-view error in the Operations logs. No schema
+migration was required. The authenticated page should be verified from the
+operator session as the final UI check.
+
+Production follow-up (2026-09-25): authenticated `/sources/` and
+`/orgs/all-data-health/` still fail because
+`v_client_source_mapping_effective` is owned by `operations_view_owner` and
+its nested, security-invoker `v_client_source_link` rejects that owner. The
+application role can select the link view directly. Add migration 0205 to
+grant only `SELECT` on the nested view to its owning effective projection;
+this repairs every consumer of the approved projection without restoring
+runtime reads from the legacy view.
+
 Migration 0186, `jobs_software_supersession`, completes the declared
 Software-only cross-key admission path for converted v1 Jobs. During its
 implementation, the existing request-to-run composite FK was found to require
