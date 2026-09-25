@@ -5,6 +5,7 @@
 <div class="card">
   <h1>Client mappings</h1>
   <p class="muted">Review source references attached to each client. Decisions are audited and replace only the current mapping state.</p>
+  {% if selected_mapping %}<p class="muted">Showing the source reference selected from Issues.</p>{% endif %}
   <table class="ops-table">
     <thead><tr><th>Client</th><th>Source</th><th>Source name</th><th>Source reference</th><th>State</th><th>Provenance</th><th>Reason</th><th>Decided</th><th>Decision</th></tr></thead>
     <tbody>

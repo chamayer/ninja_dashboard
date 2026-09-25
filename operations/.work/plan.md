@@ -792,6 +792,22 @@ grant only `SELECT` on the nested view to its owning effective projection;
 this repairs every consumer of the approved projection without restoring
 runtime reads from the legacy view.
 
+Client-name issue usability follow-up (2026-09-25): the unified Issues table
+must show the complete source-name evidence for a canonical client, not only
+the source that refreshed the finding. Its control must deep-link to the
+single source-link mapping decision, rather than the unfiltered Admin health
+page. Extend the effective-reference helper with the source-link identity;
+use it to render the evidence and a targeted Operations mapping URL.
+
+Effective-mapping permission correction (2026-09-25): after 0205, an
+operations-app query demonstrated the projection then stopped at
+`client_source_mapping_decisions`. This is not a runtime grant: the
+security-barrier projection is intentionally owned by
+`operations_view_owner`, which already has the needed source-link and
+observation reads. Migration 0206 grants that owner only `SELECT` on the
+decision history table it joins; the app continues to access it only through
+the permitted effective projection.
+
 Migration 0186, `jobs_software_supersession`, completes the declared
 Software-only cross-key admission path for converted v1 Jobs. During its
 implementation, the existing request-to-run composite FK was found to require

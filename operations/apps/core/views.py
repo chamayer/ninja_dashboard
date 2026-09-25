@@ -5240,9 +5240,35 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
                 tenant_id=1, id__in=client_ids, deleted_at__isnull=True
             ).only("id", "slug", "display_name")
         }
+        client_references_by_id: dict[str, list[dict]] = {}
+        if any(
+            finding.finding_type.name == "client_name_conflict"
+            for finding in admin_rows
+        ):
+            for reference in client_source_references():
+                client_references_by_id.setdefault(str(reference["client_id"]), []).append(reference)
         for finding in admin_rows:
             ref = finding.subject_ref or {}
             client = clients_by_id.get(str(ref.get("client_id")))
+            source_name = source_names_by_id.get(str(ref.get("source_id")), "")
+            source_reference = (
+                ref.get("external_id")
+                or " · ".join((finding.details or {}).get("external_ids") or [])
+            )
+            references = client_references_by_id.get(str(ref.get("client_id")), [])
+            matching_reference = next(
+                (
+                    reference
+                    for reference in references
+                    if reference["source_name"] == source_name
+                    and reference["external_id"] == source_reference
+                ),
+                None,
+            )
+            source_names = " · ".join(
+                f"{reference['source_name']}: {reference['observed_name'] or '(not reported)'}"
+                for reference in references
+            )
             admin_findings.append(
                 {
                     "finding": finding,
@@ -5265,17 +5291,20 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
                     "client_url": (
                         reverse("org_index", kwargs={"org_slug": client.slug}) if client else ""
                     ),
-                    "observed_name": (
+                    "observed_name": source_names or (
                         ref.get("observed_name")
                         or " ↔ ".join((finding.details or {}).get("source_group_names") or [])
                         or "(not reported)"
                     ),
-                    "source_name": source_names_by_id.get(str(ref.get("source_id")), ""),
-                    "source_reference": (
-                        ref.get("external_id")
-                        or " · ".join((finding.details or {}).get("external_ids") or [])
+                    "source_name": source_name,
+                    "source_reference": source_reference,
+                    "admin_url": (
+                        f"{reverse('client_mappings')}?"
+                        f"{urlencode({'source_link_id': matching_reference['source_link_id']})}"
+                        if matching_reference
+                        else f"{reverse('findings_admin_health')}?type={finding.finding_type.name}"
                     ),
-                    "admin_url": f"{reverse('findings_admin_health')}?type={finding.finding_type.name}",
+                    "admin_label": "Review mapping" if matching_reference else "Admin controls",
                 }
             )
 
@@ -10189,10 +10218,16 @@ def client_mapping_decide(request: HttpRequest, source_link_id: str) -> HttpResp
 @require_admin
 def client_mappings(request: HttpRequest) -> HttpResponse:
     """Operations surface for effective client/source mapping decisions."""
+    source_link_id = (request.GET.get("source_link_id") or "").strip()
+    where = ["mapping.tenant_id = 1"]
+    params: list[str] = []
+    if source_link_id:
+        where.append("mapping.source_link_id = %s::uuid")
+        params.append(source_link_id)
     with transaction.atomic(), connection.cursor() as cur:
         cur.execute("SET LOCAL operations.tenant_id = 1")
         cur.execute(
-            """
+            f"""
             SELECT mapping.source_link_id, client.slug, client.display_name, source.name,
                    mapping.external_id, mapping.observed_name, mapping.observed_at,
                    mapping.mapping_state, mapping.provenance,
@@ -10200,12 +10235,22 @@ def client_mappings(request: HttpRequest) -> HttpResponse:
               FROM operations.v_client_source_mapping_effective mapping
               JOIN operations.clients client ON client.id = mapping.client_id
               JOIN operations.sources source ON source.id = mapping.source_id
-             WHERE mapping.tenant_id = 1
+             WHERE {' AND '.join(where)}
              ORDER BY client.display_name, source.name, mapping.external_id
-            """
+            """,
+            params,
         )
         rows = cur.fetchall()
-    return render(request, "client_mappings.html", {"admin_group": "integrations", "admin_tab": "client-mappings", "rows": rows})
+    return render(
+        request,
+        "client_mappings.html",
+        {
+            "admin_group": "integrations",
+            "admin_tab": "client-mappings",
+            "rows": rows,
+            "selected_mapping": bool(source_link_id),
+        },
+    )
 
 
 @login_required

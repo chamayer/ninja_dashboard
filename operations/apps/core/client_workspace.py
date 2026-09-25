@@ -335,7 +335,7 @@ def client_source_references(*, client_id=None, source_name: str = "") -> list[d
         cur.execute("SET LOCAL operations.tenant_id = 1")
         cur.execute(
             f"""
-            SELECT link.client_id, client.display_name, client.slug,
+            SELECT link.source_link_id, link.client_id, client.display_name, client.slug,
                    source.name, link.external_id, link.external_namespace,
                    link.first_seen_at, link.last_seen_at, link.missing_since,
                    link.observed_name, link.observed_at,
@@ -356,6 +356,7 @@ def client_source_references(*, client_id=None, source_name: str = "") -> list[d
     references = []
     for row in rows:
         (
+            source_link_id,
             client_id_value,
             client_name,
             client_slug,
@@ -372,6 +373,7 @@ def client_source_references(*, client_id=None, source_name: str = "") -> list[d
         ) = row
         references.append(
             {
+                "source_link_id": source_link_id,
                 "client_id": client_id_value,
                 "client_name": client_name,
                 "client_slug": client_slug,
