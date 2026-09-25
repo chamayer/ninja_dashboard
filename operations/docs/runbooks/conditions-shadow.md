@@ -12,7 +12,7 @@ normal Operations runtime configuration, not a migration/superuser override.
 
 ## Commands
 
-Validate and display all 53 definitions without database access:
+Validate and display all 54 definitions without database access:
 
 ```sh
 python manage.py compare_conditions --tenant-id 1 --catalog-only

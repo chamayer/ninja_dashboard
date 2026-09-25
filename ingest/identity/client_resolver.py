@@ -116,9 +116,13 @@ def drain_client_resolution() -> int:
                 continue
 
             if normalized in placeholders or cd.get("is_placeholder"):
+                _resolve_finding(cur, "client_unattached_group", _cond_group(binding_id, entity_key))
+                _resolve_finding(cur, "client_link_collision", _cond_group(binding_id, entity_key))
                 continue
 
             if normalized in excludes:
+                _resolve_finding(cur, "client_unattached_group", _cond_group(binding_id, entity_key))
+                _resolve_finding(cur, "client_link_collision", _cond_group(binding_id, entity_key))
                 continue
 
             matches = name_index.get(normalized) or []
@@ -178,6 +182,7 @@ def drain_client_resolution() -> int:
         # rematch or forced rename: operators can suppress it when the source
         # label is intentionally different.
         _check_name_drift(cur)
+        _check_mapping_topology(cur)
         _retire_client_name_conflicts(cur)
 
     log.info("client_resolver: attached %d groups", attached)
@@ -355,6 +360,11 @@ def _cond_group(binding_id: uuid.UUID, entity_key: str) -> str:
 
 def _cond_link(link_id: uuid.UUID) -> str:
     raw = f"client_name_drift:{link_id}"
+    return hashlib.sha256(raw.encode()).hexdigest()[:64]
+
+
+def _cond_topology(kind: str, source_id: int, normalized_name: str, client_id: uuid.UUID | None = None) -> str:
+    raw = f"client_mapping_topology:{kind}:{source_id}:{normalized_name}:{client_id or ''}"
     return hashlib.sha256(raw.encode()).hexdigest()[:64]
 
 
@@ -619,7 +629,8 @@ def _check_name_drift(cur) -> None:
             SELECT DISTINCT ON (source_binding_id, entity_key)
                    source_binding_id, entity_key,
                    canonical_data ->> 'name' AS observed_name,
-                   canonical_data ->> 'normalized_name' AS observed_norm
+                   canonical_data ->> 'normalized_name' AS observed_norm,
+                   COALESCE((canonical_data ->> 'is_placeholder')::boolean, FALSE) AS is_placeholder
               FROM operations.entity_observation_current
              WHERE tenant_id = %s
                AND entity_type = 'org'
@@ -639,6 +650,7 @@ def _check_name_drift(cur) -> None:
             ON latest.source_binding_id = binding.id
            AND latest.entity_key = link.external_id
          WHERE link.tenant_id = %s
+           AND NOT latest.is_placeholder
         ), peers AS (
             SELECT client_id,
                    count(DISTINCT COALESCE(NULLIF(observed_norm, ''), lower(observed_name))) AS distinct_name_count,
@@ -655,6 +667,7 @@ def _check_name_drift(cur) -> None:
         """,
         (_TENANT_ID, _TENANT_ID),
     )
+    active_conditions: set[str] = set()
     for (
         link_id,
         client_id,
@@ -676,6 +689,7 @@ def _check_name_drift(cur) -> None:
         if distinct_name_count < 2:
             _resolve_entity_finding(cur, "client_name_conflict", condition_key)
             continue
+        active_conditions.add(condition_key)
         _emit_finding(
             cur,
             "client_name_conflict",
@@ -683,6 +697,7 @@ def _check_name_drift(cur) -> None:
             subject_ref={},
             details={
                 "source_binding_id": str(source_binding_id),
+                "source_link_id": str(link_id),
                 "source_id": source_id,
                 "external_id": external_id,
                 "observed_name": observed_name,
@@ -692,3 +707,125 @@ def _check_name_drift(cur) -> None:
             admin=False,
             client_id=client_id,
         )
+    _resolve_unseen_client_name_conflicts(cur, active_conditions)
+
+
+def _resolve_unseen_client_name_conflicts(cur, active_conditions: set[str]) -> None:
+    """Withdraw drift findings whose active source evidence has disappeared."""
+    ft_id = _finding_type_id(cur, "client_name_conflict")
+    if ft_id is None:
+        return
+    params: list[Any] = [_TENANT_ID, ft_id]
+    where = ""
+    if active_conditions:
+        where = " AND condition_key <> ALL(%s)"
+        params.append(list(active_conditions))
+    cur.execute(
+        f"""
+        UPDATE operations.findings
+           SET status = 'resolved', resolved_at = NOW()
+         WHERE tenant_id = %s
+           AND finding_type_id = %s
+           AND status IN ('open', 'acknowledged', 'investigating', 'suppressed')
+           {where}
+        """,
+        params,
+    )
+
+
+def _check_mapping_topology(cur) -> None:
+    """Surface duplicate source groups without altering source-link identity.
+
+    A shared source-group name mapped to different clients is a split.  The
+    same normalized source-group name appearing under multiple external IDs for
+    one client is a possible duplicate/merge.  Explicit and ignored decisions
+    are intentional operator outcomes, so they do not create review findings.
+    """
+    cur.execute(
+        """
+        WITH current_links AS (
+            SELECT link.source_link_id, link.source_id, link.client_id,
+                   link.external_id, link.observed_name,
+                   regexp_replace(lower(link.observed_name), '[\\s\\-_.]', '', 'g') AS normalized_name
+              FROM operations.v_client_source_mapping_effective link
+             WHERE link.tenant_id = %s
+               AND link.missing_since IS NULL
+               AND link.observed_name IS NOT NULL
+               AND link.observed_name <> ''
+               AND link.mapping_state NOT IN ('explicit', 'ignored')
+        ), splits AS (
+            SELECT source_id, normalized_name,
+                   array_agg(DISTINCT client_id::text ORDER BY client_id::text) AS client_ids,
+                   array_agg(DISTINCT external_id ORDER BY external_id) AS external_ids,
+                   array_agg(DISTINCT observed_name ORDER BY observed_name) AS source_group_names,
+                   array_agg(DISTINCT source_link_id::text ORDER BY source_link_id::text) AS source_link_ids
+              FROM current_links
+             GROUP BY source_id, normalized_name
+            HAVING count(DISTINCT client_id) > 1
+        ), merges AS (
+            SELECT source_id, client_id, normalized_name,
+                   array_agg(DISTINCT external_id ORDER BY external_id) AS external_ids,
+                   array_agg(DISTINCT observed_name ORDER BY observed_name) AS source_group_names,
+                   array_agg(DISTINCT source_link_id::text ORDER BY source_link_id::text) AS source_link_ids
+              FROM current_links
+             GROUP BY source_id, client_id, normalized_name
+            HAVING count(DISTINCT external_id) > 1
+        )
+        SELECT 'split', source_id, NULL::uuid, normalized_name,
+               client_ids, external_ids, source_group_names, source_link_ids
+          FROM splits
+        UNION ALL
+        SELECT 'merge', source_id, client_id, normalized_name,
+               ARRAY[client_id::text], external_ids, source_group_names, source_link_ids
+          FROM merges
+        """,
+        (_TENANT_ID,),
+    )
+    active: dict[str, set[str]] = {"split": set(), "merge": set()}
+    for kind, source_id, client_id, normalized_name, client_ids, external_ids, source_group_names, source_link_ids in cur.fetchall():
+        condition_key = _cond_topology(kind, source_id, normalized_name, client_id)
+        active[kind].add(condition_key)
+        _emit_finding(
+            cur,
+            "client_link_collision" if kind == "split" else "client_source_group_merge",
+            condition_key=condition_key,
+            subject_ref={"source_id": source_id, "external_id": external_ids[0]},
+            details={
+                "topology": kind,
+                "source_id": source_id,
+                "normalized_name": normalized_name,
+                "candidate_client_ids": client_ids,
+                "external_ids": external_ids,
+                "source_group_names": source_group_names,
+                "source_link_ids": source_link_ids,
+            },
+            severity="high" if kind == "split" else "medium",
+            admin=True,
+        )
+    _resolve_unseen_topology_findings(cur, "client_link_collision", "split", active["split"])
+    _resolve_unseen_topology_findings(cur, "client_source_group_merge", "merge", active["merge"])
+
+
+def _resolve_unseen_topology_findings(
+    cur, type_name: str, topology: str, active_conditions: set[str]
+) -> None:
+    ft_id = _finding_type_id(cur, type_name)
+    if ft_id is None:
+        return
+    params: list[Any] = [_TENANT_ID, ft_id, topology]
+    where = ""
+    if active_conditions:
+        where = " AND condition_key <> ALL(%s)"
+        params.append(list(active_conditions))
+    cur.execute(
+        f"""
+        UPDATE operations.admin_findings
+           SET status = 'resolved', resolved_at = NOW()
+         WHERE tenant_id = %s
+           AND finding_type_id = %s
+           AND details ->> 'topology' = %s
+           AND status IN ('open', 'acknowledged', 'investigating', 'suppressed')
+           {where}
+        """,
+        params,
+    )

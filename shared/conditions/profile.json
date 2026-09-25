@@ -30,7 +30,7 @@
       {"key": "conflicting_computer_details", "label": "Conflicting computer details", "conditions": ["device_role_conflict", "lifecycle_reported_state_conflict"]},
       {"key": "unknown_computer_classification", "label": "Unknown computer classification", "conditions": ["lifecycle_unknown_reported_state", "unmapped_node_class"]},
       {"key": "client_name_differences", "label": "Client name differences", "conditions": ["client_name_conflict"]},
-      {"key": "client_source_mapping", "label": "Unmapped client source groups", "conditions": ["client_link_collision", "client_unattached_group", "unnamed_source_group", "unmatched_source_group"]},
+      {"key": "client_source_mapping", "label": "Client source mapping", "conditions": ["client_link_collision", "client_source_group_merge", "client_unattached_group", "unnamed_source_group", "unmatched_source_group"]},
       {"key": "computer_identity_matching", "label": "Computer identity matching", "conditions": ["identity_resolution_pending", "unlinked_external_identity"]},
       {"key": "hudu_archive_candidates", "label": "Hudu archive candidates", "conditions": ["cmdb_asset_stale"]},
       {"key": "incorrect_hudu_links", "label": "Incorrect Hudu links", "conditions": ["cmdb_link_incorrect"]},
@@ -282,6 +282,14 @@
     {
       "name": "client_link_collision",
       "label": "Platform organization matches multiple clients",
+      "category": "Records & Matching",
+      "type": "Client matching",
+      "lifecycle": "active",
+      "rules": []
+    },
+    {
+      "name": "client_source_group_merge",
+      "label": "Duplicate source groups mapped to one client",
       "category": "Records & Matching",
       "type": "Client matching",
       "lifecycle": "active",

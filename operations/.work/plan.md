@@ -675,6 +675,31 @@ The table now exposes explicit, automatic, ignored, and review states with
   review the migration diff and request approval for one logical commit; do
   not push or deploy without separate approval.
 
+Completion pass (2026-09-25): the prior commit delivered the decision surface
+but did not complete every approved evaluator path. Active scope is limited to
+the missing legacy-alias bridge and evaluator lifecycle: preserve explicit
+manual/seed/alignment aliases as explicit per-source decisions, preserve
+source-tier aliases as automatic, clear review findings for intentional
+placeholder/excluded/withdrawn evidence, and detect incompatible source-name
+topology without changing source links. The evaluator must remain evidence-
+driven and may not manufacture split/merge mappings. A new policy taxonomy
+version will expose any new review type in the general Issues queue. Validation
+will cover migration consistency, resolver tests, and Django checks; local
+PostgreSQL execution remains a stated limitation.
+
+Completion checkpoint (2026-09-25): migration 0202 imports enabled legacy
+aliases into the decision authority without overriding an existing decision;
+manual/seed/alignment aliases become explicit and source-tier aliases become
+automatic. The resolver now clears stale name-difference findings when active
+evidence is withdrawn or marked placeholder, clears excluded/unmapped reviews,
+and emits visible split/duplicate-source-group reviews without altering source
+links. Policy taxonomy version 7 exposes the new duplicate-source-group type
+under Client source mapping. Django checks, migration consistency, Python
+compilation, and 118 focused Conditions/Findings/Workspace tests pass. Local
+PostgreSQL is unavailable, so migration SQL, alias backfill, RLS, and evaluator
+queries remain unexecuted. Next action: review and request separate approval
+for the logical completion commit; do not push or deploy without approval.
+
 Migration 0186, `jobs_software_supersession`, completes the declared
 Software-only cross-key admission path for converted v1 Jobs. During its
 implementation, the existing request-to-run composite FK was found to require

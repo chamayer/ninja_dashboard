@@ -5269,9 +5269,16 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
                     "client_url": (
                         reverse("org_index", kwargs={"org_slug": client.slug}) if client else ""
                     ),
-                    "observed_name": ref.get("observed_name") or "(not reported)",
+                    "observed_name": (
+                        ref.get("observed_name")
+                        or " ↔ ".join((finding.details or {}).get("source_group_names") or [])
+                        or "(not reported)"
+                    ),
                     "source_name": source_names_by_id.get(str(ref.get("source_id")), ""),
-                    "source_reference": ref.get("external_id") or "",
+                    "source_reference": (
+                        ref.get("external_id")
+                        or " · ".join((finding.details or {}).get("external_ids") or [])
+                    ),
                     "admin_url": f"{reverse('findings_admin_health')}?type={finding.finding_type.name}",
                 }
             )

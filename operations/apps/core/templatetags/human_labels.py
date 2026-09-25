@@ -97,6 +97,7 @@ _LABELS: dict[str, str] = {
     # ── Finding types — client resolver ──────────────────────
     "client_name_conflict": "Client renamed at source",
     "client_link_collision": "Multiple clients claim this name",
+    "client_source_group_merge": "Duplicate source groups mapped to one client",
     "client_unattached_group": "Group not attached to a client",
     # ── Scope values ─────────────────────────────────────────
     "Included": "In scope",

@@ -144,9 +144,9 @@ def signal(name, readiness, member=None):
     return Signal(name, member or participant(), readiness, f"{name}:{readiness}", ("blocker",))
 
 
-def test_profile_covers_53_definitions_and_all_subscribers():
+def test_profile_covers_54_definitions_and_all_subscribers():
     profile = load_profile()
-    assert len(profile.definitions) == 53
+    assert len(profile.definitions) == 54
     assert len(profile.consumers) == 10
     assert profile.definitions["cmdb_asset_stale"]["label"] == "Hudu archive candidate"
     assert (
@@ -498,8 +498,8 @@ def test_issue_taxonomy_covers_every_condition_once():
         for type_item in category["types"]
         for condition in type_item["conditions"]
     ]
-    assert len(memberships) == 53
-    assert len(set(memberships)) == 53
+    assert len(memberships) == 54
+    assert len(set(memberships)) == 54
     assert set(memberships) == set(profile.definitions)
     assert [category["label"] for category in profile.issue_taxonomy] == [
         "Inventory",
@@ -544,7 +544,7 @@ def test_issue_taxonomy_separates_distinct_inventory_workflows():
     assert types["historical_identity_collisions"] == {"cross_client_conflict"}
     assert types["client_name_differences"] == {"client_name_conflict"}
     assert types["client_source_mapping"] == {
-        "client_link_collision", "client_unattached_group", "unnamed_source_group",
+        "client_link_collision", "client_source_group_merge", "client_unattached_group", "unnamed_source_group",
         "unmatched_source_group",
     }
     assert types["computer_identity_matching"] == {
