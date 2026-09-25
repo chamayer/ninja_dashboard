@@ -764,6 +764,15 @@ policy form no longer exposes review or activation actions; a manually created
 policy is committed/active in one audited save. Next action: validate the
 function and admin changes, then request approval to commit/push/deploy.
 
+Client-page recovery (2026-09-25): production logs show `/orgs/all-data-health/`
+failing because runtime code still reads the restricted
+`v_client_source_link`. Scope: replace every Operations runtime client-source
+read with `v_client_source_mapping_effective` / `client_source_references`,
+which is the approved mapping evidence projection and is readable by
+`operations_app`; leave Django Admin's model registration unchanged. Validate
+client workspace and findings tests, then request approval to deploy the
+recovery.
+
 Migration 0186, `jobs_software_supersession`, completes the declared
 Software-only cross-key admission path for converted v1 Jobs. During its
 implementation, the existing request-to-run composite FK was found to require

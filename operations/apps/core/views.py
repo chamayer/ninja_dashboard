@@ -23,14 +23,13 @@ from django.db.models import (
     F,
     Func,
     OuterRef,
-    Prefetch,
     Q,
     Subquery,
     Value,
     When,
 )
 from django.db.models.expressions import RawSQL
-from django.db.models.functions import Cast, Coalesce, Concat
+from django.db.models.functions import Coalesce, Concat
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
@@ -42,7 +41,11 @@ from shared.jobs_registry import capability_state, catalog_entries, definition, 
 
 from . import capability as capability_evidence
 from . import category as category_evidence
-from .client_workspace import build_client_directory, build_client_workspace
+from .client_workspace import (
+    build_client_directory,
+    build_client_workspace,
+    client_source_references,
+)
 from .conditions.live import load_active_profile
 from .conditions.operator import (
     ATTENTION_BLOCKED,
@@ -79,7 +82,6 @@ from .models import (
     ClientNameAlias,
     ClientOrgExclude,
     ClientPolicy,
-    ClientSourceLink,
     CoverageRequirement,
     Device,
     DeviceOperatorDecision,
@@ -1130,10 +1132,8 @@ def home(request: HttpRequest) -> HttpResponse:  # noqa: PLR0912, PLR0915
     dashboard_updated_at = max(observed_updates, default=None)
 
     client_sources: dict = {}
-    for client_id, source_name in ClientSourceLink.objects.filter(tenant_id=1).values_list(
-        "client_id", "source__name"
-    ):
-        client_sources.setdefault(client_id, set()).add(source_name)
+    for reference in client_source_references():
+        client_sources.setdefault(reference["client_id"], set()).add(reference["source_name"])
 
     pending_merges_by_client = {
         row["client_id"]: row["n"]
@@ -1506,9 +1506,7 @@ def org_index(request: HttpRequest, org_slug: str) -> HttpResponse:
         )
         ctx["device_count"] = len(devices)
         ctx["type_summary"] = _type_summary(devices)
-        ctx["client_links"] = list(
-            client.source_links.select_related("source").order_by("source__name")
-        )
+        ctx["client_links"] = client_source_references(client_id=client.id)
         ctx["policy_count"] = ClientPolicy.objects.filter(tenant_id=1, client=client).count()
         ctx["policy_categories"] = list(
             ClientPolicy.objects.filter(tenant_id=1, client=client)
@@ -1529,7 +1527,7 @@ def org_index(request: HttpRequest, org_slug: str) -> HttpResponse:
                 # Total devices per scope. Device type is form factor only;
                 # coverage applicability comes from requirements/entity_type.
                 cur.execute(
-                    f"""
+                    """
                     SELECT od.device_role AS scope, COUNT(*)::int
                     FROM operations.devices od
                     WHERE od.tenant_id = 1 AND od.client_id = %s AND od.deleted_at IS NULL
@@ -1835,12 +1833,6 @@ def org_index(request: HttpRequest, org_slug: str) -> HttpResponse:
         clients_with_counts = list(
             Client.objects.filter(tenant_id=1, deleted_at__isnull=True)
             .select_related("requirement_profile")
-            .prefetch_related(
-                Prefetch(
-                    "source_links",
-                    queryset=ClientSourceLink.objects.select_related("source").order_by("source__name"),
-                )
-            )
             .annotate(
                 device_count=Count(
                     "devices",
@@ -1849,9 +1841,13 @@ def org_index(request: HttpRequest, org_slug: str) -> HttpResponse:
             )
             .order_by("-device_count", "display_name")
         )
+        source_names_by_client: dict = {}
+        for reference in client_source_references():
+            source_names_by_client.setdefault(reference["client_id"], set()).add(
+                reference["source_name"]
+            )
         for c in clients_with_counts:
-            # Shared sources carry one link per platform group — dedupe for display.
-            c.source_names = list(dict.fromkeys(l.source.name for l in c.source_links.all()))
+            c.source_names = sorted(source_names_by_client.get(c.id, set()))
         fleet_type_counts = {
             row["device_type"]: row["count"]
             for row in Device.objects.filter(tenant_id=1, deleted_at__isnull=True)

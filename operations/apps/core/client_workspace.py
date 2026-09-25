@@ -269,7 +269,7 @@ def _shared_context() -> tuple[dict, dict, dict]:
         cur.execute(
             f"""
             SELECT cl.client_id, COUNT(DISTINCT l.id)::int
-            FROM operations.v_client_source_link cl
+            FROM operations.v_client_source_mapping_effective cl
             JOIN operations.sources s ON s.id = cl.source_id
             JOIN ninja_core.locations l
               ON s.name = 'Ninja'
@@ -402,7 +402,9 @@ def build_client_workspace(client, existing: dict, *, device_policy: dict | None
     device_policy = device_policy or get_device_status_policy()
     stats_by_client, issue_details = _issue_rollup(client_id=client.id)
     stats = stats_by_client.get(client.id, {})
-    source_names = list(dict.fromkeys(link.source.name for link in existing["client_links"]))
+    source_names = list(
+        dict.fromkeys(link["source_name"] for link in existing["client_links"])
+    )
     source_updates = _source_updates(
         source_names,
         health,
