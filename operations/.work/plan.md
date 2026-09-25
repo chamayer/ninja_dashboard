@@ -717,6 +717,13 @@ exposure; admin findings do not bind device subjects. The migration transaction
 rolled back, so the revised 0202 remains safe to retry. Next action: validate,
 push the corrective commit, and verify startup/migration completion.
 
+Third recovery checkpoint (2026-09-25): the finding-type seed then exposed a
+second production non-null registry column, `suppressed_by_approval`. The new
+admin-only mapping finding now explicitly sets it false, alongside the already
+explicit non-device exposure setting. The migration transaction again rolled
+back, so no partial type, policy, or decision data was retained. Next action:
+validate and push this final registry-contract correction, then verify health.
+
 Migration 0186, `jobs_software_supersession`, completes the declared
 Software-only cross-key admission path for converted v1 Jobs. During its
 implementation, the existing request-to-run composite FK was found to require
