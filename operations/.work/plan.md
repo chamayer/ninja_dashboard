@@ -837,6 +837,12 @@ transition is needed to understand the exception. Reuse the effective mapping
 projection and active client-name findings; do not infer expected-source
 absence until a client-source coverage policy exists.
 
+Resolver recovery (2026-09-28): production startup exposed an existing
+client-name resolver defect while it refreshed source identity: it attempted
+to write `resolved_at` on `operations.findings`, whose lifecycle field is
+`closed_at`. Correct both entity-finding closure paths and test the contract;
+AdminFinding and client-candidate closure fields remain unchanged.
+
 Migration 0186, `jobs_software_supersession`, completes the declared
 Software-only cross-key admission path for converted v1 Jobs. During its
 implementation, the existing request-to-run composite FK was found to require

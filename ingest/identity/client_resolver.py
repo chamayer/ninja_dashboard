@@ -606,7 +606,7 @@ def _resolve_entity_finding(cur, type_name: str, condition_key: str) -> None:
     cur.execute(
         """
         UPDATE operations.findings
-           SET status = 'resolved', resolved_at = NOW()
+           SET status = 'resolved', closed_at = NOW()
          WHERE tenant_id = %s
            AND finding_type_id = %s
            AND condition_key = %s
@@ -723,7 +723,7 @@ def _resolve_unseen_client_name_conflicts(cur, active_conditions: set[str]) -> N
     cur.execute(
         f"""
         UPDATE operations.findings
-           SET status = 'resolved', resolved_at = NOW()
+           SET status = 'resolved', closed_at = NOW()
          WHERE tenant_id = %s
            AND finding_type_id = %s
            AND status IN ('open', 'acknowledged', 'investigating', 'suppressed')

@@ -7,3 +7,14 @@ def test_client_name_drift_compares_reported_names_exactly():
 
     assert "count(DISTINCT observed_name) AS distinct_name_count" in section
     assert "COALESCE(NULLIF(observed_norm" not in section
+
+
+def test_client_name_drift_closes_entity_findings_with_closed_at():
+    source = (Path(__file__).parents[1] / "identity" / "client_resolver.py").read_text()
+    resolve_one = source[source.index("def _resolve_entity_finding"):source.index("def _check_name_drift")]
+    resolve_unseen = source[source.index("def _resolve_unseen_client_name_conflicts"):source.index("def _check_mapping_topology")]
+
+    assert "closed_at = NOW()" in resolve_one
+    assert "closed_at = NOW()" in resolve_unseen
+    assert "resolved_at" not in resolve_one
+    assert "resolved_at" not in resolve_unseen
