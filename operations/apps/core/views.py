@@ -1841,9 +1841,8 @@ def org_index(request: HttpRequest, org_slug: str) -> HttpResponse:
             )
             .order_by("-device_count", "display_name")
         )
-        source_references = client_source_references()
         source_names_by_client: dict = {}
-        for reference in source_references:
+        for reference in client_source_references():
             source_names_by_client.setdefault(reference["client_id"], set()).add(
                 reference["source_name"]
             )
@@ -1878,11 +1877,7 @@ def org_index(request: HttpRequest, org_slug: str) -> HttpResponse:
         ctx["open_finding_count"] = Finding.objects.filter(
             tenant_id=1, status__in=_FINDING_ACTIVE_STATUSES
         ).count()
-        ctx.update(
-            build_client_directory(
-                clients_with_counts, source_references=source_references
-            )
-        )
+        ctx.update(build_client_directory(clients_with_counts))
     return render(request, "org_index.html", ctx)
 
 
