@@ -11,6 +11,15 @@ the design authority; the tenant boundary, root-completion rule, quiesced
 cutover direction, and constrained 2.2 activation scope are accepted.
 Preserve unrelated untracked root `.work/probe_*` and bootstrap files.
 
+On 2026-09-28 the user authorized autonomous completion of the Jobs work,
+including needed corrections, commits, pushes, and the coupled redeploy/migration
+path. Preserve the unrelated client-mapping and root `.work` work. Production
+read-only verification confirms Operations migrations 0183–0186 are applied
+and the Postgres, ingest, and Operations containers are healthy. Before any
+converted producer is enabled, correct the 0185 claim API: it returns only a
+claim token, which would require a raw ledger lookup to identify the claimed
+run. A replacement API must return both the run ID and fencing token.
+
 ## Goal
 
 Make every scheduled, automatic, operator-requested, and system-maintenance
