@@ -972,3 +972,22 @@ Both nullable parameters are now explicitly `text`, preventing false
 undefined-name lint, and `git diff --check` pass; the dedicated focused module
 is skipped locally because this environment cannot import the ingest runtime.
 Next action: deploy and verify that startup no longer logs the probe error.
+
+Deployment verification (2026-09-28): `780ee81` is deployed to both remotes
+and resolved by Portainer. Ingest and Operations health endpoints return OK;
+the fresh ingest startup has no catch-up probe error and reaches ready state.
+The Jobs definition catalog contains 30 immutable registered snapshots, one
+for each declared registry definition. The direct Portainer redeploy endpoint
+continues to reject bodyless POST requests (HTTP 405), while the configured
+one-minute Git update applied each approved revision. Next action: proceed with
+the next governed v1 consumer conversion without reintroducing raw ledger
+access.
+
+Worker API foundation (2026-09-29): added migration 0208 with restricted
+ingest-only v1 APIs that return a claimed run ID, fencing token, and job key
+atomically, increment attempts under that fence, and finish/release the claim
+without a worker reading or mutating the Jobs ledger directly. This remains
+dormant until worker conversion; existing version-0 traffic is unchanged.
+Focused validation passed: Python compilation, targeted Ruff, 12 Jobs
+migration tests, and `git diff --check`. Next action: deploy this additive API
+and implement the dedicated worker process against it.
