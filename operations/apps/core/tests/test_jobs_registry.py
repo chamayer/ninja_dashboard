@@ -83,6 +83,14 @@ def test_both_runtime_consumers_validate_the_shared_registry():
     assert 'validate_registry(catalog_keys=(entry["id"] for entry in _JOB_CATALOG))' in views
 
 
+def test_definition_registration_happens_after_database_initialization():
+    main = (ROOT / "ingest" / "main.py").read_text(encoding="utf-8")
+
+    assert main.index("db.init(settings.postgres_dsn)") < main.index(
+        "operator_job_queue.register_definition_snapshots()"
+    )
+
+
 def test_capability_labels_do_not_make_unreviewed_execution_safe():
     enabled, label = capability_state("agent-compliance", {"legacy_agent_compliance": False})
     assert not enabled

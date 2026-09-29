@@ -954,3 +954,12 @@ passed: Python compilation, targeted Ruff (`E`, `F`, `I`) for the registry and
 test, targeted undefined-name lint for the touched ingest modules, 10 focused
 registry/queue tests, and `git diff --check`. Next action: commit, push, and
 verify the production deployment registers the snapshot catalog cleanly.
+
+Startup-order correction (2026-09-28): production validation exposed that the
+initial registration placement ran before `db.init`, leaving ingest in a
+restart loop. Registration now runs immediately after the pending ingest
+migrations, before recovery or scheduled execution. A focused source-order
+test prevents that regression. Validation passed: Python compilation, scoped
+Ruff, 11 focused registry/queue tests, and `git diff --check`. Next action:
+commit and deploy the startup-order fix, then verify ingest health and catalog
+registration.
