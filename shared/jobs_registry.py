@@ -20,6 +20,16 @@ class RegistryValidationError(ValueError):
 
 
 @dataclass(frozen=True)
+class ScheduleDefinition:
+    """Durable cadence identity; the ingest runtime resolves its setting value."""
+
+    schedule_id: str
+    job_key: str
+    cadence_setting: str
+    cadence_unit: str = "hours"
+
+
+@dataclass(frozen=True)
 class JobDefinition:
     """Presentation and current execution metadata for one Jobs definition.
 
@@ -474,6 +484,37 @@ _RAW_DEFINITIONS = (
     ),
 )
 
+
+_SCHEDULE_DEFINITIONS = (
+    ScheduleDefinition("patch_ingest_cycle", "patches", "PATCH_INGEST_SCHEDULE_HOURS"),
+    ScheduleDefinition("agent_observations_cycle", "agent-observations", "AGENT_COMPLIANCE_SCHEDULE_HOURS"),
+    ScheduleDefinition("documentation_observations_cycle", "documentation-observations", "DOCUMENTATION_SCHEDULE_HOURS"),
+    ScheduleDefinition("identity_resolver_cycle", "resolver", "constant:30", "minutes"),
+    ScheduleDefinition("platform_evaluate_cycle", "platform-evaluate", "constant:4"),
+    ScheduleDefinition("software_classify_cycle", "software-classify-only", "SOFTWARE_CLASSIFY_SCHEDULE_HOURS"),
+    ScheduleDefinition("software_classify_full_rebuild_cycle", "software-classify-full", "SOFTWARE_CLASSIFY_FULL_REBUILD_HOURS"),
+    ScheduleDefinition("software_enqueue_orgs_cycle", "software-enqueue-orgs", "SOFTWARE_INGEST_SCHEDULE_HOURS"),
+    ScheduleDefinition("software_queue_drain_cycle", "software-queue-drain", "SOFTWARE_QUEUE_POLL_MINUTES", "minutes"),
+    ScheduleDefinition("notifications_dispatch_cycle", "notifications-dispatch", "NOTIFY_DISPATCH_SCHEDULE_MINUTES", "minutes"),
+    ScheduleDefinition("notifications_digest_cycle", "notifications-digest", "NOTIFY_DIGEST_HOUR", "cron-hour"),
+    ScheduleDefinition("observation_history_retention_cycle", "retention-history", "OBSERVATION_HISTORY_RETENTION_HOUR", "cron-hour"),
+    ScheduleDefinition("agent_compliance_ingest_cycle", "agent-compliance", "AGENT_COMPLIANCE_SCHEDULE_HOURS"),
+    ScheduleDefinition("agent_compliance_evaluate_cycle", "agent-compliance-evaluate", "AGENT_COMPLIANCE_SCHEDULE_HOURS"),
+    ScheduleDefinition("intel_nvd_cycle", "intel-nvd", "INTEL_NVD_SCHEDULE_HOURS"),
+    ScheduleDefinition("intel_cpe_dict_cycle", "intel-cpe-dict", "INTEL_CATALOG_SCHEDULE_HOURS"),
+    ScheduleDefinition("intel_kev_cycle", "intel-kev", "INTEL_KEV_SCHEDULE_HOURS"),
+    ScheduleDefinition("intel_epss_cycle", "intel-epss", "INTEL_EPSS_SCHEDULE_HOURS"),
+    ScheduleDefinition("intel_matcher_cycle", "intel-matcher", "INTEL_MATCHER_SCHEDULE_HOURS"),
+    ScheduleDefinition("intel_winget_cycle", "intel-winget", "INTEL_CATALOG_SCHEDULE_HOURS"),
+    ScheduleDefinition("intel_chocolatey_cycle", "intel-chocolatey", "INTEL_CATALOG_SCHEDULE_HOURS"),
+    ScheduleDefinition("intel_otx_cycle", "intel-otx", "INTEL_OSINT_SCHEDULE_HOURS"),
+    ScheduleDefinition("intel_abusech_cycle", "intel-abusech", "INTEL_OSINT_SCHEDULE_HOURS"),
+    ScheduleDefinition("intel_endoflife_cycle", "intel-endoflife", "INTEL_CATALOG_SCHEDULE_HOURS"),
+    ScheduleDefinition("intel_capability_cycle", "intel-capability", "INTEL_CAPABILITY_SCHEDULE_HOURS"),
+    ScheduleDefinition("intel_category_cycle", "intel-category", "INTEL_CATEGORY_SCHEDULE_HOURS"),
+    ScheduleDefinition("intel_lolrmm_cycle", "intel-lolrmm", "INTEL_CATALOG_SCHEDULE_HOURS"),
+)
+
 # Initial limits preserve the only capacity behavior the current process proves:
 # two durable handlers in total and one poller per lane.  They are a ceiling,
 # not a worker-service replica count or a claim that narrower scopes are unsafe.
@@ -536,10 +577,20 @@ _DEFINITIONS = tuple(
 _INDEX = MappingProxyType({definition.key: definition for definition in _DEFINITIONS})
 if len(_INDEX) != len(_DEFINITIONS):
     raise RegistryValidationError("Duplicate Jobs registry key")
+_SCHEDULE_INDEX = MappingProxyType({schedule.schedule_id: schedule for schedule in _SCHEDULE_DEFINITIONS})
+if len(_SCHEDULE_INDEX) != len(_SCHEDULE_DEFINITIONS):
+    raise RegistryValidationError("Duplicate Jobs schedule key")
+if set(_SCHEDULE_INDEX) != {schedule_id for item in _DEFINITIONS for schedule_id in item.schedule_ids}:
+    raise RegistryValidationError("Jobs schedule metadata does not match registry definitions")
 
 
 def definitions() -> tuple[JobDefinition, ...]:
     return _DEFINITIONS
+
+
+def schedule_definitions() -> tuple[ScheduleDefinition, ...]:
+    """Return every declared automatic cadence in stable registry order."""
+    return _SCHEDULE_DEFINITIONS
 
 
 def definition(key: str) -> JobDefinition:

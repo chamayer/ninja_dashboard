@@ -13,6 +13,7 @@ from shared.jobs_registry import (
     catalog_entries,
     definition,
     definition_keys,
+    schedule_definitions,
     scheduled_definition_keys,
     validate_registry,
 )
@@ -49,6 +50,16 @@ def test_checked_scheduler_source_matches_registry_schedule_keys():
         if record["callable"] == "operator_job_queue.enqueue_automatic"
     }
     assert scheduled == scheduled_definition_keys()
+
+
+def test_every_declared_automatic_schedule_has_one_cadence_contract():
+    schedules = schedule_definitions()
+
+    assert {schedule.schedule_id for schedule in schedules} == {
+        schedule_id for item in definitions() for schedule_id in item.schedule_ids
+    }
+    assert len({schedule.schedule_id for schedule in schedules}) == len(schedules)
+    assert all(schedule.cadence_setting for schedule in schedules)
 
 
 def test_checked_dispatcher_source_matches_registry_handler_keys():

@@ -1025,3 +1025,11 @@ rows directly. Focused validation passed: Python compilation, undefined-name
 lint, 11 operator-queue/registry tests, and `git diff --check`. Next action:
 deploy this conversion and verify a bounded operator request completes through
 the dedicated worker before converting automatic schedules.
+
+Operator producer deployment (2026-09-29): committed as `ffcdc57`, pushed to
+both remotes, and resolved by Portainer. Operations and the Jobs worker are
+healthy. A live operator request was not created during this deployment
+verification, so first-run execution remains to be confirmed through the
+normal operator surface before automatic schedules are cut over. Next action:
+implement persistent schedule state and leader-elected automatic request
+production, then exercise one bounded converted request.
