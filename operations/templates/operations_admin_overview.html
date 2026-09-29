@@ -245,6 +245,15 @@
         <span class="metric {% if stale_sources %}warn{% endif %}">{{ stale_sources }} stale / {{ source_count }} total</span>
     </a>
 
+    <a class="admin-card" href="{% url 'client_mappings' %}">
+        <div class="top">
+            <span class="icon violet">⇄</span>
+            <span class="title">Client mappings</span>
+        </div>
+        <div class="desc">Exact source client names, attachments, unassigned records, ambiguity, and mapping decisions.</div>
+        <span class="metric {% if client_mapping_review_count or nav_pending_client_candidates or client_mapping_ambiguity_count %}warn{% else %}ok{% endif %}">{{ client_mapping_review_count }} review · {{ nav_pending_client_candidates }} unassigned · {{ client_mapping_ambiguity_count }} ambiguous</span>
+    </a>
+
     <a class="admin-card" href="{% url 'admin_jobs' %}">
         <div class="top">
             <span class="icon teal">

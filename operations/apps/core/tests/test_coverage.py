@@ -501,6 +501,15 @@ def test_client_inventory_and_mapping_lifecycle_are_separate_and_complete():
     assert "Client status remains on the separate Clients overview" in inventory
     assert "client_source_reference_detail" in urls
     assert "client_source_reference_detail" in mapping
+    assert "Client mappings" in base
+    assert "Client candidates" in base
+    assert "Entity candidates" in base
+    sources = (root / "templates/sources.html").read_text(encoding="utf-8")
+    assert "Client source references" not in sources
+    assert "Client mappings for" in sources
+    admin_home = (root / "templates/operations_admin_overview.html").read_text(encoding="utf-8")
+    assert 'href="{% url \'client_mappings\' %}"' in admin_home
+    assert "Client mappings" in admin_home
 
 
 def test_hudu_device_link_read_model_is_tenant_scoped_and_read_only():

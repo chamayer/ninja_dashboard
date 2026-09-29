@@ -13113,8 +13113,6 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
 @login_required
 def sources_status(request: HttpRequest) -> HttpResponse:
     """Registry-driven source-instance health and row-based entity counts."""
-    from .client_workspace import client_source_references
-
     tenant_id = int(getattr(request, "tenant_id", 1))
     source_filter = (request.GET.get("source") or "").strip()
     with transaction.atomic():  # noqa: SIM117 -- matches existing transaction/GUC pattern
@@ -13232,8 +13230,6 @@ def sources_status(request: HttpRequest) -> HttpResponse:
     source_options = sorted({source["name"] for source in sources})
     if source_filter:
         sources = [source for source in sources if source["name"] == source_filter]
-    source_references = client_source_references(source_name=source_filter)
-
     stale_count = sum(1 for s in sources if s["is_stale"] and not s["is_processing"])
     if wants_csv(request):
         return csv_response(
@@ -13260,7 +13256,6 @@ def sources_status(request: HttpRequest) -> HttpResponse:
             "admin_group": "integrations",
             "admin_tab": "sources",
             "sources": sources,
-            "source_references": source_references,
             "source_options": source_options,
             "active_source": source_filter,
             "recent_runs": recent_runs,
@@ -14749,6 +14744,15 @@ def operations_admin_overview(request: HttpRequest) -> HttpResponse:
             "SELECT count(*)::integer FROM operations.v_source_instance_health WHERE tenant_id = 1"
         )
         generic_source_instance_count = cur.fetchone()[0]
+        cur.execute(
+            """
+            SELECT count(*)::integer,
+                   count(*) FILTER (WHERE mapping_state = 'review')::integer
+              FROM operations.v_client_source_mapping_effective
+             WHERE tenant_id = 1
+            """
+        )
+        client_mapping_count, client_mapping_review_count = cur.fetchone()
     stale_sources = sum(
         observed_at is None or not run_ok or (now - observed_at).total_seconds() > 8 * 3600
         for _platform, observed_at, run_ok in source_health
@@ -14835,6 +14839,16 @@ def operations_admin_overview(request: HttpRequest) -> HttpResponse:
             "generic_entity_count": generic_entity_count,
             "generic_conflict_count": generic_conflict_count,
             "generic_observed_candidates": generic_observed_candidates,
+            "client_mapping_count": client_mapping_count,
+            "client_mapping_review_count": client_mapping_review_count,
+            "client_mapping_ambiguity_count": AdminFinding.objects.filter(
+                tenant_id=1,
+                status__in=("open", "acknowledged"),
+                finding_type__name__in=(
+                    "client_link_collision", "client_source_group_merge",
+                    "client_unattached_group", "unnamed_source_group", "unmatched_source_group",
+                ),
+            ).count(),
             "admin_finding_count": AdminFinding.objects.filter(
                 tenant_id=1, status__in=("open", "acknowledged")
             ).count(),

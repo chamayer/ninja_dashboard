@@ -876,6 +876,22 @@ decision rationale/provenance, and decision history; mapping action remains a
 separate direct link. Validation passed: Python compilation, 14 focused
 navigation tests, Ruff F/I, and `git diff --check`. Pending commit/push.
 
+Sources/mappings boundary correction (2026-09-28): implemented locally. Admin
+Sources is source-health, collection-volume, and run-history only; it no
+longer duplicates source-client identity rows. Each source card hands off to a
+source-filtered Client mappings view, which is the exclusive attachment,
+ambiguity, candidate, and decision-lifecycle surface. The shared Admin
+navigation is stable across Overview and integration pages, with distinct
+Client mappings, Client candidates, and Entity candidates labels. Pending
+validation and commit/push.
+
+Completion checkpoint (2026-09-28): validation passed: Python compilation, 14
+focused inventory/navigation tests, Ruff F/I for changed Python, and `git diff
+--check`. Admin home now has a Client mappings card with live review,
+unassigned-candidate, and ambiguity counts. No migration is required. Next
+action: commit the completed navigation and page-boundary correction, push both
+remotes, and trigger the required GitOps redeploy.
+
 Resolver recovery (2026-09-28): production startup exposed an existing
 client-name resolver defect while it refreshed source identity: it attempted
 to write `resolved_at` on `operations.findings`, whose lifecycle field is
