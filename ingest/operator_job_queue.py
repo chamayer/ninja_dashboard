@@ -7,6 +7,7 @@ queues: its entries represent registered platform work, not a source mutation.
 from __future__ import annotations
 
 import json
+import hashlib
 import logging
 import threading
 import uuid
@@ -15,7 +16,7 @@ from typing import Any
 from psycopg_pool import PoolTimeout
 
 from ingest import db
-from shared.jobs_registry import definition, definitions, validate_registry
+from shared.jobs_registry import definition, definitions, schedule_definitions, validate_registry
 
 log = logging.getLogger(__name__)
 
@@ -65,6 +66,25 @@ def register_definition_snapshots() -> None:
                     job.handler_version,
                     json.dumps(job.snapshot_metadata()),
                 ),
+            )
+
+
+def reconcile_schedule_catalog() -> None:
+    """Persist the declared schedule catalog before its later producer cutover."""
+    with db.transaction() as cur:
+        cur.execute("SET LOCAL operations.tenant_id = 1")
+        for schedule in schedule_definitions():
+            job = definition(schedule.job_key)
+            cadence = {
+                "setting": schedule.cadence_setting,
+                "unit": schedule.cadence_unit,
+            }
+            revision = hashlib.sha256(
+                json.dumps(cadence, sort_keys=True, separators=(",", ":")).encode()
+            ).hexdigest()
+            cur.execute(
+                "SELECT operations.jobs_reconcile_schedule_v1(%s, %s, %s, %s, %s, %s::jsonb, %s, %s)",
+                (1, job.key, job.snapshot_digest(), "tenant:1", revision, json.dumps(cadence), False, "Pending Jobs schedule cutover."),
             )
 
 

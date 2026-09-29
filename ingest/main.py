@@ -2497,6 +2497,7 @@ def main() -> None:
     log.info("Applying pending migrations")
     migrations.apply_pending()
     operator_job_queue.register_definition_snapshots()
+    operator_job_queue.reconcile_schedule_catalog()
 
     # Any run_log row still 'running' belongs to a process that no longer
     # exists — nothing survives a restart. Left alone these accumulate
