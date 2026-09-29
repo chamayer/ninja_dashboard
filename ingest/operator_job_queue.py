@@ -11,11 +11,13 @@ import hashlib
 import logging
 import threading
 import uuid
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from psycopg_pool import PoolTimeout
 
 from ingest import db
+from ingest.config import settings
 from shared.jobs_registry import definition, definitions, schedule_definitions, validate_registry
 
 log = logging.getLogger(__name__)
@@ -69,23 +71,114 @@ def register_definition_snapshots() -> None:
             )
 
 
+def _schedule_cadence(schedule: Any) -> dict[str, int | str]:
+    """Resolve one registry cadence into bounded, persisted UTC metadata."""
+    if schedule.cadence_setting == "PATCH_INGEST_SCHEDULE_HOURS":
+        value = settings.patch_ingest_schedule_hours
+    elif schedule.cadence_setting.startswith("constant:"):
+        value = int(schedule.cadence_setting.partition(":")[2])
+    else:
+        value = int(getattr(settings, schedule.cadence_setting))
+    if schedule.cadence_unit == "hours":
+        return {"kind": "interval", "minutes": value * 60}
+    if schedule.cadence_unit == "minutes":
+        return {"kind": "interval", "minutes": value}
+    if schedule.cadence_unit == "cron-hour":
+        return {"kind": "daily", "hour": value}
+    raise ValueError(f"Unsupported Jobs cadence unit: {schedule.cadence_unit}")
+
+
+def _schedule_enabled(job_key: str) -> tuple[bool, str]:
+    """Apply the existing capability gates before automatic admission."""
+    job = definition(job_key)
+    enabled = {
+        "always": True,
+        "intel": settings.INTEL_ENABLED,
+        "notifications": settings.NOTIFY_ENABLED,
+        "notification_digest": settings.NOTIFY_DIGEST_ENABLED,
+        "software_queue": settings.SOFTWARE_QUEUE_ENABLED,
+        "legacy_agent_compliance": settings.AGENT_COMPLIANCE_ENABLED,
+    }.get(job.capability, False)
+    return enabled, "Available" if enabled else f"Disabled — {job.capability} is not enabled."
+
+
 def reconcile_schedule_catalog() -> None:
-    """Persist the declared schedule catalog before its later producer cutover."""
+    """Reconcile every declared cadence before the durable producer runs."""
     with db.transaction() as cur:
         cur.execute("SET LOCAL operations.tenant_id = 1")
         for schedule in schedule_definitions():
             job = definition(schedule.job_key)
-            cadence = {
-                "setting": schedule.cadence_setting,
-                "unit": schedule.cadence_unit,
-            }
+            cadence = _schedule_cadence(schedule)
+            enabled, capability_reason = _schedule_enabled(job.key)
             revision = hashlib.sha256(
-                json.dumps(cadence, sort_keys=True, separators=(",", ":")).encode()
+                json.dumps(
+                    {"cadence": cadence, "enabled": enabled},
+                    sort_keys=True, separators=(",", ":"),
+                ).encode()
             ).hexdigest()
             cur.execute(
-                "SELECT operations.jobs_reconcile_schedule_v1(%s, %s, %s, %s, %s, %s::jsonb, %s, %s)",
-                (1, job.key, job.snapshot_digest(), "tenant:1", revision, json.dumps(cadence), False, "Pending Jobs schedule cutover."),
+                "SELECT operations.jobs_reconcile_schedule_v2(%s, %s, %s, %s, %s, %s::jsonb, %s, %s)",
+                (1, job.key, job.snapshot_digest(), "tenant:1", revision, json.dumps(cadence), enabled, capability_reason),
             )
+
+
+def _next_due_at(due_at: datetime, cadence: dict[str, Any], now: datetime) -> datetime:
+    """Coalesce missed ticks into one request and advance beyond the present."""
+    interval = timedelta(
+        days=1 if cadence["kind"] == "daily" else 0,
+        minutes=0 if cadence["kind"] == "daily" else int(cadence["minutes"]),
+    )
+    candidate = due_at + interval
+    while candidate <= now:
+        candidate += interval
+    return candidate
+
+
+def produce_due_schedules() -> int:
+    """Elect a short-lived leader and atomically admit each due durable schedule."""
+    admitted = 0
+    try:
+        with db.pool.connection() as conn, conn.cursor() as cur:
+            cur.execute("SET operations.tenant_id = 1")
+            cur.execute("SELECT operations.jobs_try_schedule_leader()")
+            if not cur.fetchone()[0]:
+                return 0
+            try:
+                cur.execute(
+                    "SELECT schedule_id, due_at, cadence "
+                    "FROM operations.jobs_list_due_schedules_v1(%s)",
+                    (1,),
+                )
+                due_schedules = cur.fetchall()
+                now = datetime.now(timezone.utc)
+                for schedule_id, due_at, cadence in due_schedules:
+                    try:
+                        # A legacy row can still be draining for one family.
+                        # Keep that rejection isolated so another due schedule
+                        # is not rolled back with it.
+                        with conn.transaction():
+                            next_due_at = _next_due_at(due_at, cadence, now)
+                            request_identity = hashlib.sha256(
+                                f"schedule:{schedule_id}:{due_at.isoformat()}".encode()
+                            ).hexdigest()
+                            cur.execute(
+                                "SELECT operations.jobs_claim_due_schedule(%s, %s, %s, %s, %s)",
+                                (1, schedule_id, due_at, next_due_at, request_identity),
+                            )
+                            admitted += int(cur.fetchone()[0] is not None)
+                    except Exception:
+                        log.exception("durable Jobs schedule %s was deferred", schedule_id)
+            finally:
+                cur.execute("SELECT operations.jobs_release_schedule_leader()")
+    except PoolTimeout:
+        log.warning("durable Jobs schedules waiting for database capacity")
+        return 0
+    except Exception:
+        log.exception("durable Jobs schedule producer failed")
+        return 0
+    if admitted:
+        log.info("durable Jobs schedule producer admitted %d run(s)", admitted)
+    return admitted
 
 
 def lane_for(job_key: str) -> str:
@@ -94,6 +187,11 @@ def lane_for(job_key: str) -> str:
 
 
 WORKER_LANES = ("collection", "evaluation", "software", "intelligence", "service")
+
+# Automatic Jobs are now admitted only by produce_due_schedules().  The old
+# APScheduler entries remain temporarily for unrelated maintenance wakeups;
+# treating their automatic callbacks as no-ops prevents duplicate producers.
+DURABLE_SCHEDULES_ACTIVE = True
 
 
 class JobProgress:
@@ -161,6 +259,12 @@ def enqueue_automatic(job_key: str) -> bool:
     preferable to accumulating duplicate automatic runs while the worker is
     busy.
     """
+    if DURABLE_SCHEDULES_ACTIVE:
+        log.info(
+            "legacy automatic admission for %s ignored; durable schedule owns it",
+            job_key,
+        )
+        return False
     job = definition(job_key)
     request_identity = hashlib.sha256(
         f"automatic:{job_key}:{uuid.uuid4()}".encode()

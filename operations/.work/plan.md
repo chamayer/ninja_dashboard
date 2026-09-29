@@ -1033,3 +1033,27 @@ verification, so first-run execution remains to be confirmed through the
 normal operator surface before automatic schedules are cut over. Next action:
 implement persistent schedule state and leader-elected automatic request
 production, then exercise one bounded converted request.
+
+Automatic-admission recovery (2026-09-29): the first automatic v1 software
+request encountered a still-active version-0 run. The admission API correctly
+rejected the incompatible overlap, but the automatic scheduler allowed that
+exception to terminate ingest. `aa02a73` now logs and defers incompatible
+automatic admissions. It is deployed to both remotes and Portainer reports
+the matching configuration hash. External verification confirms
+`operations-ingest` and `ninja-jobs-worker` are healthy with zero restarts;
+ingest is completing scheduled work and the worker remains ready. The separate
+platform-findings tenant-context error remains contained by its existing
+failure boundary and was not changed. Next action: implement durable,
+leader-elected schedule production only after explicitly reconciling or
+draining active version-0 work for each converted family.
+
+Durable schedule cutover (2026-09-29): in progress. Migration 0212 adds the
+restricted schedule reconciliation and due-schedule read APIs. Ingest now
+persists resolved UTC cadence and capability state, uses a PostgreSQL advisory
+leader during each durable due-tick pass, coalesces missed ticks past the
+current time, and submits requests through the existing atomic schedule API.
+The legacy automatic producer and startup catch-ups are retired, avoiding
+duplicate producers; a still-draining version-0 family is isolated as a
+deferred schedule rather than rolling back other due work. Next action:
+commit, deploy, and externally verify schedule activation and a bounded first
+due request before implementing v1 timeout/cancellation/recovery controls.

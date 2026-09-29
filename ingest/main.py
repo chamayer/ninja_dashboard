@@ -2516,6 +2516,15 @@ def main() -> None:
         )
 
     scheduler = BackgroundScheduler()
+    # Durable schedules retain their cadence and due tick in Postgres.  This
+    # poller only admits due work; the dedicated Jobs worker performs it.
+    scheduler.add_job(
+        operator_job_queue.produce_due_schedules,
+        "interval",
+        minutes=1,
+        id="jobs_durable_schedule_producer",
+        max_instances=1,
+    )
     scheduler.add_job(
         operator_job_queue.enqueue_automatic,
         "interval",
@@ -2837,7 +2846,7 @@ def main() -> None:
     )
     log.info("Legacy agent compliance auto-scheduler disabled")
 
-    if should_catch_up("patches", settings.patch_ingest_schedule_hours):
+    if not operator_job_queue.DURABLE_SCHEDULES_ACTIVE and should_catch_up("patches", settings.patch_ingest_schedule_hours):
         log.info(
             "Catch-up: last successful run > %dh ago — firing run_once",
             settings.patch_ingest_schedule_hours,
@@ -2846,8 +2855,9 @@ def main() -> None:
     else:
         log.info("No patch catch-up needed (fresh install or recent run)")
 
-    operator_job_queue.enqueue_automatic("agent-observations")
-    log.info("Agent observations: queued startup run")
+    if not operator_job_queue.DURABLE_SCHEDULES_ACTIVE:
+        operator_job_queue.enqueue_automatic("agent-observations")
+        log.info("Agent observations: queued startup run")
 
     try:
         documentation_sources = load_sources()
@@ -2858,7 +2868,7 @@ def main() -> None:
     except Exception:
         log.exception("Documentation catch-up source discovery failed; scheduling run")
         documentation_overdue = True
-    if documentation_overdue:
+    if not operator_job_queue.DURABLE_SCHEDULES_ACTIVE and documentation_overdue:
         log.info(
             "Catch-up: documentation source has no successful run in %dh; "
             "firing run_once",
@@ -2879,7 +2889,7 @@ def main() -> None:
     # makes the configured cadence real rather than nominal. Unlike the
     # documentation cycle (see `run_documentation_observations_once`), a kick
     # here calls no vendor API; it reads tables that are already local.
-    if software_classify_overdue(settings.SOFTWARE_CLASSIFY_SCHEDULE_HOURS):
+    if not operator_job_queue.DURABLE_SCHEDULES_ACTIVE and software_classify_overdue(settings.SOFTWARE_CLASSIFY_SCHEDULE_HOURS):
         log.info(
             "Catch-up: software classifier has no successful run in %dh — firing",
             settings.SOFTWARE_CLASSIFY_SCHEDULE_HOURS,
@@ -2888,7 +2898,7 @@ def main() -> None:
     else:
         log.info("No software classifier catch-up needed (recent successful run)")
 
-    if software_classify_overdue(
+    if not operator_job_queue.DURABLE_SCHEDULES_ACTIVE and software_classify_overdue(
         settings.SOFTWARE_CLASSIFY_FULL_REBUILD_HOURS, mode="full"
     ):
         log.info(
@@ -2904,7 +2914,7 @@ def main() -> None:
     # background so a fresh deploy doesn't wait hours for the first
     # scheduler tick. Each thread records its own outcome via
     # ``ingest.intel.status.record_run``.
-    if settings.INTEL_ENABLED:
+    if settings.INTEL_ENABLED and not operator_job_queue.DURABLE_SCHEDULES_ACTIVE:
         _intel_catchup()
 
     # Kick off Metabase bootstrap in the background — won't block
