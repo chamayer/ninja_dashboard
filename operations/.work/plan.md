@@ -963,3 +963,12 @@ test prevents that regression. Validation passed: Python compilation, scoped
 Ruff, 11 focused registry/queue tests, and `git diff --check`. Next action:
 commit and deploy the startup-order fix, then verify ingest health and catalog
 registration.
+
+Production-observed catch-up correction (2026-09-28): after the startup-order
+fix restored ingest, its normal startup exposed an existing PostgreSQL
+`IndeterminateDatatype` error in the optional software-classifier mode probe.
+Both nullable parameters are now explicitly `text`, preventing false
+"overdue" decisions and unneeded classifier catch-up work. Python compilation,
+undefined-name lint, and `git diff --check` pass; the dedicated focused module
+is skipped locally because this environment cannot import the ingest runtime.
+Next action: deploy and verify that startup no longer logs the probe error.

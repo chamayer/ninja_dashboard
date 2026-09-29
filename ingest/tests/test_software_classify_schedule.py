@@ -185,6 +185,7 @@ def test_full_rebuild_catchup_filters_for_full_runs(monkeypatch) -> None:
 
     statement = " ".join(pool.cursor.statements)
     assert "subject_ref->>'mode'" in statement
+    assert "%s::text IS NULL" in statement
 
 
 def test_scheduler_registers_a_separate_full_rebuild_cadence() -> None:

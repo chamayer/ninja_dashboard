@@ -649,7 +649,7 @@ def software_classify_overdue(
                 """
                 SELECT ended_at FROM operations.run_log
                 WHERE kind = 'software_classifier' AND ok
-                  AND (%s IS NULL OR subject_ref->>'mode' = %s)
+                  AND (%s::text IS NULL OR subject_ref->>'mode' = %s::text)
                 ORDER BY started_at DESC
                 LIMIT 1
                 """
