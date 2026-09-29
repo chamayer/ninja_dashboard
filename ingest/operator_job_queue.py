@@ -161,20 +161,21 @@ def enqueue_automatic(job_key: str) -> bool:
     preferable to accumulating duplicate automatic runs while the worker is
     busy.
     """
+    job = definition(job_key)
+    request_identity = hashlib.sha256(
+        f"automatic:{job_key}:{uuid.uuid4()}".encode()
+    ).hexdigest()
+    request_api = (
+        "operations.jobs_request_software_v1"
+        if job.supersession_family == "software-classifier"
+        else "operations.jobs_request"
+    )
     try:
         with db.transaction() as cur:
             cur.execute("SET LOCAL operations.tenant_id = 1")
-            if not _admit_software_classifier(cur, job_key):
-                return False
             cur.execute(
-                f"""
-                INSERT INTO {_TABLE} (id, tenant_id, job_key, lane, requested_by_id)
-                VALUES (%s, 1, %s, %s, NULL)
-                ON CONFLICT (tenant_id, job_key) WHERE status IN ('queued', 'running')
-                DO NOTHING
-                RETURNING id
-                """,
-                (uuid.uuid4(), job_key, lane_for(job_key)),
+                f"SELECT {request_api}(%s, %s, %s, %s, %s, %s, NULL, %s::jsonb, %s::jsonb, NULL)",
+                (1, job.key, job.snapshot_digest(), "tenant:1", request_identity, "automatic", "{}", "{}"),
             )
             return cur.fetchone() is not None
     except PoolTimeout:
@@ -351,6 +352,7 @@ def _claim_next(lane: str) -> dict[str, Any] | None:
             WITH candidate AS (
                 SELECT id FROM {_TABLE}
                  WHERE tenant_id = 1 AND lane = %s AND status = 'queued'
+                   AND contract_version = 0
                    AND (
                        job_key <> ALL(%s::text[])
                        OR NOT EXISTS (
