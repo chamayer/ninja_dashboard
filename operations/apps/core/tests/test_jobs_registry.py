@@ -13,6 +13,7 @@ from shared.jobs_registry import (
     catalog_entries,
     definition,
     definition_keys,
+    definitions,
     schedule_definitions,
     scheduled_definition_keys,
     validate_registry,
