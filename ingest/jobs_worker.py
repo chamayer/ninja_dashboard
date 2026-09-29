@@ -95,10 +95,19 @@ def run() -> int:
             for lane in operator_job_queue.WORKER_LANES:
                 child = children.get(lane)
                 if child is not None:
-                    child.progress.heartbeat()
+                    try:
+                        child.progress.heartbeat()
+                    except Exception:
+                        # The control plane reaper will contain an expired
+                        # claim; do not abandon every other lane on one
+                        # transient heartbeat failure.
+                        log.exception("Jobs child heartbeat failed: run=%s", child.run_id)
                     if child.process.poll() is not None:
-                        _finish_child(child)
-                        del children[lane]
+                        try:
+                            _finish_child(child)
+                            del children[lane]
+                        except Exception:
+                            log.exception("Jobs child finish transition failed: run=%s", child.run_id)
                     continue
                 child = _start_child(lane, worker_incarnation)
                 if child is not None:
