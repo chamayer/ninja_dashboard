@@ -8,10 +8,14 @@ claim, progress, finish, and claim release through the finish transition.
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import signal
+import subprocess
+import sys
 import time
 import uuid
+from dataclasses import dataclass
 from pathlib import Path
 
 from ingest import db, operator_job_queue
@@ -25,6 +29,15 @@ _POLL_SECONDS = 1.0
 _stopping = False
 
 
+@dataclass
+class _Child:
+    run_id: uuid.UUID
+    claim_token: uuid.UUID
+    job_key: str
+    process: subprocess.Popen[str]
+    progress: operator_job_queue.V1JobProgress
+
+
 def _request_stop(_signum: int, _frame: object) -> None:
     global _stopping
     _stopping = True
@@ -35,8 +48,32 @@ def healthcheck() -> int:
     return 0 if _READY_PATH.is_file() else 1
 
 
+def _start_child(lane: str, incarnation: uuid.UUID) -> _Child | None:
+    row = operator_job_queue._claim_next_v1(lane, incarnation)
+    if row is None:
+        return None
+    process = subprocess.Popen(
+        [sys.executable, "-m", "ingest.jobs_child", row["job_key"], str(row["id"]), str(row["claim_token"])],
+        stdout=subprocess.PIPE, text=True,
+    )
+    return _Child(row["id"], row["claim_token"], row["job_key"], process,
+                  operator_job_queue.V1JobProgress(row["id"], row["claim_token"]))
+
+
+def _finish_child(child: _Child) -> None:
+    output, _ = child.process.communicate()
+    try:
+        result = json.loads(output.strip().splitlines()[-1])
+    except (IndexError, json.JSONDecodeError):
+        result = {"ok": False, "error": "Jobs child exited without a valid result."}
+    if result.get("ok"):
+        operator_job_queue._finish_v1(child.run_id, child.claim_token, "completed", rows=result.get("rows"))
+    else:
+        operator_job_queue._finish_v1(child.run_id, child.claim_token, "failed", error=str(result.get("error", "Jobs child failed."))[:2000])
+
+
 def run() -> int:
-    """Claim at most one converted run per lane on each bounded polling pass."""
+    """Supervise one isolated child per lane without blocking other lanes."""
     global _stopping
     logging.basicConfig(
         level=settings.INGEST_LOG_LEVEL,
@@ -50,18 +87,25 @@ def run() -> int:
     db.init(settings.postgres_dsn)
     operator_job_queue.register_definition_snapshots()
     worker_incarnation = uuid.uuid4()
+    children: dict[str, _Child] = {}
     _READY_PATH.touch()
     log.info("Jobs worker ready: incarnation=%s", worker_incarnation)
     try:
         while not _stopping:
-            ran_work = False
             for lane in operator_job_queue.WORKER_LANES:
-                result = operator_job_queue.process_next_v1(lane, worker_incarnation)
-                ran_work = ran_work or bool(result["completed"] or result["failed"])
+                child = children.get(lane)
+                if child is not None:
+                    child.progress.heartbeat()
+                    if child.process.poll() is not None:
+                        _finish_child(child)
+                        del children[lane]
+                    continue
+                child = _start_child(lane, worker_incarnation)
+                if child is not None:
+                    children[lane] = child
                 if _stopping:
                     break
-            if not ran_work:
-                time.sleep(_POLL_SECONDS)
+            time.sleep(_POLL_SECONDS)
     finally:
         _READY_PATH.unlink(missing_ok=True)
     return 0
