@@ -425,6 +425,14 @@ def recover_stale() -> int:
         return 0
 
 
+def contain_expired_v1() -> int:
+    """Make expired converted work visible without releasing unsafe claims."""
+    with db.transaction() as cur:
+        cur.execute("SET LOCAL operations.tenant_id = 1")
+        cur.execute("SELECT operations.jobs_contain_expired_v1(%s)", (1,))
+        return cur.fetchone()[0]
+
+
 def recover_interrupted() -> int:
     """Close runs left behind by this process being replaced or restarted."""
     with db.transaction() as cur:

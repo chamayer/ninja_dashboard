@@ -2584,6 +2584,13 @@ def main() -> None:
         id="operator_job_queue_stale_recovery",
         max_instances=1,
     )
+    scheduler.add_job(
+        operator_job_queue.contain_expired_v1,
+        "interval",
+        minutes=1,
+        id="jobs_v1_timeout_containment",
+        max_instances=1,
+    )
     # Catches hangs the startup reaper cannot: process alive, work stuck.
     scheduler.add_job(
         runlog.reap_stale,
