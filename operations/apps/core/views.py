@@ -8758,23 +8758,20 @@ def admin_job_status(request: HttpRequest) -> HttpResponse:
 @require_admin
 @require_POST
 def admin_job_cancel(request: HttpRequest, run_id: uuid.UUID) -> HttpResponse:
-    """Queued work can be cancelled; a running collector is never killed."""
+    """Cancel queued work or request cooperative cancellation of a v1 run."""
     with transaction.atomic(), connection.cursor() as cur:
         cur.execute("SET LOCAL operations.tenant_id = 1")
         cur.execute(
-            """UPDATE operations.operator_job_runs
-                   SET status = 'cancelled', stage = 'Cancelled',
-                       stage_detail = 'Cancelled before work started.', stage_updated_at = NOW(),
-                       completed_at = NOW(),
-                       error = 'Cancelled before work started.'
-                 WHERE tenant_id = 1 AND id = %s AND status = 'queued'""",
-            (run_id,),
+            "SELECT operations.jobs_cancel_v1(%s, %s, %s, %s)",
+            (1, run_id, request.user.id, "Cancelled by an administrator."),
         )
-        cancelled = cur.rowcount
-    if cancelled:
+        outcome = cur.fetchone()[0]
+    if outcome == "cancelled":
         messages.success(request, "Queued run cancelled.")
+    elif outcome == "requested":
+        messages.success(request, "Cancellation requested; the worker will stop only at a safe checkpoint.")
     else:
-        messages.info(request, "This run has already started or finished and cannot be stopped safely.")
+        messages.info(request, "This run has already finished or cannot be cancelled.")
     return redirect(request.META.get("HTTP_REFERER") or reverse("admin_job_status"))
 
 
