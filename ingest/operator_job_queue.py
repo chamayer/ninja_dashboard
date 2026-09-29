@@ -294,7 +294,7 @@ def recover_stale() -> int:
                        stage_detail = 'No progress update before the safety deadline.',
                        stage_updated_at = NOW(), completed_at = NOW(), lease_expires_at = NULL,
                        error = 'Run stopped responding. Review and retry when ready.'
-                 WHERE tenant_id = 1 AND status = 'running'
+                 WHERE tenant_id = 1 AND contract_version = 0 AND status = 'running'
                    AND heartbeat_at < NOW() - INTERVAL '{_LEASE_MINUTES} minutes'
                 """
             )
@@ -317,7 +317,7 @@ def recover_interrupted() -> int:
                        stage_updated_at = NOW(), heartbeat_at = NOW(), completed_at = NOW(),
                        lease_expires_at = NULL,
                        error = 'Interrupted by service restart. Retry when ready.'
-                 WHERE tenant_id = 1 AND status = 'running'
+                 WHERE tenant_id = 1 AND contract_version = 0 AND status = 'running'
              RETURNING id"""
         )
         interrupted_ids = [row[0] for row in cur.fetchall()]
