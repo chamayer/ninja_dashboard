@@ -863,6 +863,11 @@ workstation interpreter cannot import the repository `shared` package; Docker
 Compose has no local services, so rendered request/database validation remains
 for the deployment environment. No migration or deployment has been performed.
 
+Client overview presentation correction (2026-09-28): in progress. The
+individual client overview must not repeat opaque source IDs and provenance as
+its primary source-reference table. Keep the reported source name and current
+state visible, and add direct Source record and Mapping decision detail links.
+
 Resolver recovery (2026-09-28): production startup exposed an existing
 client-name resolver defect while it refreshed source identity: it attempted
 to write `resolved_at` on `operations.findings`, whose lifecycle field is

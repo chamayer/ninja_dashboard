@@ -125,19 +125,19 @@
 
 <section class="card" id="source-references">
   <h2>Source references</h2>
-  <p class="muted">The source groups mapped to this canonical client. A reported group name is source evidence; it does not rename the client.</p>
+  <p class="muted">Source client records mapped to this client. Reported names are source evidence; they do not rename the client.</p>
   <table class="ops-table">
-    <thead><tr><th>Source</th><th>Source ID</th><th>Mapping state</th><th>Provenance</th><th>Link state</th></tr></thead>
+    <thead><tr><th>Source</th><th>Reported name</th><th>State</th><th>Details</th></tr></thead>
     <tbody>
     {% for reference in source_references %}
       <tr>
-        <td><a href="{{ reference.source_url }}">{{ reference.source_name }}</a></td>
-        <td><code>{{ reference.external_id }}</code>{% if reference.external_namespace %}<br><span class="muted">{{ reference.external_namespace }}</span>{% endif %}</td>
-        <td>{{ reference.mapping_state }}</td><td>{{ reference.mapping_provenance|default:"—" }}</td>
-        <td>{% if reference.missing_since %}<span class="badge badge-high">Missing since {{ reference.missing_since|date:"Y-m-d" }}</span>{% else %}<span class="badge badge-low">Mapped</span>{% endif %}</td>
+        <td>{{ reference.source_name }}</td>
+        <td>{% if reference.observed_name %}<strong>{{ reference.observed_name }}</strong>{% if reference.name_differs %}<br><a class="badge badge-high" href="{{ reference.name_difference_url }}">Name differs</a>{% endif %}{% else %}<span class="muted">Not currently reported</span>{% endif %}</td>
+        <td>{% if reference.missing_since %}<span class="badge badge-high">Missing</span>{% else %}<span class="badge badge-low">{{ reference.mapping_state }}</span>{% endif %}</td>
+        <td><a href="{{ reference.source_url }}">Source record</a><br><a href="{% url 'client_mappings' %}?source_link_id={{ reference.source_link_id }}">Mapping decision</a></td>
       </tr>
     {% empty %}
-      <tr><td colspan="5" class="muted">No source references are mapped to this client.</td></tr>
+      <tr><td colspan="4" class="muted">No source references are mapped to this client.</td></tr>
     {% endfor %}
     </tbody>
   </table>
