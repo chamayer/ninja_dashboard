@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
@@ -8560,70 +8561,37 @@ def _dispatch_job(entry: dict) -> tuple[bool, str]:
 def _enqueue_operator_job(
     job_key: str, user_id: int, *, batch_id: uuid.UUID | None = None
 ) -> tuple[uuid.UUID, bool]:
-    """Create, or coalesce with, one active registered Jobs request."""
+    """Create a v1 operator request through the governed Jobs API."""
+    job = definition(job_key)
+    request_identity = hashlib.sha256(
+        f"operator:{user_id}:{job_key}:{batch_id or ''}:{uuid.uuid4()}".encode()
+    ).hexdigest()
+    request_api = (
+        "operations.jobs_request_software_v1"
+        if job.supersession_family == "software-classifier"
+        else "operations.jobs_request"
+    )
     with transaction.atomic(), connection.cursor() as cur:
         cur.execute("SET LOCAL operations.tenant_id = 1")
-        existing_id = _admit_software_classifier_job(cur, job_key)
-        if existing_id is not None:
-            return existing_id, False
         cur.execute(
-            """
-            INSERT INTO operations.operator_job_runs
-                (id, tenant_id, job_key, lane, batch_id, requested_by_id)
-            VALUES (%s, 1, %s, %s, %s, %s)
-            ON CONFLICT (tenant_id, job_key) WHERE status IN ('queued', 'running')
-            DO NOTHING RETURNING id
-            """,
-            (uuid.uuid4(), job_key, _job_lane(job_key), batch_id, user_id),
-        )
-        row = cur.fetchone()
-        if row:
-            return row[0], True
-        cur.execute(
-            """SELECT id FROM operations.operator_job_runs
-                 WHERE tenant_id = 1 AND job_key = %s
-                   AND status IN ('queued', 'running')
-                 ORDER BY requested_at DESC LIMIT 1""",
-            (job_key,),
+            f"SELECT {request_api}(%s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s::jsonb, %s)",
+            (
+                1,
+                job.key,
+                job.snapshot_digest(),
+                "tenant:1",
+                request_identity,
+                "operator",
+                user_id,
+                "{}",
+                "{}",
+                batch_id,
+            ),
         )
         row = cur.fetchone()
     if row is None:
-        raise RuntimeError("Unable to create or find the requested job")
-    return row[0], False
-
-
-def _admit_software_classifier_job(cur, job_key: str) -> uuid.UUID | None:
-    """Apply the same classifier-mode supersession policy as ingest."""
-    priority = _SOFTWARE_JOB_PRIORITY.get(job_key)
-    if priority is None:
-        return None
-    cur.execute(
-        "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
-        ("operations.software_classifier",),
-    )
-    cur.execute(
-        """SELECT id, job_key, status FROM operations.operator_job_runs
-             WHERE tenant_id = 1 AND job_key = ANY(%s::text[])
-               AND status IN ('queued', 'running')
-             FOR UPDATE""",
-        (list(_SOFTWARE_CLASSIFIER_JOBS),),
-    )
-    active = cur.fetchall()
-    broader = [row for row in active if _SOFTWARE_JOB_PRIORITY[row[1]] >= priority]
-    if broader:
-        return broader[0][0]
-    superseded = [row[0] for row in active if row[2] == "queued"]
-    if superseded:
-        cur.execute(
-            """UPDATE operations.operator_job_runs
-                   SET status = 'cancelled', stage = 'Superseded',
-                       stage_detail = 'Superseded by a broader Software classifier run.',
-                       stage_updated_at = NOW(), completed_at = NOW(),
-                       error = 'Superseded before work started.'
-                 WHERE tenant_id = 1 AND id = ANY(%s) AND status = 'queued'""",
-            (superseded,),
-        )
-    return None
+        raise RuntimeError("Jobs request API did not return a run")
+    return row[0], True
 
 
 def _queue_software_rebuild_after_commit(user_id: int) -> None:

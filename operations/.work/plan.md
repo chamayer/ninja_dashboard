@@ -1007,3 +1007,21 @@ idle until the producer cutover. Focused validation passed: Python
 compilation, targeted Ruff, four worker/migration tests, Compose config, and
 `git diff --check`. Next action: deploy the worker topology and confirm its
 health before converting the first producer family.
+
+Worker topology deployment (2026-09-29): committed as `a1a3667`, pushed to
+both remotes, and applied by Portainer. Operations logged
+`Applying operations.0209_jobs_v1_progress_api... OK`; the dedicated worker,
+ingest, and Operations are healthy. The worker initialized its own database
+pool and definition catalog and is correctly idle because no producer has yet
+created a version-1 run. Next action: convert operator-originated Job requests
+to the constrained APIs, then verify a bounded first family executes through
+the dedicated worker.
+
+Operator producer conversion (2026-09-29): the Operations Jobs request,
+retry, batch, and software-rebuild paths now call `jobs_request` or the
+declared Software supersession API with an immutable registry digest and a
+credential-free request identity. They no longer insert or supersede ledger
+rows directly. Focused validation passed: Python compilation, undefined-name
+lint, 11 operator-queue/registry tests, and `git diff --check`. Next action:
+deploy this conversion and verify a bounded operator request completes through
+the dedicated worker before converting automatic schedules.
