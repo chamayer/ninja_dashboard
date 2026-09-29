@@ -1,0 +1,26 @@
+"""Static checks for the dedicated converted-Jobs worker topology."""
+
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[4]
+
+
+def test_compose_worker_uses_the_ingest_image_without_an_http_port():
+    compose = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
+
+    assert "  jobs-worker:" in compose
+    assert 'command: ["python", "-m", "ingest.jobs_worker"]' in compose
+    assert "container_name: ninja-jobs-worker" in compose
+    worker = compose.split("  jobs-worker:", 1)[1].split("  operations:", 1)[0]
+    assert "ports:" not in worker
+    assert '"--healthcheck"' in worker
+
+
+def test_worker_uses_only_fenced_v1_queue_apis():
+    worker = (ROOT / "ingest" / "jobs_worker.py").read_text(encoding="utf-8")
+    queue = (ROOT / "ingest" / "operator_job_queue.py").read_text(encoding="utf-8")
+
+    assert "process_next_v1(lane, worker_incarnation)" in worker
+    assert "jobs_claim_next_v3" in queue
+    assert "jobs_record_v1_progress" in queue
+    assert "jobs_finish_v1" in queue

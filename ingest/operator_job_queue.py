@@ -111,6 +111,28 @@ class JobProgress:
             )
 
 
+class V1JobProgress:
+    """Record v1 progress exclusively through the fenced Jobs API."""
+
+    def __init__(self, job_id: Any, claim_token: uuid.UUID) -> None:
+        self.job_id = job_id
+        self.claim_token = claim_token
+
+    def update(self, stage: str, detail: str = "") -> None:
+        self._record(stage, detail)
+
+    def heartbeat(self) -> None:
+        self._record(None, None)
+
+    def _record(self, stage: str | None, detail: str | None) -> None:
+        with db.transaction() as cur:
+            cur.execute("SET LOCAL operations.tenant_id = 1")
+            cur.execute(
+                "SELECT operations.jobs_record_v1_progress(%s, %s, %s, %s, %s)",
+                (1, self.job_id, self.claim_token, stage, detail),
+            )
+
+
 def enqueue_automatic(job_key: str) -> bool:
     """Queue scheduled work through the same durable path as Jobs.
 
@@ -216,6 +238,30 @@ def _process_next_in_lane(lane: str) -> dict[str, int]:
     return {"completed": 1, "failed": 0}
 
 
+def process_next_v1(lane: str, worker_incarnation: uuid.UUID) -> dict[str, int]:
+    """Execute one converted run through the fenced v1 worker APIs."""
+    if lane not in WORKER_LANES:
+        raise ValueError(f"Unknown Jobs worker lane: {lane}")
+    row = _claim_next_v1(lane, worker_incarnation)
+    if row is None:
+        return {"completed": 0, "failed": 0}
+    progress = V1JobProgress(row["id"], row["claim_token"])
+    stopped = threading.Event()
+    heartbeat = threading.Thread(target=_heartbeat_loop, args=(progress, stopped), daemon=True)
+    heartbeat.start()
+    try:
+        rows = _execute(row["job_key"], progress)
+    except Exception as exc:
+        log.exception("converted operator job %s failed", row["job_key"])
+        _finish_v1(row["id"], row["claim_token"], "failed", error=str(exc)[:2000])
+        return {"completed": 0, "failed": 1}
+    finally:
+        stopped.set()
+        heartbeat.join(timeout=1)
+    _finish_v1(row["id"], row["claim_token"], "completed", rows=rows)
+    return {"completed": 1, "failed": 0}
+
+
 def recover_stale() -> int:
     try:
         with db.transaction() as cur:
@@ -312,6 +358,19 @@ def _claim_next(lane: str) -> dict[str, Any] | None:
     return {"id": row[0], "job_key": row[1]} if row else None
 
 
+def _claim_next_v1(lane: str, worker_incarnation: uuid.UUID) -> dict[str, Any] | None:
+    with db.transaction() as cur:
+        cur.execute("SET LOCAL operations.tenant_id = 1")
+        cur.execute(
+            "SELECT run_id, claim_token, job_key FROM operations.jobs_claim_next_v3(%s, %s, %s)",
+            (1, lane, worker_incarnation),
+        )
+        row = cur.fetchone()
+    if row is None:
+        return None
+    return {"id": row[0], "claim_token": row[1], "job_key": row[2]}
+
+
 def _finish(job_id: Any, status: str, *, rows: int | None = None, error: str = "") -> None:
     with db.transaction() as cur:
         cur.execute("SET LOCAL operations.tenant_id = 1")
@@ -332,6 +391,22 @@ def _finish(job_id: Any, status: str, *, rows: int | None = None, error: str = "
         )
 
 
+def _finish_v1(
+    job_id: Any,
+    claim_token: uuid.UUID,
+    status: str,
+    *,
+    rows: int | None = None,
+    error: str = "",
+) -> None:
+    with db.transaction() as cur:
+        cur.execute("SET LOCAL operations.tenant_id = 1")
+        cur.execute(
+            "SELECT operations.jobs_finish_v1(%s, %s, %s, %s, %s, %s, %s::jsonb)",
+            (1, job_id, claim_token, status, rows, error, "{}"),
+        )
+
+
 def _execute(job_key: str, progress: JobProgress) -> int | None:
     """Run a catalog job synchronously in the bounded queue worker.
 
@@ -339,14 +414,13 @@ def _execute(job_key: str, progress: JobProgress) -> int | None:
     functions intentionally raise, allowing the durable record to show failure.
     """
     from ingest import main
-    from ingest.software_findings import incremental_pending_count
     from ingest.intel import (
         abusech,
         capability_match,
+        category_match,
         chocolatey,
         cisa_kev,
         cpe_dict,
-        category_match,
         epss,
         lolrmm,
         matcher,
@@ -354,10 +428,14 @@ def _execute(job_key: str, progress: JobProgress) -> int | None:
         otx,
         winget,
     )
+    from ingest.software_findings import incremental_pending_count
 
     jobs = {
         "patch-classify": ("Classifying patch state", lambda: main.patch_classify(tenant_id=1)),
-        "platform-evaluate": ("Evaluating platform conditions", lambda: main.platform_evaluate(tenant_id=1)),
+        "platform-evaluate": (
+            "Evaluating platform conditions",
+            lambda: main.platform_evaluate(tenant_id=1),
+        ),
         "parity-check": ("Checking operational parity", lambda: main.parity_check_run(tenant_id=1)),
         "software-classify-only": (
             "Classifying changed software",
@@ -369,15 +447,42 @@ def _execute(job_key: str, progress: JobProgress) -> int | None:
         ),
         "resolver": ("Resolving computer identity", lambda: main.run_identity_resolver_once()),
         "patches": ("Collecting Ninja information", lambda: main.run_patching_once()),
-        "agent-observations": ("Collecting agent observations", lambda: main.run_agent_observations_once()),
-        "documentation-observations": ("Collecting documentation observations", lambda: main.run_documentation_observations_once()),
-        "agent-compliance": ("Refreshing agent compliance", lambda: main.run_agent_compliance_once()),
-        "agent-compliance-evaluate": ("Reviewing agent compliance", lambda: main.run_agent_compliance_evaluate_once()),
-        "retention-history": ("Cleaning closed history", lambda: main.run_observation_history_prune_once()),
-        "software-enqueue-orgs": ("Scheduling software inventory", lambda: main.enqueue_all_orgs_once()),
-        "software-queue-drain": ("Collecting software inventory", lambda: main.run_software_queue_once()),
-        "notifications-dispatch": ("Sending notifications", lambda: main.notify_dispatch(tenant_id=1)),
-        "notifications-digest": ("Preparing notification digest", lambda: main.notify_send_digest(tenant_id=1)),
+        "agent-observations": (
+            "Collecting agent observations",
+            lambda: main.run_agent_observations_once(),
+        ),
+        "documentation-observations": (
+            "Collecting documentation observations",
+            lambda: main.run_documentation_observations_once(),
+        ),
+        "agent-compliance": (
+            "Refreshing agent compliance",
+            lambda: main.run_agent_compliance_once(),
+        ),
+        "agent-compliance-evaluate": (
+            "Reviewing agent compliance",
+            lambda: main.run_agent_compliance_evaluate_once(),
+        ),
+        "retention-history": (
+            "Cleaning closed history",
+            lambda: main.run_observation_history_prune_once(),
+        ),
+        "software-enqueue-orgs": (
+            "Scheduling software inventory",
+            lambda: main.enqueue_all_orgs_once(),
+        ),
+        "software-queue-drain": (
+            "Collecting software inventory",
+            lambda: main.run_software_queue_once(),
+        ),
+        "notifications-dispatch": (
+            "Sending notifications",
+            lambda: main.notify_dispatch(tenant_id=1),
+        ),
+        "notifications-digest": (
+            "Preparing notification digest",
+            lambda: main.notify_send_digest(tenant_id=1),
+        ),
         "intel-nvd": ("Refreshing NVD intelligence", nvd.run_once),
         "intel-cpe-dict": ("Refreshing CPE dictionary", cpe_dict.run_once),
         "intel-kev": ("Refreshing exploited-vulnerability intelligence", cisa_kev.run_once),
@@ -389,7 +494,10 @@ def _execute(job_key: str, progress: JobProgress) -> int | None:
         "intel-lolrmm": ("Refreshing remote-management intelligence", lolrmm.run_once),
         "intel-otx": ("Refreshing threat intelligence", otx.run_once),
         "intel-abusech": ("Refreshing malware intelligence", abusech.run_once),
-        "intel-endoflife": ("Refreshing end-of-life intelligence", lambda: main.run_intel_endoflife_once()),
+        "intel-endoflife": (
+            "Refreshing end-of-life intelligence",
+            lambda: main.run_intel_endoflife_once(),
+        ),
         "intel-category": ("Refreshing software categories", category_match.run_once),
     }
     if job_key == "software-classify":
@@ -423,9 +531,13 @@ def _software_classify_with_intel(
         ):
             progress.update(stage, "This stage does not publish a measurable work total.")
             job()
-    progress.update("Classifying installed software", "This stage does not publish a measurable work total.")
+    progress.update(
+        "Classifying installed software", "This stage does not publish a measurable work total."
+    )
     result = main.software_classify(tenant_id=1, incremental=False)
-    progress.update("Refreshing software views", "Making the completed classification available to operators.")
+    progress.update(
+        "Refreshing software views", "Making the completed classification available to operators."
+    )
     with db.pool.connection() as conn, conn.cursor() as cur:
         cur.execute("REFRESH MATERIALIZED VIEW operations.v_software_safety")
     return int(result) if isinstance(result, int) else None

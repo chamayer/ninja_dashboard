@@ -127,6 +127,28 @@ services:
       postgres:
         condition: service_healthy
 
+  jobs-worker:
+    build:
+      context: .
+      dockerfile: ingest.Dockerfile
+    container_name: ninja-jobs-worker
+    restart: unless-stopped
+    command: ["python", "-m", "ingest.jobs_worker"]
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+    volumes:
+      - /amr-ch-01_data/ninja-dashboard:/app/envdir:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-m", "ingest.jobs_worker", "--healthcheck"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
   # ───────────────────────────────────────────────────────────────────
   # operations — Django + DRF service, write-side operator console.
   # Companion to Metabase. Built from operations.Dockerfile.

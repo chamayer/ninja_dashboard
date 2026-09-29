@@ -991,3 +991,19 @@ dormant until worker conversion; existing version-0 traffic is unchanged.
 Focused validation passed: Python compilation, targeted Ruff, 12 Jobs
 migration tests, and `git diff --check`. Next action: deploy this additive API
 and implement the dedicated worker process against it.
+
+Worker API deployment (2026-09-29): committed as `8b1322a`, pushed to both
+remotes, and applied by Portainer. Operations logged
+`Applying operations.0208_jobs_v1_worker_api... OK`; Operations and ingest
+remain healthy. Next action: add the dedicated worker process and Compose
+topology, using only the restricted v1 APIs for converted work.
+
+Dedicated worker topology (2026-09-29): added migration 0209 for fenced v1
+progress/heartbeat writes, `ingest.jobs_worker` as a no-HTTP/no-scheduler
+process, and the `jobs-worker` Compose service with its own health signal.
+The worker claims, progresses, and finishes converted runs through the
+restricted APIs; existing version-0 producers remain unchanged, so it starts
+idle until the producer cutover. Focused validation passed: Python
+compilation, targeted Ruff, four worker/migration tests, Compose config, and
+`git diff --check`. Next action: deploy the worker topology and confirm its
+health before converting the first producer family.
