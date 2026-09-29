@@ -17,7 +17,6 @@ there is no background worker to re-pick them up; operator must resubmit.
 from __future__ import annotations
 
 import logging
-import threading
 from datetime import datetime, timezone
 
 from ingest import db
@@ -246,9 +245,19 @@ def process_entry(entry_id: int) -> None:
     )
 
 
+def process_next() -> int:
+    """Process one retained demand entry under the governed Jobs worker."""
+    with db.pool.connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            f"SELECT id FROM {_TABLE} WHERE status = 'pending' ORDER BY queued_at, id LIMIT 1"
+        )
+        row = cur.fetchone()
+    if row is None:
+        return 0
+    process_entry(int(row[0]))
+    return 1
+
+
 def enqueue_and_run(source: str, reason: str = "") -> int:
-    """Enqueue source and fire its entry in a daemon thread. Returns entry id."""
-    entry_id = enqueue(source, reason)
-    if entry_id:
-        threading.Thread(target=process_entry, args=(entry_id,), daemon=True).start()
-    return entry_id
+    """Compatibility name: enqueue only; the Jobs worker executes demand."""
+    return enqueue(source, reason)

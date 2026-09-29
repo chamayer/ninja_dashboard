@@ -495,6 +495,19 @@ _RAW_DEFINITIONS = (
         run_all=False,
         schedule_ids=("source_action_requests_cycle",),
     ),
+    JobDefinition(
+        "source-demand",
+        "Source demand worker",
+        "Process one queued on-demand source refresh with its retained source record.",
+        "maintenance",
+        "collection",
+        "",
+        "source_run_queue",
+        "run_log",
+        "ingest.source_run_queue.process_next",
+        run_all=False,
+        schedule_ids=("source_demand_cycle",),
+    ),
 )
 
 
@@ -509,6 +522,7 @@ _SCHEDULE_DEFINITIONS = (
     ScheduleDefinition("software_enqueue_orgs_cycle", "software-enqueue-orgs", "SOFTWARE_INGEST_SCHEDULE_HOURS"),
     ScheduleDefinition("software_queue_drain_cycle", "software-queue-drain", "SOFTWARE_QUEUE_POLL_MINUTES", "minutes"),
     ScheduleDefinition("source_action_requests_cycle", "source-actions", "constant:1", "minutes"),
+    ScheduleDefinition("source_demand_cycle", "source-demand", "constant:1", "minutes"),
     ScheduleDefinition("notifications_dispatch_cycle", "notifications-dispatch", "NOTIFY_DISPATCH_SCHEDULE_MINUTES", "minutes"),
     ScheduleDefinition("notifications_digest_cycle", "notifications-digest", "NOTIFY_DIGEST_HOUR", "cron-hour"),
     ScheduleDefinition("observation_history_retention_cycle", "retention-history", "OBSERVATION_HISTORY_RETENTION_HOUR", "cron-hour"),

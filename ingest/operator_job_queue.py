@@ -52,6 +52,7 @@ EXECUTABLE_JOB_KEYS = frozenset(
         "intel-capability", "intel-lolrmm", "intel-otx", "intel-abusech",
         "intel-endoflife", "intel-category", "software-classify",
         "source-actions",
+        "source-demand",
     }
 )
 validate_registry(executable_keys=EXECUTABLE_JOB_KEYS)
@@ -95,6 +96,17 @@ def _schedule_cadence(schedule: Any) -> dict[str, int | str]:
 def _schedule_enabled(job_key: str) -> tuple[bool, str]:
     """Apply the existing capability gates before automatic admission."""
     job = definition(job_key)
+    if job_key in {"source-demand", "source-actions"}:
+        table = (
+            "operations.source_run_queue"
+            if job_key == "source-demand"
+            else "operations.source_action_requests"
+        )
+        with db.pool.connection() as conn, conn.cursor() as cur:
+            cur.execute(f"SELECT EXISTS (SELECT 1 FROM {table} WHERE status = 'pending')")
+            pending = cur.fetchone()[0]
+        label = "source demand" if job_key == "source-demand" else "source actions"
+        return pending, "Available" if pending else f"Waiting for {label}."
     enabled = {
         "always": True,
         "intel": settings.INTEL_ENABLED,
@@ -580,6 +592,7 @@ def _execute(job_key: str, progress: JobProgress) -> int | None:
     )
     from ingest.software_findings import incremental_pending_count
     from ingest import source_actions
+    from ingest import source_run_queue
 
     jobs = {
         "patch-classify": ("Classifying patch state", lambda: main.patch_classify(tenant_id=1)),
@@ -630,6 +643,7 @@ def _execute(job_key: str, progress: JobProgress) -> int | None:
             "Processing approved source actions",
             lambda: sum(source_actions.process_pending().values()),
         ),
+        "source-demand": ("Processing queued source demand", source_run_queue.process_next),
         "notifications-dispatch": (
             "Sending notifications",
             lambda: main.notify_dispatch(tenant_id=1),

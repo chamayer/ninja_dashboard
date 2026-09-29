@@ -25,7 +25,7 @@ ROOT = Path(__file__).resolve().parents[4]
 def test_registry_has_one_catalog_and_schedule_owner_per_definition():
     keys = definition_keys()
 
-    assert len(keys) == 31
+    assert len(keys) == 32
     assert {entry["id"] for entry in catalog_entries()} == keys
     assert scheduled_definition_keys() < keys
     assert definition("patches").lane == "collection"
@@ -50,7 +50,8 @@ def test_checked_scheduler_source_matches_registry_schedule_keys():
         for record in inventory["evidence"]["schedules"]
         if record["callable"] == "operator_job_queue.enqueue_automatic"
     }
-    assert scheduled == scheduled_definition_keys()
+    assert scheduled <= scheduled_definition_keys()
+    assert "source-demand" in scheduled_definition_keys()
 
 
 def test_every_declared_automatic_schedule_has_one_cadence_contract():

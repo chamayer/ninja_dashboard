@@ -2003,6 +2003,12 @@
         "owner": "_execute",
         "key": "source-actions",
         "expression": "source_actions.process_pending()"
+      },
+      {
+        "file": "ingest/operator_job_queue.py",
+        "owner": "_execute",
+        "key": "source-demand",
+        "expression": "source_run_queue.process_next()"
       }
     ],
     "startup_calls": [
