@@ -181,6 +181,9 @@ def enqueue_automatic(job_key: str) -> bool:
     except PoolTimeout:
         log.warning("automatic job %s waiting for database capacity", job_key)
         return False
+    except Exception:
+        log.exception("automatic job %s was deferred by Jobs admission", job_key)
+        return False
 
 
 def _admit_software_classifier(cur, job_key: str) -> bool:
