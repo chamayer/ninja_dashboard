@@ -51,6 +51,7 @@ EXECUTABLE_JOB_KEYS = frozenset(
         "intel-kev", "intel-epss", "intel-matcher", "intel-winget", "intel-chocolatey",
         "intel-capability", "intel-lolrmm", "intel-otx", "intel-abusech",
         "intel-endoflife", "intel-category", "software-classify",
+        "source-actions",
     }
 )
 validate_registry(executable_keys=EXECUTABLE_JOB_KEYS)
@@ -578,6 +579,7 @@ def _execute(job_key: str, progress: JobProgress) -> int | None:
         winget,
     )
     from ingest.software_findings import incremental_pending_count
+    from ingest import source_actions
 
     jobs = {
         "patch-classify": ("Classifying patch state", lambda: main.patch_classify(tenant_id=1)),
@@ -623,6 +625,10 @@ def _execute(job_key: str, progress: JobProgress) -> int | None:
         "software-queue-drain": (
             "Collecting software inventory",
             lambda: main.run_software_queue_once(),
+        ),
+        "source-actions": (
+            "Processing approved source actions",
+            lambda: sum(source_actions.process_pending().values()),
         ),
         "notifications-dispatch": (
             "Sending notifications",

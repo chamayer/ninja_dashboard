@@ -2558,10 +2558,11 @@ def main() -> None:
         id="source_run_queue_stale_recovery",
     )
     scheduler.add_job(
-        source_actions.process_pending,
+        operator_job_queue.enqueue_automatic,
         "interval",
         minutes=1,
         id="source_action_requests",
+        args=["source-actions"],
         max_instances=1,
     )
     # Durable Jobs have bounded lanes. A slow evaluator must not block source

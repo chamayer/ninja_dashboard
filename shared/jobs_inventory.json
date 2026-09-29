@@ -75,10 +75,11 @@
         "file": "ingest/main.py",
         "owner": "main",
         "id": "'source_action_requests'",
-        "callable": "source_actions.process_pending",
+        "callable": "operator_job_queue.enqueue_automatic",
         "trigger": "'interval'",
         "options": {
           "minutes": "1",
+          "args": "['source-actions']",
           "max_instances": "1"
         },
         "guards": []
@@ -1996,6 +1997,12 @@
         "owner": "_execute",
         "key": "software-classify",
         "expression": "_software_classify_with_intel(progress, matcher, winget, chocolatey, main)"
+      },
+      {
+        "file": "ingest/operator_job_queue.py",
+        "owner": "_execute",
+        "key": "source-actions",
+        "expression": "source_actions.process_pending()"
       }
     ],
     "startup_calls": [

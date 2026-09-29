@@ -482,6 +482,19 @@ _RAW_DEFINITIONS = (
         run_all=False,
         schedule_ids=("software_queue_drain_cycle",),
     ),
+    JobDefinition(
+        "source-actions",
+        "Source actions worker",
+        "Process approved external source actions with their retained audit records.",
+        "maintenance",
+        "service",
+        "",
+        "source_action_requests",
+        "run_log",
+        "ingest.source_actions.process_pending",
+        run_all=False,
+        schedule_ids=("source_action_requests_cycle",),
+    ),
 )
 
 
@@ -495,6 +508,7 @@ _SCHEDULE_DEFINITIONS = (
     ScheduleDefinition("software_classify_full_rebuild_cycle", "software-classify-full", "SOFTWARE_CLASSIFY_FULL_REBUILD_HOURS"),
     ScheduleDefinition("software_enqueue_orgs_cycle", "software-enqueue-orgs", "SOFTWARE_INGEST_SCHEDULE_HOURS"),
     ScheduleDefinition("software_queue_drain_cycle", "software-queue-drain", "SOFTWARE_QUEUE_POLL_MINUTES", "minutes"),
+    ScheduleDefinition("source_action_requests_cycle", "source-actions", "constant:1", "minutes"),
     ScheduleDefinition("notifications_dispatch_cycle", "notifications-dispatch", "NOTIFY_DISPATCH_SCHEDULE_MINUTES", "minutes"),
     ScheduleDefinition("notifications_digest_cycle", "notifications-digest", "NOTIFY_DIGEST_HOUR", "cron-hour"),
     ScheduleDefinition("observation_history_retention_cycle", "retention-history", "OBSERVATION_HISTORY_RETENTION_HOUR", "cron-hour"),
