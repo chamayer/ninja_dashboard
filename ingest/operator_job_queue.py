@@ -14,6 +14,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from psycopg.errors import UndefinedFunction
 from psycopg_pool import PoolTimeout
 
 from ingest import db
@@ -75,6 +76,8 @@ def _schedule_cadence(schedule: Any) -> dict[str, int | str]:
     """Resolve one registry cadence into bounded, persisted UTC metadata."""
     if schedule.cadence_setting == "PATCH_INGEST_SCHEDULE_HOURS":
         value = settings.patch_ingest_schedule_hours
+    elif schedule.cadence_setting == "OBSERVATION_HISTORY_RETENTION_HOUR":
+        value = getattr(settings, schedule.cadence_setting, 3)
     elif schedule.cadence_setting.startswith("constant:"):
         value = int(schedule.cadence_setting.partition(":")[2])
     else:
@@ -102,24 +105,31 @@ def _schedule_enabled(job_key: str) -> tuple[bool, str]:
     return enabled, "Available" if enabled else f"Disabled — {job.capability} is not enabled."
 
 
-def reconcile_schedule_catalog() -> None:
+def reconcile_schedule_catalog() -> bool:
     """Reconcile every declared cadence before the durable producer runs."""
-    with db.transaction() as cur:
-        cur.execute("SET LOCAL operations.tenant_id = 1")
-        for schedule in schedule_definitions():
-            job = definition(schedule.job_key)
-            cadence = _schedule_cadence(schedule)
-            enabled, capability_reason = _schedule_enabled(job.key)
-            revision = hashlib.sha256(
-                json.dumps(
-                    {"cadence": cadence, "enabled": enabled},
-                    sort_keys=True, separators=(",", ":"),
-                ).encode()
-            ).hexdigest()
-            cur.execute(
-                "SELECT operations.jobs_reconcile_schedule_v2(%s, %s, %s, %s, %s, %s::jsonb, %s, %s)",
-                (1, job.key, job.snapshot_digest(), "tenant:1", revision, json.dumps(cadence), enabled, capability_reason),
-            )
+    try:
+        with db.transaction() as cur:
+            cur.execute("SET LOCAL operations.tenant_id = 1")
+            for schedule in schedule_definitions():
+                job = definition(schedule.job_key)
+                cadence = _schedule_cadence(schedule)
+                enabled, capability_reason = _schedule_enabled(job.key)
+                revision = hashlib.sha256(
+                    json.dumps(
+                        {"cadence": cadence, "enabled": enabled},
+                        sort_keys=True, separators=(",", ":"),
+                    ).encode()
+                ).hexdigest()
+                cur.execute(
+                    "SELECT operations.jobs_reconcile_schedule_v2(%s, %s, %s, %s, %s, %s::jsonb, %s, %s)",
+                    (1, job.key, job.snapshot_digest(), "tenant:1", revision, json.dumps(cadence), enabled, capability_reason),
+                )
+    except UndefinedFunction:
+        # Operations owns Django migrations and can become ready after ingest.
+        # The producer retries this idempotent registration before admission.
+        log.info("durable Jobs schedule migration is not available yet")
+        return False
+    return True
 
 
 def _next_due_at(due_at: datetime, cadence: dict[str, Any], now: datetime) -> datetime:
@@ -137,6 +147,8 @@ def _next_due_at(due_at: datetime, cadence: dict[str, Any], now: datetime) -> da
 def produce_due_schedules() -> int:
     """Elect a short-lived leader and atomically admit each due durable schedule."""
     admitted = 0
+    if not reconcile_schedule_catalog():
+        return admitted
     try:
         with db.pool.connection() as conn, conn.cursor() as cur:
             cur.execute("SET operations.tenant_id = 1")
