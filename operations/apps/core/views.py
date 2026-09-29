@@ -10224,18 +10224,46 @@ def client_mapping_decide(request: HttpRequest, source_link_id: str) -> HttpResp
 @login_required
 @require_admin
 def client_mappings(request: HttpRequest) -> HttpResponse:
-    """Operations surface for effective client/source mapping decisions."""
+    """Complete Operations lifecycle surface for client/source identity.
+
+    This deliberately joins three persisted workflows instead of presenting
+    only attached links: effective source-client relationships, unresolved
+    source-client candidates, and resolver-detected ambiguity.  A source
+    record must never disappear from the admin surface merely because it is
+    not attached to a client yet.
+    """
     source_link_id = (request.GET.get("source_link_id") or "").strip()
+    client_id = (request.GET.get("client_id") or "").strip()
+    source_filter = (request.GET.get("source") or "").strip()
+    state_filter = (request.GET.get("state") or "all").strip()
+    query = (request.GET.get("q") or "").strip()
+    valid_states = {"all", "mapped", "review", "explicit", "automatic", "ignored", "unattached", "ambiguous"}
+    if state_filter not in valid_states:
+        state_filter = "all"
+
     where = ["mapping.tenant_id = 1"]
     params: list[str] = []
     if source_link_id:
         where.append("mapping.source_link_id = %s::uuid")
         params.append(source_link_id)
+    if client_id:
+        where.append("mapping.client_id = %s::uuid")
+        params.append(client_id)
+    if source_filter:
+        where.append("source.name = %s")
+        params.append(source_filter)
+    if query:
+        where.append("(client.display_name ILIKE %s OR mapping.observed_name ILIKE %s OR mapping.external_id ILIKE %s)")
+        params.extend([f"%{query}%"] * 3)
+    if state_filter in {"review", "explicit", "automatic", "ignored"}:
+        where.append("mapping.mapping_state = %s")
+        params.append(state_filter)
+
     with transaction.atomic(), connection.cursor() as cur:
         cur.execute("SET LOCAL operations.tenant_id = 1")
         cur.execute(
             f"""
-            SELECT mapping.source_link_id, client.slug, client.display_name, source.name,
+            SELECT mapping.source_link_id, mapping.client_id, client.slug, client.display_name, source.name,
                    mapping.external_id, mapping.observed_name, mapping.observed_at,
                    mapping.mapping_state, mapping.provenance,
                    mapping.decision_reason, mapping.decided_at
@@ -10247,17 +10275,136 @@ def client_mappings(request: HttpRequest) -> HttpResponse:
             """,
             params,
         )
-        rows = cur.fetchall()
+        mapped_rows = [
+            {
+                "source_link_id": row[0], "client_id": row[1], "client_slug": row[2], "client_name": row[3],
+                "source_name": row[4], "external_id": row[5], "observed_name": row[6],
+                "observed_at": row[7], "state": row[8], "provenance": row[9],
+                "reason": row[10], "decided_at": row[11],
+            }
+            for row in cur.fetchall()
+        ]
+        link_ids = [str(row["source_link_id"]) for row in mapped_rows]
+        history_by_link: dict[str, list[dict]] = {}
+        if link_ids:
+            cur.execute(
+                """
+                SELECT source_link_id, state, provenance, reason, decided_at, superseded_at
+                  FROM operations.client_source_mapping_decisions
+                 WHERE tenant_id = 1 AND source_link_id = ANY(%s::uuid[])
+                 ORDER BY source_link_id, decided_at DESC
+                """,
+                (link_ids,),
+            )
+            for link_id, state, provenance, reason, decided_at, superseded_at in cur.fetchall():
+                history_by_link.setdefault(str(link_id), []).append(
+                    {"state": state, "provenance": provenance, "reason": reason,
+                     "decided_at": decided_at, "superseded_at": superseded_at}
+                )
+
+    names_by_client_id: dict[str, set[str]] = {}
+    for reference in client_source_references():
+        if reference["observed_name"]:
+            names_by_client_id.setdefault(str(reference["client_id"]), set()).add(reference["observed_name"])
+    for row in mapped_rows:
+        names = sorted(names_by_client_id.get(str(row["client_id"]), set()))
+        row["other_names"] = [name for name in names if name != row["observed_name"]]
+        row["history"] = history_by_link.get(str(row["source_link_id"]), [])
+
+    # Candidate history remains visible to administrators as audit evidence;
+    # only the unattached filter narrows this to records requiring action.
+    candidates = []
+    if state_filter in {"all", "unattached"}:
+        candidate_qs = ClientCandidate.objects.filter(tenant_id=1)
+        if state_filter == "unattached":
+            candidate_qs = candidate_qs.filter(status=ClientCandidate.Status.OPEN)
+        if query:
+            candidate_qs = candidate_qs.filter(Q(display_name__icontains=query) | Q(normalized_name__icontains=query))
+        source_names = {source.id: source.name for source in Source.objects.all()}
+        for candidate in candidate_qs.order_by("display_name"):
+            refs = candidate.source_refs or []
+            candidate_sources = sorted({source_names.get(ref.get("source_id"), "Unknown source") for ref in refs})
+            if source_filter and source_filter not in candidate_sources:
+                continue
+            candidates.append({"candidate": candidate, "sources": candidate_sources, "refs": refs})
+
+    ambiguity_types = ("client_link_collision", "client_source_group_merge", "client_unattached_group", "unnamed_source_group", "unmatched_source_group")
+    ambiguities = []
+    if state_filter in {"all", "ambiguous"}:
+        ambiguity_qs = AdminFinding.objects.filter(
+            tenant_id=1, status__in=("open", "acknowledged"), finding_type__name__in=ambiguity_types
+        ).select_related("finding_type").order_by("-last_detected_at")
+        for finding in ambiguity_qs:
+            subject = finding.subject_ref or {}
+            details = finding.details or {}
+            source_id = subject.get("source_id") or details.get("source_id")
+            source = Source.objects.filter(id=source_id).first() if source_id else None
+            evidence = subject.get("observed_name") or subject.get("external_name_stored") or details.get("observed_name") or details.get("external_id") or "No source name recorded"
+            if query and query.lower() not in str(evidence).lower() and query.lower() not in finding.finding_type.name.lower():
+                continue
+            if source_filter and (source is None or source.name != source_filter):
+                continue
+            ambiguities.append({"finding": finding, "source_name": source.name if source else "Unknown source", "evidence": evidence, "details": details, "subject": subject})
+
+    if state_filter == "mapped":
+        mapped_rows = [row for row in mapped_rows if row["state"] != "review"]
+
+    source_options = list(Source.objects.order_by("name").values_list("name", flat=True))
     return render(
         request,
         "client_mappings.html",
         {
             "admin_group": "integrations",
             "admin_tab": "client-mappings",
-            "rows": rows,
+            "rows": mapped_rows,
+            "candidates": candidates,
+            "ambiguities": ambiguities,
+            "source_options": source_options,
+            "active_state": state_filter,
+            "active_source": source_filter,
+            "query": query,
+            "show_mapped": state_filter not in {"unattached", "ambiguous"},
+            "show_unattached": state_filter in {"all", "unattached"},
+            "show_ambiguous": state_filter in {"all", "ambiguous"},
             "selected_mapping": bool(source_link_id),
         },
     )
+
+
+@login_required
+def inventory_clients(request: HttpRequest) -> HttpResponse:
+    """Compact client inventory; source identity detail remains in Admin."""
+    query = (request.GET.get("q") or "").strip()
+    clients = Client.objects.filter(tenant_id=1, deleted_at__isnull=True).order_by("display_name")
+    if query:
+        clients = clients.filter(display_name__icontains=query)
+
+    rows_by_client: dict[str, dict] = {
+        str(client.id): {"client": client, "source_count": 0, "sources": [], "review_count": 0, "name_difference_count": 0}
+        for client in clients
+    }
+    for reference in client_source_references():
+        row = rows_by_client.get(str(reference["client_id"]))
+        if row is None:
+            continue
+        row["source_count"] += 1
+        row["sources"].append(reference["source_name"])
+        if reference["mapping_state"] == "review":
+            row["review_count"] += 1
+
+    differences = AdminFinding.objects.filter(
+        tenant_id=1, status__in=("open", "acknowledged"), finding_type__name="client_name_conflict"
+    ).values_list("subject_ref", flat=True)
+    for subject in differences:
+        client_id = str((subject or {}).get("client_id") or "")
+        if client_id in rows_by_client:
+            rows_by_client[client_id]["name_difference_count"] += 1
+
+    open_candidates = ClientCandidate.objects.filter(tenant_id=1, status=ClientCandidate.Status.OPEN).count()
+    return render(request, "inventory_clients.html", {
+        "active_section": "inventory", "rows": list(rows_by_client.values()), "query": query,
+        "open_candidates": open_candidates,
+    })
 
 
 @login_required

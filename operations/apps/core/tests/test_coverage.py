@@ -484,6 +484,23 @@ def test_inventory_computers_navigation_uses_the_coverage_reader():
     assert 'path("inventory/computers/", fleet_coverage, name="inventory_computers")' in urls
 
 
+def test_client_inventory_and_mapping_lifecycle_are_separate_and_complete():
+    root = Path(__file__).parents[3]
+    base = (root / "templates/base.html").read_text(encoding="utf-8")
+    urls = (root / "config/urls.py").read_text(encoding="utf-8")
+    mapping = (root / "templates/client_mappings.html").read_text(encoding="utf-8")
+    inventory = (root / "templates/inventory_clients.html").read_text(encoding="utf-8")
+
+    assert 'path("inventory/clients/", inventory_clients, name="inventory_clients")' in urls
+    assert 'href="{% url \'inventory_clients\' %}">Clients</a>' in base
+    assert "Attached source client records" in mapping
+    assert "Unattached source client records and lifecycle history" in mapping
+    assert "Ambiguous or colliding records" in mapping
+    assert "Why / history" in mapping
+    assert "Client inventory" in inventory
+    assert "Client status remains on the separate Clients overview" in inventory
+
+
 def test_hudu_device_link_read_model_is_tenant_scoped_and_read_only():
     migration = (
         Path(__file__).parents[1] / "migrations/0146_hudu_device_links_read_model.py"

@@ -25,6 +25,8 @@ def _active_section(request: HttpRequest) -> str:
         return "patching"
     if url_name in ("devices_page", "device_detail", "device_merge", "org_devices"):
         return "devices"
+    if url_name in ("inventory_clients", "inventory_computers", "fleet_coverage"):
+        return "inventory"
     if "finding" in url_name:
         return "issues"
     if "org" in url_name or url_name in ("client_requirements_config", "client_policy_form"):

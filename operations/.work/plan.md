@@ -828,14 +828,40 @@ identity attachment, but it must not suppress a client-name finding. The
 resolver and Issues comparison now treat any non-identical reported source
 names as different, including punctuation, spacing, hyphenation, and case.
 
-Client directory inventory evidence (2026-09-25): preserve the status
-dashboard and add an exception-first source-identity summary to its existing
-directory. Healthy clients remain one row. A client with literal cross-source
-name differences, a review mapping, or no source record gets a compact second
-line with only the relevant source names; no source IDs, expansion, or page
-transition is needed to understand the exception. Reuse the effective mapping
-projection and active client-name findings; do not infer expected-source
-absence until a client-source coverage policy exists.
+Client mapping inventory completion (2026-09-28): in progress. Keep the
+top-level Clients page as a status dashboard. Add Inventory > Clients as the
+operator-facing canonical-client inventory, with compact source-record,
+literal-name-difference, review, and unmapped-candidate counts. Rebuild
+Operations Admin > Integrations > Client mappings as the complete lifecycle
+surface: effective attachments, open unattached candidates, and active
+collision/duplicate-group findings must all be visible through explicit
+filters, with source evidence, current decision/provenance, decision history,
+and direct action/detail links. Do not introduce an expected-source absence
+finding until a client-source coverage policy exists. Reuse the existing
+candidate acceptance/map/exclude lifecycle; do not write source evidence
+directly to canonical entities.
+
+Scope: `apps/core/views.py`, `config/urls.py`, navigation, the mapping template,
+and a new Inventory Clients template. No schema migration is planned because
+the approved effective mapping projection, decision history, candidate queue,
+and findings already persist the needed state. Validation: Django checks,
+focused request/template tests, Ruff, and diff check. Checkpoint: inspect the
+existing effective-mapping/candidate paths, then implement the two read models
+and links before adding focused tests.
+
+Completion checkpoint (2026-09-28): implemented the two read models. Inventory
+now opens on Clients and has a Clients sub-navigation item before Computers;
+it lists canonical clients with attached source-record, literal-name-difference,
+and review counts, while preserving the existing Clients status dashboard.
+Operations Admin > Integrations > Client mappings now shows all effective
+attachments with decision provenance/history, all candidate lifecycle records
+(including resolved history), and active ambiguity/collision findings, with
+source, client, candidate, and finding links. Validation passed: Python
+compile, 14 focused inventory/navigation tests, Ruff F/I for changed Python,
+and `git diff --check`. The local `manage.py check` cannot run because this
+workstation interpreter cannot import the repository `shared` package; Docker
+Compose has no local services, so rendered request/database validation remains
+for the deployment environment. No migration or deployment has been performed.
 
 Resolver recovery (2026-09-28): production startup exposed an existing
 client-name resolver defect while it refreshed source identity: it attempted
