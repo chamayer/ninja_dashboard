@@ -134,7 +134,7 @@
         <td>{{ reference.source_name }}</td>
         <td>{% if reference.observed_name %}<strong>{{ reference.observed_name }}</strong>{% if reference.name_differs %}<br><a class="badge badge-high" href="{{ reference.name_difference_url }}">Name differs</a>{% endif %}{% else %}<span class="muted">Not currently reported</span>{% endif %}</td>
         <td>{% if reference.missing_since %}<span class="badge badge-high">Missing</span>{% else %}<span class="badge badge-low">{{ reference.mapping_state }}</span>{% endif %}</td>
-        <td><a href="{{ reference.source_url }}">Source record</a><br><a href="{% url 'client_mappings' %}?source_link_id={{ reference.source_link_id }}">Mapping decision</a></td>
+        <td><a href="{% url 'client_source_reference_detail' source_link_id=reference.source_link_id %}">Source record</a><br><a href="{% url 'client_mappings' %}?source_link_id={{ reference.source_link_id }}">Mapping decision</a></td>
       </tr>
     {% empty %}
       <tr><td colspan="4" class="muted">No source references are mapped to this client.</td></tr>

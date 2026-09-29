@@ -499,6 +499,8 @@ def test_client_inventory_and_mapping_lifecycle_are_separate_and_complete():
     assert "Why / history" in mapping
     assert "Client inventory" in inventory
     assert "Client status remains on the separate Clients overview" in inventory
+    assert "client_source_reference_detail" in urls
+    assert "client_source_reference_detail" in mapping
 
 
 def test_hudu_device_link_read_model_is_tenant_scoped_and_read_only():

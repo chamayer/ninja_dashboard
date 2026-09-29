@@ -868,6 +868,14 @@ individual client overview must not repeat opaque source IDs and provenance as
 its primary source-reference table. Keep the reported source name and current
 state visible, and add direct Source record and Mapping decision detail links.
 
+Source-record drilldown completion (2026-09-28): implemented locally. The
+Source record link now targets one exact client/source attachment rather than
+the generic Sources list. Its detail surface includes reported name, source
+identifier/namespace, observation and presence timing, current attachment,
+decision rationale/provenance, and decision history; mapping action remains a
+separate direct link. Validation passed: Python compilation, 14 focused
+navigation tests, Ruff F/I, and `git diff --check`. Pending commit/push.
+
 Resolver recovery (2026-09-28): production startup exposed an existing
 client-name resolver defect while it refreshed source identity: it attempted
 to write `resolved_at` on `operations.findings`, whose lifecycle field is

@@ -30,7 +30,7 @@ from django.db.models import (
 )
 from django.db.models.expressions import RawSQL
 from django.db.models.functions import Coalesce, Concat
-from django.http import HttpRequest, HttpResponse, JsonResponse
+from django.http import Http404, HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
@@ -10219,6 +10219,56 @@ def client_mapping_decide(request: HttpRequest, source_link_id: str) -> HttpResp
         )
     messages.success(request, "Client mapping decision recorded.")
     return redirect("client_mappings")
+
+
+@login_required
+def client_source_reference_detail(request: HttpRequest, source_link_id: str) -> HttpResponse:
+    """Evidence and lifecycle history for one client/source attachment."""
+    with transaction.atomic(), connection.cursor() as cur:
+        cur.execute("SET LOCAL operations.tenant_id = 1")
+        cur.execute(
+            """
+            SELECT mapping.source_link_id, client.slug, client.display_name, source.name,
+                   mapping.external_id, mapping.external_namespace, mapping.observed_name,
+                   mapping.observed_at, mapping.first_seen_at, mapping.last_seen_at,
+                   mapping.missing_since, mapping.mapping_state, mapping.provenance,
+                   mapping.decision_reason, mapping.decided_at
+              FROM operations.v_client_source_mapping_effective mapping
+              JOIN operations.clients client ON client.id = mapping.client_id
+              JOIN operations.sources source ON source.id = mapping.source_id
+             WHERE mapping.tenant_id = 1 AND mapping.source_link_id = %s::uuid
+            """,
+            [source_link_id],
+        )
+        row = cur.fetchone()
+        if row is None:
+            raise Http404("Client source record not found")
+        cur.execute(
+            """
+            SELECT state, provenance, reason, decided_at, superseded_at
+              FROM operations.client_source_mapping_decisions
+             WHERE tenant_id = 1 AND source_link_id = %s::uuid
+             ORDER BY decided_at DESC
+            """,
+            [source_link_id],
+        )
+        history = [
+            {"state": state, "provenance": provenance, "reason": reason,
+             "decided_at": decided_at, "superseded_at": superseded_at}
+            for state, provenance, reason, decided_at, superseded_at in cur.fetchall()
+        ]
+    fields = (
+        "source_link_id", "client_slug", "client_name", "source_name", "external_id",
+        "external_namespace", "observed_name", "observed_at", "first_seen_at",
+        "last_seen_at", "missing_since", "state", "provenance", "reason", "decided_at",
+    )
+    reference = dict(zip(fields, row, strict=True))
+    return render(request, "client_source_reference_detail.html", {
+        "reference": reference,
+        "history": history,
+        "admin_group": "integrations" if request.user.is_staff else "",
+        "admin_tab": "client-mappings" if request.user.is_staff else "",
+    })
 
 
 @login_required
