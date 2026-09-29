@@ -8,6 +8,8 @@ path safe to execute.
 
 from __future__ import annotations
 
+import hashlib
+import json
 from dataclasses import dataclass, replace
 from types import MappingProxyType
 from typing import Iterable, Mapping
@@ -43,6 +45,7 @@ class JobDefinition:
     resource_keys: tuple[str, ...] = ()
     supersession_family: str = ""
     supersession_rank: int = 0
+    handler_version: str = "registry-v1"
     retry_policy: str = "manual_only_unreviewed"
     kill_safe: bool = False
 
@@ -62,6 +65,24 @@ class JobDefinition:
         if self.legacy_bridge:
             entry["legacy_bridge"] = True
         return entry
+
+    def snapshot_metadata(self) -> dict[str, object]:
+        """Return credential-free immutable metadata for the Jobs ledger."""
+        return {
+            "key": self.key,
+            "lane": self.lane,
+            "owner": self.owner,
+            "capability": self.capability,
+            "resource_keys": list(self.resource_keys),
+            "supersession_family": self.supersession_family,
+            "supersession_rank": self.supersession_rank,
+        }
+
+    def snapshot_digest(self) -> str:
+        encoded = json.dumps(
+            self.snapshot_metadata(), sort_keys=True, separators=(",", ":")
+        ).encode("utf-8")
+        return hashlib.sha256(encoded).hexdigest()
 
 
 _RAW_DEFINITIONS = (

@@ -6,6 +6,7 @@ queues: its entries represent registered platform work, not a source mutation.
 
 from __future__ import annotations
 
+import json
 import logging
 import threading
 import uuid
@@ -14,7 +15,7 @@ from typing import Any
 from psycopg_pool import PoolTimeout
 
 from ingest import db
-from shared.jobs_registry import definition, validate_registry
+from shared.jobs_registry import definition, definitions, validate_registry
 
 log = logging.getLogger(__name__)
 
@@ -49,6 +50,22 @@ EXECUTABLE_JOB_KEYS = frozenset(
     }
 )
 validate_registry(executable_keys=EXECUTABLE_JOB_KEYS)
+
+
+def register_definition_snapshots() -> None:
+    """Register immutable, credential-free definitions before v1 admission."""
+    with db.transaction() as cur:
+        cur.execute("SET LOCAL operations.tenant_id = 1")
+        for job in definitions():
+            cur.execute(
+                """SELECT operations.jobs_register_definition(%s, %s, %s, %s::jsonb)""",
+                (
+                    job.key,
+                    job.snapshot_digest(),
+                    job.handler_version,
+                    json.dumps(job.snapshot_metadata()),
+                ),
+            )
 
 
 def lane_for(job_key: str) -> str:

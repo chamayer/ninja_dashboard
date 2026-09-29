@@ -108,3 +108,15 @@ def test_registry_exposes_the_approved_conservative_resource_policy():
     assert definition("software-classify").supersession_rank == 3
     assert definition("software-classify").supersession_family == "software-classifier"
     assert all(definition(key).resource_keys for key in definition_keys())
+
+
+def test_registry_snapshot_is_deterministic_and_credential_free():
+    snapshot = definition("software-classify").snapshot_metadata()
+
+    assert snapshot["key"] == "software-classify"
+    assert snapshot["supersession_family"] == "software-classifier"
+    assert definition("software-classify").snapshot_digest() == definition(
+        "software-classify"
+    ).snapshot_digest()
+    assert len(definition("software-classify").snapshot_digest()) == 64
+    assert "token" not in json.dumps(snapshot).lower()

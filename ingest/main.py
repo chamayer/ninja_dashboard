@@ -2485,6 +2485,7 @@ def main() -> None:
         executable_keys=operator_job_queue.EXECUTABLE_JOB_KEYS,
         scheduled_keys=SCHEDULED_OPERATOR_JOB_KEYS,
     )
+    operator_job_queue.register_definition_snapshots()
 
     # Bind HTTP server FIRST so /healthz is reachable before any
     # potentially-slow startup work. Keeps the Docker HEALTHCHECK

@@ -930,3 +930,27 @@ not locally proven. Current next action: run the required small synthetic
 PostgreSQL claim/contention/dependency/supersession checks when a local test
 database is available; do not proceed to worker topology or convert a family
 until that Step 2.3 safety validation is evidenced.
+
+Autonomous correction checkpoint (2026-09-28): migration 0207 fixed the
+claim-result API by returning both the claimed run ID and fencing token through
+one restricted function. Focused migration tests, Python compilation, targeted
+Ruff, and `git diff --check` passed. It was committed as `43b2fbc`, pushed to
+`origin` and `a-m-rose`, and Portainer redeployed the approved commit. The
+Portainer stack reports the matching configuration hash; Operations startup
+logged `Applying operations.0207_jobs_claim_result_api... OK`, `/healthz`
+returned 200, and Operations, ingest, and Postgres are healthy. The direct
+Portainer POST/PUT redeploy attempts were rejected by its bodyless helper API,
+but the configured one-minute Git redeploy detected and completed the push.
+Next action: add deterministic immutable registry snapshot registration and
+then convert v1 admission/claim consumers without falling back to raw ledger
+lookups.
+
+Definition registration checkpoint (2026-09-28): the shared Jobs registry now
+produces deterministic, credential-free immutable snapshot metadata and a
+SHA-256 digest. Ingest registers every declared snapshot transactionally under
+the ingest tenant before operational execution begins. This establishes the
+definition catalog without enabling a v1 producer or worker. Validation
+passed: Python compilation, targeted Ruff (`E`, `F`, `I`) for the registry and
+test, targeted undefined-name lint for the touched ingest modules, 10 focused
+registry/queue tests, and `git diff --check`. Next action: commit, push, and
+verify the production deployment registers the snapshot catalog cleanly.
