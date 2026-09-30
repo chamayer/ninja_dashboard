@@ -25,7 +25,7 @@ ROOT = Path(__file__).resolve().parents[4]
 def test_registry_has_one_catalog_and_schedule_owner_per_definition():
     keys = definition_keys()
 
-    assert len(keys) == 32
+    assert len(keys) == 33
     assert {entry["id"] for entry in catalog_entries()} == keys
     assert scheduled_definition_keys() < keys
     assert definition("patches").lane == "collection"

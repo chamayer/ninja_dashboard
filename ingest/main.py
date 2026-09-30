@@ -340,8 +340,9 @@ def run_agent_compliance_once() -> None:
         agent_compliance_ingest.run()
     finally:
         _AGENT_COMPLIANCE_LOCK.release()
-    # Run resolver immediately after AC so new S1/SC/LMI observations get device_ids
-    threading.Thread(target=run_identity_resolver_once, daemon=True).start()
+    # The follow-up is a separate durable run so failure and waiting state are
+    # visible instead of hidden in a daemon thread.
+    operator_job_queue.request_system_job("resolver", "agent-compliance-followup")
     log.info("Agent compliance run complete")
 
 
@@ -421,8 +422,14 @@ def schedule_agent_compliance_evaluate(reason: str) -> bool:
     if not settings.AGENT_COMPLIANCE_ENABLED or not _READY.is_set():
         return False
     log.info("Scheduling agent compliance evaluate: %s", reason)
-    threading.Thread(target=run_agent_compliance_evaluate_once, daemon=True).start()
-    return True
+    try:
+        operator_job_queue.request_system_job(
+            "agent-compliance-evaluate", f"agent-compliance-action:{reason}"
+        )
+        return True
+    except Exception:
+        log.exception("Could not request agent compliance evaluation")
+        return False
 
 
 def run_platform_evaluate_once() -> None:
@@ -907,6 +914,7 @@ _HTTP_JOB_PATHS = {
     "/run": "patches", "/run/patches": "patches",
     "/run/agent-compliance": "agent-compliance",
     "/run/agent-compliance-evaluate": "agent-compliance-evaluate",
+    "/run/agent-compliance-review-digest": "agent-compliance-review-digest",
     "/run/resolver": "resolver", "/run/notifications/dispatch": "notifications-dispatch",
     "/run/platform-evaluate": "platform-evaluate",
     "/run/software-classify": "software-classify",

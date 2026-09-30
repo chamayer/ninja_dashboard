@@ -247,6 +247,20 @@ _RAW_DEFINITIONS = (
         schedule_ids=("agent_compliance_evaluate_cycle",),
     ),
     JobDefinition(
+        "agent-compliance-review-digest",
+        "Agent compliance review digest",
+        "Send the enabled legacy agent-compliance review summary.",
+        "notifications",
+        "service",
+        "run/agent-compliance-review-digest",
+        "agent_compliance.review_digest",
+        "run_log",
+        "ingest.main.run_review_digest_once",
+        capability="legacy_agent_compliance",
+        run_all=False,
+        legacy_bridge=True,
+    ),
+    JobDefinition(
         "intel-kev",
         "Intel: CISA KEV",
         "Refresh CISA's list of actively exploited vulnerabilities.",
@@ -576,9 +590,15 @@ for _key in (
     "software-classify-only", "software-classify-full",
 ):
     _RESOURCE_KEYS_BY_DEFINITION[_key] += ("tenant:{tenant_id}:software-inventory",)
-for _key in ("notifications-dispatch", "notifications-digest"):
+for _key in (
+    "notifications-dispatch", "notifications-digest",
+    "agent-compliance-review-digest",
+):
     _RESOURCE_KEYS_BY_DEFINITION[_key] += ("tenant:{tenant_id}:notification-delivery",)
-for _key in ("agent-compliance", "agent-compliance-evaluate"):
+for _key in (
+    "agent-compliance", "agent-compliance-evaluate",
+    "agent-compliance-review-digest",
+):
     _RESOURCE_KEYS_BY_DEFINITION[_key] += ("tenant:{tenant_id}:legacy-agent-compliance",)
 
 _SUPERSESSION_RANKS = MappingProxyType({

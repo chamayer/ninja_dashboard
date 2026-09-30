@@ -53,6 +53,7 @@ EXECUTABLE_JOB_KEYS = frozenset(
         "intel-endoflife", "intel-category", "software-classify",
         "source-actions",
         "source-demand",
+        "agent-compliance-review-digest",
     }
 )
 validate_registry(executable_keys=EXECUTABLE_JOB_KEYS)
@@ -651,6 +652,10 @@ def _execute(job_key: str, progress: JobProgress) -> int | None:
         "agent-compliance-evaluate": (
             "Reviewing agent compliance",
             lambda: main.run_agent_compliance_evaluate_once(),
+        ),
+        "agent-compliance-review-digest": (
+            "Preparing agent compliance review digest",
+            lambda: main.run_review_digest_once(),
         ),
         "retention-history": (
             "Cleaning closed history",

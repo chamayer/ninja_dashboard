@@ -2009,6 +2009,12 @@
         "owner": "_execute",
         "key": "source-demand",
         "expression": "source_run_queue.process_next()"
+      },
+      {
+        "file": "ingest/operator_job_queue.py",
+        "owner": "_execute",
+        "key": "agent-compliance-review-digest",
+        "expression": "main.run_review_digest_once()"
       }
     ],
     "startup_calls": [
