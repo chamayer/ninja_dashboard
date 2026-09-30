@@ -25,3 +25,5 @@ def test_worker_uses_only_fenced_v1_queue_apis():
     assert "jobs_claim_next_v3" in queue
     assert "jobs_record_v1_progress" in queue
     assert "jobs_finish_v1" in queue
+    assert "jobs_should_cancel_v1" in queue
+    assert "jobs_finish_cancelled_v1" in queue

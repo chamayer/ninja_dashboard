@@ -66,7 +66,9 @@ def _finish_child(child: _Child) -> None:
         result = json.loads(output.strip().splitlines()[-1])
     except (IndexError, json.JSONDecodeError):
         result = {"ok": False, "error": "Jobs child exited without a valid result."}
-    if result.get("ok"):
+    if result.get("cancelled"):
+        operator_job_queue._finish_cancelled_v1(child.run_id, child.claim_token)
+    elif result.get("ok"):
         operator_job_queue._finish_v1(child.run_id, child.claim_token, "completed", rows=result.get("rows"))
     else:
         operator_job_queue._finish_v1(child.run_id, child.claim_token, "failed", error=str(result.get("error", "Jobs child failed."))[:2000])

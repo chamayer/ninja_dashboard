@@ -23,6 +23,10 @@ from shared.jobs_registry import definition, definitions, schedule_definitions, 
 
 log = logging.getLogger(__name__)
 
+
+class JobCancellationRequested(RuntimeError):
+    """Raised only at a reviewed worker stage boundary."""
+
 _TABLE = "operations.operator_job_runs"
 _LEASE_MINUTES = 90
 _HEARTBEAT_SECONDS = 30
@@ -263,10 +267,21 @@ class V1JobProgress:
         self.claim_token = claim_token
 
     def update(self, stage: str, detail: str = "") -> None:
+        if self.cancel_requested():
+            raise JobCancellationRequested("Cancellation requested by an operator.")
         self._record(stage, detail)
 
     def heartbeat(self) -> None:
         self._record(None, None)
+
+    def cancel_requested(self) -> bool:
+        with db.transaction() as cur:
+            cur.execute("SET LOCAL operations.tenant_id = 1")
+            cur.execute(
+                "SELECT operations.jobs_should_cancel_v1(%s, %s, %s)",
+                (1, self.job_id, self.claim_token),
+            )
+            return bool(cur.fetchone()[0])
 
     def _record(self, stage: str | None, detail: str | None) -> None:
         with db.transaction() as cur:
@@ -592,6 +607,15 @@ def _finish_v1(
         cur.execute(
             "SELECT operations.jobs_finish_v1(%s, %s, %s, %s, %s, %s, %s::jsonb)",
             (1, job_id, claim_token, status, rows, error, "{}"),
+        )
+
+
+def _finish_cancelled_v1(job_id: Any, claim_token: uuid.UUID) -> None:
+    with db.transaction() as cur:
+        cur.execute("SET LOCAL operations.tenant_id = 1")
+        cur.execute(
+            "SELECT operations.jobs_finish_cancelled_v1(%s, %s, %s)",
+            (1, job_id, claim_token),
         )
 
 
