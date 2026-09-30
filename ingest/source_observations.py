@@ -61,6 +61,16 @@ _FETCHERS = {
     "Hudu": hudu.fetch,
 }
 
+
+class SourceObservationFailure(RuntimeError):
+    """Report isolated collector failures while retaining successful counts."""
+
+    def __init__(self, failure_count: int, counts: dict[str, int]) -> None:
+        super().__init__(
+            f"{failure_count} source collection(s) failed; retained diagnostics identify them"
+        )
+        self.counts = dict(counts)
+
 # Sources outside the identity-signal set carry no independent identity
 # evidence: they either already know their device or have none. Gating here
 # rather than branching per platform means any future non-identity source
@@ -92,11 +102,13 @@ def run_source_observations(
     """Fetch all registered sources and write to entity_observations.
 
     Sources with no fetcher registered or no source_binding_id are skipped.
-    Per-source exceptions are isolated so one bad source never blocks others.
-    Returns counts written per platform.
+    Per-source exceptions are isolated so one bad source never blocks the
+    remaining sources, then reported together so an owning Job cannot record
+    partial collection as success. Returns counts written per platform.
     """
     batch_id = uuid.uuid4()
     counts: dict[str, int] = {}
+    failures = 0
     for source in sources:
         # Not every registered source is collected here — Ninja has its own
         # pipeline (run_ninja_observations_once). Skipping is silent on
@@ -120,12 +132,15 @@ def run_source_observations(
                 "source_observations: source=%s written=%d", source.source_name, written
             )
         except Exception as exc:
+            failures += 1
             _record_source_run(
                 source, observed_at, ok=False, rows=0, error=str(exc)[:2000]
             )
             log.exception(
                 "source_observations: source %s failed — continuing", source.source_name
             )
+    if failures:
+        raise SourceObservationFailure(failures, counts)
     return counts
 
 

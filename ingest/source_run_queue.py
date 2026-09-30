@@ -166,7 +166,11 @@ def recover_stale() -> int:
 def process_entry(entry_id: int, job_run_id: object) -> int:
     """Claim and execute one demand entry under its durable Job run."""
     # Late imports to avoid circular deps at module load time.
-    from ingest.source_observations import is_identity_source, run_source_observations
+    from ingest.source_observations import (
+        SourceObservationFailure,
+        is_identity_source,
+        run_source_observations,
+    )
     from ingest.sources import load_sources
     from ingest.identity.client_resolver import drain_client_resolution
     from ingest.identity.resolver import drain_resolution
@@ -212,7 +216,12 @@ def process_entry(entry_id: int, job_run_id: object) -> int:
         elif df in available_sources():
             sources = [s for s in load_sources() if s.platform == df]
             observed_at = datetime.now(timezone.utc)
-            counts = run_source_observations(sources, observed_at)
+            collection_failure = None
+            try:
+                counts = run_source_observations(sources, observed_at)
+            except SourceObservationFailure as exc:
+                counts = exc.counts
+                collection_failure = exc
             rows_seen = sum(counts.values())
             if rows_seen:
                 try:
@@ -238,6 +247,8 @@ def process_entry(entry_id: int, job_run_id: object) -> int:
                     log.info("cmdb findings: %s", cmdb_findings.evaluate(dry_run=False))
                 except Exception:
                     log.exception("cmdb findings evaluation failed — collection unaffected")
+            if collection_failure:
+                raise collection_failure
         else:
             raise ValueError(f"Unknown source: {df!r}")
     except Exception as exc:

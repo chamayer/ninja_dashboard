@@ -76,6 +76,10 @@ def test_initial_workflow_edges_are_registered_and_acyclic():
     assert workflow_edges("software-queue-drain") == (
         ("software-queue-drain", "software-classify-only"),
     )
+    assert workflow_edges("agent-compliance") == (
+        ("agent-compliance", "resolver"),
+        ("resolver", "platform-evaluate"),
+    )
 
 
 def test_checked_dispatcher_source_matches_registry_handler_keys():

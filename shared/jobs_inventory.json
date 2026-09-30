@@ -1038,16 +1038,6 @@
     "admission_and_followup_calls": [
       {
         "file": "ingest/main.py",
-        "owner": "run_patching_once",
-        "expression": "refresh_after_collection('Ninja patch collection')"
-      },
-      {
-        "file": "ingest/main.py",
-        "owner": "run_ninja_observations_once",
-        "expression": "refresh_after_collection('Ninja observations collection')"
-      },
-      {
-        "file": "ingest/main.py",
         "owner": "run_agent_observations_once",
         "expression": "refresh_after_collection('agent observations collection')"
       },

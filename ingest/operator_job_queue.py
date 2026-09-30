@@ -487,6 +487,8 @@ def _execute(job_key: str, progress: V1JobProgress) -> int | None:
     stage, job = jobs[job_key]
     progress.update(stage, "This job does not publish a measurable work total.")
     result = job()
+    if job_key == "patches" and result is False:
+        raise RuntimeError("Patch collection could not acquire its database execution lock")
     return int(result) if isinstance(result, int) else None
 
 

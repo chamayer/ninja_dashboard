@@ -658,6 +658,7 @@ _WORKFLOW_SUCCESSORS = MappingProxyType({
     "patch-classify": ("platform-evaluate",),
     "resolver": ("platform-evaluate",),
     "software-queue-drain": ("software-classify-only",),
+    "agent-compliance": ("resolver",),
 })
 if set(_RESOURCE_KEYS_BY_DEFINITION) != {item.key for item in _RAW_DEFINITIONS}:
     raise RegistryValidationError("Missing Jobs resource policy")

@@ -39,7 +39,11 @@ from ingest.logging_utils import install_log_safety
 from ingest.activities import ingest as activities_ingest
 from ingest.agent_compliance import ingest as agent_compliance_ingest
 from ingest.agent_compliance import review_digest
-from ingest.source_observations import is_identity_source, run_source_observations
+from ingest.source_observations import (
+    SourceObservationFailure,
+    is_identity_source,
+    run_source_observations,
+)
 from ingest import operator_job_queue, source_run_queue
 from ingest.inventory import software as software_ingest
 from ingest.inventory import queue as software_queue
@@ -122,6 +126,7 @@ def run_patching_once() -> bool:
             with run_log("patch_cycle"):
                 log.info("Patch ingest run starting")
                 snapshot_at = datetime.now(timezone.utc)
+                failures: list[tuple[str, Exception]] = []
                 with NinjaClient(
                     base_url=settings.NINJA_BASE_URL,
                     token_url=settings.NINJA_TOKEN_URL,
@@ -129,22 +134,35 @@ def run_patching_once() -> bool:
                     client_secret=settings.NINJA_CLIENT_SECRET.get_secret_value(),
                     scope=settings.NINJA_SCOPE,
                 ) as client:
-                    _safe("organizations",  organizations.run, client)
-                    _safe("locations",      locations.run, client)
-                    _safe("policies",       policies.run, client)
-                    _safe("patching_enabled_policies", sync_patching_enabled_policies)
-                    _safe("devices",        devices.run, client, snapshot_at)
-                    _safe("device_health",  device_health.run, client, snapshot_at)
-                    _safe("custom_fields",  custom_fields.run, client, snapshot_at)
+                    for failure in (
+                        _safe("organizations", organizations.run, client),
+                        _safe("locations", locations.run, client),
+                        _safe("policies", policies.run, client),
+                        _safe("patching_enabled_policies", sync_patching_enabled_policies),
+                        _safe("devices", devices.run, client, snapshot_at),
+                        _safe("device_health", device_health.run, client, snapshot_at),
+                        _safe("custom_fields", custom_fields.run, client, snapshot_at),
+                    ):
+                        if failure:
+                            failures.append(failure)
                     # Patching-scope matview reads ninja_core.custom_field_values +
                     # ninja_core.policies + ops.devices; must refresh AFTER
                     # custom_fields ingest lands. Track O batch O4.
-                    _safe("patching_scope_refresh", devices.refresh_patching_scope_current)
-                    _safe("patches",        patches_ingest.run, client, snapshot_at)
-                    _safe("activities",     activities_ingest.run, client)
-                    _safe("troubleshooting_signal", refresh_device_troubleshooting_signal)
-                refresh_after_collection("Ninja patch collection")
-                run_windows_servicing_once()
+                    for failure in (
+                        _safe("patching_scope_refresh", devices.refresh_patching_scope_current),
+                        _safe("patches", patches_ingest.run, client, snapshot_at),
+                        _safe("activities", activities_ingest.run, client),
+                        _safe("troubleshooting_signal", refresh_device_troubleshooting_signal),
+                    ):
+                        if failure:
+                            failures.append(failure)
+                for failure in (
+                    _safe("derived_refresh", refresh_after_collection, "Ninja patch collection"),
+                    _safe("windows_servicing", run_windows_servicing_once),
+                ):
+                    if failure:
+                        failures.append(failure)
+                _raise_step_failures("Patch collection", failures)
                 log.info("Patch ingest run complete")
             return True
         finally:
@@ -153,16 +171,20 @@ def run_patching_once() -> bool:
 
 def run_identity_resolver_once(*, refresh_current: bool = True) -> None:
     """Drain unresolved observations and optionally refresh presence state."""
+    failures: list[tuple[str, Exception]] = []
     try:
         attached = _drain_client_resolution()
         log.info("Client resolver complete: attached=%d", attached)
-    except Exception:
+    except Exception as exc:
         log.exception("Client resolver failed")
+        failures.append(("client resolver", exc))
     try:
         resolved = _drain_resolution(batch_size=500, refresh_current=refresh_current)
         log.info("Identity resolver complete: resolved=%d", resolved)
-    except Exception:
+    except Exception as exc:
         log.exception("Identity resolver failed")
+        failures.append(("identity resolver", exc))
+    _raise_step_failures("Identity resolution", failures)
 
 
 def run_ninja_observations_once() -> None:
@@ -176,6 +198,7 @@ def run_ninja_observations_once() -> None:
     """
     log.info("Ninja observations run starting")
     snapshot_at = datetime.now(timezone.utc)
+    failures: list[tuple[str, Exception]] = []
     with NinjaClient(
         base_url=settings.NINJA_BASE_URL,
         token_url=settings.NINJA_TOKEN_URL,
@@ -183,11 +206,20 @@ def run_ninja_observations_once() -> None:
         client_secret=settings.NINJA_CLIENT_SECRET.get_secret_value(),
         scope=settings.NINJA_SCOPE,
     ) as client:
-        _safe("organizations", organizations.run, client)
-        _safe("locations",     locations.run, client)
-        _safe("devices",       devices.run, client, snapshot_at)
-    refresh_after_collection("Ninja observations collection")
-    run_windows_servicing_once()
+        for failure in (
+            _safe("organizations", organizations.run, client),
+            _safe("locations", locations.run, client),
+            _safe("devices", devices.run, client, snapshot_at),
+        ):
+            if failure:
+                failures.append(failure)
+    for failure in (
+        _safe("derived_refresh", refresh_after_collection, "Ninja observations collection"),
+        _safe("windows_servicing", run_windows_servicing_once),
+    ):
+        if failure:
+            failures.append(failure)
+    _raise_step_failures("Ninja observations", failures)
     log.info("Ninja observations run complete")
 
 
@@ -205,11 +237,18 @@ def run_agent_observations_once() -> None:
     try:
         sources = [s for s in load_sources() if is_identity_source(s)]
         observed_at = datetime.now(timezone.utc)
-        counts = run_source_observations(sources, observed_at)
+        collection_failure = None
+        try:
+            counts = run_source_observations(sources, observed_at)
+        except SourceObservationFailure as exc:
+            counts = exc.counts
+            collection_failure = exc
         total = sum(counts.values())
         if total:
             run_identity_resolver_once(refresh_current=False)
         refresh_after_collection("agent observations collection")
+        if collection_failure:
+            raise collection_failure
         log.info("Agent observations run complete: %s total=%d", counts, total)
     except Exception:
         log.exception("Agent observations run failed")
@@ -242,10 +281,17 @@ def run_documentation_observations_once() -> None:
             log.info("Documentation observations: no documentation sources enabled")
             return
         observed_at = datetime.now(timezone.utc)
-        counts = run_source_observations(sources, observed_at)
+        collection_failure = None
+        try:
+            counts = run_source_observations(sources, observed_at)
+        except SourceObservationFailure as exc:
+            counts = exc.counts
+            collection_failure = exc
         total = sum(counts.values())
         refresh_after_collection("documentation observations collection")
         _run_cmdb_findings()
+        if collection_failure:
+            raise collection_failure
         log.info("Documentation observations run complete: %s total=%d", counts, total)
     except Exception:
         log.exception("Documentation observations run failed")
@@ -316,29 +362,22 @@ def _run_cmdb_findings() -> None:
 
 def run_agent_compliance_once() -> None:
     if not settings.AGENT_COMPLIANCE_ENABLED:
-        log.info("Agent compliance disabled; skipping run")
-        return
+        raise RuntimeError("Agent compliance is disabled")
     if not _AGENT_COMPLIANCE_LOCK.acquire(blocking=False):
-        log.info("Agent compliance run skipped; another agent compliance job is running")
-        return
+        raise RuntimeError("Another agent compliance operation is already running")
     log.info("Agent compliance run starting")
     try:
         agent_compliance_ingest.run()
     finally:
         _AGENT_COMPLIANCE_LOCK.release()
-    # The follow-up is a separate durable run so failure and waiting state are
-    # visible instead of hidden in a daemon thread.
-    operator_job_queue.request_system_job("resolver", "agent-compliance-followup")
     log.info("Agent compliance run complete")
 
 
 def run_agent_compliance_evaluate_once() -> None:
     if not settings.AGENT_COMPLIANCE_ENABLED:
-        log.info("Agent compliance disabled; skipping evaluate")
-        return
+        raise RuntimeError("Agent compliance is disabled")
     if not _AGENT_COMPLIANCE_LOCK.acquire(blocking=False):
-        log.info("Agent compliance evaluate skipped; another agent compliance job is running")
-        return
+        raise RuntimeError("Another agent compliance operation is already running")
     log.info("Agent compliance evaluate starting")
     try:
         agent_compliance_ingest.evaluate(send_alerts=True)
@@ -420,21 +459,17 @@ def run_platform_evaluate_once() -> None:
 
 def run_windows_servicing_once() -> None:
     """Refresh Windows servicing state after device or corpus evidence changes."""
-    try:
-        from ingest.intel.windows_servicing import project_and_evaluate, rollout_summary
+    from ingest.intel.windows_servicing import project_and_evaluate, rollout_summary
 
-        affected = project_and_evaluate(tenant_id=1)
-        summary = rollout_summary(tenant_id=1)
-        if summary["invalid_rows"]:
-            log.error("Windows servicing lifecycle validation failed: %s", summary)
-        else:
-            log.info(
-                "Windows servicing lifecycle complete: findings_affected=%d states=%s",
-                affected,
-                summary["states"],
-            )
-    except Exception:
-        log.exception("Windows servicing lifecycle projection failed")
+    affected = project_and_evaluate(tenant_id=1)
+    summary = rollout_summary(tenant_id=1)
+    if summary["invalid_rows"]:
+        raise RuntimeError("Windows servicing lifecycle validation failed")
+    log.info(
+        "Windows servicing lifecycle complete: findings_affected=%d states=%s",
+        affected,
+        summary["states"],
+    )
 
 
 def run_intel_nvd_once() -> None:
@@ -519,26 +554,26 @@ def run_intel_abusech_once() -> None:
 
 
 def run_intel_endoflife_once() -> None:
-    try:
-        from ingest.intel import endoflife
-        rows = endoflife.run_once()
-        log.info("Intel end-of-life complete: rows=%d", rows)
-    except Exception:
-        log.exception("Intel end-of-life failed")
+    from ingest.intel import endoflife, eol_match
+
+    failures: list[tuple[str, Exception]] = []
+    failure = _safe("end-of-life fetch", endoflife.run_once)
+    if failure:
+        failures.append(failure)
     # Projection follows the fetch in the same job: a refreshed corpus that
     # never reaches catalog.software_versions.eol_date changes nothing an
     # operator can see. Runs even if the fetch failed, so a corpus already on
     # disk still projects.
-    try:
-        from ingest.intel import eol_match
-        rows = eol_match.run_once()
-        log.info("Intel end-of-life projection complete: rows=%d", rows)
-    except Exception:
-        log.exception("Intel end-of-life projection failed")
+    failure = _safe("end-of-life projection", eol_match.run_once)
+    if failure:
+        failures.append(failure)
     # Windows servicing state is another projection of this same corpus.  Run
     # it even after a fetch failure so an already-retained corpus still reaches
     # device findings, matching the software EOL projector above.
-    run_windows_servicing_once()
+    failure = _safe("windows servicing", run_windows_servicing_once)
+    if failure:
+        failures.append(failure)
+    _raise_step_failures("End-of-life intelligence", failures)
 
 
 def run_notifications_dispatch_once() -> None:
@@ -714,11 +749,9 @@ def run_parity_check_once() -> None:
 
 def run_review_digest_once() -> None:
     if not settings.AGENT_COMPLIANCE_ENABLED:
-        log.info("Agent compliance disabled; skipping review digest")
-        return
+        raise RuntimeError("Agent compliance is disabled")
     if not settings.AGENT_COMPLIANCE_REVIEW_DIGEST_ENABLED:
-        log.info("Review digest disabled; skipping")
-        return
+        raise RuntimeError("Agent compliance review digest is disabled")
     log.info("Review digest starting")
     with run_log("agent_compliance.review_digest") as stats:
         sent = review_digest.send_review_digest(datetime.now(timezone.utc))
@@ -735,22 +768,27 @@ def run_observation_history_prune_once() -> None:
     """
     days = int(getattr(settings, "OBSERVATION_HISTORY_RETENTION_DAYS", 90))
     log.info("Observation history retention starting: keep %d days", days)
-    try:
-        with run_log("retention.observation_history") as stats:
-            generic, software = retention_observations.purge_all(days=days)
-            claims = retention_observations.purge_claim_history(days=days)
-            stats["generic_deleted"] = generic
-            stats["software_deleted"] = software
-            stats["attribute_claims_deleted"] = claims
-    except Exception:
-        log.exception("Observation history retention failed")
+    with run_log("retention.observation_history") as stats:
+        generic, software = retention_observations.purge_all(days=days)
+        claims = retention_observations.purge_claim_history(days=days)
+        stats["generic_deleted"] = generic
+        stats["software_deleted"] = software
+        stats["attribute_claims_deleted"] = claims
 
 
-def _safe(name: str, func, *args) -> None:
+def _safe(name: str, func, *args) -> tuple[str, Exception] | None:
     try:
         func(*args)
-    except Exception:
+    except Exception as exc:
         log.exception("%s ingest failed; continuing with next module", name)
+        return name, exc
+    return None
+
+
+def _raise_step_failures(context: str, failures: list[tuple[str, Exception]]) -> None:
+    if failures:
+        names = ", ".join(name for name, _ in failures)
+        raise RuntimeError(f"{context} had {len(failures)} failed required step(s): {names}")
 
 
 # ── Metabase auto-bootstrap ─────────────────────────────────────────

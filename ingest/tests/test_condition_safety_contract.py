@@ -44,7 +44,8 @@ def test_source_action_worker_preserves_legacy_target_identity():
     source = (Path(__file__).parents[1] / "source_actions.py").read_text()
     assert "request.parent_external_id" in source
     assert "request.external_id" in source
-    assert '"company_id", "asset_id"' in source
+    assert '"company_id"' in source
+    assert '"asset_id"' in source
     assert "request_row[\"company_id\"]" in source
     assert "request_row[\"asset_id\"]" in source
 

@@ -45,6 +45,7 @@ def dispatch(tenant_id: int = _TENANT_ID) -> int:
 
     now = datetime.now(timezone.utc)
     sent = 0
+    failed = 0
 
     with db.pool.connection() as conn, conn.cursor(row_factory=dict_row) as cur:
         cur.execute(f"SET LOCAL operations.tenant_id = {tenant_id}")
@@ -88,8 +89,14 @@ def dispatch(tenant_id: int = _TENANT_ID) -> int:
         if status == "sent":
             _upsert_state(fingerprint, rule["id"], now, rule["cooldown_hours"])
             sent += 1
+        elif status == "failed":
+            failed += 1
 
     log.info("notifications: sent %d", sent)
+    if failed:
+        raise RuntimeError(
+            f"{failed} notification delivery attempt(s) failed; retained events require review"
+        )
     return sent
 
 

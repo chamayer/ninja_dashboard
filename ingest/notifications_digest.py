@@ -147,9 +147,16 @@ def send_digest(tenant_id: int = _TENANT_ID) -> int:
     }
 
     fired = 0
+    failed = 0
     for route in routes:
         status, _code, _preview = _send(route, payload)
         log.info("digest: route %s (%s) → %s", route["id"], route["channel"], status)
         if status == "sent":
             fired += 1
+        elif status == "failed":
+            failed += 1
+    if failed:
+        raise RuntimeError(
+            f"{failed} digest delivery attempt(s) failed; delivery state requires review"
+        )
     return fired

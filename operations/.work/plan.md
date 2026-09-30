@@ -1258,3 +1258,16 @@ execution remains unavailable while the stack is inactive. Next action: audit
 every executable handler for truthful failure/result behavior, then close
 worker-shutdown and Admin Health parity gaps found by the final requirements
 review.
+
+Handler-truth checkpoint (2026-09-29): required patch and Ninja collection
+substeps now continue independently but fail the owning Job after all safe
+steps finish. Identity and source collectors retain partial outcomes while
+propagating aggregate failure after required projections. Retention and
+Windows/end-of-life projections no longer suppress failure, and failed
+notification or digest deliveries fail the Job after retaining delivery
+evidence. The Agent compliance resolver follow-up is now a declared atomic
+dependency rather than a later request. Focused source-failure, condition
+safety, registry, operator, inventory, and worker-topology tests pass, with
+Python compilation, undefined-name lint, and diff checks. Next action: enforce
+the accepted workflow-root rule so a requested root remains Waiting until all
+required descendants complete, then audit worker shutdown and health parity.
