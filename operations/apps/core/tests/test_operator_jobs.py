@@ -11,7 +11,7 @@ def test_operator_jobs_use_a_durable_queue_and_separate_stall_watchdog():
     workflow_migration = Path("apps/core/migrations/0180_operator_job_workflow_controls.py").read_text(encoding="utf-8")
     software_lane_migration = Path("apps/core/migrations/0182_software_job_lane_and_operations_controls.py").read_text(encoding="utf-8")
 
-    assert "operations.jobs_claim_next_v3" in queue
+    assert "operations.jobs_claim_next_v4" in queue
     assert "operations.jobs_finish_v1" in queue
     assert "operations.jobs_record_v1_progress" in queue
     assert "class V1JobProgress" in queue

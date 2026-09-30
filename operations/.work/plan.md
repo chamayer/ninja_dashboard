@@ -1438,3 +1438,23 @@ and external Metabase execution remain unavailable while the local stack is
 inactive. Next action: commit/push this audit correction, then continue the
 full requirement audit for any remaining ungoverned background paths or
 cross-surface gaps.
+
+Timeout-contract correction in progress (2026-09-30): the review found that
+the durable claim path still assigned one hard-coded 90-minute deadline and
+definition snapshots did not describe timeout, progress, result, or
+permission contracts. Add those immutable registry fields to every snapshot
+and introduce a fenced v4 claim API that derives the deadline from the
+claimed revision. Existing v1 snapshot rows without the new field retain the
+previous 90-minute behavior only as backward-compatible historical input.
+
+Timeout-contract correction checkpoint (2026-09-30): immutable definition
+metadata now contains timeout, retry, stage-progress, result, and permission
+contracts. Migration 0230 adds a tenant/fence-preserving v4 claim API, which
+reads the claimed immutable snapshot and records its timeout in the run. The
+v3 90-minute fallback is reachable only for historical v1 snapshots that
+predate this contract; every newly registered revision carries its own value.
+Focused inventory/registry/Jobs worker/UI/migration tests (26), Django
+checks, Python compilation, undefined-name lint, and `git diff --check` pass.
+PostgreSQL execution remains unavailable while the local stack is inactive.
+Next action: commit/push this contract correction, then continue the full
+requirement audit.

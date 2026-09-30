@@ -183,6 +183,10 @@ def test_registry_exposes_the_approved_conservative_resource_policy():
     assert definition("software-classify").supersession_rank == 3
     assert definition("software-classify").supersession_family == "software-classifier"
     assert all(definition(key).resource_keys for key in definition_keys())
+    assert all(definition(key).timeout_minutes == 90 for key in definition_keys())
+    assert all(definition(key).progress_contract == "stage" for key in definition_keys())
+    assert all(definition(key).result_contract == "rows_or_outcome" for key in definition_keys())
+    assert all(definition(key).permission in {"administrator", "system"} for key in definition_keys())
 
 
 def test_registry_snapshot_is_deterministic_and_credential_free():
@@ -195,3 +199,6 @@ def test_registry_snapshot_is_deterministic_and_credential_free():
     ).snapshot_digest()
     assert len(definition("software-classify").snapshot_digest()) == 64
     assert "token" not in json.dumps(snapshot).lower()
+    assert snapshot["timeout_minutes"] == 90
+    assert snapshot["progress_contract"] == "stage"
+    assert snapshot["result_contract"] == "rows_or_outcome"
