@@ -8559,7 +8559,11 @@ def _dispatch_job(entry: dict) -> tuple[bool, str]:
 
 
 def _enqueue_operator_job(
-    job_key: str, user_id: int, *, batch_id: uuid.UUID | None = None
+    job_key: str,
+    user_id: int,
+    *,
+    batch_id: uuid.UUID | None = None,
+    retry_of: uuid.UUID | None = None,
 ) -> tuple[uuid.UUID, bool]:
     """Create a v1 operator request through the governed Jobs API."""
     job = definition(job_key)
@@ -8573,6 +8577,17 @@ def _enqueue_operator_job(
     )
     with transaction.atomic(), connection.cursor() as cur:
         cur.execute("SET LOCAL operations.tenant_id = 1")
+        if retry_of is not None:
+            cur.execute(
+                """SELECT id FROM operations.operator_job_runs
+                     WHERE tenant_id = 1 AND job_key = %s
+                       AND status IN ('queued', 'running')
+                     ORDER BY requested_at DESC, id DESC LIMIT 1""",
+                (job.key,),
+            )
+            active = cur.fetchone()
+            if active is not None:
+                return active[0], False
         cur.execute(
             f"SELECT {request_api}(%s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s::jsonb, %s)",
             (
@@ -8589,6 +8604,11 @@ def _enqueue_operator_job(
             ),
         )
         row = cur.fetchone()
+        if row is not None and retry_of is not None:
+            cur.execute(
+                "SELECT operations.jobs_link_retry_v1(%s, %s, %s)",
+                (1, row[0], retry_of),
+            )
     if row is None:
         raise RuntimeError("Jobs request API did not return a run")
     return row[0], True
@@ -8792,7 +8812,9 @@ def admin_job_retry(request: HttpRequest, run_id: uuid.UUID) -> HttpResponse:
     if row is None:
         messages.info(request, "Only failed or stalled runs can be retried.")
         return redirect(request.META.get("HTTP_REFERER") or reverse("admin_job_status"))
-    new_id, created = _enqueue_operator_job(row[0], request.user.id)
+    new_id, created = _enqueue_operator_job(
+        row[0], request.user.id, retry_of=run_id
+    )
     if created:
         messages.success(request, "Retry queued. Follow the new run in Job status.")
     else:
