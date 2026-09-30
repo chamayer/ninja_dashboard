@@ -1362,3 +1362,14 @@ compilation, undefined-name lint, and `git diff --check`. PostgreSQL-backed
 request checks remain unavailable while the local stack is inactive. Next
 action: commit/push this slice, then add durable terminal schedule outcomes
 and continue the requirement audit.
+
+Schedule terminal-outcome checkpoint (2026-09-30): migration 0227 makes
+`job_schedules.last_outcome` authoritative for the terminal result of its
+current `last_run_id`. An `AFTER UPDATE OF status` security-definer trigger
+handles every completion path and refuses to overwrite a schedule that has
+advanced to a newer request; an additive backfill corrects prior terminal
+schedule rows. Focused migration/Jobs tests (7), Django system checks, Python
+compilation, undefined-name lint, and `git diff --check` pass. PostgreSQL
+execution remains unavailable while the local stack is inactive. Next action:
+commit/push this migration, then audit and implement remaining actionable
+Admin Health findings and cross-surface Job links.
