@@ -1216,3 +1216,13 @@ temporary version-0 drain needed for pre-cutover rows. Static inventory,
 focused Jobs tests, and compilation pass. Next action: define the controlled
 version-0 queue cutover and move ordinary maintenance mutations into explicit
 Jobs, leaving only claim containment and service liveness outside normal lanes.
+
+Maintenance conversion checkpoint (2026-09-29): source-demand lease recovery,
+stale diagnostic-run recovery, and platform-health evaluation are now three
+registered, durably scheduled service-lane Jobs. Their former direct scheduler
+callbacks and startup run-log mutation are removed. Claim timeout containment,
+legacy-v0 interruption recovery, HTTP liveness, and infrastructure bootstrap
+remain direct control-plane duties by design. Registry/inventory tests,
+compilation, and diff checks pass. Next action: quiesce or preserve any queued
+version-0 runs through an explicit cutover migration, then remove the legacy
+in-process v0 worker and recovery callbacks.

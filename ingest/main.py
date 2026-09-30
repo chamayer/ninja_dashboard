@@ -300,20 +300,6 @@ def documentation_observations_overdue(sources: list, schedule_hours: int) -> bo
     return False
 
 
-def _run_platform_findings() -> None:
-    """Evaluate platform-health findings.
-
-    Isolated and non-fatal for the same reason as `_run_cmdb_findings`:
-    findings are derived reporting and must never take down a cycle.
-    """
-    try:
-        from ingest import platform_findings
-
-        log.info("platform findings: %s", platform_findings.evaluate(dry_run=False))
-    except Exception:
-        log.exception("platform findings evaluation failed — ingest unaffected")
-
-
 def _run_cmdb_findings() -> None:
     """Evaluate CMDB findings after a collection.
 
@@ -2359,10 +2345,6 @@ def main() -> None:
     operator_job_queue.register_definition_snapshots()
     operator_job_queue.reconcile_schedule_catalog()
 
-    # Any run_log row still 'running' belongs to a process that no longer
-    # exists — nothing survives a restart. Left alone these accumulate
-    # forever and make "is this domain healthy?" unanswerable.
-    runlog.reap_orphaned()
     # A durable Jobs attempt cannot survive this process. Mark it immediately
     # so operators can retry instead of waiting for its lease to expire.
     operator_job_queue.recover_interrupted()
@@ -2376,12 +2358,6 @@ def main() -> None:
         minutes=1,
         id="jobs_durable_schedule_producer",
         max_instances=1,
-    )
-    scheduler.add_job(
-        source_run_queue.recover_stale,
-        "interval",
-        minutes=15,
-        id="source_run_queue_stale_recovery",
     )
     # Durable Jobs have bounded lanes. A slow evaluator must not block source
     # collection, Intel refresh, or service work; the queue module applies the
@@ -2408,24 +2384,6 @@ def main() -> None:
         "interval",
         minutes=1,
         id="jobs_v1_timeout_containment",
-        max_instances=1,
-    )
-    # Catches hangs the startup reaper cannot: process alive, work stuck.
-    scheduler.add_job(
-        runlog.reap_stale,
-        "interval",
-        minutes=30,
-        id="run_log_stale_reaper",
-        max_instances=1,
-    )
-    # Ingest failures and queue-threshold breaches were being recorded in
-    # run_log / queue_registry and read by nobody. This raises them as
-    # admin-class findings on the Operations health page.
-    scheduler.add_job(
-        _run_platform_findings,
-        "interval",
-        minutes=30,
-        id="platform_health_findings",
         max_instances=1,
     )
     scheduler.start()

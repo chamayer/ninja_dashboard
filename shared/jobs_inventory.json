@@ -37,17 +37,6 @@
       {
         "file": "ingest/main.py",
         "owner": "main",
-        "id": "'source_run_queue_stale_recovery'",
-        "callable": "source_run_queue.recover_stale",
-        "trigger": "'interval'",
-        "options": {
-          "minutes": "15"
-        },
-        "guards": []
-      },
-      {
-        "file": "ingest/main.py",
-        "owner": "main",
         "id": "f'operator_job_queue_{lane}'",
         "callable": "operator_job_queue.process_next",
         "trigger": "'interval'",
@@ -80,30 +69,6 @@
         "trigger": "'interval'",
         "options": {
           "minutes": "1",
-          "max_instances": "1"
-        },
-        "guards": []
-      },
-      {
-        "file": "ingest/main.py",
-        "owner": "main",
-        "id": "'run_log_stale_reaper'",
-        "callable": "runlog.reap_stale",
-        "trigger": "'interval'",
-        "options": {
-          "minutes": "30",
-          "max_instances": "1"
-        },
-        "guards": []
-      },
-      {
-        "file": "ingest/main.py",
-        "owner": "main",
-        "id": "'platform_health_findings'",
-        "callable": "_run_platform_findings",
-        "trigger": "'interval'",
-        "options": {
-          "minutes": "30",
           "max_instances": "1"
         },
         "guards": []
@@ -761,6 +726,42 @@
         "status_source": "run_log",
         "description": "Process one queued on-demand source refresh with its retained source record.",
         "run_all": false
+      },
+      {
+        "file": "operations/apps/core/views.py",
+        "owner": "",
+        "id": "source-demand-recovery",
+        "name": "Source demand recovery",
+        "category": "maintenance",
+        "endpoint": "",
+        "status_key": "source_run_queue",
+        "status_source": "run_log",
+        "description": "Mark source-demand work whose execution lease expired for operator review.",
+        "run_all": false
+      },
+      {
+        "file": "operations/apps/core/views.py",
+        "owner": "",
+        "id": "run-log-recovery",
+        "name": "Diagnostic run recovery",
+        "category": "maintenance",
+        "endpoint": "",
+        "status_key": "run_log",
+        "status_source": "run_log",
+        "description": "Close stale diagnostic run records that no active process can complete.",
+        "run_all": false
+      },
+      {
+        "file": "operations/apps/core/views.py",
+        "owner": "",
+        "id": "platform-health-evaluate",
+        "name": "Platform health evaluator",
+        "category": "maintenance",
+        "endpoint": "",
+        "status_key": "platform_findings",
+        "status_source": "run_log",
+        "description": "Evaluate source failures and queue thresholds for Admin Health.",
+        "run_all": false
       }
     ],
     "handlers": [
@@ -865,6 +866,24 @@
         "owner": "_execute",
         "key": "source-demand",
         "expression": "('Processing queued source demand', lambda: source_run_queue.process_next(progress.job_id))"
+      },
+      {
+        "file": "ingest/operator_job_queue.py",
+        "owner": "_execute",
+        "key": "source-demand-recovery",
+        "expression": "('Recovering expired source demand', source_run_queue.recover_stale)"
+      },
+      {
+        "file": "ingest/operator_job_queue.py",
+        "owner": "_execute",
+        "key": "run-log-recovery",
+        "expression": "('Recovering stale diagnostics', runlog.reap_stale)"
+      },
+      {
+        "file": "ingest/operator_job_queue.py",
+        "owner": "_execute",
+        "key": "platform-health-evaluate",
+        "expression": "('Evaluating platform health', lambda: sum(platform_findings.evaluate(dry_run=False).values()))"
       },
       {
         "file": "ingest/operator_job_queue.py",
@@ -1004,12 +1023,6 @@
         "file": "ingest/main.py",
         "owner": "main",
         "expression": "operator_job_queue.reconcile_schedule_catalog()",
-        "guards": []
-      },
-      {
-        "file": "ingest/main.py",
-        "owner": "main",
-        "expression": "runlog.reap_orphaned()",
         "guards": []
       },
       {

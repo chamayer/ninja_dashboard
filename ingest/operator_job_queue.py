@@ -58,6 +58,9 @@ EXECUTABLE_JOB_KEYS = frozenset(
         "source-actions",
         "source-demand",
         "agent-compliance-review-digest",
+        "source-demand-recovery",
+        "run-log-recovery",
+        "platform-health-evaluate",
     }
 )
 validate_registry(executable_keys=EXECUTABLE_JOB_KEYS)
@@ -644,6 +647,7 @@ def _execute(job_key: str, progress: JobProgress) -> int | None:
     from ingest.software_findings import incremental_pending_count
     from ingest import source_actions
     from ingest import source_run_queue
+    from ingest import platform_findings, runlog
 
     jobs = {
         "patch-classify": ("Classifying patch state", lambda: main.patch_classify(tenant_id=1)),
@@ -701,6 +705,15 @@ def _execute(job_key: str, progress: JobProgress) -> int | None:
         "source-demand": (
             "Processing queued source demand",
             lambda: source_run_queue.process_next(progress.job_id),
+        ),
+        "source-demand-recovery": (
+            "Recovering expired source demand",
+            source_run_queue.recover_stale,
+        ),
+        "run-log-recovery": ("Recovering stale diagnostics", runlog.reap_stale),
+        "platform-health-evaluate": (
+            "Evaluating platform health",
+            lambda: sum(platform_findings.evaluate(dry_run=False).values()),
         ),
         "notifications-dispatch": (
             "Sending notifications",
