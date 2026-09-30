@@ -93,8 +93,12 @@ interactive production operation.
 
 ## Status
 
-**Implementation complete; GitOps deployment and live verification remain
-external.** The v1 ledger, durable
+**Corrective implementation in progress.** Live validation on 2026-09-30
+found that an older stalled v1 run retained three `held` resource claims, and
+the claim query stopped at a resource-blocked head-of-line row. This prevented
+the worker from draining the durable queue and caused schedules whose retained
+queued rows used an older immutable definition digest to be repeatedly
+deferred. The v1 ledger, durable
 schedules, resource-aware isolated workers, domain queue ownership, operator
 surfaces, v0 cutover, and registered maintenance work are implemented. The
 current slice activates completion dependencies and declared workflow graphs;
@@ -1526,3 +1530,18 @@ registry/inventory/Jobs UI tests (24), Django checks, Python compilation,
 undefined-name lint, and `git diff --check` pass. Next action: commit/push
 the correction and use read-only SSH health checks to verify the automatic
 GitOps restart; do not call Portainer.
+
+Live corrective checkpoint (2026-09-30): production has all Jobs migrations
+through 0231 and healthy scheduler/worker heartbeats, but 26 queued runs, no
+running run, and three `held` claims belonging to a stalled
+`agent-observations` run. The existing claim SQL returns after its first
+resource-blocked candidate instead of considering later compatible work.
+Schedule admission correctly refuses incompatible immutable definition
+revisions, but it currently raises and retries the same due tick without a
+durable deferred outcome. Implement migration 0232 to reconcile terminal
+held claims into explicit containment, scan queued candidates fairly past
+blocked resources, persist a schedule deferral event, and expose a
+confirmation-gated administrator recovery for contained claims. Do not
+automatically release uncertain claims or call Portainer. Next action: add
+the migration, worker/API/UI integration, focused tests, then commit/push and
+verify automatic GitOps deployment before any explicit recovery action.

@@ -9012,6 +9012,7 @@ def _operator_job_runs(
         prerequisites_by_job: dict[uuid.UUID, list[dict]] = {job_id: [] for job_id in job_ids}
         dependents_by_job: dict[uuid.UUID, list[dict]] = {job_id: [] for job_id in job_ids}
         domain_attempts_by_job: dict[uuid.UUID, list[dict]] = {job_id: [] for job_id in job_ids}
+        contained_claims_by_job: dict[uuid.UUID, int] = {}
         if job_ids:
             cur.execute(
                 """SELECT job_id, event_at, event_type, stage, detail
@@ -9087,6 +9088,14 @@ def _operator_job_runs(
                     "kind": attempt[1], "record_id": attempt[2],
                     "attempt": attempt[3], "linked_at": attempt[4],
                 })
+            cur.execute(
+                """SELECT run_id, count(*)
+                     FROM operations.job_resource_claims
+                    WHERE tenant_id = 1 AND run_id = ANY(%s) AND state = 'contained'
+                    GROUP BY run_id""",
+                (job_ids,),
+            )
+            contained_claims_by_job = {run_id: count for run_id, count in cur.fetchall()}
     labels = {entry["id"]: entry["name"] for entry in _JOB_CATALOG}
     status_labels = {
         "queued": "Queued", "running": "Running", "completed": "Completed",
@@ -9148,6 +9157,7 @@ def _operator_job_runs(
             "prerequisites": prerequisites_by_job.get(row[0], []),
             "dependents": dependents_by_job.get(row[0], []),
             "domain_attempts": domain_attempts_by_job.get(row[0], []),
+            "contained_claim_count": contained_claims_by_job.get(row[0], 0),
         }
         for row in rows
     ]
@@ -9354,6 +9364,30 @@ def admin_job_retry(request: HttpRequest, run_id: uuid.UUID) -> HttpResponse:
     else:
         messages.info(request, "An equivalent run is already queued or running.")
     return redirect(reverse("admin_job_status") + f"?run={new_id}")
+
+
+@login_required
+@require_admin
+@require_POST
+def admin_job_release_contained_claim(request: HttpRequest, run_id: uuid.UUID) -> HttpResponse:
+    """Release only claims an administrator has explicitly verified as safe."""
+    if request.POST.get("confirm_release") != "release":
+        messages.error(request, "Confirm that the interrupted process has stopped before releasing its claim.")
+        return redirect(request.META.get("HTTP_REFERER") or reverse("admin_job_status"))
+    with transaction.atomic(), connection.cursor() as cur:
+        cur.execute("SET LOCAL operations.tenant_id = 1")
+        cur.execute(
+            "SELECT operations.jobs_release_contained_claim_v1(%s, %s, %s, %s)",
+            (
+                1,
+                run_id,
+                request.user.id,
+                "Administrator verified the interrupted process has stopped and released contained claims.",
+            ),
+        )
+        released = int(cur.fetchone()[0])
+    messages.success(request, f"Released {released} contained resource claim(s) after administrator review.")
+    return redirect(request.META.get("HTTP_REFERER") or reverse("admin_job_status"))
 
 
 @login_required

@@ -445,7 +445,7 @@ def _claim_next_v1(lane: str, worker_incarnation: uuid.UUID) -> dict[str, Any] |
     with db.transaction() as cur:
         cur.execute("SET LOCAL operations.tenant_id = 1")
         cur.execute(
-            "SELECT run_id, claim_token, job_key FROM operations.jobs_claim_next_v4(%s, %s, %s)",
+            "SELECT run_id, claim_token, job_key FROM operations.jobs_claim_next_v5(%s, %s, %s)",
             (1, lane, worker_incarnation),
         )
         row = cur.fetchone()

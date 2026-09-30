@@ -11,7 +11,7 @@ def test_operator_jobs_use_a_durable_queue_and_separate_stall_watchdog():
     workflow_migration = Path("apps/core/migrations/0180_operator_job_workflow_controls.py").read_text(encoding="utf-8")
     software_lane_migration = Path("apps/core/migrations/0182_software_job_lane_and_operations_controls.py").read_text(encoding="utf-8")
 
-    assert "operations.jobs_claim_next_v4" in queue
+    assert "operations.jobs_claim_next_v5" in queue
     assert "operations.jobs_finish_v1" in queue
     assert "operations.jobs_record_v1_progress" in queue
     assert "class V1JobProgress" in queue
@@ -66,6 +66,10 @@ def test_jobs_status_uses_operator_language_and_safe_controls():
     assert "admin_job_history_retry" in urls
     assert "admin_job_status" in urls
     assert "admin_job_retry" in urls
+    assert "admin_job_release_contained_claim" in urls
+    assert "def admin_job_release_contained_claim" in views
+    assert "jobs_release_contained_claim_v1" in views
+    assert "Release" in template
     assert "queued_job_status" in views
     assert "operator_job_runs" in views
     assert "capability_state" in views
