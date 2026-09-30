@@ -57,6 +57,24 @@ def test_checked_scheduler_source_matches_registry_schedule_keys():
     assert "source-demand" in scheduled_definition_keys()
 
 
+def test_scheduler_parity_constant_exactly_matches_registered_schedules():
+    main = (ROOT / "ingest" / "main.py").read_text(encoding="utf-8")
+    tree = ast.parse(main)
+    assigned = next(
+        node.value
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Assign)
+        and any(
+            isinstance(target, ast.Name) and target.id == "SCHEDULED_OPERATOR_JOB_KEYS"
+            for target in node.targets
+        )
+    )
+
+    assert isinstance(assigned, ast.Call)
+    assert isinstance(assigned.args[0], ast.Set)
+    assert {ast.literal_eval(element) for element in assigned.args[0].elts} == scheduled_definition_keys()
+
+
 def test_every_declared_automatic_schedule_has_one_cadence_contract():
     schedules = schedule_definitions()
 

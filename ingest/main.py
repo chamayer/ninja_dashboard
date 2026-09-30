@@ -103,6 +103,8 @@ SCHEDULED_OPERATOR_JOB_KEYS = frozenset(
         "intel-cpe-dict", "intel-kev", "intel-epss", "intel-matcher",
         "intel-winget", "intel-chocolatey", "intel-otx", "intel-abusech",
         "intel-endoflife", "intel-capability", "intel-category", "intel-lolrmm",
+        "source-actions", "source-demand", "source-demand-recovery",
+        "run-log-recovery", "platform-health-evaluate",
     }
 )
 

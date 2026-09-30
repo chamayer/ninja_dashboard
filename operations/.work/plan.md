@@ -1511,3 +1511,18 @@ The local PostgreSQL stack is inactive, so migration execution, runtime
 admission/claim behavior, and automatic GitOps deployment cannot be directly
 verified here. Per user direction, do not call Portainer; origin pushes are
 the deployment handoff. No legacy data/history is deleted or fabricated.
+
+Production regression correction in progress (2026-09-30): read-only SSH
+health validation after the automatic deployment found `operations-ingest`
+restart-looping because `SCHEDULED_OPERATOR_JOB_KEYS` omitted five registered
+durable maintenance schedules. The fail-closed registry check correctly
+prevented a partial scheduler from running, but its test inspected obsolete
+direct scheduler declarations rather than the parity constant. Restore exact
+membership and test the parsed constant against `scheduled_definition_keys()`.
+
+Production regression correction checkpoint (2026-09-30): restored the five
+omitted schedule keys and added exact parsed-constant parity coverage. Focused
+registry/inventory/Jobs UI tests (24), Django checks, Python compilation,
+undefined-name lint, and `git diff --check` pass. Next action: commit/push
+the correction and use read-only SSH health checks to verify the automatic
+GitOps restart; do not call Portainer.
