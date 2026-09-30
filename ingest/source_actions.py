@@ -24,13 +24,13 @@ _ACTION_ARCHIVE_HUDU = "archive_hudu_asset"
 _LEASE_MINUTES = 5
 
 
-def process_pending(*, limit: int = 10) -> dict[str, int]:
+def process_pending(*, job_run_id: object, limit: int = 10) -> dict[str, int]:
     """Process a small leased batch and refresh Hudu evidence after success."""
     recover_stale()
     completed = failed = cancelled = 0
     refresh_source: SourceConfig | None = None
     for _ in range(limit):
-        request_row = _claim_next()
+        request_row = _claim_next(job_run_id)
         if request_row is None:
             break
         status, source = _process_one(request_row)
@@ -43,10 +43,12 @@ def process_pending(*, limit: int = 10) -> dict[str, int]:
             failed += 1
     if refresh_source is not None:
         _refresh_hudu_evidence(refresh_source)
+    if failed:
+        raise RuntimeError(f"{failed} source action request(s) failed; review retained outcomes")
     return {"completed": completed, "failed": failed, "cancelled": cancelled}
 
 
-def _claim_next() -> dict[str, Any] | None:
+def _claim_next(job_run_id: object) -> dict[str, Any] | None:
     with db.transaction() as cur:
         cur.execute("SET LOCAL operations.tenant_id = 1")
         cur.execute(
@@ -62,12 +64,13 @@ def _claim_next() -> dict[str, Any] | None:
             UPDATE {_TABLE} request
                SET status = 'processing', started_at = NOW(),
                    lease_expires_at = NOW() + INTERVAL '{_LEASE_MINUTES} minutes',
-                   attempts = attempts + 1
+                   attempts = attempts + 1, job_run_id = %s
               FROM candidate
              WHERE request.id = candidate.id
             RETURNING request.id, request.finding_id, request.source_instance_id,
                       request.action_key, request.parent_external_id, request.external_id
-            """
+            """,
+            (job_run_id,),
         )
         row = cur.fetchone()
     if row is None:
@@ -236,12 +239,13 @@ def _finish(
     error: str = "",
 ) -> None:
     with db.transaction() as cur:
+        cur.execute("SET LOCAL operations.tenant_id = 1")
         cur.execute(
             f"""
             UPDATE {_TABLE}
                SET status = %s, completed_at = NOW(), lease_expires_at = NULL,
                    outcome = %s, error = %s
-             WHERE id = %s
+             WHERE tenant_id = 1 AND id = %s
             """,
             (status, Json(outcome or {}), error, request_id),
         )
@@ -250,12 +254,13 @@ def _finish(
 def recover_stale() -> int:
     """Fail closed after a lost worker lease; never repeat a source mutation."""
     with db.transaction() as cur:
+        cur.execute("SET LOCAL operations.tenant_id = 1")
         cur.execute(
             f"""
             UPDATE {_TABLE}
                SET status = 'failed', completed_at = NOW(),
                    error = 'worker lease expired; verify the source before requeueing'
-             WHERE status = 'processing' AND lease_expires_at < NOW()
+             WHERE tenant_id = 1 AND status = 'processing' AND lease_expires_at < NOW()
             """
         )
         return cur.rowcount

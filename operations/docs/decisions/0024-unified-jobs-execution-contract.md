@@ -246,6 +246,13 @@ membership so per-item failures are not hidden by a successful drain wrapper.
 One source-action record can have several reviewed attempts: use a link per
 attempt, not a repeatedly overwritten FK that loses earlier executions.
 
+The first governed source-domain conversion retains one immutable demand or
+action row per submitted attempt. The worker attaches that row to its Job run
+in the same transaction that changes the domain row from pending to processing.
+Both links are tenant-composite, and both domain tables enforce tenant RLS. A
+failed mutation fails the owning Job after retaining the domain outcome; it is
+never reported as a successful drain.
+
 A proposed workflow root represents the operator's requested refresh.
 Collection, resolution, projector, and evaluator children have separate
 results and events. The root becomes Completed only after its required

@@ -107,7 +107,8 @@ def _schedule_enabled(job_key: str) -> tuple[bool, str]:
             if job_key == "source-demand"
             else "operations.source_action_requests"
         )
-        with db.pool.connection() as conn, conn.cursor() as cur:
+        with db.transaction() as cur:
+            cur.execute("SET LOCAL operations.tenant_id = 1")
             cur.execute(f"SELECT EXISTS (SELECT 1 FROM {table} WHERE status = 'pending')")
             pending = cur.fetchone()[0]
         label = "source demand" if job_key == "source-demand" else "source actions"
@@ -695,9 +696,12 @@ def _execute(job_key: str, progress: JobProgress) -> int | None:
         ),
         "source-actions": (
             "Processing approved source actions",
-            lambda: sum(source_actions.process_pending().values()),
+            lambda: sum(source_actions.process_pending(job_run_id=progress.job_id).values()),
         ),
-        "source-demand": ("Processing queued source demand", source_run_queue.process_next),
+        "source-demand": (
+            "Processing queued source demand",
+            lambda: source_run_queue.process_next(progress.job_id),
+        ),
         "notifications-dispatch": (
             "Sending notifications",
             lambda: main.notify_dispatch(tenant_id=1),

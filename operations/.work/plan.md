@@ -1175,3 +1175,14 @@ conditional source-domain schedules distinguish waiting for demand from a
 disabled capability. Focused Jobs tests, Python compilation, and diff checks
 pass. Next action: harden and populate the source-demand/source-action Job-run
 links with same-tenant constraints and lifecycle ownership.
+
+Source-domain ownership checkpoint (2026-09-29): migration 0218 corrects the
+preparatory single-column Job references to same-tenant composite references,
+adds the tenant-1 boundary and RLS to the legacy source-demand queue, and adds
+RLS to source actions. Governed workers attach each claimed domain row to the
+exact Job run before execution. Retained domain failures now fail the wrapper
+Job instead of appearing successful. Focused migration/topology tests and
+Python compilation pass; PostgreSQL migration execution remains unavailable
+while the stack is inactive. Next action: inventory and convert the remaining
+direct/background execution paths, beginning with maintenance and bootstrap
+work that still bypasses durable admission.

@@ -9,9 +9,8 @@ df values:
   'ScreenConnect' — SC observations → entity_observations
   'LogMeIn'      — LMI observations → entity_observations
 
-Demand entries fire in their own thread immediately on enqueue.
-Stale processing entries (lease expired, thread died) are marked failed —
-there is no background worker to re-pick them up; operator must resubmit.
+Demand entries are retained until the governed Jobs worker claims them.
+Stale processing entries are marked failed; an operator must resubmit them.
 """
 
 from __future__ import annotations
@@ -67,9 +66,10 @@ def enqueue(source: str, reason: str = "") -> int:
     Deduped: if a pending entry already exists for this source, returns
     the existing id without inserting.
     """
-    with db.pool.connection() as conn, conn.cursor() as cur:
+    with db.transaction() as cur:
+        cur.execute("SET LOCAL operations.tenant_id = 1")
         cur.execute(
-            f"INSERT INTO {_TABLE} (df, reason) VALUES (%s, %s) "
+            f"INSERT INTO {_TABLE} (tenant_id, df, reason) VALUES (1, %s, %s) "
             "ON CONFLICT (df) WHERE status = 'pending' DO NOTHING RETURNING id",
             (source, reason),
         )
@@ -77,7 +77,7 @@ def enqueue(source: str, reason: str = "") -> int:
         if row:
             return int(row[0])
         cur.execute(
-            f"SELECT id FROM {_TABLE} WHERE df = %s AND status = 'pending'",
+            f"SELECT id FROM {_TABLE} WHERE tenant_id = 1 AND df = %s AND status = 'pending'",
             (source,),
         )
         row = cur.fetchone()
@@ -88,12 +88,13 @@ def enqueue(source: str, reason: str = "") -> int:
 
 
 def get_status(entry_id: int) -> dict | None:
-    with db.pool.connection() as conn, conn.cursor() as cur:
+    with db.transaction() as cur:
+        cur.execute("SET LOCAL operations.tenant_id = 1")
         cur.execute(
             f"""
             SELECT id, df, reason, status, attempts, max_attempts,
                    queued_at, started_at, completed_at, rows_seen, error
-            FROM {_TABLE} WHERE id = %s
+            FROM {_TABLE} WHERE tenant_id = 1 AND id = %s
             """,
             (entry_id,),
         )
@@ -113,14 +114,15 @@ def queue_details() -> dict:
         "id", "df", "status", "attempts", "max_attempts",
         "started_at", "completed_at", "rows_seen", "error",
     ]
-    with db.pool.connection() as conn, conn.cursor() as cur:
-        cur.execute(f"SELECT status, COUNT(*) FROM {_TABLE} GROUP BY status")
+    with db.transaction() as cur:
+        cur.execute("SET LOCAL operations.tenant_id = 1")
+        cur.execute(f"SELECT status, COUNT(*) FROM {_TABLE} WHERE tenant_id = 1 GROUP BY status")
         counts = {row[0]: int(row[1]) for row in cur.fetchall()}
 
         cur.execute(
             f"""
             SELECT {', '.join(_cols)} FROM {_TABLE}
-            WHERE status = 'processing' ORDER BY started_at LIMIT 20
+            WHERE tenant_id = 1 AND status = 'processing' ORDER BY started_at LIMIT 20
             """
         )
         active = [dict(zip(_cols, row)) for row in cur.fetchall()]
@@ -128,7 +130,7 @@ def queue_details() -> dict:
         cur.execute(
             f"""
             SELECT {', '.join(_cols)} FROM {_TABLE}
-            WHERE status IN ('done', 'failed')
+            WHERE tenant_id = 1 AND status IN ('done', 'failed')
             ORDER BY completed_at DESC LIMIT 40
             """
         )
@@ -148,7 +150,7 @@ def recover_stale() -> int:
             UPDATE {_TABLE}
             SET status = 'failed', completed_at = NOW(),
                 error = COALESCE(NULLIF(error, '') || ' | ', '') || 'lease expired — resubmit'
-            WHERE status = 'processing'
+            WHERE tenant_id = 1 AND status = 'processing'
               AND started_at < NOW() - INTERVAL '{_LEASE_MINUTES} minutes'
             """
         )
@@ -161,29 +163,32 @@ def recover_stale() -> int:
 # ── Demand worker ────────────────────────────────────────────────────
 
 
-def process_entry(entry_id: int) -> None:
-    """Claim and execute one demand entry. Run in a dedicated thread."""
+def process_entry(entry_id: int, job_run_id: object) -> int:
+    """Claim and execute one demand entry under its durable Job run."""
     # Late imports to avoid circular deps at module load time.
     from ingest.source_observations import is_identity_source, run_source_observations
     from ingest.sources import load_sources
     from ingest.identity.client_resolver import drain_client_resolution
     from ingest.identity.resolver import drain_resolution
 
-    with db.pool.connection() as conn, conn.cursor() as cur:
+    with db.transaction() as cur:
+        cur.execute("SET LOCAL operations.tenant_id = 1")
         cur.execute(
             f"""
             UPDATE {_TABLE}
-            SET status = 'processing', started_at = NOW(), attempts = attempts + 1
-            WHERE id = %s AND status = 'pending'
+            SET status = 'processing', started_at = NOW(), attempts = attempts + 1,
+                job_run_id = %s
+            WHERE tenant_id = 1 AND id = %s AND status = 'pending'
+              AND job_run_id IS NULL
             RETURNING df, attempts, max_attempts
             """,
-            (entry_id,),
+            (job_run_id, entry_id),
         )
         row = cur.fetchone()
 
     if not row:
         log.warning("source_run_queue: entry %d not claimable (already running?)", entry_id)
-        return
+        return 0
 
     df, attempts, max_attempts = row
     log.info("source_run_queue: processing entry=%d source=%s attempt=%d", entry_id, df, attempts)
@@ -230,12 +235,13 @@ def process_entry(entry_id: int) -> None:
         log.exception("source_run_queue: entry %d failed: %s", entry_id, df)
 
     status = "failed" if error else "done"
-    with db.pool.connection() as conn, conn.cursor() as cur:
+    with db.transaction() as cur:
+        cur.execute("SET LOCAL operations.tenant_id = 1")
         cur.execute(
             f"""
             UPDATE {_TABLE}
             SET status = %s, completed_at = NOW(), rows_seen = %s, error = %s
-            WHERE id = %s
+            WHERE tenant_id = 1 AND id = %s
             """,
             (status, rows_seen or None, error, entry_id),
         )
@@ -243,19 +249,23 @@ def process_entry(entry_id: int) -> None:
         "source_run_queue: entry=%d source=%s status=%s rows=%s",
         entry_id, df, status, rows_seen,
     )
+    if error:
+        raise RuntimeError(error)
+    return 1
 
 
-def process_next() -> int:
+def process_next(job_run_id: object) -> int:
     """Process one retained demand entry under the governed Jobs worker."""
-    with db.pool.connection() as conn, conn.cursor() as cur:
+    with db.transaction() as cur:
+        cur.execute("SET LOCAL operations.tenant_id = 1")
         cur.execute(
-            f"SELECT id FROM {_TABLE} WHERE status = 'pending' ORDER BY queued_at, id LIMIT 1"
+            f"SELECT id FROM {_TABLE} WHERE tenant_id = 1 AND status = 'pending' "
+            "AND job_run_id IS NULL ORDER BY queued_at, id LIMIT 1"
         )
         row = cur.fetchone()
     if row is None:
         return 0
-    process_entry(int(row[0]))
-    return 1
+    return process_entry(int(row[0]), job_run_id)
 
 
 def enqueue_and_run(source: str, reason: str = "") -> int:
