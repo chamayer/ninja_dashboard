@@ -1236,3 +1236,11 @@ execution now uses fenced v1 APIs and isolated child processes. Focused tests,
 compilation, undefined-name lint, and diff checks pass; migration execution is
 pending because the stack remains inactive. Next action: complete dependency
 runtime semantics and expose workflow/run detail from the common ledger.
+
+Run-detail checkpoint (2026-09-29): Job activity now exposes the selected
+run's event timeline, prerequisite and dependent edges, linked domain attempts,
+contract version, scope, immutable definition digest, correlation/retry links,
+parent link, and terminal reason. This gives the dependency runtime a truthful
+operator surface before production edges are activated. Focused Jobs tests,
+compilation, and diff checks pass. Next action: implement atomic workflow
+admission plus success release and prerequisite-failure propagation.

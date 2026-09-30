@@ -8717,6 +8717,10 @@ def _operator_job_runs(*, limit: int = 100, run_id: str = "", batch_id: str = ""
         rows = cur.fetchall()
         job_ids = [row[0] for row in rows]
         events_by_job: dict[uuid.UUID, list[dict]] = {job_id: [] for job_id in job_ids}
+        technical_by_job: dict[uuid.UUID, dict] = {}
+        prerequisites_by_job: dict[uuid.UUID, list[dict]] = {job_id: [] for job_id in job_ids}
+        dependents_by_job: dict[uuid.UUID, list[dict]] = {job_id: [] for job_id in job_ids}
+        domain_attempts_by_job: dict[uuid.UUID, list[dict]] = {job_id: [] for job_id in job_ids}
         if job_ids:
             cur.execute(
                 """SELECT job_id, event_at, event_type, stage, detail
@@ -8729,6 +8733,61 @@ def _operator_job_runs(*, limit: int = 100, run_id: str = "", batch_id: str = ""
                 events_by_job.setdefault(event[0], []).append(
                     {"at": event[1], "type": event[2], "stage": event[3], "detail": event[4]}
                 )
+            cur.execute(
+                """SELECT id, definition_digest, scope_identity, input_revisions,
+                          requested_input, parent_run_id, root_run_id
+                     FROM operations.operator_job_runs
+                    WHERE tenant_id = 1 AND id = ANY(%s)""",
+                (job_ids,),
+            )
+            for detail in cur.fetchall():
+                technical_by_job[detail[0]] = {
+                    "definition_digest": detail[1], "scope_identity": detail[2],
+                    "input_revisions": detail[3] or {}, "requested_input": detail[4] or {},
+                    "parent_run_id": detail[5], "root_run_id": detail[6],
+                }
+            cur.execute(
+                """SELECT dependency.dependent_run_id, dependency.prerequisite_run_id,
+                          dependency.state, dependency.reason,
+                          prerequisite.job_key, prerequisite.status,
+                          dependent.job_key, dependent.status
+                     FROM operations.job_dependencies dependency
+                     JOIN operations.operator_job_runs prerequisite
+                       ON prerequisite.tenant_id = dependency.tenant_id
+                      AND prerequisite.id = dependency.prerequisite_run_id
+                     JOIN operations.operator_job_runs dependent
+                       ON dependent.tenant_id = dependency.tenant_id
+                      AND dependent.id = dependency.dependent_run_id
+                    WHERE dependency.tenant_id = 1
+                      AND (dependency.dependent_run_id = ANY(%s)
+                           OR dependency.prerequisite_run_id = ANY(%s))
+                    ORDER BY dependency.created_at, dependency.id""",
+                (job_ids, job_ids),
+            )
+            for dependency in cur.fetchall():
+                prerequisites_by_job.setdefault(dependency[0], []).append({
+                    "id": dependency[1], "job_key": dependency[4],
+                    "status": dependency[5], "state": dependency[2],
+                    "reason": dependency[3],
+                })
+                dependents_by_job.setdefault(dependency[1], []).append({
+                    "id": dependency[0], "job_key": dependency[6],
+                    "status": dependency[7], "state": dependency[2],
+                    "reason": dependency[3],
+                })
+            cur.execute(
+                """SELECT job_run_id, domain_kind, domain_record_id,
+                          attempt_number, linked_at
+                     FROM operations.job_domain_attempts
+                    WHERE tenant_id = 1 AND job_run_id = ANY(%s)
+                    ORDER BY linked_at, id""",
+                (job_ids,),
+            )
+            for attempt in cur.fetchall():
+                domain_attempts_by_job.setdefault(attempt[0], []).append({
+                    "kind": attempt[1], "record_id": attempt[2],
+                    "attempt": attempt[3], "linked_at": attempt[4],
+                })
     labels = {entry["id"]: entry["name"] for entry in _JOB_CATALOG}
     status_labels = {
         "queued": "Queued", "running": "Running", "completed": "Completed",
@@ -8780,6 +8839,10 @@ def _operator_job_runs(*, limit: int = 100, run_id: str = "", batch_id: str = ""
             "result_label": result_label(row[7], row[9], row[10]),
             "elapsed": elapsed_label(row[5], row[6]),
             "events": events_by_job.get(row[0], []),
+            "technical": technical_by_job.get(row[0], {}),
+            "prerequisites": prerequisites_by_job.get(row[0], []),
+            "dependents": dependents_by_job.get(row[0], []),
+            "domain_attempts": domain_attempts_by_job.get(row[0], []),
         }
         for row in rows
     ]

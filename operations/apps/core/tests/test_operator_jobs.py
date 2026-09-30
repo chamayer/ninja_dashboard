@@ -74,6 +74,11 @@ def test_jobs_status_uses_operator_language_and_safe_controls():
     assert "No run available" in jobs_template
     assert "next due" in jobs_template
     assert "last_schedule_outcome" in jobs_template
+    assert "job_domain_attempts" in views
+    assert "operations.job_dependencies" in views
+    assert "Technical details" in template
+    assert "Domain work" in template
+    assert "Dependencies" in template
 
 
 def test_scoped_software_requests_wait_for_the_governed_queue_worker():
