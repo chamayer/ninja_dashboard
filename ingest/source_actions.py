@@ -68,14 +68,28 @@ def _claim_next(job_run_id: object) -> dict[str, Any] | None:
               FROM candidate
              WHERE request.id = candidate.id
             RETURNING request.id, request.finding_id, request.source_instance_id,
-                      request.action_key, request.parent_external_id, request.external_id
+                      request.action_key, request.parent_external_id, request.external_id,
+                      request.attempts
             """,
             (job_run_id,),
         )
         row = cur.fetchone()
+        if row:
+            cur.execute(
+                """
+                INSERT INTO operations.job_domain_attempts (
+                    tenant_id, domain_kind, domain_record_id,
+                    attempt_number, job_run_id
+                ) VALUES (1, 'source.action', %s, %s, %s)
+                """,
+                (str(row[0]), int(row[6]), job_run_id),
+            )
     if row is None:
         return None
-    keys = ("id", "finding_id", "source_instance_id", "action_key", "company_id", "asset_id")
+    keys = (
+        "id", "finding_id", "source_instance_id", "action_key", "company_id",
+        "asset_id", "attempts",
+    )
     return dict(zip(keys, row))
 
 

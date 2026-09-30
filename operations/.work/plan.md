@@ -1195,3 +1195,14 @@ scheduled work. The static Jobs inventory was regenerated from its checked
 discovery function. Focused inventory/operator tests and compilation pass.
 Next action: add immutable per-attempt Job membership for all three software
 domain queues, then make partial queue failures fail the owning Job.
+
+Software-domain ownership checkpoint (2026-09-29): migration 0219 adds
+tenant-safe Job links to all three legacy software queues and an immutable
+`job_domain_attempts` journal shared by software and source-domain claims.
+Each claim records its owning run and attempt before work starts; software
+demand, activity, and scheduled rows share one bounded drain, and any item
+failure now fails the owning wrapper Job while retaining retry state. The
+software queues enforce the current tenant boundary and RLS. PostgreSQL
+execution remains unverified while the stack is inactive. Next action: remove
+the dormant version-0 producers/workers and convert direct maintenance work
+to registered control Jobs without letting recovery depend on normal lanes.

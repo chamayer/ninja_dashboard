@@ -20,6 +20,8 @@ Failure handling:
 from __future__ import annotations
 
 import logging
+from contextlib import contextmanager
+from typing import Iterator
 
 from ingest import db
 from ingest.ninja_client import NinjaClient
@@ -42,6 +44,19 @@ _BACKGROUND_QUEUES = (
 )
 _DEMAND_TABLE = "ninja_core.software_demand_queue"
 
+_DOMAIN_KINDS = {
+    "ninja_core.software_scheduled_queue": "software.scheduled",
+    "ninja_core.software_demand_queue": "software.demand",
+    "ninja_core.software_activity_queue": "software.activity",
+}
+
+
+@contextmanager
+def _tenant_cursor() -> Iterator[object]:
+    with db.transaction() as cur:
+        cur.execute("SET LOCAL operations.tenant_id = 1")
+        yield cur
+
 
 # ── Enqueue helpers ─────────────────────────────────────────────────
 
@@ -58,10 +73,10 @@ def enqueue_activity(ninja_device_id: int, reason: str = "") -> bool:
 
 def enqueue_demand(df: str, reason: str = "") -> int:
     """Insert into Q2. Returns the entry id (existing if already pending)."""
-    with db.pool.connection() as conn, conn.cursor() as cur:
+    with _tenant_cursor() as cur:
         cur.execute(
-            "INSERT INTO ninja_core.software_demand_queue (df, reason) "
-            "VALUES (%s, %s) "
+            "INSERT INTO ninja_core.software_demand_queue (tenant_id, df, reason) "
+            "VALUES (1, %s, %s) "
             "ON CONFLICT (df) WHERE status = 'pending' DO NOTHING "
             "RETURNING id",
             (df, reason),
@@ -81,7 +96,7 @@ def enqueue_demand(df: str, reason: str = "") -> int:
 
 def get_demand_status(entry_id: int) -> dict | None:
     """Return the demand queue row as a dict, or None if not found."""
-    with db.pool.connection() as conn, conn.cursor() as cur:
+    with _tenant_cursor() as cur:
         cur.execute(
             """
             SELECT id, df, reason, status, attempts, max_attempts,
@@ -109,7 +124,7 @@ def queue_details() -> dict[str, dict]:
         "activity":  "ninja_core.software_activity_queue",
     }
     result: dict[str, dict] = {}
-    with db.pool.connection() as conn, conn.cursor() as cur:
+    with _tenant_cursor() as cur:
         for name, table in tables.items():
             cur.execute(f"SELECT status, COUNT(*) FROM {table} GROUP BY status")
             counts = {row[0]: int(row[1]) for row in cur.fetchall()}
@@ -149,7 +164,7 @@ def queue_counts() -> dict[str, dict[str, int]]:
         "activity":  "ninja_core.software_activity_queue",
     }
     result: dict[str, dict[str, int]] = {}
-    with db.pool.connection() as conn, conn.cursor() as cur:
+    with _tenant_cursor() as cur:
         for name, table in tables.items():
             cur.execute(
                 f"SELECT status, COUNT(*) FROM {table} GROUP BY status",
@@ -166,7 +181,7 @@ def recover_stale_entries() -> int:
     Called at the start of each background worker tick."""
     total = 0
     for table in _BACKGROUND_QUEUES:
-        with db.pool.connection() as conn, conn.cursor() as cur:
+        with _tenant_cursor() as cur:
             cur.execute(
                 f"""
                 UPDATE {table}
@@ -186,7 +201,7 @@ def recover_stale_entries() -> int:
             total += n
 
     # Demand entries with no live thread → mark failed so operator sees it.
-    with db.pool.connection() as conn, conn.cursor() as cur:
+    with _tenant_cursor() as cur:
         cur.execute(
             f"""
             UPDATE {_DEMAND_TABLE}
@@ -209,32 +224,43 @@ def recover_stale_entries() -> int:
     return total
 
 
-def drain_background(client: NinjaClient, batch_size: int) -> tuple[int, int, int]:
+def drain_background(
+    client: NinjaClient, batch_size: int, job_run_id: object
+) -> dict[str, int]:
     """Drain Q2, Q3, then Q1 up to the shared batch-size limit."""
     recover_stale_entries()
 
-    demand_drained = _drain_queue(client, _DEMAND_TABLE, batch_size)
+    demand_drained, demand_failed = _drain_queue(
+        client, _DEMAND_TABLE, batch_size, job_run_id
+    )
     remaining = batch_size - demand_drained
-    activity_drained = _drain_queue(
-        client, "ninja_core.software_activity_queue", remaining
+    activity_drained, activity_failed = _drain_queue(
+        client, "ninja_core.software_activity_queue", remaining, job_run_id
     )
     remaining -= activity_drained
     scheduled_drained = 0
     if remaining > 0:
-        scheduled_drained = _drain_queue(
-            client, "ninja_core.software_scheduled_queue", remaining
+        scheduled_drained, scheduled_failed = _drain_queue(
+            client, "ninja_core.software_scheduled_queue", remaining, job_run_id
         )
-    return demand_drained, activity_drained, scheduled_drained
+    else:
+        scheduled_failed = 0
+    return {
+        "demand": demand_drained,
+        "activity": activity_drained,
+        "scheduled": scheduled_drained,
+        "failed": demand_failed + activity_failed + scheduled_failed,
+    }
 
 
 # ── Internal helpers ───────────────────────────────────────────────
 
 
 def _enqueue(table: str, df: str, reason: str) -> bool:
-    with db.pool.connection() as conn, conn.cursor() as cur:
+    with _tenant_cursor() as cur:
         cur.execute(
-            f"INSERT INTO {table} (df, reason) "
-            "VALUES (%s, %s) "
+            f"INSERT INTO {table} (tenant_id, df, reason) "
+            "VALUES (1, %s, %s) "
             "ON CONFLICT (df) WHERE status = 'pending' DO NOTHING "
             "RETURNING id",
             (df, reason),
@@ -242,24 +268,27 @@ def _enqueue(table: str, df: str, reason: str) -> bool:
         return cur.fetchone() is not None
 
 
-def _drain_queue(client: NinjaClient, table: str, limit: int) -> int:
-    drained = 0
+def _drain_queue(
+    client: NinjaClient, table: str, limit: int, job_run_id: object
+) -> tuple[int, int]:
+    drained = failed = 0
     for _ in range(limit):
-        entry = _claim_one(table)
+        entry = _claim_one(table, job_run_id)
         if entry is None:
             break
-        _process_entry(client, table, entry)
+        if not _process_entry(client, table, entry):
+            failed += 1
         drained += 1
-    return drained
+    return drained, failed
 
 
-def _claim_one(table: str) -> dict | None:
+def _claim_one(table: str, job_run_id: object) -> dict | None:
     """Atomically claim the oldest pending entry. Returns dict or None."""
-    with db.pool.connection() as conn, conn.cursor() as cur:
+    with _tenant_cursor() as cur:
         cur.execute(
             f"""
             UPDATE {table}
-            SET status = 'processing', started_at = NOW()
+            SET status = 'processing', started_at = NOW(), job_run_id = %s
             WHERE id = (
                 SELECT id FROM {table}
                 WHERE status = 'pending'
@@ -269,8 +298,19 @@ def _claim_one(table: str) -> dict | None:
             )
             RETURNING id, df, attempts, max_attempts
             """,
+            (job_run_id,),
         )
         row = cur.fetchone()
+        if row:
+            cur.execute(
+                """
+                INSERT INTO operations.job_domain_attempts (
+                    tenant_id, domain_kind, domain_record_id,
+                    attempt_number, job_run_id
+                ) VALUES (1, %s, %s, %s, %s)
+                """,
+                (_DOMAIN_KINDS[table], str(row[0]), int(row[2]) + 1, job_run_id),
+            )
     if not row:
         return None
     return dict(zip(["id", "df", "attempts", "max_attempts"], row))
@@ -283,7 +323,7 @@ def _process_entry(client: NinjaClient, table: str, entry: dict) -> bool:
     max_attempts = entry["max_attempts"]
     try:
         rows = _sw.run(client, df=df)
-        with db.pool.connection() as conn, conn.cursor() as cur:
+        with _tenant_cursor() as cur:
             cur.execute(
                 f"UPDATE {table} "
                 "SET status = 'done', completed_at = NOW(), rows_seen = %s "
@@ -296,7 +336,7 @@ def _process_entry(client: NinjaClient, table: str, entry: dict) -> bool:
         new_attempts = attempts + 1
         err = str(exc)[:_ERROR_MAX]
         if new_attempts < max_attempts:
-            with db.pool.connection() as conn, conn.cursor() as cur:
+            with _tenant_cursor() as cur:
                 cur.execute(
                     f"UPDATE {table} "
                     "SET status = 'pending', attempts = %s, error = %s, started_at = NULL "
@@ -308,7 +348,7 @@ def _process_entry(client: NinjaClient, table: str, entry: dict) -> bool:
                 table, entry_id, new_attempts, max_attempts, exc,
             )
         else:
-            with db.pool.connection() as conn, conn.cursor() as cur:
+            with _tenant_cursor() as cur:
                 cur.execute(
                     f"UPDATE {table} "
                     "SET status = 'failed', attempts = %s, error = %s, completed_at = NOW() "

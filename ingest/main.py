@@ -40,7 +40,7 @@ from ingest.activities import ingest as activities_ingest
 from ingest.agent_compliance import ingest as agent_compliance_ingest
 from ingest.agent_compliance import review_digest
 from ingest.source_observations import is_identity_source, run_source_observations
-from ingest import operator_job_queue, source_actions, source_run_queue
+from ingest import operator_job_queue, source_run_queue
 from ingest.inventory import software as software_ingest
 from ingest.inventory import queue as software_queue
 from ingest.runlog import run_log
@@ -379,7 +379,7 @@ def enqueue_all_orgs_once() -> None:
     log.info("Scheduled sweep enqueue: %d / %d orgs added to Q1", enqueued, len(org_ids))
 
 
-def run_software_queue_once() -> int:
+def run_software_queue_once(job_run_id: object) -> int:
     """Drain governed demand, activity, and scheduled software work."""
     if not settings.SOFTWARE_QUEUE_ENABLED:
         return 0
@@ -390,15 +390,22 @@ def run_software_queue_once() -> int:
         client_secret=settings.NINJA_CLIENT_SECRET.get_secret_value(),
         scope=settings.NINJA_SCOPE,
     ) as client:
-        demand, activity, scheduled = software_queue.drain_background(
-            client, settings.SOFTWARE_QUEUE_WORKER_BATCH
+        result = software_queue.drain_background(
+            client, settings.SOFTWARE_QUEUE_WORKER_BATCH, job_run_id
         )
+    demand = result["demand"]
+    activity = result["activity"]
+    scheduled = result["scheduled"]
     if demand or activity or scheduled:
         software_ingest.refresh_read_models()
     log.info(
         "Software queue drain complete: demand=%d activity=%d scheduled=%d",
         demand, activity, scheduled,
     )
+    if result["failed"]:
+        raise RuntimeError(
+            f"{result['failed']} software queue item(s) failed; retained for review or retry"
+        )
     return demand + activity + scheduled
 
 

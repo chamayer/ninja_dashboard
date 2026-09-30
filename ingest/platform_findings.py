@@ -62,6 +62,7 @@ def evaluate(*, dry_run: bool = True) -> dict[str, int]:
     counts = {"source_failure": 0, "software_queue_stalled": 0, "queues_skipped": 0}
 
     with db.transaction() as cur:
+        cur.execute("SET LOCAL operations.tenant_id = %s", (TENANT_ID,))
         ft_failure = _finding_type_id(cur, "source_failure")
         ft_queue = _finding_type_id(cur, "software_queue_stalled")
 

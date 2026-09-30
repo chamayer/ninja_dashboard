@@ -692,7 +692,7 @@ def _execute(job_key: str, progress: JobProgress) -> int | None:
         ),
         "software-queue-drain": (
             "Collecting software inventory",
-            lambda: main.run_software_queue_once(),
+            lambda: main.run_software_queue_once(progress.job_id),
         ),
         "source-actions": (
             "Processing approved source actions",

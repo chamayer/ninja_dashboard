@@ -92,5 +92,5 @@ def test_scoped_software_requests_wait_for_the_governed_queue_worker():
     assert "process_demand_entry" not in main
     assert "run_software_scoped" not in main
     assert "process_demand_entry" not in queue
-    assert "demand_drained = _drain_queue" in queue
+    assert "client, _DEMAND_TABLE, batch_size, job_run_id" in queue
     assert "Direct scoped software run" not in jobs_template

@@ -1941,7 +1941,7 @@
         "file": "ingest/operator_job_queue.py",
         "owner": "_execute",
         "key": "software-queue-drain",
-        "expression": "('Collecting software inventory', lambda: main.run_software_queue_once())"
+        "expression": "('Collecting software inventory', lambda: main.run_software_queue_once(progress.job_id))"
       },
       {
         "file": "ingest/operator_job_queue.py",

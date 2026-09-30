@@ -185,6 +185,16 @@ def process_entry(entry_id: int, job_run_id: object) -> int:
             (job_run_id, entry_id),
         )
         row = cur.fetchone()
+        if row:
+            cur.execute(
+                """
+                INSERT INTO operations.job_domain_attempts (
+                    tenant_id, domain_kind, domain_record_id,
+                    attempt_number, job_run_id
+                ) VALUES (1, 'source.demand', %s, %s, %s)
+                """,
+                (str(entry_id), int(row[1]), job_run_id),
+            )
 
     if not row:
         log.warning("source_run_queue: entry %d not claimable (already running?)", entry_id)
