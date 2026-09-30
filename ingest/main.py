@@ -903,6 +903,24 @@ def should_catch_up(
 # (503 with "starting" body until this event is set).
 _READY = threading.Event()
 
+_HTTP_JOB_PATHS = {
+    "/run": "patches", "/run/patches": "patches",
+    "/run/agent-compliance": "agent-compliance",
+    "/run/agent-compliance-evaluate": "agent-compliance-evaluate",
+    "/run/resolver": "resolver", "/run/notifications/dispatch": "notifications-dispatch",
+    "/run/platform-evaluate": "platform-evaluate",
+    "/run/software-classify": "software-classify",
+    "/run/software-classify-only": "software-classify-only",
+    "/run/intel-capability": "intel-capability", "/run/intel-category": "intel-category",
+    "/run/intel-lolrmm": "intel-lolrmm", "/run/patch-classify": "patch-classify",
+    "/run/parity-check": "parity-check", "/run/notifications/digest": "notifications-digest",
+    "/run/intel-nvd": "intel-nvd", "/run/intel-cpe-dict": "intel-cpe-dict",
+    "/run/intel-kev": "intel-kev", "/run/intel-epss": "intel-epss",
+    "/run/intel-matcher": "intel-matcher", "/run/intel-winget": "intel-winget",
+    "/run/intel-chocolatey": "intel-chocolatey", "/run/intel-otx": "intel-otx",
+    "/run/intel-abusech": "intel-abusech", "/run/intel-endoflife": "intel-endoflife",
+}
+
 
 class _Handler(http.server.BaseHTTPRequestHandler):
     def log_message(self, fmt: str, *args: object) -> None:
@@ -938,6 +956,19 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self.send_error(404)
 
     def do_POST(self) -> None:
+        governed_job = _HTTP_JOB_PATHS.get(self.path)
+        if governed_job is not None:
+            if not _READY.is_set():
+                self._respond(503, b"still starting - try again shortly\n")
+                return
+            try:
+                run_id = operator_job_queue.request_system_job(governed_job, self.path)
+            except Exception:
+                log.exception("governed HTTP Job request failed: %s", governed_job)
+                self._respond(503, b"job admission unavailable\n")
+                return
+            self._respond(202, f"job queued: {run_id}\n".encode())
+            return
         if self.path == "/run":
             if not _READY.is_set():
                 self._respond(503, b"still starting - try again shortly\n")

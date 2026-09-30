@@ -1,3 +1,94 @@
+# Admin navigation consistency
+
+## Status
+
+Complete — one operator-facing Admin sub-navigation now renders on every
+Admin page, with no page-local duplicate strip.
+
+## Goal and scope
+
+The global Admin context bar in `templates/base.html` is the single navigation
+authority. It must expose the same meaningful destinations on Overview,
+Sources, mappings, reviews, Jobs, Health, and configuration pages. Remove the
+older group-specific `_admin_tabs.html` includes that duplicate or contradict
+the global bar. Preserve all URLs and page behavior.
+
+## Validation
+
+- Template compilation and focused navigation tests.
+- Confirm all Admin views already provide `admin_group` / `admin_tab` context.
+
+## Validation
+
+`PYTHONPATH=.. python manage.py check` passed. Focused navigation coverage
+tests passed: `apps/core/tests/test_coverage.py` (14 passed). `git diff
+--check` passed.
+
+---
+
+# Client mapping identity rebuild
+
+## Status
+
+Complete — production data rebuild executed and validated on 2026-09-29.
+
+## Goal
+
+Remove every live source-group-to-client attachment produced by the legacy
+compatibility projection, rerun the native resolver, reuse retained legacy
+PowerShell aliases as explainable name mappings, and leave every unresolved or
+ambiguous source group visible as a candidate and finding.
+
+## Scope and decisions
+
+- Live client-class source links and their observation-derived attachments;
+  canonical clients, devices, raw/current evidence, aliases, audit records,
+  and historical link evidence remain intact.
+- A source link is a derived compatibility projection, not an operator mapping
+  authority. Open history intervals are closed before detaching a live link.
+- Retained PowerShell aliases are resolver input. They are not copied into
+  source evidence or treated as a connector authority.
+- The resolver runs only after every organization observation and its grouped
+  records are detached, so no old attachment can short-circuit its name ladder.
+
+## Steps
+
+1. Measure active links, alias tiers, decisions, candidates, and grouped
+   observations. Complete.
+2. Detach live client links and observation assignments under an advisory lock;
+   preserve history, reset stale candidate resolution state, then run resolver
+   and derived link projection. Complete.
+3. Compare reattached, unresolved, and ambiguous groups and their findings;
+   correct presentation gaps if found. Complete for the data rebuild.
+
+## Checkpoint
+
+Production baseline: 320 active client source links, all with
+`system.compatibility_backfill`; 320 active attached organization observations
+and 18 unattached. Alias tiers: 4 manual, 42 seed, 5 alignment. Current mapping
+decisions are 37 `legacy_alias` explicit decisions and no operator decisions.
+This confirms the displayed unrelated names were inherited compatibility
+attachments, not recorded operator choices.
+
+Rebuild result: closed all 320 open client-link history intervals, removed the
+320 live client link projections and their 320 dependent attribute-projection
+cache rows, detached 320 organization and 18,303 grouped records, then ran the
+native resolver. It attached 313 groups and derived 313 new live client links.
+It reapplied 37 retained PowerShell-alias decisions against the new link IDs.
+25 active groups remain unattached, represented by 15 open candidates and 18
+open `client_unattached_group` findings (the difference is expected where
+multiple source records normalize to the same candidate or have no usable
+name). The earlier 37 legacy decisions remain as immutable orphaned audit
+history; the replacement decisions reference current links.
+
+## Next action
+
+The requested rebuild is complete. Before any future intentional reset, make
+this audited procedure a versioned operator job rather than repeating an
+interactive production operation.
+
+---
+
 # Unified Jobs framework
 
 ## Status
@@ -1057,3 +1148,22 @@ duplicate producers; a still-draining version-0 family is isolated as a
 deferred schedule rather than rolling back other due work. Next action:
 commit, deploy, and externally verify schedule activation and a bounded first
 due request before implementing v1 timeout/cancellation/recovery controls.
+
+Lifecycle and domain conversion checkpoint (2026-09-29): commits `a235d6f`
+through `51ffe88` added governed cancellation requests, absolute v1 deadlines
+with conservative resource containment, per-lane child-process execution,
+supervisor control-plane resilience, additive source-domain Job links, and
+registered source-action/source-demand workers. Source demand no longer starts
+a daemon thread; demand-aware schedule enablement prevents idle no-op history.
+The next conversion routes registered ingest HTTP triggers through v1
+admission, leaving only genuinely scoped/legacy/bootstrap paths for separate
+review. Focused registry, topology, migration, compilation, and diff checks
+passed for the individual commits.
+
+Operational blocker (2026-09-29): read-only host verification found every
+Ninja container absent. Portainer stack 16 reports inactive, automatic update
+has no JobID, and its last deployed revision is `a235d6f`; later pushes are not
+deployed. The user explicitly prohibited direct Portainer deployment, so no
+restart/redeploy was attempted. Continue implementation locally, but final
+production validation requires the automatic updater/stack to be restored
+outside this task or new explicit recovery direction.

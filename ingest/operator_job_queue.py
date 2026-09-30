@@ -304,7 +304,8 @@ def enqueue_automatic(job_key: str) -> bool:
             cur.execute("SET LOCAL operations.tenant_id = 1")
             cur.execute(
                 f"SELECT {request_api}(%s, %s, %s, %s, %s, %s, NULL, %s::jsonb, %s::jsonb, NULL)",
-                (1, job.key, job.snapshot_digest(), "tenant:1", request_identity, "automatic", "{}", "{}"),
+                (1, job.key, job.snapshot_digest(), "tenant:1", request_identity,
+                 "automatic", "{}", "{}"),
             )
             return cur.fetchone() is not None
     except PoolTimeout:
@@ -313,6 +314,30 @@ def enqueue_automatic(job_key: str) -> bool:
     except Exception:
         log.exception("automatic job %s was deferred by Jobs admission", job_key)
         return False
+
+
+def request_system_job(job_key: str, request_source: str) -> uuid.UUID:
+    """Admit an explicit internal HTTP request through the governed v1 API."""
+    job = definition(job_key)
+    request_identity = hashlib.sha256(
+        f"system:{request_source}:{job_key}:{uuid.uuid4()}".encode()
+    ).hexdigest()
+    request_api = (
+        "operations.jobs_request_software_v1"
+        if job.supersession_family == "software-classifier"
+        else "operations.jobs_request"
+    )
+    with db.transaction() as cur:
+        cur.execute("SET LOCAL operations.tenant_id = 1")
+        cur.execute(
+            f"SELECT {request_api}(%s, %s, %s, %s, %s, %s, NULL, %s::jsonb, %s::jsonb, NULL)",
+            (1, job.key, job.snapshot_digest(), "tenant:1", request_identity,
+             "automatic", "{}", "{}"),
+        )
+        row = cur.fetchone()
+    if row is None:
+        raise RuntimeError("Jobs request API did not return a run")
+    return row[0]
 
 
 def _admit_software_classifier(cur, job_key: str) -> bool:

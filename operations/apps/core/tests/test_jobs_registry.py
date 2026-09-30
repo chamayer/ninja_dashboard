@@ -104,6 +104,15 @@ def test_definition_registration_happens_after_database_initialization():
     )
 
 
+def test_registered_http_jobs_use_governed_admission_before_legacy_routes():
+    main = (ROOT / "ingest" / "main.py").read_text(encoding="utf-8")
+    queue = (ROOT / "ingest" / "operator_job_queue.py").read_text(encoding="utf-8")
+
+    assert "_HTTP_JOB_PATHS" in main
+    assert "operator_job_queue.request_system_job(governed_job, self.path)" in main
+    assert "SELECT {request_api}" in queue
+
+
 def test_capability_labels_do_not_make_unreviewed_execution_safe():
     enabled, label = capability_state("agent-compliance", {"legacy_agent_compliance": False})
     assert not enabled
