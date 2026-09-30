@@ -1373,3 +1373,13 @@ compilation, undefined-name lint, and `git diff --check` pass. PostgreSQL
 execution remains unavailable while the local stack is inactive. Next action:
 commit/push this migration, then audit and implement remaining actionable
 Admin Health findings and cross-surface Job links.
+
+Admin Health persistence correction (2026-09-30): before adding the remaining
+Jobs conditions, the existing platform-health evaluator was found to import an
+entity-finding helper despite its admin-only contract. It now writes its
+deduplicated source-failure and queue-stall conditions to
+`operations.admin_findings`, preserving the condition assessment participant
+contract. Focused condition-safety tests (37), Python compilation,
+undefined-name lint, and `git diff --check` pass. Next action: commit/push
+this regression correction, then register and evaluate the seven required
+Jobs health conditions.

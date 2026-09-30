@@ -212,6 +212,14 @@ def test_platform_health_absent_resolution_targets_admin_findings():
     assert "may_clear" in section
 
 
+def test_platform_health_emits_admin_findings_not_entity_findings():
+    source = (Path(__file__).parents[1] / "platform_findings.py").read_text()
+    section = source[source.index("def _upsert_admin_finding"):source.index("def evaluate")]
+    assert "INSERT INTO operations.admin_findings" in section
+    assert "INSERT INTO operations.findings" not in section
+    assert "preserve_operator_episode" in section
+
+
 def test_assessment_policy_digest_is_required_and_bound_to_version():
     migration = (
         Path(__file__).parents[2]

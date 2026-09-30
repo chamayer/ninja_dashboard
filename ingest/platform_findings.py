@@ -25,6 +25,7 @@ Default is dry-run: nothing is written unless `dry_run=False` is passed.
 from __future__ import annotations
 
 import logging
+import json
 import uuid
 from datetime import UTC, datetime
 from typing import Any
@@ -36,8 +37,8 @@ from ingest import db
 from ingest.cmdb_findings import (
     TENANT_ID,
     _finding_type_id,
-    _upsert,
 )
+from ingest.condition_evidence import preserve_operator_episode
 from ingest.conditions import record_assessment
 
 log = logging.getLogger(__name__)
@@ -54,6 +55,48 @@ _QUEUE_COLUMNS = ("status", "queued_at")
 
 def _subject(kind: str, key: str) -> uuid.UUID:
     return uuid.uuid5(_NS, f"{kind}:{key}")
+
+
+def _upsert_admin_finding(
+    cur: Any,
+    *,
+    finding_type_id: int,
+    condition_key: str,
+    severity: str,
+    now: datetime,
+    subject_ref: dict[str, Any],
+    details: dict[str, Any],
+) -> uuid.UUID:
+    """Upsert a platform condition in the admin-only findings ledger."""
+    preserved = preserve_operator_episode(
+        cur, "admin_findings", TENANT_ID, condition_key, now, details
+    )
+    if preserved is not None:
+        return uuid.UUID(preserved)
+    cur.execute(
+        """
+        INSERT INTO operations.admin_findings (
+            id, version, tenant_id, finding_type_id, condition_key, severity,
+            status, subject_ref, details, first_detected_at, last_detected_at
+        ) VALUES (
+            gen_random_uuid(), 1, %s, %s, %s, %s, 'open', %s::jsonb, %s::jsonb, %s, %s
+        )
+        ON CONFLICT (tenant_id, condition_key)
+            WHERE status IN ('open', 'acknowledged', 'investigating', 'suppressed')
+        DO UPDATE SET
+            last_detected_at = EXCLUDED.last_detected_at,
+            details = EXCLUDED.details
+        RETURNING id
+        """,
+        (
+            TENANT_ID, finding_type_id, condition_key, severity,
+            json.dumps(subject_ref), json.dumps(details), now, now,
+        ),
+    )
+    row = cur.fetchone()
+    if row is None:
+        raise RuntimeError("Admin finding upsert did not return a finding ID")
+    return row[0]
 
 
 def evaluate(*, dry_run: bool = True) -> dict[str, int]:
@@ -162,17 +205,14 @@ def _eval_source_failures(
         if dry_run:
             continue
         subject_id = _subject("domain", domain)
-        finding_id = _upsert(
+        finding_id = _upsert_admin_finding(
             cur,
-            tenant_id=TENANT_ID,
             finding_type_id=finding_type_id,
-            client_id=None,
-            subject_type="source_binding",
-            subject_id=subject_id,
             condition_key=key,
             # A domain with no success in 24h is broken, not flaky.
             severity="high" if last_ok is None else "medium",
             now=now,
+            subject_ref={"signal_kind": "domain", "signal_id": str(subject_id)},
             details={
                 "domain": domain,
                 "last_failure_at": started_at.isoformat() if started_at else None,
@@ -225,12 +265,13 @@ def _eval_stalled_queues(
             counts["software_queue_stalled"] += 1
             if dry_run:
                 continue
-            finding_id = _upsert(
-                cur, tenant_id=TENANT_ID, finding_type_id=finding_type_id,
-                client_id=None, subject_type="source_binding",
-                subject_id=_subject("queue", queue_key), condition_key=key,
+            finding_id = _upsert_admin_finding(
+                cur, finding_type_id=finding_type_id, condition_key=key,
                 severity="high" if failed_count or (over_depth and over_age) else "medium",
                 now=now,
+                subject_ref={
+                    "signal_kind": "queue", "signal_id": str(_subject("queue", queue_key)),
+                },
                 details={
                     "queue_key": queue_key, "pending_depth": depth,
                     "oldest_pending_minutes": round(oldest_age_m, 1),
@@ -278,16 +319,15 @@ def _eval_stalled_queues(
         counts["software_queue_stalled"] += 1
         if dry_run:
             continue
-        finding_id = _upsert(
+        finding_id = _upsert_admin_finding(
             cur,
-            tenant_id=TENANT_ID,
             finding_type_id=finding_type_id,
-            client_id=None,
-            subject_type="source_binding",
-            subject_id=_subject("queue", queue_key),
             condition_key=key,
             severity="high" if (over_depth and over_age) else "medium",
             now=now,
+            subject_ref={
+                "signal_kind": "queue", "signal_id": str(_subject("queue", queue_key)),
+            },
             details={
                 "queue_key": queue_key,
                 "table_name": table_name,
