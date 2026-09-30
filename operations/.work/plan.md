@@ -93,7 +93,8 @@ interactive production operation.
 
 ## Status
 
-**Implementation completion audit in progress.** The v1 ledger, durable
+**Implementation complete; GitOps deployment and live verification remain
+external.** The v1 ledger, durable
 schedules, resource-aware isolated workers, domain queue ownership, operator
 surfaces, v0 cutover, and registered maintenance work are implemented. The
 current slice activates completion dependencies and declared workflow graphs;
@@ -1486,3 +1487,27 @@ source demand under tenant context and renders its retained Job-run link for
 queued or running work. Focused Jobs UI tests (7), Django checks, and `git
 diff --check` pass. Next action: commit/push this correction, then complete
 the remaining requirement audit.
+
+Completion audit checkpoint (2026-09-30): the full governed Jobs scope is
+implemented in the current branch. The shared immutable registry now records
+owner, technical key, presentation, capability, cadence/trigger, lane,
+resource/concurrency/coalescing scope, dependency contracts, priority,
+timeout, retry, progress, result, permission, and handler revision; its
+machine-checked inventory covers registered dispatchers, schedules, HTTP
+admission paths, queues, startup work, and the remaining service threads.
+Every converted invocation is admitted before execution, domain attempts link
+to their Job run, and all Jobs readers use the durable ledger/schedule/control
+relations rather than run-log lifecycle state. The worker uses fenced APIs,
+isolated children, contained timeouts, cooperative cancellation, immutable
+revision dependencies, and explicit stalled/blocked outcomes. Jobs Admin
+Health has all seven governed, deduplicated, actionable measurements with
+durable Job/control-plane links; Sources has the active demand-to-Job link.
+
+Validation: `pytest apps/core/tests/*jobs*.py` passed (57), `python manage.py
+check` passed, Python compilation and undefined-name lint passed for each
+changed implementation slice, and `git diff --check` passed. Relevant pushed
+commits include `c5df42c`, `62e2b8a`, `f0836c0`, `622555f`, and `83cc24e`.
+The local PostgreSQL stack is inactive, so migration execution, runtime
+admission/claim behavior, and automatic GitOps deployment cannot be directly
+verified here. Per user direction, do not call Portainer; origin pushes are
+the deployment handoff. No legacy data/history is deleted or fabricated.

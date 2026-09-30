@@ -23,8 +23,10 @@ def test_source_domain_workers_attach_the_claiming_job_run():
     demand = (ROOT / "ingest" / "source_run_queue.py").read_text(encoding="utf-8")
     actions = (ROOT / "ingest" / "source_actions.py").read_text(encoding="utf-8")
 
-    assert "source_run_queue.process_next(progress.job_id)" in queue
-    assert "process_pending(job_run_id=progress.job_id)" in queue
+    assert "def _run_source_demand(job_run_id: object)" in queue
+    assert "source_run_queue.process_next(job_run_id)" in queue
+    assert "def _run_source_actions(job_run_id: object)" in queue
+    assert "process_pending(job_run_id=job_run_id)" in queue
     assert "job_run_id = %s" in demand
     assert "job_run_id = %s" in actions
     assert 'SET LOCAL operations.tenant_id = 1' in demand
