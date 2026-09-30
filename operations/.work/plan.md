@@ -1475,3 +1475,14 @@ order. Focused registry/worker/UI/migration tests (22), Django checks, Python
 compilation, undefined-name lint, and `git diff --check` pass. PostgreSQL
 execution remains unavailable while the local stack is inactive. Next action:
 commit/push this correction and continue the full requirement audit.
+
+Cross-surface correction in progress (2026-09-30): active source-demand rows
+already retain their same-tenant `job_run_id`, but the Sources page displayed
+only a generic queued/running label. Expose a direct Job activity link from
+that durable relationship; do not derive a link from run-log diagnostics.
+
+Cross-surface correction checkpoint (2026-09-30): Sources now queries active
+source demand under tenant context and renders its retained Job-run link for
+queued or running work. Focused Jobs UI tests (7), Django checks, and `git
+diff --check` pass. Next action: commit/push this correction, then complete
+the remaining requirement audit.

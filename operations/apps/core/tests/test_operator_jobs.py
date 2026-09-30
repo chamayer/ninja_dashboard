@@ -146,3 +146,12 @@ def test_admin_health_links_jobs_findings_to_their_durable_evidence():
     assert 'details.get("job_key")' in views
     assert 'details.get("control_section")' in views
     assert "control_plane_url" in template
+
+
+def test_sources_surface_links_active_demand_to_its_durable_job_run():
+    views = Path("apps/core/views.py").read_text(encoding="utf-8")
+    template = Path("templates/sources.html").read_text(encoding="utf-8")
+
+    assert "job_run_id" in views[views.index("def sources_status"):]
+    assert "active_job_url" in views
+    assert "Open Job status" in template

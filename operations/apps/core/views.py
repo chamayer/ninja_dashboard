@@ -13694,10 +13694,12 @@ def sources_status(request: HttpRequest) -> HttpResponse:
             # Currently pending or processing (manual demand queue)
             cur.execute(
                 """
-                SELECT df, status, queued_at, started_at
+                SELECT df, status, queued_at, started_at, job_run_id
                   FROM operations.source_run_queue
-                 WHERE status IN ('pending', 'processing')
+                 WHERE tenant_id = %s AND status IN ('pending', 'processing')
                 """
+                ,
+                (tenant_id,),
             )
             active = {r[0]: r for r in cur.fetchall()}
 
@@ -13752,6 +13754,11 @@ def sources_status(request: HttpRequest) -> HttpResponse:
                 "run_platform": run_platform,
                 "is_processing": bool(act and act[1] == "processing"),
                 "has_pending": bool(act and act[1] == "pending"),
+                "active_job_url": (
+                    reverse("admin_job_status") + "?" + urlencode({"run": act[4]})
+                    if act and act[4]
+                    else ""
+                ),
                 "last_success": last_success,
                 "last_failure": last_fail,
                 "last_rows": last_success_rows if last_success_rows is not None else last_run_rows,

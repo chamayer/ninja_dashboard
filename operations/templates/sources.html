@@ -60,9 +60,9 @@
         {{ s.name }}{% if s.client_name %} · {{ s.client_name }}{% endif %}
     </div>
     {% if s.is_processing %}
-    <div class="source-stat" style="color:#2563eb;">Running now…</div>
+    <div class="source-stat" style="color:#2563eb;">Running now…{% if s.active_job_url %} <a href="{{ s.active_job_url }}">Open Job status</a>{% endif %}</div>
     {% elif s.has_pending %}
-    <div class="source-stat" style="color:#d97706;">Queued — pending start</div>
+    <div class="source-stat" style="color:#d97706;">Queued — pending start{% if s.active_job_url %} <a href="{{ s.active_job_url }}">Open Job status</a>{% endif %}</div>
     {% endif %}
     <div class="source-stat">
         Last run:
