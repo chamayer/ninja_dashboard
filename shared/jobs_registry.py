@@ -58,6 +58,7 @@ class JobDefinition:
     handler_version: str = "registry-v1"
     retry_policy: str = "manual_only_unreviewed"
     kill_safe: bool = False
+    successors: tuple[str, ...] = ()
 
     def catalog_entry(self) -> dict[str, object]:
         """Return the stable operator-facing shape used by the current UI."""
@@ -86,6 +87,7 @@ class JobDefinition:
             "resource_keys": list(self.resource_keys),
             "supersession_family": self.supersession_family,
             "supersession_rank": self.supersession_rank,
+            "successors": list(self.successors),
         }
 
     def snapshot_digest(self) -> str:
@@ -651,6 +653,12 @@ _SUPERSESSION_RANKS = MappingProxyType({
 _SUPERSESSION_FAMILIES = MappingProxyType({
     key: "software-classifier" for key in _SUPERSESSION_RANKS
 })
+_WORKFLOW_SUCCESSORS = MappingProxyType({
+    "patches": ("patch-classify", "resolver"),
+    "patch-classify": ("platform-evaluate",),
+    "resolver": ("platform-evaluate",),
+    "software-queue-drain": ("software-classify-only",),
+})
 if set(_RESOURCE_KEYS_BY_DEFINITION) != {item.key for item in _RAW_DEFINITIONS}:
     raise RegistryValidationError("Missing Jobs resource policy")
 
@@ -660,6 +668,7 @@ _DEFINITIONS = tuple(
         resource_keys=_RESOURCE_KEYS_BY_DEFINITION[item.key],
         supersession_family=_SUPERSESSION_FAMILIES.get(item.key, ""),
         supersession_rank=_SUPERSESSION_RANKS.get(item.key, 0),
+        successors=_WORKFLOW_SUCCESSORS.get(item.key, ()),
     )
     for item in _RAW_DEFINITIONS
 )
@@ -681,6 +690,27 @@ def definitions() -> tuple[JobDefinition, ...]:
 def schedule_definitions() -> tuple[ScheduleDefinition, ...]:
     """Return every declared automatic cadence in stable registry order."""
     return _SCHEDULE_DEFINITIONS
+
+
+def workflow_edges(root_key: str) -> tuple[tuple[str, str], ...]:
+    """Return the declared completion graph in prerequisite-first order."""
+    definition(root_key)
+    edges: list[tuple[str, str]] = []
+    visited: set[str] = set()
+
+    def visit(prerequisite: str, ancestors: frozenset[str]) -> None:
+        if prerequisite in ancestors:
+            raise RegistryValidationError("Jobs workflow contains a cycle")
+        for dependent in definition(prerequisite).successors:
+            definition(dependent)
+            edge = (prerequisite, dependent)
+            if edge not in visited:
+                visited.add(edge)
+                edges.append(edge)
+                visit(dependent, ancestors | {prerequisite})
+
+    visit(root_key, frozenset())
+    return tuple(edges)
 
 
 def definition(key: str) -> JobDefinition:

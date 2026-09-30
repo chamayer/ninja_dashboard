@@ -36,6 +36,7 @@ def test_operator_jobs_use_a_durable_queue_and_separate_stall_watchdog():
 
 def test_jobs_status_uses_operator_language_and_safe_controls():
     views = Path("apps/core/views.py").read_text(encoding="utf-8")
+    queue = Path("../ingest/operator_job_queue.py").read_text(encoding="utf-8")
     template = Path("templates/admin_job_status.html").read_text(encoding="utf-8")
     jobs_template = Path("templates/admin_jobs.html").read_text(encoding="utf-8")
     urls = Path("config/urls.py").read_text(encoding="utf-8")
@@ -79,6 +80,10 @@ def test_jobs_status_uses_operator_language_and_safe_controls():
     assert "Technical details" in template
     assert "Domain work" in template
     assert "Dependencies" in template
+    assert "_admit_operator_workflow" in views
+    assert "jobs_add_completion_dependency_v1" in views
+    assert "_admit_workflow" in queue
+    assert "jobs_add_completion_dependency_v1" in queue
 
 
 def test_scoped_software_requests_wait_for_the_governed_queue_worker():

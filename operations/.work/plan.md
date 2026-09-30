@@ -93,23 +93,22 @@ interactive production operation.
 
 ## Status
 
-**Step 2.3 in progress; the resource/fairness policy is approved.** Step 2.2
-implementation is complete with a documented local-PostgreSQL validation
-limitation. WP0 has a useful
-partial inventory and focused source-discovery checks, but its full exit is
-not yet proven. ADR-0024's detailed contract and migration companion remain
-the design authority; the tenant boundary, root-completion rule, quiesced
-cutover direction, and constrained 2.2 activation scope are accepted.
+**Implementation completion audit in progress.** The v1 ledger, durable
+schedules, resource-aware isolated workers, domain queue ownership, operator
+surfaces, v0 cutover, and registered maintenance work are implemented. The
+current slice activates completion dependencies and declared workflow graphs;
+remaining work is a requirement-by-requirement audit and correction of any
+dishonest handler outcomes, shutdown gaps, or health-surface gaps. ADR-0024's
+detailed contract and migration companion remain the design authority.
 Preserve unrelated untracked root `.work/probe_*` and bootstrap files.
 
 On 2026-09-28 the user authorized autonomous completion of the Jobs work,
-including needed corrections, commits, pushes, and the coupled redeploy/migration
-path. Preserve the unrelated client-mapping and root `.work` work. Production
-read-only verification confirms Operations migrations 0183–0186 are applied
-and the Postgres, ingest, and Operations containers are healthy. Before any
-converted producer is enabled, correct the 0185 claim API: it returns only a
-claim token, which would require a raw ledger lookup to identify the claimed
-run. A replacement API must return both the run ID and fencing token.
+including needed corrections, commits, and pushes. Preserve the unrelated
+client-mapping and root `.work` work. The user explicitly prohibited direct
+Portainer deployment because deployment is automatic. The latest read-only
+production check found the Ninja containers absent and stack 16 inactive, with
+its recorded revision still at `a235d6f`; therefore migrations after that
+revision and live behavior remain unverified. Do not invoke Portainer.
 
 ## Goal
 
@@ -1244,3 +1243,18 @@ parent link, and terminal reason. This gives the dependency runtime a truthful
 operator surface before production edges are activated. Focused Jobs tests,
 compilation, and diff checks pass. Next action: implement atomic workflow
 admission plus success release and prerequisite-failure propagation.
+
+Dependency-runtime checkpoint (2026-09-29): the shared registry declares
+completion successors for patch collection and software queue draining. Both
+operator and automatic admission create the full graph atomically, including
+the patch-classification/resolver join before platform evaluation. Migration
+0221 adds an idempotent completion-edge API, releases ready children on
+successful completion, and recursively marks queued descendants Needs
+attention when a prerequisite fails, is cancelled, or times out. Material
+revision dependencies remain distinct and unchanged. Focused registry,
+migration, operator, inventory, and worker-topology tests pass (22 tests), as
+do Python compilation, undefined-name lint, and `git diff --check`; PostgreSQL
+execution remains unavailable while the stack is inactive. Next action: audit
+every executable handler for truthful failure/result behavior, then close
+worker-shutdown and Admin Health parity gaps found by the final requirements
+review.

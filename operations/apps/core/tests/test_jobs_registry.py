@@ -16,6 +16,7 @@ from shared.jobs_registry import (
     definitions,
     schedule_definitions,
     scheduled_definition_keys,
+    workflow_edges,
     validate_registry,
 )
 
@@ -63,6 +64,18 @@ def test_every_declared_automatic_schedule_has_one_cadence_contract():
     }
     assert len({schedule.schedule_id for schedule in schedules}) == len(schedules)
     assert all(schedule.cadence_setting for schedule in schedules)
+
+
+def test_initial_workflow_edges_are_registered_and_acyclic():
+    assert workflow_edges("patches") == (
+        ("patches", "patch-classify"),
+        ("patch-classify", "platform-evaluate"),
+        ("patches", "resolver"),
+        ("resolver", "platform-evaluate"),
+    )
+    assert workflow_edges("software-queue-drain") == (
+        ("software-queue-drain", "software-classify-only"),
+    )
 
 
 def test_checked_dispatcher_source_matches_registry_handler_keys():

@@ -44,6 +44,7 @@ from shared.jobs_registry import (
     definition,
     scheduled_definition_keys,
     validate_registry,
+    workflow_edges,
 )
 
 from . import capability as capability_evidence
@@ -8654,6 +8655,8 @@ def _enqueue_operator_job(
             ),
         )
         row = cur.fetchone()
+        if row is not None:
+            _admit_operator_workflow(cur, job.key, row[0])
         if row is not None and retry_of is not None:
             cur.execute(
                 "SELECT operations.jobs_link_retry_v1(%s, %s, %s)",
@@ -8662,6 +8665,34 @@ def _enqueue_operator_job(
     if row is None:
         raise RuntimeError("Jobs request API did not return a run")
     return row[0], True
+
+
+def _admit_operator_workflow(cur, root_key: str, root_run_id: uuid.UUID) -> None:
+    """Create one declared workflow graph in the root admission transaction."""
+    runs = {root_key: root_run_id}
+    for prerequisite_key, dependent_key in workflow_edges(root_key):
+        dependent = definition(dependent_key)
+        request_api = (
+            "operations.jobs_request_software_v1"
+            if dependent.supersession_family == "software-classifier"
+            else "operations.jobs_request"
+        )
+        request_identity = hashlib.sha256(
+            f"workflow:{root_run_id}:{dependent_key}".encode()
+        ).hexdigest()
+        cur.execute(
+            f"SELECT {request_api}(%s, %s, %s, %s, %s, %s, NULL, %s::jsonb, %s::jsonb, %s)",
+            (
+                1, dependent.key, dependent.snapshot_digest(), "tenant:1",
+                request_identity, "dependency", "{}", "{}", root_run_id,
+            ),
+        )
+        dependent_id = cur.fetchone()[0]
+        runs[dependent_key] = dependent_id
+        cur.execute(
+            "SELECT operations.jobs_add_completion_dependency_v1(%s, %s, %s)",
+            (1, dependent_id, runs[prerequisite_key]),
+        )
 
 
 def _queue_software_rebuild_after_commit(user_id: int) -> None:
