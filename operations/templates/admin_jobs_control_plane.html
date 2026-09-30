@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+
+{% block title %}Jobs control plane{% endblock %}
+
+{% block content %}
+<style>
+  .jobs-control-head { display:flex; justify-content:space-between; align-items:baseline; gap:1rem; flex-wrap:wrap; }
+  .jobs-control-head h1 { margin:0; font-size:1.35rem; }
+  .jobs-control-tabs { display:flex; flex-wrap:wrap; gap:.4rem; margin:1rem 0; }
+  .jobs-control-tabs a { padding:.35rem .6rem; border:1px solid var(--border); border-radius:4px; text-decoration:none; }
+  .jobs-control-tabs a.active { background:#1e40af; border-color:#1e40af; color:#fff; }
+  .jobs-control-row { margin:.55rem 0; border:1px solid var(--border); border-radius:6px; background:var(--surface); }
+  .jobs-control-row summary { cursor:pointer; padding:.65rem .8rem; font-weight:600; }
+  .jobs-control-data { display:grid; grid-template-columns:minmax(10rem, 14rem) 1fr; margin:0; border-top:1px solid var(--border); }
+  .jobs-control-data dt,.jobs-control-data dd { margin:0; padding:.45rem .7rem; border-bottom:1px solid var(--border); overflow-wrap:anywhere; }
+  .jobs-control-data dt { color:var(--muted); font-size:.78rem; }
+  .jobs-control-data dd { white-space:pre-wrap; font-family:ui-monospace, monospace; font-size:.78rem; }
+  .jobs-control-health { padding:.75rem 1rem; border-radius:6px; margin:1rem 0; }
+  .jobs-control-health.ok { background:#dcfce7; color:#14532d; }
+  .jobs-control-health.bad { background:#fef3c7; color:#78350f; }
+  .jobs-control-pages { display:flex; justify-content:space-between; margin-top:1rem; }
+</style>
+
+<div class="jobs-control-head">
+  <div><h1>Jobs control plane</h1><div class="muted">Read-only persisted definitions, policy, requests, execution evidence, and runtime health.</div></div>
+  <div><a href="{% url 'admin_jobs' %}">Jobs</a> · <a href="{% url 'admin_job_status' %}">Job activity</a></div>
+</div>
+
+{% if jobs_health.ok %}
+<div class="jobs-control-health ok"><strong>Control plane healthy.</strong> Registry, schedules, policy, and runtime heartbeats agree.</div>
+{% else %}
+<div class="jobs-control-health bad"><strong>Control plane needs review.</strong><ul>{% for issue in jobs_health.issues %}<li>{{ issue }}</li>{% empty %}<li>Health evidence is unavailable.</li>{% endfor %}</ul></div>
+{% endif %}
+
+<nav class="jobs-control-tabs" aria-label="Jobs diagnostics sections">
+{% for key, label in sections %}<a href="?section={{ key }}"{% if active_section == key %} class="active"{% endif %}>{{ label }}</a>{% endfor %}
+</nav>
+
+{% if unavailable %}<div class="notice notice-warning">{{ unavailable }}</div>{% endif %}
+<p class="muted">{{ total }} persisted record{{ total|pluralize }}. Page {{ page }}.</p>
+
+{% for row in rows %}
+<details class="jobs-control-row"{% if forloop.first %} open{% endif %}>
+  <summary>{% if row.definition_key %}{{ row.definition_key }}{% elif row.job_key %}{{ row.job_key }}{% elif row.runtime_kind %}{{ row.runtime_kind }} · {{ row.runtime_identity }}{% elif row.resource_identity %}{{ row.resource_identity }}{% elif row.resource_template %}{{ row.resource_template }}{% elif row.lane %}{{ row.lane }}{% elif row.event_type %}{{ row.event_type }} · {{ row.job_id }}{% elif row.domain_kind %}{{ row.domain_kind }} · {{ row.domain_record_id }}{% else %}{{ row.id|default:"Persisted record" }}{% endif %}</summary>
+  <dl class="jobs-control-data">{% for key, value in row.items %}<dt>{{ key }}</dt><dd>{{ value }}</dd>{% endfor %}</dl>
+</details>
+{% empty %}
+{% if not unavailable %}<p class="muted">No persisted records in this section.</p>{% endif %}
+{% endfor %}
+
+<div class="jobs-control-pages">
+  <span>{% if has_previous %}<a href="?section={{ active_section }}&amp;page={{ previous_page }}">← Previous</a>{% endif %}</span>
+  <span>{% if has_next %}<a href="?section={{ active_section }}&amp;page={{ next_page }}">Next →</a>{% endif %}</span>
+</div>
+{% endblock %}

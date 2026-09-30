@@ -1330,3 +1330,22 @@ PostgreSQL execution remains unavailable while the stack is inactive. Next
 action: commit and push this slice, then add Jobs registry/scheduler/worker,
 claim-containment, and policy mismatch evidence to Admin Health and expose the
 remaining persisted control-plane data.
+
+Control-plane diagnostics checkpoint (2026-09-29): in progress. Migration
+0226 adds tenant-protected scheduler/worker heartbeat storage and restricted
+heartbeat/stop APIs. A read-only administrator API provides paginated access
+to every persisted Jobs control relation: definition revisions, schedules and
+ticks, request aliases, runs and events, dependencies, domain attempts,
+lane/resource policy and claims, and runtime heartbeats. The new Jobs control
+plane page exposes those records without direct table grants. Admin Health
+compares the stored definition/schedule/policy state and fresh runtime registry
+digests against the shared registry, and flags missing runtimes or contained
+claims. The final schema-name review also corrected the run-detail query from
+the nonexistent `requested_input` name to the authoritative `request_payload`
+column before this slice was committed. Focused Operations tests pass (65),
+focused registry/material tests pass (16), Django system checks pass, and
+compilation, undefined-name lint, and `git diff --check` pass. PostgreSQL
+execution remains unavailable while the stack is inactive. Next action:
+review and commit/push this slice, then complete Job activity filters/
+pagination and remaining request/schedule outcome semantics before the final
+requirement audit.

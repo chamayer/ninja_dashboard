@@ -16,6 +16,18 @@
     {% endif %}
 </div>
 
+<div class="card">
+    <h2>Jobs control plane</h2>
+    {% if jobs_health.ok %}
+    <p><strong>Healthy.</strong> Registry definitions, schedules, capacity policy, and current scheduler/worker heartbeats agree.</p>
+    {% else %}
+    <p><strong>Needs review.</strong></p>
+    <ul>{% for issue in jobs_health.issues %}<li>{{ issue }}</li>{% empty %}<li>Jobs health evidence is unavailable.</li>{% endfor %}</ul>
+    {% endif %}
+    {% if jobs_health.summary %}<p class="muted">Queued {{ jobs_health.summary.queued_runs|default:0 }} · Running {{ jobs_health.summary.running_runs|default:0 }} · Stalled {{ jobs_health.summary.stalled_runs|default:0 }} · Contained claims {{ jobs_health.summary.contained_claims|default:0 }} · Waiting dependencies {{ jobs_health.summary.waiting_dependencies|default:0 }}</p>{% endif %}
+    <p><a href="{% url 'admin_jobs_control_plane' %}">Open Jobs control-plane diagnostics</a></p>
+</div>
+
 {% if condition_coverage %}
 <div class="card">
     <h2>Condition assessment coverage</h2>

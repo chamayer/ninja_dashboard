@@ -1,5 +1,7 @@
 from pathlib import Path
 
+from django.template.loader import get_template
+
 
 def test_operator_jobs_use_a_durable_queue_and_separate_stall_watchdog():
     queue = Path("../ingest/operator_job_queue.py").read_text(encoding="utf-8")
@@ -87,6 +89,16 @@ def test_jobs_status_uses_operator_language_and_safe_controls():
     assert "dependency.required_input_revisions" in views
     assert "dependency.required_output_revision" in views
     assert "Output revisions:" in template
+    assert "output_revisions, request_payload" in views
+    assert "output_revisions, requested_input" not in views
+    assert "admin_jobs_control_plane" in urls
+    assert "jobs_admin_diagnostics_v1" in views
+    assert "_jobs_control_health" in views
+    control_template = Path("templates/admin_jobs_control_plane.html").read_text(encoding="utf-8")
+    assert "row.items" in control_template
+    assert "Runtime heartbeats" in views
+    control_start = views.index("def admin_jobs_control_plane")
+    assert "@require_admin" in views[views.rfind("@login_required", 0, control_start):control_start]
 
 
 def test_scoped_software_requests_wait_for_the_governed_queue_worker():
@@ -99,3 +111,7 @@ def test_scoped_software_requests_wait_for_the_governed_queue_worker():
     assert "process_demand_entry" not in queue
     assert "client, _DEMAND_TABLE, batch_size, job_run_id" in queue
     assert "Direct scoped software run" not in jobs_template
+
+
+def test_jobs_control_plane_template_compiles():
+    get_template("admin_jobs_control_plane.html")

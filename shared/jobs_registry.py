@@ -771,6 +771,17 @@ def definitions() -> tuple[JobDefinition, ...]:
     return _DEFINITIONS
 
 
+def registry_digest() -> str:
+    """Return one credential-free identity for the complete live registry."""
+    payload = [
+        {"digest": item.snapshot_digest(), "key": item.key}
+        for item in _DEFINITIONS
+    ]
+    return hashlib.sha256(
+        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+
+
 def schedule_definitions() -> tuple[ScheduleDefinition, ...]:
     """Return every declared automatic cadence in stable registry order."""
     return _SCHEDULE_DEFINITIONS

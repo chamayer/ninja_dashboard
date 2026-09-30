@@ -22,12 +22,14 @@ from ingest.config import settings
 from shared.jobs_registry import (
     definition,
     definitions,
+    registry_digest,
     schedule_definitions,
     validate_registry,
     workflow_edges,
 )
 
 log = logging.getLogger(__name__)
+SCHEDULER_RUNTIME_ID = uuid.uuid4()
 
 
 class JobCancellationRequested(RuntimeError):
@@ -78,6 +80,51 @@ def register_definition_snapshots() -> None:
                     json.dumps(job.snapshot_metadata()),
                 ),
             )
+
+
+def record_runtime_heartbeat(
+    runtime_kind: str,
+    runtime_identity: uuid.UUID,
+    metadata: dict[str, object],
+) -> bool:
+    """Publish sanitized liveness without granting runtime table access."""
+    try:
+        with db.transaction() as cur:
+            cur.execute("SET LOCAL operations.tenant_id = 1")
+            cur.execute(
+                "SELECT operations.jobs_runtime_heartbeat_v1(%s, %s, %s, %s, %s::jsonb)",
+                (
+                    1,
+                    runtime_kind,
+                    runtime_identity,
+                    registry_digest(),
+                    json.dumps(metadata),
+                ),
+            )
+    except UndefinedFunction:
+        log.info("Jobs runtime heartbeat migration is not available yet")
+        return False
+    except Exception:
+        log.exception("Jobs %s heartbeat failed", runtime_kind)
+        return False
+    return True
+
+
+def stop_runtime(runtime_kind: str, runtime_identity: uuid.UUID) -> bool:
+    """Record a graceful runtime stop when the diagnostics API is available."""
+    try:
+        with db.transaction() as cur:
+            cur.execute("SET LOCAL operations.tenant_id = 1")
+            cur.execute(
+                "SELECT operations.jobs_runtime_stop_v1(%s, %s, %s)",
+                (1, runtime_kind, runtime_identity),
+            )
+    except UndefinedFunction:
+        return False
+    except Exception:
+        log.exception("Jobs %s stop heartbeat failed", runtime_kind)
+        return False
+    return True
 
 
 def _schedule_cadence(schedule: Any) -> dict[str, int | str]:
@@ -255,6 +302,15 @@ def _run_source_actions(job_run_id: object) -> JobExecutionResult:
 def produce_due_schedules() -> int:
     """Elect a short-lived leader and atomically admit each due durable schedule."""
     admitted = 0
+    record_runtime_heartbeat(
+        "scheduler",
+        SCHEDULER_RUNTIME_ID,
+        {
+            "definition_count": len(definitions()),
+            "leader_mode": "short_lived_advisory",
+            "poll_seconds": 60,
+        },
+    )
     if not reconcile_schedule_catalog():
         return admitted
     try:

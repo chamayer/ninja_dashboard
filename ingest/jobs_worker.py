@@ -26,6 +26,7 @@ log = logging.getLogger(__name__)
 
 _READY_PATH = Path("/tmp/ninja-jobs-worker-ready")
 _POLL_SECONDS = 1.0
+_HEARTBEAT_SECONDS = 15.0
 _stopping = False
 
 
@@ -118,8 +119,21 @@ def run() -> int:
     children: dict[str, _Child] = {}
     _READY_PATH.touch()
     log.info("Jobs worker ready: incarnation=%s", worker_incarnation)
+    next_runtime_heartbeat = 0.0
     try:
         while not _stopping:
+            now = time.monotonic()
+            if now >= next_runtime_heartbeat:
+                operator_job_queue.record_runtime_heartbeat(
+                    "worker",
+                    worker_incarnation,
+                    {
+                        "lanes": list(operator_job_queue.WORKER_LANES),
+                        "active_children": len(children),
+                        "poll_seconds": _POLL_SECONDS,
+                    },
+                )
+                next_runtime_heartbeat = now + _HEARTBEAT_SECONDS
             for lane in operator_job_queue.WORKER_LANES:
                 child = children.get(lane)
                 if child is not None:
@@ -146,6 +160,7 @@ def run() -> int:
     finally:
         _READY_PATH.unlink(missing_ok=True)
         _shutdown_children(children)
+        operator_job_queue.stop_runtime("worker", worker_incarnation)
     return 0
 
 

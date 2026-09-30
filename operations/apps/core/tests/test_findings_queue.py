@@ -687,6 +687,8 @@ def test_admin_health_exposes_unavailable_policy_state():
     template = Path("templates/findings_admin_health.html").read_text(encoding="utf-8")
     assert '"condition_policy_available": condition_policy_available' in source
     assert "Condition policy is unavailable" in template
+    assert '"jobs_health": jobs_health' in source
+    assert "Open Jobs control-plane diagnostics" in template
 
 
 def test_admin_coverage_tracks_condition_keys_and_links_to_issues():

@@ -23,7 +23,7 @@
 
 <div class="job-status-head">
   <div><h1>Job activity</h1><div class="muted">All requested and scheduled work. Updates every 15 seconds; work runs independently by lane.</div></div>
-  <a href="{% url 'admin_jobs' %}">Back to Jobs</a>
+  <div><a href="{% url 'admin_jobs' %}">Back to Jobs</a> · <a href="{% url 'admin_jobs_control_plane' %}">Control plane</a></div>
 </div>
 
 {% if runs %}
@@ -45,7 +45,7 @@
       {% if run.domain_attempts %}<details class="job-timeline"><summary>Domain work</summary><ul>{% for attempt in run.domain_attempts %}<li>{{ attempt.kind }} record {{ attempt.record_id }}, attempt {{ attempt.attempt }}</li>{% endfor %}</ul></details>{% endif %}
       <details class="job-timeline"><summary>Technical details</summary><ul>
         <li>Run ID: {{ run.id }}</li><li>Job key: {{ run.job_key }}</li><li>Contract: v{{ run.contract_version }}</li><li>Scope: {{ run.technical.scope_identity }}</li><li>Definition: {{ run.technical.definition_digest }}</li>
-        {% if run.technical.input_revisions %}<li>Input revisions: {{ run.technical.input_revisions }}</li>{% endif %}{% if run.technical.output_revisions %}<li>Output revisions: {{ run.technical.output_revisions }}</li>{% endif %}{% if run.technical.requested_input %}<li>Requested input: {{ run.technical.requested_input }}</li>{% endif %}
+        {% if run.technical.input_revisions %}<li>Input revisions: {{ run.technical.input_revisions }}</li>{% endif %}{% if run.technical.output_revisions %}<li>Output revisions: {{ run.technical.output_revisions }}</li>{% endif %}{% if run.technical.request_payload %}<li>Request payload: {{ run.technical.request_payload }}</li>{% endif %}
         {% if run.correlation_id %}<li>Correlation: {{ run.correlation_id }}</li>{% endif %}{% if run.retry_of_run_id %}<li>Retry of: <a href="?run={{ run.retry_of_run_id }}">{{ run.retry_of_run_id }}</a></li>{% endif %}{% if run.technical.parent_run_id %}<li>Parent: <a href="?run={{ run.technical.parent_run_id }}">{{ run.technical.parent_run_id }}</a></li>{% endif %}{% if run.technical.root_run_id %}<li>Root: <a href="?run={{ run.technical.root_run_id }}">{{ run.technical.root_run_id }}</a></li>{% endif %}{% if run.terminal_reason %}<li>Terminal reason: {{ run.terminal_reason }}</li>{% endif %}
       </ul></details>
     </td>

@@ -16,7 +16,7 @@ from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied
 from django.core.paginator import Paginator
-from django.db import IntegrityError, connection, transaction
+from django.db import DatabaseError, IntegrityError, connection, transaction
 from django.db.models import (
     Case,
     CharField,
@@ -39,9 +39,15 @@ from django.utils.dateparse import parse_datetime
 from django.utils.text import slugify
 from django.views.decorators.http import require_GET, require_POST
 from shared.jobs_registry import (
+    INITIAL_EXECUTION_CAPACITY,
+    INITIAL_LANE_CAPACITIES,
     capability_state,
     catalog_entries,
     definition,
+    definition_keys,
+    definitions,
+    registry_digest,
+    schedule_definitions,
     scheduled_definition_keys,
     validate_registry,
     workflow_edges,
@@ -8238,6 +8244,184 @@ _SOFTWARE_JOB_PRIORITY = {
     "software-classify": 3,
 }
 
+_JOBS_DIAGNOSTIC_SECTIONS = (
+    ("definition_versions", "Definition revisions"),
+    ("schedules", "Schedules"),
+    ("schedule_events", "Schedule events"),
+    ("requests", "Request aliases"),
+    ("runs", "Runs"),
+    ("events", "Run events"),
+    ("dependencies", "Dependencies"),
+    ("domain_attempts", "Domain attempts"),
+    ("lane_limits", "Lane policy"),
+    ("resource_limits", "Resource policy"),
+    ("resource_claims", "Resource claims"),
+    ("runtimes", "Runtime heartbeats"),
+)
+_JOBS_DIAGNOSTIC_KEYS = frozenset(key for key, _label in _JOBS_DIAGNOSTIC_SECTIONS)
+
+
+def _jobs_diagnostic_query(
+    section: str, *, limit: int = 100, offset: int = 0, cursor=None
+) -> tuple[int, list[dict]]:
+    """Read one bounded diagnostics page through the restricted SQL API."""
+    if cursor is None:
+        with transaction.atomic(), connection.cursor() as cur:
+            cur.execute("SET LOCAL operations.tenant_id = 1")
+            return _jobs_diagnostic_query(
+                section, limit=limit, offset=offset, cursor=cur
+            )
+    cursor.execute(
+        "SELECT total_count, item FROM operations.jobs_admin_diagnostics_v1(%s, %s, %s, %s)",
+        (1, section, limit, offset),
+    )
+    rows = cursor.fetchall()
+    return (int(rows[0][0]) if rows else 0, [row[1] or {} for row in rows])
+
+
+def _jobs_diagnostic_all(section: str, cursor) -> list[dict]:
+    """Read a small policy/catalog section completely for health comparison."""
+    offset = 0
+    rows: list[dict] = []
+    while True:
+        total, page = _jobs_diagnostic_query(
+            section, limit=100, offset=offset, cursor=cursor
+        )
+        rows.extend(page)
+        offset += len(page)
+        if not page or offset >= total:
+            return rows
+
+
+def _jobs_control_health() -> dict:
+    """Compare persisted Jobs state with this Operations registry revision."""
+    result = {
+        "available": False,
+        "ok": False,
+        "issues": [],
+        "summary": {},
+        "runtimes": [],
+    }
+    try:
+        with transaction.atomic(), connection.cursor() as cur:
+            cur.execute("SET LOCAL operations.tenant_id = 1")
+            _count, health_rows = _jobs_diagnostic_query("health", cursor=cur)
+            version_rows = _jobs_diagnostic_all("definition_versions", cur)
+            schedule_rows = _jobs_diagnostic_all("schedules", cur)
+            lane_rows = _jobs_diagnostic_all("lane_limits", cur)
+            resource_rows = _jobs_diagnostic_all("resource_limits", cur)
+            _count, runtime_rows = _jobs_diagnostic_query("runtimes", cursor=cur)
+    except DatabaseError:
+        log.exception("Jobs control-plane health query failed")
+        result["issues"].append("Jobs diagnostics are unavailable or failed.")
+        return result
+
+    result["available"] = True
+    result["summary"] = health_rows[0] if health_rows else {}
+    result["runtimes"] = runtime_rows
+    issues: list[str] = []
+
+    stored_versions = {
+        (row.get("definition_key"), row.get("definition_digest"))
+        for row in version_rows
+    }
+    expected_versions = {(item.key, item.snapshot_digest()) for item in definitions()}
+    missing_versions = sorted(key for key, digest in expected_versions if (key, digest) not in stored_versions)
+    if missing_versions:
+        issues.append("Missing current definition revisions: " + ", ".join(missing_versions))
+
+    schedules_by_key = {row.get("definition_key"): row for row in schedule_rows}
+    expected_schedules = {item.job_key for item in schedule_definitions()}
+    missing_schedules = sorted(expected_schedules - schedules_by_key.keys())
+    if missing_schedules:
+        issues.append("Missing schedule state: " + ", ".join(missing_schedules))
+    stale_schedules = sorted(
+        key
+        for key, row in schedules_by_key.items()
+        if key in definition_keys()
+        and row.get("definition_digest") != definition(key).snapshot_digest()
+    )
+    if stale_schedules:
+        issues.append("Schedules use old definitions: " + ", ".join(stale_schedules))
+
+    actual_lanes = {row.get("lane"): row.get("capacity") for row in lane_rows}
+    if actual_lanes != dict(INITIAL_LANE_CAPACITIES):
+        issues.append("Lane capacity policy differs from the reviewed registry policy.")
+    expected_resources = {"execution:deployment": INITIAL_EXECUTION_CAPACITY}
+    for item in definitions():
+        for resource in item.resource_keys:
+            expected_resources.setdefault(resource, 1)
+    actual_resources = {
+        row.get("resource_template"): row.get("capacity") for row in resource_rows
+    }
+    if actual_resources != expected_resources:
+        issues.append("Resource capacity policy differs from the reviewed registry policy.")
+
+    expected_registry = registry_digest()
+    now = timezone.now()
+    live_kinds: set[str] = set()
+    for runtime in runtime_rows:
+        heartbeat = parse_datetime(str(runtime.get("heartbeat_at") or ""))
+        if runtime.get("stopped_at") or heartbeat is None:
+            continue
+        if now - heartbeat <= timedelta(minutes=3):
+            live_kinds.add(str(runtime.get("runtime_kind")))
+            if runtime.get("registry_digest") != expected_registry:
+                issues.append(
+                    f"Live {runtime.get('runtime_kind')} uses a different registry revision."
+                )
+    for required_kind in ("scheduler", "worker"):
+        if required_kind not in live_kinds:
+            issues.append(f"No current Jobs {required_kind} heartbeat.")
+
+    if int(result["summary"].get("contained_claims") or 0):
+        issues.append("Contained resource claims require administrator review.")
+
+    result["issues"] = list(dict.fromkeys(issues))
+    result["ok"] = not result["issues"]
+    return result
+
+
+@login_required
+@require_admin
+def admin_jobs_control_plane(request: HttpRequest) -> HttpResponse:
+    """Paginated, read-only access to every persisted Jobs control relation."""
+    section = (request.GET.get("section") or "definition_versions").strip()
+    if section not in _JOBS_DIAGNOSTIC_KEYS:
+        section = "definition_versions"
+    try:
+        page = min(40001, max(1, int(request.GET.get("page") or "1")))
+    except ValueError:
+        page = 1
+    page_size = 25
+    offset = (page - 1) * page_size
+    unavailable = ""
+    try:
+        total, rows = _jobs_diagnostic_query(section, limit=page_size, offset=offset)
+    except DatabaseError:
+        log.exception("Jobs control-plane diagnostics query failed: section=%s", section)
+        total, rows = 0, []
+        unavailable = "Jobs diagnostics are unavailable or failed."
+    return render(
+        request,
+        "admin_jobs_control_plane.html",
+        {
+            "admin_group": "integrations",
+            "admin_tab": "jobs",
+            "sections": _JOBS_DIAGNOSTIC_SECTIONS,
+            "active_section": section,
+            "rows": rows,
+            "total": total,
+            "page": page,
+            "has_previous": page > 1,
+            "previous_page": page - 1,
+            "has_next": offset + len(rows) < total,
+            "next_page": page + 1,
+            "unavailable": unavailable,
+            "jobs_health": _jobs_control_health(),
+        },
+    )
+
 
 def _job_lane(job_key: str) -> str:
     return definition(job_key).lane
@@ -8776,7 +8960,7 @@ def _operator_job_runs(*, limit: int = 100, run_id: str = "", batch_id: str = ""
                 )
             cur.execute(
                 """SELECT id, definition_digest, scope_identity, input_revisions,
-                          output_revisions, requested_input, parent_run_id, root_run_id
+                          output_revisions, request_payload, parent_run_id, root_run_id
                      FROM operations.operator_job_runs
                     WHERE tenant_id = 1 AND id = ANY(%s)""",
                 (job_ids,),
@@ -8785,7 +8969,7 @@ def _operator_job_runs(*, limit: int = 100, run_id: str = "", batch_id: str = ""
                 technical_by_job[detail[0]] = {
                     "definition_digest": detail[1], "scope_identity": detail[2],
                     "input_revisions": detail[3] or {}, "output_revisions": detail[4] or {},
-                    "requested_input": detail[5] or {},
+                    "request_payload": detail[5] or {},
                     "parent_run_id": detail[6], "root_run_id": detail[7],
                 }
             cur.execute(
@@ -10694,6 +10878,7 @@ def findings_admin_health(request: HttpRequest) -> HttpResponse:
         condition_policy_available = False
 
     condition_coverage = _condition_coverage_summary(condition_profile)
+    jobs_health = _jobs_control_health()
 
     return render(
         request,
@@ -10709,6 +10894,7 @@ def findings_admin_health(request: HttpRequest) -> HttpResponse:
             "active_severity": severity_filter,
             "active_type": type_filter,
             "condition_coverage": condition_coverage,
+            "jobs_health": jobs_health,
         },
     )
 

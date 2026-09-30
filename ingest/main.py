@@ -2382,6 +2382,15 @@ def main() -> None:
     migrations.apply_pending()
     operator_job_queue.register_definition_snapshots()
     operator_job_queue.reconcile_schedule_catalog()
+    operator_job_queue.record_runtime_heartbeat(
+        "scheduler",
+        operator_job_queue.SCHEDULER_RUNTIME_ID,
+        {
+            "definition_count": len(operator_job_queue.EXECUTABLE_JOB_KEYS),
+            "leader_mode": "short_lived_advisory",
+            "poll_seconds": 60,
+        },
+    )
 
     scheduler = BackgroundScheduler()
     # Durable schedules retain their cadence and due tick in Postgres.  This
@@ -2415,6 +2424,9 @@ def main() -> None:
     try:
         threading.Event().wait()
     finally:
+        operator_job_queue.stop_runtime(
+            "scheduler", operator_job_queue.SCHEDULER_RUNTIME_ID
+        )
         httpd.shutdown()
 
 

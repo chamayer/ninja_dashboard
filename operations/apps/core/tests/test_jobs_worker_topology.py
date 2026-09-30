@@ -32,3 +32,5 @@ def test_worker_uses_only_fenced_v1_queue_apis():
     assert ".terminate(" not in worker
     assert ".kill(" not in worker
     assert "jobs_interrupt_v1" in queue
+    assert "record_runtime_heartbeat" in worker
+    assert "stop_runtime" in worker
