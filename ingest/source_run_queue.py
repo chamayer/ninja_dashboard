@@ -218,17 +218,6 @@ def process_entry(entry_id: int, job_run_id: object) -> int:
                 collection_failure = exc
             rows_seen = sum(counts.values())
             refresh_after_collection(f"on-demand {df} collection")
-            # Refresh derived findings for non-identity (CMDB) sources so an
-            # on-demand run reflects immediately rather than waiting for the
-            # next scheduled cycle. This is required output for documentation
-            # sources, so failure must fail the owning Job.
-            if sources:
-                from ingest.source_observations import is_identity_source
-
-                if not any(is_identity_source(s) for s in sources):
-                    from ingest import cmdb_findings
-
-                    log.info("cmdb findings: %s", cmdb_findings.evaluate(dry_run=False))
             if collection_failure:
                 raise collection_failure
         else:

@@ -81,9 +81,12 @@ def test_jobs_status_uses_operator_language_and_safe_controls():
     assert "Domain work" in template
     assert "Dependencies" in template
     assert "_admit_operator_workflow" in views
-    assert "jobs_add_completion_dependency_v1" in views
+    assert "jobs_add_revision_dependency_v1" in views
     assert "_admit_workflow" in queue
-    assert "jobs_add_completion_dependency_v1" in queue
+    assert "jobs_add_revision_dependency_v1" in queue
+    assert "dependency.required_input_revisions" in views
+    assert "dependency.required_output_revision" in views
+    assert "Output revisions:" in template
 
 
 def test_scoped_software_requests_wait_for_the_governed_queue_worker():

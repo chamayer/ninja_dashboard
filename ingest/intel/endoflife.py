@@ -36,6 +36,7 @@ import httpx
 
 from ingest import db
 from ingest.config import settings
+from ingest.intel.material import MaterialCount
 from ingest.intel.status import record_run
 
 log = logging.getLogger(__name__)
@@ -55,7 +56,8 @@ def run_once() -> int:
         products, releases = _pull_and_upsert()
         state["rows_touched"] = products + releases
         state["notes"] = f"Upserted {products} products, {releases} releases."
-        return products + releases
+        changed = products + releases
+        return MaterialCount(changed, material_changed=changed > 0)
 
 
 def _pull_and_upsert() -> tuple[int, int]:
@@ -139,10 +141,18 @@ def _upsert_products(entries: list[dict]) -> int:
                 aliases    = EXCLUDED.aliases,
                 tags       = EXCLUDED.tags,
                 updated_at = now()
+            WHERE ROW(
+                intel.eol_products.label, intel.eol_products.category,
+                intel.eol_products.aliases, intel.eol_products.tags
+            ) IS DISTINCT FROM ROW(
+                EXCLUDED.label, EXCLUDED.category,
+                EXCLUDED.aliases, EXCLUDED.tags
+            )
             """,
             rows,
         )
-    return len(rows)
+        changed = cur.rowcount or 0
+    return changed
 
 
 def _upsert_releases(product_name: str, releases: list[dict]) -> int:
@@ -191,10 +201,26 @@ def _upsert_releases(product_name: str, releases: list[dict]) -> int:
                 is_lts         = EXCLUDED.is_lts,
                 latest_version = EXCLUDED.latest_version,
                 updated_at     = now()
+            WHERE ROW(
+                intel.eol_releases.label, intel.eol_releases.release_date,
+                intel.eol_releases.eoas_from, intel.eol_releases.is_eoas,
+                intel.eol_releases.eol_from, intel.eol_releases.is_eol,
+                intel.eol_releases.eoes_from, intel.eol_releases.is_eoes,
+                intel.eol_releases.is_maintained, intel.eol_releases.is_lts,
+                intel.eol_releases.latest_version
+            ) IS DISTINCT FROM ROW(
+                EXCLUDED.label, EXCLUDED.release_date,
+                EXCLUDED.eoas_from, EXCLUDED.is_eoas,
+                EXCLUDED.eol_from, EXCLUDED.is_eol,
+                EXCLUDED.eoes_from, EXCLUDED.is_eoes,
+                EXCLUDED.is_maintained, EXCLUDED.is_lts,
+                EXCLUDED.latest_version
+            )
             """,
             rows,
         )
-    return len(rows)
+        changed = cur.rowcount or 0
+    return changed
 
 
 def _as_date(value: object) -> date | None:

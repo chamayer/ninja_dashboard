@@ -405,6 +405,18 @@
       {
         "file": "operations/apps/core/views.py",
         "owner": "",
+        "id": "cmdb-evaluate",
+        "name": "CMDB evaluation",
+        "category": "evaluation",
+        "endpoint": "",
+        "status_key": "cmdb_findings",
+        "status_source": "run_log",
+        "description": "Evaluate CMDB findings from completed documentation-source evidence.",
+        "run_all": false
+      },
+      {
+        "file": "operations/apps/core/views.py",
+        "owner": "",
         "id": "resolver",
         "name": "Identity resolver",
         "category": "evaluators",
@@ -741,6 +753,12 @@
       {
         "file": "ingest/operator_job_queue.py",
         "owner": "_execute",
+        "key": "cmdb-evaluate",
+        "expression": "('Evaluating CMDB conditions', lambda: sum(cmdb_findings.evaluate(dry_run=False).values()))"
+      },
+      {
+        "file": "ingest/operator_job_queue.py",
+        "owner": "_execute",
         "key": "parity-check",
         "expression": "('Checking operational parity', lambda: main.parity_check_run(tenant_id=1))"
       },
@@ -820,13 +838,13 @@
         "file": "ingest/operator_job_queue.py",
         "owner": "_execute",
         "key": "source-actions",
-        "expression": "('Processing approved source actions', lambda: sum(source_actions.process_pending(job_run_id=progress.job_id).values()))"
+        "expression": "('Processing approved source actions', lambda: _run_source_actions(progress.job_id))"
       },
       {
         "file": "ingest/operator_job_queue.py",
         "owner": "_execute",
         "key": "source-demand",
-        "expression": "('Processing queued source demand', lambda: source_run_queue.process_next(progress.job_id))"
+        "expression": "('Processing queued source demand', lambda: _run_source_demand(progress.job_id))"
       },
       {
         "file": "ingest/operator_job_queue.py",

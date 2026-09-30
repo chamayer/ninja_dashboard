@@ -10,6 +10,7 @@ import json
 import hashlib
 import logging
 import uuid
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -32,11 +33,19 @@ log = logging.getLogger(__name__)
 class JobCancellationRequested(RuntimeError):
     """Raised only at a reviewed worker stage boundary."""
 
+
+@dataclass(frozen=True)
+class JobExecutionResult:
+    """Sanitized child result used for conditional dependency admission."""
+
+    rows: int | None = None
+    signals: tuple[str, ...] = ()
+
 # Keep this independent from the registry so an omitted or extra dispatcher
 # handler prevents readiness instead of becoming an unreviewed live path.
 EXECUTABLE_JOB_KEYS = frozenset(
     {
-        "patch-classify", "platform-evaluate", "parity-check", "software-classify-only",
+        "patch-classify", "platform-evaluate", "cmdb-evaluate", "parity-check", "software-classify-only",
         "software-classify-full", "resolver", "patches", "agent-observations",
         "documentation-observations", "agent-compliance", "agent-compliance-evaluate",
         "retention-history", "software-enqueue-orgs", "software-queue-drain",
@@ -155,19 +164,24 @@ def _next_due_at(due_at: datetime, cadence: dict[str, Any], now: datetime) -> da
     return candidate
 
 
-def _admit_workflow(cur: Any, root_key: str, root_run_id: uuid.UUID) -> None:
-    """Create declared successor runs and completion edges atomically."""
+def _admit_workflow(
+    cur: Any,
+    root_key: str,
+    root_run_id: uuid.UUID,
+    conditions: frozenset[str] = frozenset({"always"}),
+) -> None:
+    """Create matching successor runs and revision edges atomically."""
     runs = {root_key: root_run_id}
-    for prerequisite_key, dependent_key in workflow_edges(root_key):
-        prerequisite_id = runs[prerequisite_key]
-        dependent = definition(dependent_key)
+    for edge in workflow_edges(root_key, conditions):
+        prerequisite_id = runs[edge.prerequisite]
+        dependent = definition(edge.dependent)
         request_api = (
             "operations.jobs_request_software_v1"
             if dependent.supersession_family == "software-classifier"
             else "operations.jobs_request"
         )
         request_identity = hashlib.sha256(
-            f"workflow:{root_run_id}:{dependent_key}".encode()
+            f"workflow:{root_run_id}:{edge.dependent}:{edge.revision_name}".encode()
         ).hexdigest()
         cur.execute(
             f"SELECT {request_api}(%s, %s, %s, %s, %s, %s, NULL, %s::jsonb, %s::jsonb, %s)",
@@ -177,11 +191,65 @@ def _admit_workflow(cur: Any, root_key: str, root_run_id: uuid.UUID) -> None:
             ),
         )
         dependent_id = cur.fetchone()[0]
-        runs[dependent_key] = dependent_id
+        runs[edge.dependent] = dependent_id
+        required_revision = hashlib.sha256(
+            f"{prerequisite_id}:{edge.revision_name}:tenant:1".encode()
+        ).hexdigest()
         cur.execute(
-            "SELECT operations.jobs_add_completion_dependency_v1(%s, %s, %s)",
-            (1, dependent_id, prerequisite_id),
+            "SELECT operations.jobs_add_revision_dependency_v1(%s, %s, %s, %s, %s, %s)",
+            (
+                1, dependent_id, prerequisite_id, edge.revision_name,
+                "tenant:1", required_revision,
+            ),
         )
+
+
+def admit_result_workflow(
+    root_key: str, root_run_id: uuid.UUID, signals: tuple[str, ...]
+) -> None:
+    """Admit only registry-approved conditional edges from a fenced result."""
+    approved = frozenset(signals) - {"always"}
+    if not approved:
+        return
+    with db.transaction() as cur:
+        cur.execute("SET LOCAL operations.tenant_id = 1")
+        _admit_workflow(cur, root_key, root_run_id, approved)
+
+
+def _run_source_demand(job_run_id: object) -> JobExecutionResult:
+    from ingest.source_observations import is_identity_source
+    from ingest.sources import load_sources
+    from ingest import source_run_queue
+
+    with db.transaction() as cur:
+        cur.execute("SET LOCAL operations.tenant_id = 1")
+        cur.execute(
+            "SELECT df FROM operations.source_run_queue "
+            "WHERE tenant_id = 1 AND status = 'pending' AND job_run_id IS NULL "
+            "ORDER BY queued_at, id LIMIT 1"
+        )
+        row = cur.fetchone()
+    source_name = row[0] if row else ""
+    processed = source_run_queue.process_next(job_run_id)
+    if not processed:
+        return JobExecutionResult(rows=0)
+    if source_name == "Ninja":
+        return JobExecutionResult(rows=processed, signals=("identity_source",))
+    sources = [source for source in load_sources() if source.platform == source_name]
+    signal = (
+        "identity_source"
+        if any(is_identity_source(source) for source in sources)
+        else "documentation_source"
+    )
+    return JobExecutionResult(rows=processed, signals=(signal,))
+
+
+def _run_source_actions(job_run_id: object) -> JobExecutionResult:
+    from ingest import source_actions
+
+    outcome = source_actions.process_pending(job_run_id=job_run_id)
+    signals = ("documentation_source",) if outcome["completed"] else ()
+    return JobExecutionResult(rows=sum(outcome.values()), signals=signals)
 
 
 def produce_due_schedules() -> int:
@@ -365,7 +433,7 @@ def _interrupt_v1(job_id: Any, claim_token: uuid.UUID, reason: str) -> bool:
         return bool(cur.fetchone()[0])
 
 
-def _execute(job_key: str, progress: V1JobProgress) -> int | None:
+def _execute(job_key: str, progress: V1JobProgress) -> int | JobExecutionResult | None:
     """Run a catalog job synchronously in the bounded queue worker.
 
     Importing main here avoids its startup import cycle. The direct lower-level
@@ -387,15 +455,19 @@ def _execute(job_key: str, progress: V1JobProgress) -> int | None:
         winget,
     )
     from ingest.software_findings import incremental_pending_count
-    from ingest import source_actions
     from ingest import source_run_queue
     from ingest import platform_findings, runlog
+    from ingest import cmdb_findings
 
     jobs = {
         "patch-classify": ("Classifying patch state", lambda: main.patch_classify(tenant_id=1)),
         "platform-evaluate": (
             "Evaluating platform conditions",
             lambda: main.platform_evaluate(tenant_id=1),
+        ),
+        "cmdb-evaluate": (
+            "Evaluating CMDB conditions",
+            lambda: sum(cmdb_findings.evaluate(dry_run=False).values()),
         ),
         "parity-check": ("Checking operational parity", lambda: main.parity_check_run(tenant_id=1)),
         "software-classify-only": (
@@ -442,11 +514,11 @@ def _execute(job_key: str, progress: V1JobProgress) -> int | None:
         ),
         "source-actions": (
             "Processing approved source actions",
-            lambda: sum(source_actions.process_pending(job_run_id=progress.job_id).values()),
+            lambda: _run_source_actions(progress.job_id),
         ),
         "source-demand": (
             "Processing queued source demand",
-            lambda: source_run_queue.process_next(progress.job_id),
+            lambda: _run_source_demand(progress.job_id),
         ),
         "source-demand-recovery": (
             "Recovering expired source demand",
@@ -500,6 +572,13 @@ def _execute(job_key: str, progress: V1JobProgress) -> int | None:
     result = job()
     if job_key == "patches" and result is False:
         raise RuntimeError("Patch collection could not acquire its database execution lock")
+    if isinstance(result, JobExecutionResult):
+        return result
+    if bool(getattr(result, "material_changed", False)) and any(
+        successor.condition == "material_change"
+        for successor in definition(job_key).successors
+    ):
+        return JobExecutionResult(rows=result, signals=("material_change",))
     return int(result) if isinstance(result, int) else None
 
 

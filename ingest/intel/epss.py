@@ -16,6 +16,7 @@ import httpx
 
 from ingest import db
 from ingest.config import settings
+from ingest.intel.material import MaterialCount
 from ingest.intel.status import record_run
 
 log = logging.getLogger(__name__)
@@ -34,7 +35,7 @@ def run_once() -> int:
         rows = _pull_and_upsert()
         state["rows_touched"] = rows
         state["notes"] = f"Updated {rows} CVEs with EPSS scores."
-        return rows
+        return MaterialCount(rows, material_changed=rows > 0)
 
 
 def _pull_and_upsert() -> int:
@@ -74,9 +75,10 @@ def _pull_and_upsert() -> int:
             UPDATE intel.cves
                SET epss_score = %s, epss_percentile = %s, updated_at = now()
              WHERE cve_id = %s
+               AND ROW(epss_score, epss_percentile)
+                   IS DISTINCT FROM ROW(%s, %s)
             """,
-            rows,
+            [(epss, percentile, cve_id, epss, percentile) for epss, percentile, cve_id in rows],
         )
-        cur.execute("SELECT COUNT(*) FROM intel.cves WHERE epss_score IS NOT NULL")
-        (updated,) = cur.fetchone()
-    return int(updated)
+        updated = cur.rowcount or 0
+    return updated

@@ -69,6 +69,11 @@ def _finish_child(child: _Child) -> None:
     if result.get("cancelled"):
         operator_job_queue._finish_cancelled_v1(child.run_id, child.claim_token)
     elif result.get("ok"):
+        operator_job_queue.admit_result_workflow(
+            child.job_key,
+            child.run_id,
+            tuple(result.get("signals") or ()),
+        )
         operator_job_queue._finish_v1(child.run_id, child.claim_token, "completed", rows=result.get("rows"))
     else:
         operator_job_queue._finish_v1(child.run_id, child.claim_token, "failed", error=str(result.get("error", "Jobs child failed."))[:2000])

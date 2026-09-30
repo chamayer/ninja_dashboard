@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from dataclasses import dataclass, replace
 from types import MappingProxyType
 from typing import Iterable, Mapping
@@ -27,6 +28,39 @@ class ScheduleDefinition:
     job_key: str
     cadence_setting: str
     cadence_unit: str = "hours"
+
+
+@dataclass(frozen=True)
+class DependencyDefinition:
+    """One declared successor contract for a published prerequisite revision."""
+
+    successor: str
+    revision_name: str
+    condition: str = "always"
+    scope_mode: str = "inherit"
+    coalescing: str = "definition_scope"
+    failure_rule: str = "block"
+
+    def snapshot(self) -> dict[str, str]:
+        return {
+            "successor": self.successor,
+            "revision_name": self.revision_name,
+            "condition": self.condition,
+            "scope_mode": self.scope_mode,
+            "coalescing": self.coalescing,
+            "failure_rule": self.failure_rule,
+        }
+
+
+@dataclass(frozen=True)
+class WorkflowEdge:
+    prerequisite: str
+    dependent: str
+    revision_name: str
+    condition: str
+    scope_mode: str
+    coalescing: str
+    failure_rule: str
 
 
 @dataclass(frozen=True)
@@ -58,7 +92,7 @@ class JobDefinition:
     handler_version: str = "registry-v1"
     retry_policy: str = "manual_only_unreviewed"
     kill_safe: bool = False
-    successors: tuple[str, ...] = ()
+    successors: tuple[DependencyDefinition, ...] = ()
 
     def catalog_entry(self) -> dict[str, object]:
         """Return the stable operator-facing shape used by the current UI."""
@@ -87,7 +121,7 @@ class JobDefinition:
             "resource_keys": list(self.resource_keys),
             "supersession_family": self.supersession_family,
             "supersession_rank": self.supersession_rank,
-            "successors": list(self.successors),
+            "successors": [successor.snapshot() for successor in self.successors],
         }
 
     def snapshot_digest(self) -> str:
@@ -194,6 +228,18 @@ _RAW_DEFINITIONS = (
         "run_log",
         "ingest.evaluator.evaluate",
         schedule_ids=("platform_evaluate_cycle",),
+    ),
+    JobDefinition(
+        "cmdb-evaluate",
+        "CMDB evaluation",
+        "Evaluate CMDB findings from completed documentation-source evidence.",
+        "evaluation",
+        "evaluation",
+        "",
+        "cmdb_findings",
+        "run_log",
+        "ingest.cmdb_findings.evaluate",
+        run_all=False,
     ),
     JobDefinition(
         "resolver",
@@ -654,28 +700,48 @@ _SUPERSESSION_FAMILIES = MappingProxyType({
     key: "software-classifier" for key in _SUPERSESSION_RANKS
 })
 _WORKFLOW_SUCCESSORS = MappingProxyType({
-    "patches": ("patch-classify", "resolver"),
-    "patch-classify": ("platform-evaluate",),
-    "resolver": ("platform-evaluate",),
-    "agent-observations": ("resolver",),
-    "documentation-observations": ("resolver",),
-    "source-demand": ("resolver",),
-    "source-actions": ("resolver",),
-    "software-queue-drain": ("software-classify-only",),
-    "agent-compliance": ("resolver",),
-    "intel-nvd": ("intel-matcher",),
-    "intel-cpe-dict": ("intel-matcher",),
-    "intel-kev": ("intel-matcher",),
-    "intel-epss": ("intel-matcher",),
-    "intel-matcher": ("software-classify-full",),
-    "intel-winget": ("software-classify-full",),
-    "intel-chocolatey": ("software-classify-full",),
-    "intel-capability": ("software-classify-full",),
-    "intel-lolrmm": ("software-classify-full",),
-    "intel-otx": ("software-classify-full",),
-    "intel-abusech": ("software-classify-full",),
-    "intel-endoflife": ("software-classify-full",),
-    "intel-category": ("software-classify-full",),
+    "patches": (
+        DependencyDefinition("patch-classify", "ninja.patch-snapshot"),
+        DependencyDefinition("resolver", "ninja.identity-snapshot"),
+    ),
+    "patch-classify": (
+        DependencyDefinition("platform-evaluate", "patch.findings"),
+    ),
+    "resolver": (
+        DependencyDefinition("platform-evaluate", "identity.current"),
+    ),
+    "agent-observations": (
+        DependencyDefinition("resolver", "source.identity-observations"),
+    ),
+    "documentation-observations": (
+        DependencyDefinition("cmdb-evaluate", "source.documentation-observations"),
+    ),
+    "source-demand": (
+        DependencyDefinition("resolver", "source.identity-observations", "identity_source"),
+        DependencyDefinition("cmdb-evaluate", "source.documentation-observations", "documentation_source"),
+    ),
+    "source-actions": (
+        DependencyDefinition("cmdb-evaluate", "source.documentation-observations", "documentation_source"),
+    ),
+    "software-queue-drain": (
+        DependencyDefinition("software-classify-only", "software.inventory-batch"),
+    ),
+    "agent-compliance": (
+        DependencyDefinition("resolver", "agent-compliance.observations"),
+    ),
+    "intel-nvd": (DependencyDefinition("intel-matcher", "intel.cves", "material_change"),),
+    "intel-cpe-dict": (DependencyDefinition("intel-matcher", "intel.cpes", "material_change"),),
+    "intel-kev": (DependencyDefinition("intel-matcher", "intel.kev", "material_change"),),
+    "intel-epss": (DependencyDefinition("intel-matcher", "intel.epss", "material_change"),),
+    "intel-matcher": (DependencyDefinition("software-classify-full", "software.cve-match", "material_change"),),
+    "intel-winget": (DependencyDefinition("software-classify-full", "software.winget-signals", "material_change"),),
+    "intel-chocolatey": (DependencyDefinition("software-classify-full", "software.chocolatey-signals", "material_change"),),
+    "intel-capability": (DependencyDefinition("software-classify-full", "software.capabilities", "material_change"),),
+    "intel-lolrmm": (DependencyDefinition("software-classify-full", "software.lolrmm", "material_change"),),
+    "intel-otx": (DependencyDefinition("software-classify-full", "software.otx-signals", "material_change"),),
+    "intel-abusech": (DependencyDefinition("software-classify-full", "software.abusech-signals", "material_change"),),
+    "intel-endoflife": (DependencyDefinition("software-classify-full", "software.end-of-life", "material_change"),),
+    "intel-category": (DependencyDefinition("software-classify-full", "software.categories", "material_change"),),
 })
 if set(_RESOURCE_KEYS_BY_DEFINITION) != {item.key for item in _RAW_DEFINITIONS}:
     raise RegistryValidationError("Missing Jobs resource policy")
@@ -710,24 +776,37 @@ def schedule_definitions() -> tuple[ScheduleDefinition, ...]:
     return _SCHEDULE_DEFINITIONS
 
 
-def workflow_edges(root_key: str) -> tuple[tuple[str, str], ...]:
-    """Return the declared completion graph in prerequisite-first order."""
+def workflow_edges(
+    root_key: str, conditions: frozenset[str] = frozenset({"always"})
+) -> tuple[WorkflowEdge, ...]:
+    """Return matching root edges plus transitive always-required edges."""
     definition(root_key)
-    edges: list[tuple[str, str]] = []
-    visited: set[str] = set()
+    edges: list[WorkflowEdge] = []
+    visited: set[tuple[str, str, str]] = set()
 
-    def visit(prerequisite: str, ancestors: frozenset[str]) -> None:
+    def visit(prerequisite: str, ancestors: frozenset[str], root: bool) -> None:
         if prerequisite in ancestors:
             raise RegistryValidationError("Jobs workflow contains a cycle")
-        for dependent in definition(prerequisite).successors:
-            definition(dependent)
-            edge = (prerequisite, dependent)
-            if edge not in visited:
-                visited.add(edge)
+        for successor in definition(prerequisite).successors:
+            if successor.condition not in (conditions if root else frozenset({"always"})):
+                continue
+            definition(successor.successor)
+            identity = (prerequisite, successor.successor, successor.revision_name)
+            if identity not in visited:
+                visited.add(identity)
+                edge = WorkflowEdge(
+                    prerequisite,
+                    successor.successor,
+                    successor.revision_name,
+                    successor.condition,
+                    successor.scope_mode,
+                    successor.coalescing,
+                    successor.failure_rule,
+                )
                 edges.append(edge)
-                visit(dependent, ancestors | {prerequisite})
+                visit(successor.successor, ancestors | {prerequisite}, False)
 
-    visit(root_key, frozenset())
+    visit(root_key, frozenset(), True)
     return tuple(edges)
 
 
@@ -740,6 +819,54 @@ def definition(key: str) -> JobDefinition:
 
 def definition_keys() -> frozenset[str]:
     return frozenset(_INDEX)
+
+
+def _validate_dependency_contracts() -> None:
+    allowed_conditions = {
+        "always", "identity_source", "documentation_source", "material_change",
+    }
+    revision_pattern = re.compile(r"[a-z0-9][a-z0-9._-]{2,119}")
+    errors: list[str] = []
+    graph: dict[str, tuple[str, ...]] = {}
+    for job in _DEFINITIONS:
+        targets: set[str] = set()
+        graph[job.key] = tuple(successor.successor for successor in job.successors)
+        for successor in job.successors:
+            if successor.successor not in _INDEX:
+                errors.append(f"{job.key} has unknown successor {successor.successor}")
+            if successor.successor in targets:
+                errors.append(f"{job.key} has duplicate successor {successor.successor}")
+            targets.add(successor.successor)
+            if revision_pattern.fullmatch(successor.revision_name) is None:
+                errors.append(f"{job.key} has invalid revision name")
+            if successor.condition not in allowed_conditions:
+                errors.append(f"{job.key} has invalid dependency condition")
+            if successor.scope_mode != "inherit":
+                errors.append(f"{job.key} has unsupported dependency scope")
+            if successor.coalescing != "definition_scope":
+                errors.append(f"{job.key} has unsupported dependency coalescing")
+            if successor.failure_rule != "block":
+                errors.append(f"{job.key} has unsupported dependency failure rule")
+
+    visiting: set[str] = set()
+    visited: set[str] = set()
+
+    def visit(key: str) -> None:
+        if key in visiting:
+            errors.append(f"Jobs workflow contains a cycle at {key}")
+            return
+        if key in visited:
+            return
+        visiting.add(key)
+        for successor in graph.get(key, ()):
+            visit(successor)
+        visiting.remove(key)
+        visited.add(key)
+
+    for key in graph:
+        visit(key)
+    if errors:
+        raise RegistryValidationError("; ".join(errors))
 
 
 def catalog_entries() -> tuple[dict[str, object], ...]:
@@ -794,3 +921,6 @@ def validate_registry(
             errors.append(f"{name} has unregistered {', '.join(extra)}")
     if errors:
         raise RegistryValidationError("; ".join(errors))
+
+
+_validate_dependency_contracts()

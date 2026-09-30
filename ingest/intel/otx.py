@@ -19,6 +19,7 @@ import httpx
 
 from ingest import db
 from ingest.config import settings
+from ingest.intel.material import MaterialCount
 from ingest.intel.status import record_run
 
 log = logging.getLogger(__name__)
@@ -41,7 +42,7 @@ def run_once() -> int:
         rows = _pull_and_upsert(key)
         state["rows_touched"] = rows
         state["notes"] = f"OTX signals: {rows} rows."
-        return rows
+        return MaterialCount(rows, material_changed=rows > 0)
 
 
 def _pull_and_upsert(api_key: str) -> int:
@@ -88,10 +89,12 @@ def _pull_and_upsert(api_key: str) -> int:
             DO UPDATE SET
                 details = EXCLUDED.details,
                 observed_at = now()
+            WHERE operations.safety_signal.details IS DISTINCT FROM EXCLUDED.details
             """,
             matched,
         )
-    return len(matched)
+        changed = cur.rowcount or 0
+    return changed
 
 
 def _tracked_names() -> tuple[set[str], set[str]]:

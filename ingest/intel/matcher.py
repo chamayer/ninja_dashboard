@@ -60,6 +60,7 @@ import re
 
 from ingest import db
 from ingest.config import settings
+from ingest.intel.material import MaterialCount
 from ingest.intel.status import record_run
 
 log = logging.getLogger(__name__)
@@ -251,7 +252,8 @@ def _match_and_upsert() -> int:
                 "DELETE FROM operations.cve_match WHERE tenant_id = %s",
                 (_TENANT_ID,),
             )
-        return 0
+            changed = (cur.rowcount or 0) > 0
+        return MaterialCount(0, material_changed=changed)
 
     products_by_vendor: dict[str, set[str]] = {}
     all_products: set[str] = set()
@@ -269,6 +271,16 @@ def _match_and_upsert() -> int:
     # count against intel.cves for no new information.
     cve_cache: dict[tuple[str, ...], list[str]] = {}
     with db.transaction() as cur:
+        cur.execute(
+            """
+            CREATE TEMP TABLE cve_match_before ON COMMIT DROP AS
+            SELECT canonical_name, software_version_id, cve_id,
+                   match_kind, version_range, confidence
+              FROM operations.cve_match
+             WHERE tenant_id = %s
+            """,
+            (_TENANT_ID,),
+        )
         cur.execute(
             "DELETE FROM operations.cve_match WHERE tenant_id = %s",
             (_TENANT_ID,),
@@ -411,12 +423,36 @@ def _match_and_upsert() -> int:
             if title_matched:
                 matched_titles += 1
 
+        cur.execute(
+            """
+            SELECT EXISTS (
+                (SELECT canonical_name, software_version_id, cve_id,
+                        match_kind, version_range, confidence
+                   FROM operations.cve_match WHERE tenant_id = %s
+                 EXCEPT
+                 SELECT canonical_name, software_version_id, cve_id,
+                        match_kind, version_range, confidence
+                   FROM cve_match_before)
+                UNION ALL
+                (SELECT canonical_name, software_version_id, cve_id,
+                        match_kind, version_range, confidence
+                   FROM cve_match_before
+                 EXCEPT
+                 SELECT canonical_name, software_version_id, cve_id,
+                        match_kind, version_range, confidence
+                   FROM operations.cve_match WHERE tenant_id = %s)
+            )
+            """,
+            (_TENANT_ID, _TENANT_ID),
+        )
+        material_changed = bool(cur.fetchone()[0])
+
     log.info(
         "Intel matcher: %d titles matched (%d product+version pairs), "
         "%d sub-components ignored, %d cve_match rows.",
         matched_titles, matched_versions, ignored_titles, total_rows,
     )
-    return total_rows
+    return MaterialCount(total_rows, material_changed=material_changed)
 
 
 def _filter_by_version_prefix(

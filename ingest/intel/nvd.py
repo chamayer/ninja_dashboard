@@ -22,6 +22,7 @@ import httpx
 
 from ingest import db
 from ingest.config import settings
+from ingest.intel.material import MaterialCount
 from ingest.intel.status import record_run
 
 log = logging.getLogger(__name__)
@@ -40,7 +41,7 @@ def run_once() -> int:
         rows = _pull_and_upsert()
         state["rows_touched"] = rows
         state["notes"] = f"Upserted {rows} CVEs from NVD."
-        return rows
+        return MaterialCount(rows, material_changed=rows > 0)
 
 
 def _pull_and_upsert() -> int:
@@ -167,10 +168,24 @@ def _upsert_batch(vulns: list[dict[str, Any]]) -> int:
                 affected_cpes    = EXCLUDED.affected_cpes,
                 raw_nvd          = EXCLUDED.raw_nvd,
                 updated_at       = now()
+            WHERE ROW(
+                intel.cves.cvss_v3, intel.cves.cvss_v3_vector,
+                intel.cves.cvss_v4, intel.cves.cvss_v4_vector,
+                intel.cves.severity, intel.cves.published_at,
+                intel.cves.last_modified_at, intel.cves.description,
+                intel.cves.cwes, intel.cves.affected_cpes, intel.cves.raw_nvd
+            ) IS DISTINCT FROM ROW(
+                EXCLUDED.cvss_v3, EXCLUDED.cvss_v3_vector,
+                EXCLUDED.cvss_v4, EXCLUDED.cvss_v4_vector,
+                EXCLUDED.severity, EXCLUDED.published_at,
+                EXCLUDED.last_modified_at, EXCLUDED.description,
+                EXCLUDED.cwes, EXCLUDED.affected_cpes, EXCLUDED.raw_nvd
+            )
             """,
             rows,
         )
-    return len(rows)
+        changed = cur.rowcount or 0
+    return changed
 
 
 def _first_cvss(metrics: dict, key: str) -> tuple[float | None, str | None] | None:

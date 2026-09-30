@@ -16,6 +16,7 @@ import httpx
 
 from ingest import db
 from ingest.config import settings
+from ingest.intel.material import MaterialCount
 from ingest.intel.status import record_run
 
 log = logging.getLogger(__name__)
@@ -40,7 +41,7 @@ def run_once() -> int:
         rows = _enrich()
         state["rows_touched"] = rows
         state["notes"] = f"Chocolatey-enriched {rows} titles."
-        return rows
+        return MaterialCount(rows, material_changed=rows > 0)
 
 
 def _enrich() -> int:
@@ -187,7 +188,8 @@ def _write_signal(canonical: str, tags: list[str], titles_found: list[str]) -> i
             ) VALUES (%s, %s, '', 'chocolatey', 'category', 'info', %s::jsonb)
             ON CONFLICT (tenant_id, LOWER(canonical_name), LOWER(publisher), source, signal_type)
             DO UPDATE SET details = EXCLUDED.details, observed_at = now()
+            WHERE operations.safety_signal.details IS DISTINCT FROM EXCLUDED.details
             """,
             (_TENANT_ID, canonical, json.dumps(details)),
         )
-    return 1
+        return cur.rowcount or 0

@@ -37,6 +37,7 @@ from __future__ import annotations
 import logging
 
 from ingest import db
+from ingest.intel.material import MaterialCount
 from ingest.intel.status import record_run
 
 log = logging.getLogger(__name__)
@@ -104,6 +105,15 @@ DO UPDATE SET
     evidence_kind    = EXCLUDED.evidence_kind,
     evidence_ref     = EXCLUDED.evidence_ref,
     matcher_version  = EXCLUDED.matcher_version
+WHERE ROW(
+    catalog.category_assertion_machine.confidence,
+    catalog.category_assertion_machine.evidence_kind,
+    catalog.category_assertion_machine.evidence_ref,
+    catalog.category_assertion_machine.matcher_version
+) IS DISTINCT FROM ROW(
+    EXCLUDED.confidence, EXCLUDED.evidence_kind,
+    EXCLUDED.evidence_ref, EXCLUDED.matcher_version
+)
 """
 
 _WITHDRAW_SQL = """
@@ -138,7 +148,8 @@ def run_once() -> int:
             f"{rules} tag rule(s) over {len(evaluated)} source(s); "
             f"{written} assertion(s) written, {withdrawn} withdrawn."
         )
-        return written + withdrawn
+        changed = written + withdrawn
+        return MaterialCount(changed, material_changed=changed > 0)
 
 
 def _project() -> tuple[int, int, int, list[str]]:

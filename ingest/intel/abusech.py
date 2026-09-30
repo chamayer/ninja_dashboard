@@ -9,7 +9,6 @@ against our fleet.
 
 from __future__ import annotations
 
-import io
 import json
 import logging
 from typing import Any
@@ -18,6 +17,7 @@ import httpx
 
 from ingest import db
 from ingest.config import settings
+from ingest.intel.material import MaterialCount
 from ingest.intel.status import record_run
 
 log = logging.getLogger(__name__)
@@ -36,7 +36,13 @@ def run_once() -> int:
         total = mb + tf
         state["rows_touched"] = total
         state["notes"] = f"MalwareBazaar: {mb}, ThreatFox: {tf}"
-        return total
+        return MaterialCount(
+            total,
+            material_changed=(
+                bool(getattr(mb, "material_changed", False))
+                or bool(getattr(tf, "material_changed", False))
+            ),
+        )
 
 
 def _pull_bazaar() -> int:
@@ -71,7 +77,8 @@ def _pull_bazaar() -> int:
                         }),
                     ))
                     break
-    return _upsert_rows(matched)
+    rows = _upsert_rows(matched)
+    return MaterialCount(rows, material_changed=rows > 0)
 
 
 def _pull_threatfox() -> int:
@@ -106,7 +113,8 @@ def _pull_threatfox() -> int:
                         }),
                     ))
                     break
-    return _upsert_rows(matched)
+    rows = _upsert_rows(matched)
+    return MaterialCount(rows, material_changed=rows > 0)
 
 
 def _fetch_json(url: str) -> dict[str, Any]:
@@ -167,7 +175,9 @@ def _upsert_rows(rows: list[tuple]) -> int:
             DO UPDATE SET
                 details = EXCLUDED.details,
                 observed_at = now()
+            WHERE operations.safety_signal.details IS DISTINCT FROM EXCLUDED.details
             """,
             rows,
         )
-    return len(rows)
+        changed = cur.rowcount or 0
+    return changed

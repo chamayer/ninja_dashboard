@@ -22,6 +22,7 @@ import logging
 
 from ingest import db
 from ingest.config import settings
+from ingest.intel.material import MaterialCount
 from ingest.intel.status import record_run
 
 log = logging.getLogger(__name__)
@@ -172,7 +173,8 @@ def run_once() -> int:
             f"{rules} lifecycle rule(s) in force; {written} version(s) dated, "
             f"{cleared} cleared."
         )
-        return written + cleared
+        changed = written + cleared
+        return MaterialCount(changed, material_changed=changed > 0)
 
 
 def _project() -> tuple[int, int, int]:

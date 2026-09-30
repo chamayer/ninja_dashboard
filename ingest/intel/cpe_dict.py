@@ -41,6 +41,7 @@ import httpx
 
 from ingest import db
 from ingest.config import settings
+from ingest.intel.material import MaterialCount
 from ingest.intel.status import record_run
 
 log = logging.getLogger(__name__)
@@ -71,11 +72,11 @@ def run_once() -> int:
                 f"Backfill {'complete' if done else 'in progress'}: "
                 f"{at}/{total} ({pct}%), {rows} upserted this run."
             )
-            return rows
+            return MaterialCount(rows, material_changed=rows > 0)
         rows = _pull_and_upsert()
         state["rows_touched"] = rows
         state["notes"] = f"Upserted {rows} CPE entries."
-        return rows
+        return MaterialCount(rows, material_changed=rows > 0)
 
 
 def _backfill_state() -> dict | None:
@@ -255,10 +256,18 @@ def _upsert_batch(products: list[dict]) -> int:
                 version    = EXCLUDED.version,
                 raw_nvd    = EXCLUDED.raw_nvd,
                 updated_at = now()
+            WHERE ROW(
+                intel.cpes.vendor, intel.cpes.product,
+                intel.cpes.version, intel.cpes.raw_nvd
+            ) IS DISTINCT FROM ROW(
+                EXCLUDED.vendor, EXCLUDED.product,
+                EXCLUDED.version, EXCLUDED.raw_nvd
+            )
             """,
             rows,
         )
-    return len(rows)
+        changed = cur.rowcount or 0
+    return changed
 
 
 def _split(cpe23: str) -> tuple[str, str, str | None]:

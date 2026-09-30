@@ -8670,15 +8670,15 @@ def _enqueue_operator_job(
 def _admit_operator_workflow(cur, root_key: str, root_run_id: uuid.UUID) -> None:
     """Create one declared workflow graph in the root admission transaction."""
     runs = {root_key: root_run_id}
-    for prerequisite_key, dependent_key in workflow_edges(root_key):
-        dependent = definition(dependent_key)
+    for edge in workflow_edges(root_key):
+        dependent = definition(edge.dependent)
         request_api = (
             "operations.jobs_request_software_v1"
             if dependent.supersession_family == "software-classifier"
             else "operations.jobs_request"
         )
         request_identity = hashlib.sha256(
-            f"workflow:{root_run_id}:{dependent_key}".encode()
+            f"workflow:{root_run_id}:{edge.dependent}:{edge.revision_name}".encode()
         ).hexdigest()
         cur.execute(
             f"SELECT {request_api}(%s, %s, %s, %s, %s, %s, NULL, %s::jsonb, %s::jsonb, %s)",
@@ -8688,10 +8688,20 @@ def _admit_operator_workflow(cur, root_key: str, root_run_id: uuid.UUID) -> None
             ),
         )
         dependent_id = cur.fetchone()[0]
-        runs[dependent_key] = dependent_id
+        runs[edge.dependent] = dependent_id
+        required_revision = hashlib.sha256(
+            f"{runs[edge.prerequisite]}:{edge.revision_name}:tenant:1".encode()
+        ).hexdigest()
         cur.execute(
-            "SELECT operations.jobs_add_completion_dependency_v1(%s, %s, %s)",
-            (1, dependent_id, runs[prerequisite_key]),
+            "SELECT operations.jobs_add_revision_dependency_v1(%s, %s, %s, %s, %s, %s)",
+            (
+                1,
+                dependent_id,
+                runs[edge.prerequisite],
+                edge.revision_name,
+                "tenant:1",
+                required_revision,
+            ),
         )
 
 
@@ -8766,7 +8776,7 @@ def _operator_job_runs(*, limit: int = 100, run_id: str = "", batch_id: str = ""
                 )
             cur.execute(
                 """SELECT id, definition_digest, scope_identity, input_revisions,
-                          requested_input, parent_run_id, root_run_id
+                          output_revisions, requested_input, parent_run_id, root_run_id
                      FROM operations.operator_job_runs
                     WHERE tenant_id = 1 AND id = ANY(%s)""",
                 (job_ids,),
@@ -8774,14 +8784,18 @@ def _operator_job_runs(*, limit: int = 100, run_id: str = "", batch_id: str = ""
             for detail in cur.fetchall():
                 technical_by_job[detail[0]] = {
                     "definition_digest": detail[1], "scope_identity": detail[2],
-                    "input_revisions": detail[3] or {}, "requested_input": detail[4] or {},
-                    "parent_run_id": detail[5], "root_run_id": detail[6],
+                    "input_revisions": detail[3] or {}, "output_revisions": detail[4] or {},
+                    "requested_input": detail[5] or {},
+                    "parent_run_id": detail[6], "root_run_id": detail[7],
                 }
             cur.execute(
                 """SELECT dependency.dependent_run_id, dependency.prerequisite_run_id,
                           dependency.state, dependency.reason,
                           prerequisite.job_key, prerequisite.status,
-                          dependent.job_key, dependent.status
+                          dependent.job_key, dependent.status,
+                          dependency.required_input_revisions,
+                          dependency.required_output_revision,
+                          dependency.failure_rule
                      FROM operations.job_dependencies dependency
                      JOIN operations.operator_job_runs prerequisite
                        ON prerequisite.tenant_id = dependency.tenant_id
@@ -8799,12 +8813,16 @@ def _operator_job_runs(*, limit: int = 100, run_id: str = "", batch_id: str = ""
                 prerequisites_by_job.setdefault(dependency[0], []).append({
                     "id": dependency[1], "job_key": dependency[4],
                     "status": dependency[5], "state": dependency[2],
-                    "reason": dependency[3],
+                    "reason": dependency[3], "contract": dependency[8] or {},
+                    "required_revision": dependency[9],
+                    "failure_rule": dependency[10],
                 })
                 dependents_by_job.setdefault(dependency[1], []).append({
                     "id": dependency[0], "job_key": dependency[6],
                     "status": dependency[7], "state": dependency[2],
-                    "reason": dependency[3],
+                    "reason": dependency[3], "contract": dependency[8] or {},
+                    "required_revision": dependency[9],
+                    "failure_rule": dependency[10],
                 })
             cur.execute(
                 """SELECT job_run_id, domain_kind, domain_record_id,

@@ -25,6 +25,7 @@ import yaml
 
 from ingest import db
 from ingest.config import settings
+from ingest.intel.material import MaterialCount
 from ingest.intel.status import record_run
 
 log = logging.getLogger(__name__)
@@ -52,7 +53,8 @@ def run_once() -> int:
             f"{len(tools)} unique normalized LOLRMM tool(s); "
             f"{corpus_rows} corpus row(s), {machine_rows} assertion row(s) touched."
         )
-        return corpus_rows + machine_rows
+        changed = corpus_rows + machine_rows
+        return MaterialCount(changed, material_changed=changed > 0)
 
 
 def _fetch_complete_corpus() -> dict[str, dict]:
@@ -131,9 +133,22 @@ def _replace_corpus(tools: dict[str, dict]) -> int:
                 updated_at = now(),
                 withdrawn_at = NULL,
                 withdrawn_reason = ''
+            WHERE ROW(
+                catalog.lolrmm_tool.display_name,
+                catalog.lolrmm_tool.capability,
+                catalog.lolrmm_tool.source_ref,
+                catalog.lolrmm_tool.raw_record,
+                catalog.lolrmm_tool.withdrawn_at,
+                catalog.lolrmm_tool.withdrawn_reason
+            ) IS DISTINCT FROM ROW(
+                EXCLUDED.display_name, EXCLUDED.capability,
+                EXCLUDED.source_ref, EXCLUDED.raw_record,
+                NULL, ''
+            )
             """,
             rows,
         )
+        changed = cur.rowcount or 0
         cur.execute(
             """
             UPDATE catalog.lolrmm_tool
@@ -143,7 +158,7 @@ def _replace_corpus(tools: dict[str, dict]) -> int:
             """,
             (list(tools),),
         )
-        return len(rows) + (cur.rowcount or 0)
+        return changed + (cur.rowcount or 0)
 
 
 def _project_identities(tools: dict[str, dict]) -> int:
@@ -211,6 +226,15 @@ def _project_identities(tools: dict[str, dict]) -> int:
                           evidence_kind = EXCLUDED.evidence_kind,
                           evidence_ref = EXCLUDED.evidence_ref,
                           matcher_version = EXCLUDED.matcher_version
+            WHERE ROW(
+                catalog.capability_assertion_machine.confidence,
+                catalog.capability_assertion_machine.evidence_kind,
+                catalog.capability_assertion_machine.evidence_ref,
+                catalog.capability_assertion_machine.matcher_version
+            ) IS DISTINCT FROM ROW(
+                EXCLUDED.confidence, EXCLUDED.evidence_kind,
+                EXCLUDED.evidence_ref, EXCLUDED.matcher_version
+            )
             """
         )
         written = cur.rowcount or 0

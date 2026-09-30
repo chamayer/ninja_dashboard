@@ -1312,3 +1312,21 @@ and diff checks pass. Next action: replace the provisional broad source and
 intelligence completion chains with dependency metadata and revision-aware,
 affected-scope admission required by ADR-0024, then add Jobs control-plane
 health evidence.
+
+Revision-dependency checkpoint (2026-09-29): the provisional completion-only
+edges are replaced with named revision contracts and condition-aware
+admission. Migration 0225 validates each edge against the prerequisite's
+immutable definition snapshot, persists scope/condition/coalescing/failure
+metadata, publishes successful output revisions, and rechecks exact freshness
+before release. CMDB evaluation is a separate registered Job. Source-demand
+and source-action handlers publish bounded source-type signals. Intelligence
+handlers retain integer compatibility but now report material change
+explicitly; unchanged upserts do not count, and the full CVE matcher compares
+semantic before/after output sets. Job detail exposes requested/input/output
+revisions and edge contracts. The checked inventory was regenerated. Focused
+Operations tests pass (20), focused ingest/material/projector tests pass (67),
+and Python compilation, undefined-name lint, and `git diff --check` pass.
+PostgreSQL execution remains unavailable while the stack is inactive. Next
+action: commit and push this slice, then add Jobs registry/scheduler/worker,
+claim-containment, and policy mismatch evidence to Admin Health and expose the
+remaining persisted control-plane data.

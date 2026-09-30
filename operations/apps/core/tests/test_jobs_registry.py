@@ -26,7 +26,7 @@ ROOT = Path(__file__).resolve().parents[4]
 def test_registry_has_one_catalog_and_schedule_owner_per_definition():
     keys = definition_keys()
 
-    assert len(keys) == 36
+    assert len(keys) == 37
     assert {entry["id"] for entry in catalog_entries()} == keys
     assert scheduled_definition_keys() < keys
     assert definition("patches").lane == "collection"
@@ -67,30 +67,43 @@ def test_every_declared_automatic_schedule_has_one_cadence_contract():
 
 
 def test_initial_workflow_edges_are_registered_and_acyclic():
-    assert workflow_edges("patches") == (
-        ("patches", "patch-classify"),
-        ("patch-classify", "platform-evaluate"),
-        ("patches", "resolver"),
-        ("resolver", "platform-evaluate"),
+    def shape(key, conditions=frozenset({"always"})):
+        return tuple(
+            (edge.prerequisite, edge.dependent, edge.revision_name, edge.condition)
+            for edge in workflow_edges(key, conditions)
+        )
+
+    assert shape("patches") == (
+        ("patches", "patch-classify", "ninja.patch-snapshot", "always"),
+        ("patch-classify", "platform-evaluate", "patch.findings", "always"),
+        ("patches", "resolver", "ninja.identity-snapshot", "always"),
+        ("resolver", "platform-evaluate", "identity.current", "always"),
     )
-    assert workflow_edges("software-queue-drain") == (
-        ("software-queue-drain", "software-classify-only"),
+    assert shape("software-queue-drain") == (
+        ("software-queue-drain", "software-classify-only", "software.inventory-batch", "always"),
     )
-    assert workflow_edges("agent-compliance") == (
-        ("agent-compliance", "resolver"),
-        ("resolver", "platform-evaluate"),
+    assert shape("agent-compliance") == (
+        ("agent-compliance", "resolver", "agent-compliance.observations", "always"),
+        ("resolver", "platform-evaluate", "identity.current", "always"),
     )
-    assert workflow_edges("source-demand") == (
-        ("source-demand", "resolver"),
-        ("resolver", "platform-evaluate"),
+    assert shape("source-demand") == ()
+    assert shape("source-demand", frozenset({"identity_source"})) == (
+        ("source-demand", "resolver", "source.identity-observations", "identity_source"),
+        ("resolver", "platform-evaluate", "identity.current", "always"),
     )
-    assert workflow_edges("intel-nvd") == (
-        ("intel-nvd", "intel-matcher"),
-        ("intel-matcher", "software-classify-full"),
+    assert shape("source-demand", frozenset({"documentation_source"})) == (
+        ("source-demand", "cmdb-evaluate", "source.documentation-observations", "documentation_source"),
     )
-    assert workflow_edges("intel-winget") == (
-        ("intel-winget", "software-classify-full"),
+    assert shape("intel-nvd") == ()
+    assert shape("intel-nvd", frozenset({"material_change"})) == (
+        ("intel-nvd", "intel-matcher", "intel.cves", "material_change"),
     )
+
+    for item in definitions():
+        for successor in item.successors:
+            assert successor.scope_mode == "inherit"
+            assert successor.coalescing == "definition_scope"
+            assert successor.failure_rule == "block"
 
 
 def test_checked_dispatcher_source_matches_registry_handler_keys():

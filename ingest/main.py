@@ -287,7 +287,6 @@ def run_documentation_observations_once() -> None:
             collection_failure = exc
         total = sum(counts.values())
         refresh_after_collection("documentation observations collection")
-        _run_cmdb_findings()
         if collection_failure:
             raise collection_failure
         log.info("Documentation observations run complete: %s total=%d", counts, total)
@@ -342,13 +341,6 @@ def documentation_observations_overdue(sources: list, schedule_hours: int) -> bo
         if last_success < cutoff:
             return True
     return False
-
-
-def _run_cmdb_findings() -> None:
-    """Evaluate required CMDB findings after a documentation collection."""
-    from ingest import cmdb_findings
-
-    log.info("cmdb findings: %s", cmdb_findings.evaluate(dry_run=False))
 
 
 def run_agent_compliance_once() -> None:
@@ -544,20 +536,34 @@ def run_intel_abusech_once() -> None:
         log.exception("Intel abuse.ch failed")
 
 
-def run_intel_endoflife_once() -> None:
+def run_intel_endoflife_once() -> int:
     from ingest.intel import endoflife, eol_match
 
     failures: list[tuple[str, Exception]] = []
-    failure = _safe("end-of-life fetch", endoflife.run_once)
-    if failure:
-        failures.append(failure)
+    changed = 0
+    material_changed = False
+    try:
+        outcome = endoflife.run_once()
+        changed += int(outcome or 0)
+        material_changed = material_changed or bool(
+            getattr(outcome, "material_changed", False)
+        )
+    except Exception as exc:
+        log.exception("end-of-life fetch failed; continuing with retained corpus")
+        failures.append(("end-of-life fetch", exc))
     # Projection follows the fetch in the same job: a refreshed corpus that
     # never reaches catalog.software_versions.eol_date changes nothing an
     # operator can see. Runs even if the fetch failed, so a corpus already on
     # disk still projects.
-    failure = _safe("end-of-life projection", eol_match.run_once)
-    if failure:
-        failures.append(failure)
+    try:
+        outcome = eol_match.run_once()
+        changed += int(outcome or 0)
+        material_changed = material_changed or bool(
+            getattr(outcome, "material_changed", False)
+        )
+    except Exception as exc:
+        log.exception("end-of-life projection failed")
+        failures.append(("end-of-life projection", exc))
     # Windows servicing state is another projection of this same corpus.  Run
     # it even after a fetch failure so an already-retained corpus still reaches
     # device findings, matching the software EOL projector above.
@@ -565,6 +571,9 @@ def run_intel_endoflife_once() -> None:
     if failure:
         failures.append(failure)
     _raise_step_failures("End-of-life intelligence", failures)
+    from ingest.intel.material import MaterialCount
+
+    return MaterialCount(changed, material_changed=material_changed)
 
 
 def run_notifications_dispatch_once() -> None:

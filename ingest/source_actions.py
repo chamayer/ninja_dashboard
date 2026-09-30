@@ -282,13 +282,6 @@ def recover_stale() -> int:
 
 def _refresh_hudu_evidence(source: SourceConfig) -> None:
     """Let normal collection prove the Hudu result and resolve the finding."""
-    try:
-        from ingest import cmdb_findings
-        from ingest.source_observations import run_source_observations
+    from ingest.source_observations import run_source_observations
 
-        run_source_observations([source], datetime.now(timezone.utc))
-        cmdb_findings.evaluate(dry_run=False)
-    except Exception:
-        # The source action outcome is still retained; a later scheduled Hudu
-        # run will reconcile the evidence and candidate finding.
-        log.exception("Hudu refresh after source actions failed")
+    run_source_observations([source], datetime.now(timezone.utc))

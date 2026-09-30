@@ -15,6 +15,7 @@ import httpx
 
 from ingest import db
 from ingest.config import settings
+from ingest.intel.material import MaterialCount
 from ingest.intel.status import record_run
 
 log = logging.getLogger(__name__)
@@ -30,7 +31,7 @@ def run_once() -> int:
         rows = _pull_and_upsert()
         state["rows_touched"] = rows
         state["notes"] = f"Flagged {rows} CVEs as KEV."
-        return rows
+        return MaterialCount(rows, material_changed=rows > 0)
 
 
 def _pull_and_upsert() -> int:
@@ -62,9 +63,16 @@ def _pull_and_upsert() -> int:
                 kev_added_at = EXCLUDED.kev_added_at,
                 kev_notes    = EXCLUDED.kev_notes,
                 updated_at   = now()
+            WHERE ROW(
+                intel.cves.kev_flag, intel.cves.kev_added_at,
+                intel.cves.kev_notes
+            ) IS DISTINCT FROM ROW(
+                TRUE, EXCLUDED.kev_added_at, EXCLUDED.kev_notes
+            )
             """,
             kev_rows,
         )
+        changed = cur.rowcount or 0
         # Clear kev_flag on any CVE that CISA removed from the list.
         cve_ids = [row[0] for row in kev_rows]
         cur.execute(
@@ -75,7 +83,8 @@ def _pull_and_upsert() -> int:
             """,
             (cve_ids,),
         )
-    return len(kev_rows)
+        changed += cur.rowcount or 0
+    return changed
 
 
 def _parse_date(v: str | None) -> date | None:
