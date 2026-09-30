@@ -166,14 +166,8 @@ def recover_stale() -> int:
 def process_entry(entry_id: int, job_run_id: object) -> int:
     """Claim and execute one demand entry under its durable Job run."""
     # Late imports to avoid circular deps at module load time.
-    from ingest.source_observations import (
-        SourceObservationFailure,
-        is_identity_source,
-        run_source_observations,
-    )
+    from ingest.source_observations import SourceObservationFailure, run_source_observations
     from ingest.sources import load_sources
-    from ingest.identity.client_resolver import drain_client_resolution
-    from ingest.identity.resolver import drain_resolution
 
     with db.transaction() as cur:
         cur.execute("SET LOCAL operations.tenant_id = 1")
@@ -223,30 +217,18 @@ def process_entry(entry_id: int, job_run_id: object) -> int:
                 counts = exc.counts
                 collection_failure = exc
             rows_seen = sum(counts.values())
-            if rows_seen:
-                try:
-                    drain_client_resolution()
-                except Exception:
-                    log.exception("source_run_queue: client_resolver failed — continuing")
-                # Device identity resolution only applies to identity-signal
-                # streams. Documentation sources are excluded by the resolver's
-                # allowlist regardless; skipping the drain avoids a pointless
-                # 500-row scan on a Hudu-only run. Client resolution above
-                # still matters — Hudu companies resolve to clients.
-                if any(is_identity_source(s) for s in sources):
-                    drain_resolution(batch_size=500, refresh_current=False)
             refresh_after_collection(f"on-demand {df} collection")
             # Refresh derived findings for non-identity (CMDB) sources so an
             # on-demand run reflects immediately rather than waiting for the
-            # next scheduled cycle. Non-fatal: derived reporting must never
-            # fail an otherwise successful collection.
-            if sources and not any(is_identity_source(s) for s in sources):
-                try:
+            # next scheduled cycle. This is required output for documentation
+            # sources, so failure must fail the owning Job.
+            if sources:
+                from ingest.source_observations import is_identity_source
+
+                if not any(is_identity_source(s) for s in sources):
                     from ingest import cmdb_findings
 
                     log.info("cmdb findings: %s", cmdb_findings.evaluate(dry_run=False))
-                except Exception:
-                    log.exception("cmdb findings evaluation failed — collection unaffected")
             if collection_failure:
                 raise collection_failure
         else:

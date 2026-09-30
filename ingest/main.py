@@ -244,8 +244,6 @@ def run_agent_observations_once() -> None:
             counts = exc.counts
             collection_failure = exc
         total = sum(counts.values())
-        if total:
-            run_identity_resolver_once(refresh_current=False)
         refresh_after_collection("agent observations collection")
         if collection_failure:
             raise collection_failure
@@ -347,17 +345,10 @@ def documentation_observations_overdue(sources: list, schedule_hours: int) -> bo
 
 
 def _run_cmdb_findings() -> None:
-    """Evaluate CMDB findings after a collection.
+    """Evaluate required CMDB findings after a documentation collection."""
+    from ingest import cmdb_findings
 
-    Isolated and non-fatal: findings are derived reporting, so a failure here
-    must never mark an otherwise successful collection as failed.
-    """
-    try:
-        from ingest import cmdb_findings
-
-        log.info("cmdb findings: %s", cmdb_findings.evaluate(dry_run=False))
-    except Exception:
-        log.exception("cmdb findings evaluation failed — collection unaffected")
+    log.info("cmdb findings: %s", cmdb_findings.evaluate(dry_run=False))
 
 
 def run_agent_compliance_once() -> None:

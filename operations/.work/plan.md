@@ -1285,3 +1285,18 @@ and operator tests, compilation, undefined-name lint, and diff checks pass;
 PostgreSQL execution remains pending while the stack is inactive. Next action:
 complete the declared source/intelligence edge families, then close worker
 shutdown and Admin Health parity gaps.
+
+Successor/edge-family checkpoint (2026-09-29): migration 0223 replaces the
+single queued-or-running key exclusion with one queued successor plus one
+executing run; workflow coordinators remain workerless and do not occupy the
+executing slot. Generic and Software request APIs now preserve demand arriving
+during execution. Broader Software supersession rewires retained workflow
+edges to the covering queued run instead of stranding a parent. The registry
+now declares source collection/action -> resolver -> platform evaluation and
+the intelligence -> matcher/full-classifier families; duplicate inline source
+resolution was removed, while required CMDB evaluation remains in the source
+handler and now propagates failure. Focused migration, registry, source safety,
+inventory, operator, and topology tests pass (59 tests), along with Python
+compilation, undefined-name lint, and diff checks. Next action: make worker
+shutdown explicitly terminate/reconcile children and add registry/scheduler/
+worker mismatch evidence to Admin Health.

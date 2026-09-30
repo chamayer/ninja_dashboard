@@ -80,6 +80,17 @@ def test_initial_workflow_edges_are_registered_and_acyclic():
         ("agent-compliance", "resolver"),
         ("resolver", "platform-evaluate"),
     )
+    assert workflow_edges("source-demand") == (
+        ("source-demand", "resolver"),
+        ("resolver", "platform-evaluate"),
+    )
+    assert workflow_edges("intel-nvd") == (
+        ("intel-nvd", "intel-matcher"),
+        ("intel-matcher", "software-classify-full"),
+    )
+    assert workflow_edges("intel-winget") == (
+        ("intel-winget", "software-classify-full"),
+    )
 
 
 def test_checked_dispatcher_source_matches_registry_handler_keys():
