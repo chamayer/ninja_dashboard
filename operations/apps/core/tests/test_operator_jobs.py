@@ -22,9 +22,8 @@ def test_operator_jobs_use_a_durable_queue_and_separate_stall_watchdog():
     assert 'id=f"operator_job_queue_{lane}"' in main
     assert 'id="operator_job_queue_stale_recovery"' in main
     assert "def enqueue_automatic" in queue
-    assert 'args=["patches"]' in main
-    assert 'args=["platform-evaluate"]' in main
-    assert 'args=["intel-nvd"]' in main
+    assert 'id="jobs_durable_schedule_producer"' in main
+    assert "operator_job_queue.enqueue_automatic" not in main
     assert "uq_operator_job_runs_active" in migration
     assert "ENABLE ROW LEVEL SECURITY" in migration
     assert "stage_updated_at" in progress_migration

@@ -1206,3 +1206,13 @@ software queues enforce the current tenant boundary and RLS. PostgreSQL
 execution remains unverified while the stack is inactive. Next action: remove
 the dormant version-0 producers/workers and convert direct maintenance work
 to registered control Jobs without letting recovery depend on normal lanes.
+
+Producer cleanup checkpoint (2026-09-29): ingest now registers one automatic
+producer only: the durable schedule poller. All legacy per-definition
+APScheduler registrations and startup catch-up admissions are removed, along
+with the unreachable HTTP daemon-thread handlers hidden behind governed
+dispatch. The scheduler still hosts bounded control/recovery loops and the
+temporary version-0 drain needed for pre-cutover rows. Static inventory,
+focused Jobs tests, and compilation pass. Next action: define the controlled
+version-0 queue cutover and move ordinary maintenance mutations into explicit
+Jobs, leaving only claim containment and service liveness outside normal lanes.
