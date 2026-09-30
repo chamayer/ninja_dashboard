@@ -82,3 +82,15 @@ def test_jobs_status_uses_operator_language_and_safe_controls():
     assert "No run available" in jobs_template
     assert "next due" in jobs_template
     assert "last_schedule_outcome" in jobs_template
+
+
+def test_scoped_software_requests_wait_for_the_governed_queue_worker():
+    main = Path("../ingest/main.py").read_text(encoding="utf-8")
+    queue = Path("../ingest/inventory/queue.py").read_text(encoding="utf-8")
+    jobs_template = Path("templates/admin_jobs.html").read_text(encoding="utf-8")
+
+    assert "process_demand_entry" not in main
+    assert "run_software_scoped" not in main
+    assert "process_demand_entry" not in queue
+    assert "demand_drained = _drain_queue" in queue
+    assert "Direct scoped software run" not in jobs_template

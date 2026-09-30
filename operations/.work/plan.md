@@ -1186,3 +1186,12 @@ Python compilation pass; PostgreSQL migration execution remains unavailable
 while the stack is inactive. Next action: inventory and convert the remaining
 direct/background execution paths, beginning with maintenance and bootstrap
 work that still bypasses durable admission.
+
+Software-demand cutover checkpoint (2026-09-29): both scoped software forms
+now retain demand rows and wait for the registered software queue Job. The
+former direct scoped daemon thread and the demand queue's immediate worker
+thread are removed; the governed drain processes demand before activity and
+scheduled work. The static Jobs inventory was regenerated from its checked
+discovery function. Focused inventory/operator tests and compilation pass.
+Next action: add immutable per-attempt Job membership for all three software
+domain queues, then make partial queue failures fail the owning Job.

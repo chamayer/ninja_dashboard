@@ -25,6 +25,18 @@
       {
         "file": "ingest/main.py",
         "owner": "main",
+        "id": "'jobs_durable_schedule_producer'",
+        "callable": "operator_job_queue.produce_due_schedules",
+        "trigger": "'interval'",
+        "options": {
+          "minutes": "1",
+          "max_instances": "1"
+        },
+        "guards": []
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "main",
         "id": "'patch_ingest_cycle'",
         "callable": "operator_job_queue.enqueue_automatic",
         "trigger": "'interval'",
@@ -104,6 +116,18 @@
         "owner": "main",
         "id": "'operator_job_queue_stale_recovery'",
         "callable": "operator_job_queue.recover_stale",
+        "trigger": "'interval'",
+        "options": {
+          "minutes": "1",
+          "max_instances": "1"
+        },
+        "guards": []
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "main",
+        "id": "'jobs_v1_timeout_containment'",
+        "callable": "operator_job_queue.contain_expired_v1",
         "trigger": "'interval'",
         "options": {
           "minutes": "1",
@@ -783,18 +807,6 @@
     "threads": [
       {
         "file": "ingest/main.py",
-        "owner": "run_agent_compliance_once",
-        "expression": "threading.Thread(target=run_identity_resolver_once, daemon=True)",
-        "guards": []
-      },
-      {
-        "file": "ingest/main.py",
-        "owner": "schedule_agent_compliance_evaluate",
-        "expression": "threading.Thread(target=run_agent_compliance_evaluate_once, daemon=True)",
-        "guards": []
-      },
-      {
-        "file": "ingest/main.py",
         "owner": "_Handler.do_POST",
         "expression": "threading.Thread(target=run_patching_once, daemon=True)",
         "guards": [
@@ -1332,18 +1344,6 @@
       },
       {
         "file": "ingest/main.py",
-        "owner": "_Handler._handle_software_scoped",
-        "expression": "threading.Thread(target=run_software_scoped, args=(df,), daemon=True)",
-        "guards": []
-      },
-      {
-        "file": "ingest/main.py",
-        "owner": "_Handler._handle_software_enqueue",
-        "expression": "threading.Thread(target=_run, daemon=True)",
-        "guards": []
-      },
-      {
-        "file": "ingest/main.py",
         "owner": "_start_http_server",
         "expression": "threading.Thread(target=httpd.serve_forever, daemon=True)",
         "guards": []
@@ -1353,7 +1353,7 @@
         "owner": "main",
         "expression": "threading.Thread(target=run_patching_once, daemon=True)",
         "guards": [
-          "should_catch_up('patches', settings.patch_ingest_schedule_hours)"
+          "not operator_job_queue.DURABLE_SCHEDULES_ACTIVE and should_catch_up('patches', settings.patch_ingest_schedule_hours)"
         ]
       },
       {
@@ -1369,12 +1369,10 @@
         "guards": []
       },
       {
-        "file": "ingest/source_run_queue.py",
-        "owner": "enqueue_and_run",
-        "expression": "threading.Thread(target=process_entry, args=(entry_id,), daemon=True)",
-        "guards": [
-          "entry_id"
-        ]
+        "file": "ingest/operator_job_queue.py",
+        "owner": "process_next_v1",
+        "expression": "threading.Thread(target=_heartbeat_loop, args=(progress, stopped), daemon=True)",
+        "guards": []
       }
     ],
     "run_logs": [
@@ -1507,8 +1505,8 @@
         "endpoint": "run/sources/enqueue",
         "status_key": "source.Hudu",
         "status_source": "run_log_like",
-        "run_all": false,
-        "description": "Refresh documentation records from Hudu."
+        "description": "Refresh documentation records from Hudu.",
+        "run_all": false
       },
       {
         "file": "operations/apps/core/views.py",
@@ -1530,8 +1528,8 @@
         "endpoint": "run/software-classify-only",
         "status_key": "software_classifier",
         "status_source": "run_log",
-        "run_all": false,
-        "description": "Update changed software findings using intelligence already on hand."
+        "description": "Update changed software findings using intelligence already on hand.",
+        "run_all": false
       },
       {
         "file": "operations/apps/core/views.py",
@@ -1542,8 +1540,8 @@
         "endpoint": "",
         "status_key": "software_classifier",
         "status_source": "run_log",
-        "run_all": false,
-        "description": "Rebuild every software finding after a rule, decision, or intelligence-wide change."
+        "description": "Rebuild every software finding after a rule, decision, or intelligence-wide change.",
+        "run_all": false
       },
       {
         "file": "operations/apps/core/views.py",
@@ -1598,9 +1596,9 @@
         "endpoint": "run/agent-compliance",
         "status_key": "agent_compliance",
         "status_source": "run_log",
+        "description": "Refresh the legacy agent-compliance bridge when it is enabled.",
         "run_all": false,
-        "legacy_bridge": true,
-        "description": "Refresh the legacy agent-compliance bridge when it is enabled."
+        "legacy_bridge": true
       },
       {
         "file": "operations/apps/core/views.py",
@@ -1611,9 +1609,22 @@
         "endpoint": "run/agent-compliance/evaluate",
         "status_key": "agent_compliance.evaluate",
         "status_source": "run_log",
+        "description": "Reassess the legacy agent-compliance bridge when it is enabled.",
         "run_all": false,
-        "legacy_bridge": true,
-        "description": "Reassess the legacy agent-compliance bridge when it is enabled."
+        "legacy_bridge": true
+      },
+      {
+        "file": "operations/apps/core/views.py",
+        "owner": "",
+        "id": "agent-compliance-review-digest",
+        "name": "Agent compliance review digest",
+        "category": "notifications",
+        "endpoint": "run/agent-compliance-review-digest",
+        "status_key": "agent_compliance.review_digest",
+        "status_source": "run_log",
+        "description": "Send the enabled legacy agent-compliance review summary.",
+        "run_all": false,
+        "legacy_bridge": true
       },
       {
         "file": "operations/apps/core/views.py",
@@ -1663,7 +1674,7 @@
         "file": "operations/apps/core/views.py",
         "owner": "",
         "id": "intel-matcher",
-        "name": "Intel: title × CVE matcher",
+        "name": "Intel: title \u00d7 CVE matcher",
         "category": "intel",
         "endpoint": "run/intel-matcher",
         "status_key": "matcher",
@@ -1789,8 +1800,8 @@
         "endpoint": "",
         "status_key": "retention.observation_history",
         "status_source": "run_log",
-        "run_all": false,
-        "description": "Remove closed history that has reached its retention date."
+        "description": "Remove closed history that has reached its retention date.",
+        "run_all": false
       },
       {
         "file": "operations/apps/core/views.py",
@@ -1801,8 +1812,8 @@
         "endpoint": "",
         "status_key": "",
         "status_source": "run_log",
-        "run_all": false,
-        "description": "Queue the next scheduled Ninja software inventory sweep."
+        "description": "Queue the next scheduled Ninja software inventory sweep.",
+        "run_all": false
       },
       {
         "file": "operations/apps/core/views.py",
@@ -1813,8 +1824,32 @@
         "endpoint": "",
         "status_key": "",
         "status_source": "run_log",
-        "run_all": false,
-        "description": "Process queued Ninja software inventory work."
+        "description": "Process queued Ninja software inventory work.",
+        "run_all": false
+      },
+      {
+        "file": "operations/apps/core/views.py",
+        "owner": "",
+        "id": "source-actions",
+        "name": "Source actions worker",
+        "category": "maintenance",
+        "endpoint": "",
+        "status_key": "source_action_requests",
+        "status_source": "run_log",
+        "description": "Process approved external source actions with their retained audit records.",
+        "run_all": false
+      },
+      {
+        "file": "operations/apps/core/views.py",
+        "owner": "",
+        "id": "source-demand",
+        "name": "Source demand worker",
+        "category": "maintenance",
+        "endpoint": "",
+        "status_key": "source_run_queue",
+        "status_source": "run_log",
+        "description": "Process one queued on-demand source refresh with its retained source record.",
+        "run_all": false
       }
     ],
     "handlers": [
@@ -1887,6 +1922,12 @@
       {
         "file": "ingest/operator_job_queue.py",
         "owner": "_execute",
+        "key": "agent-compliance-review-digest",
+        "expression": "('Preparing agent compliance review digest', lambda: main.run_review_digest_once())"
+      },
+      {
+        "file": "ingest/operator_job_queue.py",
+        "owner": "_execute",
         "key": "retention-history",
         "expression": "('Cleaning closed history', lambda: main.run_observation_history_prune_once())"
       },
@@ -1901,6 +1942,18 @@
         "owner": "_execute",
         "key": "software-queue-drain",
         "expression": "('Collecting software inventory', lambda: main.run_software_queue_once())"
+      },
+      {
+        "file": "ingest/operator_job_queue.py",
+        "owner": "_execute",
+        "key": "source-actions",
+        "expression": "('Processing approved source actions', lambda: sum(source_actions.process_pending(job_run_id=progress.job_id).values()))"
+      },
+      {
+        "file": "ingest/operator_job_queue.py",
+        "owner": "_execute",
+        "key": "source-demand",
+        "expression": "('Processing queued source demand', lambda: source_run_queue.process_next(progress.job_id))"
       },
       {
         "file": "ingest/operator_job_queue.py",
@@ -1997,24 +2050,6 @@
         "owner": "_execute",
         "key": "software-classify",
         "expression": "_software_classify_with_intel(progress, matcher, winget, chocolatey, main)"
-      },
-      {
-        "file": "ingest/operator_job_queue.py",
-        "owner": "_execute",
-        "key": "source-actions",
-        "expression": "source_actions.process_pending()"
-      },
-      {
-        "file": "ingest/operator_job_queue.py",
-        "owner": "_execute",
-        "key": "source-demand",
-        "expression": "source_run_queue.process_next()"
-      },
-      {
-        "file": "ingest/operator_job_queue.py",
-        "owner": "_execute",
-        "key": "agent-compliance-review-digest",
-        "expression": "main.run_review_digest_once()"
       }
     ],
     "startup_calls": [
@@ -2046,6 +2081,18 @@
         "file": "ingest/main.py",
         "owner": "main",
         "expression": "migrations.apply_pending()",
+        "guards": []
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "main",
+        "expression": "operator_job_queue.register_definition_snapshots()",
+        "guards": []
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "main",
+        "expression": "operator_job_queue.reconcile_schedule_catalog()",
         "guards": []
       },
       {
@@ -2101,7 +2148,7 @@
         "owner": "main",
         "expression": "threading.Thread(target=run_patching_once, daemon=True).start()",
         "guards": [
-          "should_catch_up('patches', settings.patch_ingest_schedule_hours)"
+          "not operator_job_queue.DURABLE_SCHEDULES_ACTIVE and should_catch_up('patches', settings.patch_ingest_schedule_hours)"
         ]
       },
       {
@@ -2109,14 +2156,16 @@
         "owner": "main",
         "expression": "threading.Thread(target=run_patching_once, daemon=True)",
         "guards": [
-          "should_catch_up('patches', settings.patch_ingest_schedule_hours)"
+          "not operator_job_queue.DURABLE_SCHEDULES_ACTIVE and should_catch_up('patches', settings.patch_ingest_schedule_hours)"
         ]
       },
       {
         "file": "ingest/main.py",
         "owner": "main",
         "expression": "operator_job_queue.enqueue_automatic('agent-observations')",
-        "guards": []
+        "guards": [
+          "not operator_job_queue.DURABLE_SCHEDULES_ACTIVE"
+        ]
       },
       {
         "file": "ingest/main.py",
@@ -2135,7 +2184,7 @@
         "owner": "main",
         "expression": "operator_job_queue.enqueue_automatic('documentation-observations')",
         "guards": [
-          "documentation_overdue"
+          "not operator_job_queue.DURABLE_SCHEDULES_ACTIVE and documentation_overdue"
         ]
       },
       {
@@ -2149,7 +2198,7 @@
         "owner": "main",
         "expression": "operator_job_queue.enqueue_automatic('software-classify-only')",
         "guards": [
-          "software_classify_overdue(settings.SOFTWARE_CLASSIFY_SCHEDULE_HOURS)"
+          "not operator_job_queue.DURABLE_SCHEDULES_ACTIVE and software_classify_overdue(settings.SOFTWARE_CLASSIFY_SCHEDULE_HOURS)"
         ]
       },
       {
@@ -2163,7 +2212,7 @@
         "owner": "main",
         "expression": "operator_job_queue.enqueue_automatic('software-classify-full')",
         "guards": [
-          "software_classify_overdue(settings.SOFTWARE_CLASSIFY_FULL_REBUILD_HOURS, mode='full')"
+          "not operator_job_queue.DURABLE_SCHEDULES_ACTIVE and software_classify_overdue(settings.SOFTWARE_CLASSIFY_FULL_REBUILD_HOURS, mode='full')"
         ]
       },
       {
@@ -2171,7 +2220,7 @@
         "owner": "main",
         "expression": "_intel_catchup()",
         "guards": [
-          "settings.INTEL_ENABLED"
+          "settings.INTEL_ENABLED and (not operator_job_queue.DURABLE_SCHEDULES_ACTIVE)"
         ]
       },
       {
@@ -2324,6 +2373,7 @@
       {
         "relation": "operations.source_action_requests",
         "files": [
+          "ingest/operator_job_queue.py",
           "ingest/source_actions.py",
           "operations/apps/core/conditions/reader.py",
           "operations/apps/core/views.py"
@@ -2332,6 +2382,7 @@
       {
         "relation": "operations.source_run_queue",
         "files": [
+          "ingest/operator_job_queue.py",
           "ingest/source_run_queue.py",
           "operations/apps/core/views.py"
         ]
@@ -2381,7 +2432,9 @@
         "file": "ingest/operator_job_queue.py",
         "relations": [
           "operations.operator_job_events",
-          "operations.operator_job_runs"
+          "operations.operator_job_runs",
+          "operations.source_action_requests",
+          "operations.source_run_queue"
         ]
       },
       {

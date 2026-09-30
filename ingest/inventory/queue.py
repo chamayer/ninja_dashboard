@@ -3,13 +3,12 @@
 Three queues (all in ninja_core):
   software_scheduled_queue  Q1  one entry per Ninja org, filled by
                                 enqueue_all_orgs() on a schedule
-  software_demand_queue     Q2  operator-triggered; fired immediately
-                                on enqueue, status tracked per job
+  software_demand_queue     Q2  operator-triggered; drained before
+                                background demand
   software_activity_queue   Q3  device-level, filled by activity
                                 processor on SOFTWARE_* events
 
-Background worker drains Q3 first (higher priority), then Q1.
-Q2 fires in its own thread and is never touched by the background worker.
+The governed worker drains Q2 first, then Q3, then Q1.
 
 Failure handling:
   - Lease expiry: processing entries older than _LEASE_MINUTES are reset
@@ -210,50 +209,22 @@ def recover_stale_entries() -> int:
     return total
 
 
-def drain_background(client: NinjaClient, batch_size: int) -> tuple[int, int]:
-    """Drain Q3 (activity) then Q1 (scheduled) up to batch_size total.
-    Returns (activity_drained, scheduled_drained)."""
+def drain_background(client: NinjaClient, batch_size: int) -> tuple[int, int, int]:
+    """Drain Q2, Q3, then Q1 up to the shared batch-size limit."""
     recover_stale_entries()
 
+    demand_drained = _drain_queue(client, _DEMAND_TABLE, batch_size)
+    remaining = batch_size - demand_drained
     activity_drained = _drain_queue(
-        client, "ninja_core.software_activity_queue", batch_size
+        client, "ninja_core.software_activity_queue", remaining
     )
-    remaining = batch_size - activity_drained
+    remaining -= activity_drained
     scheduled_drained = 0
     if remaining > 0:
         scheduled_drained = _drain_queue(
             client, "ninja_core.software_scheduled_queue", remaining
         )
-    return activity_drained, scheduled_drained
-
-
-# ── On-demand worker (Q2) ──────────────────────────────────────────
-
-
-def process_demand_entry(entry_id: int, client: NinjaClient) -> None:
-    """Claim and process a Q2 demand entry. Called from a dedicated thread."""
-    with db.pool.connection() as conn, conn.cursor() as cur:
-        cur.execute(
-            """
-            UPDATE ninja_core.software_demand_queue
-            SET status = 'processing', started_at = NOW()
-            WHERE id = %s AND status = 'pending'
-            RETURNING df, attempts, max_attempts
-            """,
-            (entry_id,),
-        )
-        row = cur.fetchone()
-    if not row:
-        log.warning("Demand entry %d already claimed or not found", entry_id)
-        return
-    df, attempts, max_attempts = row
-    succeeded = _process_entry(
-        client,
-        _DEMAND_TABLE,
-        {"id": entry_id, "df": df, "attempts": attempts, "max_attempts": max_attempts},
-    )
-    if succeeded:
-        _sw.refresh_read_models()
+    return demand_drained, activity_drained, scheduled_drained
 
 
 # ── Internal helpers ───────────────────────────────────────────────

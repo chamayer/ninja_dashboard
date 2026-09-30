@@ -379,10 +379,10 @@ def enqueue_all_orgs_once() -> None:
     log.info("Scheduled sweep enqueue: %d / %d orgs added to Q1", enqueued, len(org_ids))
 
 
-def run_software_queue_once() -> None:
-    """Drain Q3 (activity) then Q1 (scheduled) up to the configured batch size."""
+def run_software_queue_once() -> int:
+    """Drain governed demand, activity, and scheduled software work."""
     if not settings.SOFTWARE_QUEUE_ENABLED:
-        return
+        return 0
     with NinjaClient(
         base_url=settings.NINJA_BASE_URL,
         token_url=settings.NINJA_TOKEN_URL,
@@ -390,32 +390,16 @@ def run_software_queue_once() -> None:
         client_secret=settings.NINJA_CLIENT_SECRET.get_secret_value(),
         scope=settings.NINJA_SCOPE,
     ) as client:
-        activity, scheduled = software_queue.drain_background(
+        demand, activity, scheduled = software_queue.drain_background(
             client, settings.SOFTWARE_QUEUE_WORKER_BATCH
         )
-    if activity or scheduled:
+    if demand or activity or scheduled:
         software_ingest.refresh_read_models()
     log.info(
-        "Software queue drain complete: activity=%d scheduled=%d",
-        activity, scheduled,
+        "Software queue drain complete: demand=%d activity=%d scheduled=%d",
+        demand, activity, scheduled,
     )
-
-
-def run_software_scoped(df: str) -> None:
-    log.info("Software inventory scoped run starting (df=%r)", df)
-    with NinjaClient(
-        base_url=settings.NINJA_BASE_URL,
-        token_url=settings.NINJA_TOKEN_URL,
-        client_id=settings.NINJA_CLIENT_ID,
-        client_secret=settings.NINJA_CLIENT_SECRET.get_secret_value(),
-        scope=settings.NINJA_SCOPE,
-    ) as client:
-        try:
-            software_ingest.run(client, df)
-            software_ingest.refresh_read_models()
-        except Exception:
-            log.exception("software.scoped ingest failed")
-    log.info("Software inventory scoped run complete (df=%r)", df)
+    return demand + activity + scheduled
 
 
 def schedule_agent_compliance_evaluate(reason: str) -> bool:
@@ -1926,14 +1910,13 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             orgs, devices = _scope_selector.load_scope_choices()
             links_html = (
                 '<p style="margin-top:16px;font-size:13px;color:#52606d;">'
-                '<a href="/run/software/enqueue" style="color:#0b69a3;">Queue a demand run instead</a>'
-                ' &middot; <a href="/run/software/queue" style="color:#0b69a3;">Queue status</a>'
+                '<a href="/run/software/queue" style="color:#0b69a3;">Queue status</a>'
                 '</p>'
             )
             selector_html = _scope_selector.render_scope_selector(
                 orgs, devices,
-                action="/run/software/scoped",
-                submit_label="Run scoped refresh",
+                action="/run/software/enqueue",
+                submit_label="Queue scoped refresh",
                 redirect_url="/run/software/queue",
                 links_html=links_html,
             )
@@ -1950,7 +1933,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
 </head>
 <body>
   <h2>Software inventory — scoped refresh</h2>
-  <p class="hint">Pulls software observations for the selected scope and writes them into Operations. All other devices are unchanged.</p>
+  <p class="hint">Queues software observations for the selected scope. All other devices are unchanged.</p>
   {selector_html}
 </body>
 </html>""".encode("utf-8")
@@ -1961,13 +1944,14 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self._respond(400, b"missing df\n")
             return
 
-        threading.Thread(
-            target=run_software_scoped, args=(df,), daemon=True
-        ).start()
-        self._respond(
-            202,
-            f"software scoped run scheduled (df={df!r})\n".encode("utf-8"),
-        )
+        entry_id = software_queue.enqueue_demand(df, reason="on_demand")
+        if not entry_id:
+            self._respond(500, b"failed to enqueue demand entry\n")
+            return
+        self.send_response(303)
+        self.send_header("Location", f"/run/software/demand/{entry_id}")
+        self.send_header("Content-Length", "0")
+        self.end_headers()
 
     def _handle_software_enqueue(self) -> None:
         """Q2 demand queue form and submission."""
@@ -1984,7 +1968,6 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             links_html = (
                 '<p style="margin-top:16px;font-size:13px;color:#52606d;">'
                 '<a href="/run/software/queue" style="color:#0b69a3;">Queue status</a>'
-                ' &middot; <a href="/run/software/scoped" style="color:#0b69a3;">Direct scoped run (bypasses queue)</a>'
                 '</p>'
             )
             selector_html = _scope_selector.render_scope_selector(
@@ -2022,18 +2005,6 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         if not entry_id:
             self._respond(500, b"failed to enqueue demand entry\n")
             return
-
-        def _run() -> None:
-            with NinjaClient(
-                base_url=settings.NINJA_BASE_URL,
-                token_url=settings.NINJA_TOKEN_URL,
-                client_id=settings.NINJA_CLIENT_ID,
-                client_secret=settings.NINJA_CLIENT_SECRET.get_secret_value(),
-                scope=settings.NINJA_SCOPE,
-            ) as client:
-                software_queue.process_demand_entry(entry_id, client)
-
-        threading.Thread(target=_run, daemon=True).start()
 
         # Redirect to status page.
         location = f"/run/software/demand/{entry_id}"
@@ -2232,8 +2203,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
               </table>
               {detail_html}
               <p style="margin-top: 24px;">
-                <a href="/run/software/enqueue">New demand run</a> &middot;
-                <a href="/run/software/scoped">Direct scoped run</a>
+                <a href="/run/software/enqueue">New demand run</a>
               </p>
             </body>
             </html>
