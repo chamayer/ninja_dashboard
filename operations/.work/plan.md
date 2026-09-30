@@ -1415,3 +1415,26 @@ undefined-name lint, formatter checks for changed implementation files, and
 local stack is inactive. Next action: review the full requirements against the
 current framework, correct any remaining cross-surface or handler gaps, then
 commit/push this evaluator slice with this checkpoint.
+
+Audit correction in progress (2026-09-30): the inventory identified Metabase
+bootstrap as an ungoverned daemon-thread path at startup and on the legacy
+HTTP endpoint. It is explicitly classified as maintenance work by the Jobs
+contract, so it is being registered as a capability-gated service Job and
+admitted through the existing request API. HTTP serving and the scheduler
+remain service infrastructure rather than Job work. The bootstrap result must
+be truthful: disabled configuration creates no run, while configured but
+unavailable or incomplete Metabase fails the Job for explicit manual retry.
+
+Metabase bootstrap correction checkpoint (2026-09-30): `metabase-bootstrap`
+is now a registered, capability-gated maintenance Job. Startup and the
+`POST /bootstrap-metabase` endpoint admit it through the durable request API;
+the prior daemon threads are removed. Disabled configuration returns no Job,
+and a configured external dependency that is unavailable or incomplete makes
+the Job fail rather than logging a false success. The checked registry
+inventory was regenerated, retaining its coverage metadata. Focused inventory,
+registry, and Jobs UI tests (22), Django checks, Python compilation,
+undefined-name lint, and `git diff --check` pass. PostgreSQL-backed admission
+and external Metabase execution remain unavailable while the local stack is
+inactive. Next action: commit/push this audit correction, then continue the
+full requirement audit for any remaining ungoverned background paths or
+cross-surface gaps.

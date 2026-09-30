@@ -177,12 +177,6 @@
       {
         "file": "ingest/main.py",
         "owner": "_Handler.do_POST",
-        "route": "/bootstrap-metabase",
-        "match": "comparison"
-      },
-      {
-        "file": "ingest/main.py",
-        "owner": "_Handler.do_POST",
         "route": "/agent-compliance/action/",
         "match": "startswith"
       }
@@ -190,25 +184,8 @@
     "threads": [
       {
         "file": "ingest/main.py",
-        "owner": "_Handler.do_POST",
-        "expression": "threading.Thread(target=bootstrap_metabase, daemon=True)",
-        "guards": [
-          "not (self.path == '/run/software/enqueue' or self.path.startswith('/run/software/enqueue?'))",
-          "not (self.path == '/run/software/scoped' or self.path.startswith('/run/software/scoped?'))",
-          "not (self.path == '/run/sources/enqueue' or self.path.startswith('/run/sources/enqueue?'))",
-          "self.path == '/bootstrap-metabase'"
-        ]
-      },
-      {
-        "file": "ingest/main.py",
         "owner": "_start_http_server",
         "expression": "threading.Thread(target=httpd.serve_forever, daemon=True)",
-        "guards": []
-      },
-      {
-        "file": "ingest/main.py",
-        "owner": "main",
-        "expression": "threading.Thread(target=bootstrap_metabase, daemon=True)",
         "guards": []
       }
     ],
@@ -735,6 +712,18 @@
         "status_source": "run_log",
         "description": "Evaluate source failures and queue thresholds for Admin Health.",
         "run_all": false
+      },
+      {
+        "file": "operations/apps/core/views.py",
+        "owner": "",
+        "id": "metabase-bootstrap",
+        "name": "Metabase dashboard bootstrap",
+        "category": "maintenance",
+        "endpoint": "",
+        "status_key": "metabase_bootstrap",
+        "status_source": "run_log",
+        "description": "Provision the configured Metabase dashboards after service startup or an explicit request.",
+        "run_all": false
       }
     ],
     "handlers": [
@@ -863,6 +852,12 @@
         "owner": "_execute",
         "key": "platform-health-evaluate",
         "expression": "('Evaluating platform health', lambda: sum(platform_findings.evaluate(dry_run=False).values()))"
+      },
+      {
+        "file": "ingest/operator_job_queue.py",
+        "owner": "_execute",
+        "key": "metabase-bootstrap",
+        "expression": "('Provisioning Metabase dashboards', main.bootstrap_metabase)"
       },
       {
         "file": "ingest/operator_job_queue.py",
@@ -1007,6 +1002,18 @@
       {
         "file": "ingest/main.py",
         "owner": "main",
+        "expression": "operator_job_queue.record_runtime_heartbeat('scheduler', operator_job_queue.SCHEDULER_RUNTIME_ID, {'definition_count': len(operator_job_queue.EXECUTABLE_JOB_KEYS), 'leader_mode': 'short_lived_advisory', 'poll_seconds': 60})",
+        "guards": []
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "main",
+        "expression": "len(operator_job_queue.EXECUTABLE_JOB_KEYS)",
+        "guards": []
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "main",
         "expression": "BackgroundScheduler()",
         "guards": []
       },
@@ -1019,14 +1026,16 @@
       {
         "file": "ingest/main.py",
         "owner": "main",
-        "expression": "threading.Thread(target=bootstrap_metabase, daemon=True).start()",
+        "expression": "metabase_bootstrap_enabled()",
         "guards": []
       },
       {
         "file": "ingest/main.py",
         "owner": "main",
-        "expression": "threading.Thread(target=bootstrap_metabase, daemon=True)",
-        "guards": []
+        "expression": "operator_job_queue.request_system_job('metabase-bootstrap', 'startup')",
+        "guards": [
+          "metabase_bootstrap_enabled()"
+        ]
       },
       {
         "file": "ingest/main.py",
@@ -1044,6 +1053,12 @@
         "file": "ingest/main.py",
         "owner": "main",
         "expression": "threading.Event()",
+        "guards": []
+      },
+      {
+        "file": "ingest/main.py",
+        "owner": "main",
+        "expression": "operator_job_queue.stop_runtime('scheduler', operator_job_queue.SCHEDULER_RUNTIME_ID)",
         "guards": []
       },
       {

@@ -8437,6 +8437,9 @@ def admin_jobs(request: HttpRequest) -> HttpResponse:
         "legacy_agent_compliance": os.environ.get("AGENT_COMPLIANCE_ENABLED", "false").strip().lower() in {"1", "true", "yes", "on"},
         "intel": os.environ.get("INTEL_ENABLED", "false").strip().lower() in {"1", "true", "yes", "on"},
         "notifications": os.environ.get("NOTIFY_ENABLED", "false").strip().lower() in {"1", "true", "yes", "on"},
+        "metabase_bootstrap": bool(
+            os.environ.get("MB_BOOTSTRAP_USER") and os.environ.get("MB_BOOTSTRAP_PASS")
+        ),
         "notification_digest": os.environ.get("NOTIFY_DIGEST_ENABLED", "false").strip().lower() in {"1", "true", "yes", "on"},
         "software_queue": os.environ.get("SOFTWARE_QUEUE_ENABLED", "false").strip().lower() in {"1", "true", "yes", "on"},
     }

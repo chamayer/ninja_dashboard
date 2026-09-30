@@ -818,75 +818,57 @@ def _metabase_setup_complete(url: str) -> bool:
         return False
 
 
-def bootstrap_metabase() -> None:
-    """Provision dashboards in Metabase via API. Tolerates Metabase
-    being down, not yet set up, or credentials missing — logs and
-    returns rather than raising."""
+def metabase_bootstrap_enabled() -> bool:
+    """Whether the configured bootstrap can safely be admitted as a Job."""
+    return bool(settings.MB_BOOTSTRAP_USER and settings.MB_BOOTSTRAP_PASS.get_secret_value())
+
+
+def bootstrap_metabase() -> int:
+    """Provision dashboards and return the number of published dashboard URLs.
+
+    This runs only through the governed maintenance Job.  A configured but
+    unavailable or incomplete Metabase instance is a factual Job failure,
+    rather than a successful row backed only by a log message.
+    """
     user = settings.MB_BOOTSTRAP_USER
     password = settings.MB_BOOTSTRAP_PASS.get_secret_value()
     url = settings.MB_BOOTSTRAP_URL
 
     if not user or not password:
-        log.info(
-            "Metabase auto-bootstrap disabled "
-            "(MB_BOOTSTRAP_USER / MB_BOOTSTRAP_PASS not set in .env)"
-        )
-        return
+        raise RuntimeError("Metabase bootstrap capability is not configured")
 
     log.info("Waiting for Metabase at %s", redact_url(url))
     if not _wait_for_metabase(url, timeout=300):
-        log.warning("Metabase not reachable after 5 min — skipping bootstrap")
-        return
+        raise RuntimeError("Metabase was not reachable within the five-minute bootstrap window")
 
     if not _metabase_setup_complete(url):
-        log.info(
-            "Metabase first-run wizard not yet complete — skipping bootstrap "
-            "(create admin user + Postgres data source in the UI, then "
-            "restart ingest or hit POST /bootstrap-metabase)"
+        raise RuntimeError(
+            "Metabase first-run setup is incomplete; finish setup before retrying the bootstrap Job"
         )
         return
 
     log.info("Running Metabase dashboard bootstrap")
-    try:
-        from ingest.inventory.metabase_retirement import retire_inventory_metabase
+    from ingest.inventory.metabase_retirement import retire_inventory_metabase
+    from ingest.metabase_bootstrap import run_bootstrap
+    from ingest.agent_compliance.metabase_bootstrap import (
+        run_bootstrap as run_agent_compliance_bootstrap,
+    )
 
-        retired = retire_inventory_metabase(
-            url=url,
-            user=user,
-            password=password,
-        )
-        log.info(
-            "Inventory Metabase retirement complete: "
-            "dashboards=%d cards=%d collections=%d",
-            retired["dashboards"],
-            retired["cards"],
-            retired["collections"],
-        )
-    except Exception:
-        log.exception("Inventory Metabase retirement failed; other bootstrap continues")
-
-    try:
-        from ingest.metabase_bootstrap import run_bootstrap
-        from ingest.agent_compliance.metabase_bootstrap import (
-            run_bootstrap as run_agent_compliance_bootstrap,
-        )
-        urls = run_bootstrap(
-            url=url,
-            user=user,
-            password=password,
-            db_name=settings.MB_BOOTSTRAP_DB_NAME,
-        )
-        if settings.AGENT_COMPLIANCE_ENABLED:
-            urls.extend(run_agent_compliance_bootstrap(
-                url=url,
-                user=user,
-                password=password,
-                db_name=settings.MB_BOOTSTRAP_DB_NAME,
-            ))
-        for u in urls:
-            log.info("Dashboard ready: %s", u)
-    except Exception:
-        log.exception("Metabase bootstrap failed (will not retry; trigger via /bootstrap-metabase)")
+    retired = retire_inventory_metabase(url=url, user=user, password=password)
+    log.info(
+        "Inventory Metabase retirement complete: dashboards=%d cards=%d collections=%d",
+        retired["dashboards"], retired["cards"], retired["collections"],
+    )
+    urls = run_bootstrap(
+        url=url, user=user, password=password, db_name=settings.MB_BOOTSTRAP_DB_NAME,
+    )
+    if settings.AGENT_COMPLIANCE_ENABLED:
+        urls.extend(run_agent_compliance_bootstrap(
+            url=url, user=user, password=password, db_name=settings.MB_BOOTSTRAP_DB_NAME,
+        ))
+    for dashboard_url in urls:
+        log.info("Dashboard ready: %s", dashboard_url)
+    return len(urls)
 
 
 def last_successful_run_at(domain: str | None = None) -> datetime | None:
@@ -942,6 +924,7 @@ _HTTP_JOB_PATHS = {
     "/run/intel-matcher": "intel-matcher", "/run/intel-winget": "intel-winget",
     "/run/intel-chocolatey": "intel-chocolatey", "/run/intel-otx": "intel-otx",
     "/run/intel-abusech": "intel-abusech", "/run/intel-endoflife": "intel-endoflife",
+    "/bootstrap-metabase": "metabase-bootstrap",
 }
 
 
@@ -984,6 +967,9 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             if not _READY.is_set():
                 self._respond(503, b"still starting - try again shortly\n")
                 return
+            if governed_job == "metabase-bootstrap" and not metabase_bootstrap_enabled():
+                self._respond(409, b"metabase bootstrap is not configured\n")
+                return
             try:
                 run_id = operator_job_queue.request_system_job(governed_job, self.path)
             except Exception:
@@ -998,9 +984,6 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self._handle_software_scoped()
         elif self.path == "/run/sources/enqueue" or self.path.startswith("/run/sources/enqueue?"):
             self._handle_sources_enqueue()
-        elif self.path == "/bootstrap-metabase":
-            threading.Thread(target=bootstrap_metabase, daemon=True).start()
-            self._respond(202, b"metabase bootstrap scheduled\n")
         elif self.path.startswith("/agent-compliance/action/"):
             self._handle_agent_compliance_action()
         else:
@@ -2412,9 +2395,13 @@ def main() -> None:
     scheduler.start()
     log.info("Durable Jobs producer and control maintenance started")
 
-    # Kick off Metabase bootstrap in the background — won't block
-    # startup if Metabase isn't ready or creds aren't set.
-    threading.Thread(target=bootstrap_metabase, daemon=True).start()
+    if metabase_bootstrap_enabled():
+        try:
+            operator_job_queue.request_system_job("metabase-bootstrap", "startup")
+        except Exception:
+            log.exception("Could not admit the configured Metabase bootstrap Job")
+    else:
+        log.info("Metabase bootstrap capability is disabled")
 
     _READY.set()
     log.info("Ingest service ready")

@@ -609,6 +609,19 @@ _RAW_DEFINITIONS = (
         run_all=False,
         schedule_ids=("platform_health_evaluate_cycle",),
     ),
+    JobDefinition(
+        "metabase-bootstrap",
+        "Metabase dashboard bootstrap",
+        "Provision the configured Metabase dashboards after service startup or an explicit request.",
+        "maintenance",
+        "service",
+        "",
+        "metabase_bootstrap",
+        "run_log",
+        "ingest.main.bootstrap_metabase",
+        capability="metabase_bootstrap",
+        run_all=False,
+    ),
 )
 
 

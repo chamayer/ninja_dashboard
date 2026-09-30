@@ -26,13 +26,14 @@ ROOT = Path(__file__).resolve().parents[4]
 def test_registry_has_one_catalog_and_schedule_owner_per_definition():
     keys = definition_keys()
 
-    assert len(keys) == 37
+    assert len(keys) == 38
     assert {entry["id"] for entry in catalog_entries()} == keys
     assert scheduled_definition_keys() < keys
     assert definition("patches").lane == "collection"
     assert definition("intel-nvd").lane == "intelligence"
     assert definition("software-classify").lane == "software"
     assert definition("notifications-dispatch").lane == "service"
+    assert definition("metabase-bootstrap").capability == "metabase_bootstrap"
 
 
 def test_registry_rejects_missing_duplicate_and_unregistered_consumer_keys():
@@ -153,6 +154,8 @@ def test_registered_http_jobs_use_governed_admission_before_legacy_routes():
     assert "_HTTP_JOB_PATHS" in main
     assert "operator_job_queue.request_system_job(governed_job, self.path)" in main
     assert "SELECT {request_api}" in queue
+    assert '"/bootstrap-metabase": "metabase-bootstrap"' in main
+    assert "threading.Thread(target=bootstrap_metabase" not in main
 
 
 def test_capability_labels_do_not_make_unreviewed_execution_safe():

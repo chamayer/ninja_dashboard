@@ -61,6 +61,7 @@ EXECUTABLE_JOB_KEYS = frozenset(
         "source-demand-recovery",
         "run-log-recovery",
         "platform-health-evaluate",
+        "metabase-bootstrap",
     }
 )
 validate_registry(executable_keys=EXECUTABLE_JOB_KEYS)
@@ -584,6 +585,10 @@ def _execute(job_key: str, progress: V1JobProgress) -> int | JobExecutionResult 
         "platform-health-evaluate": (
             "Evaluating platform health",
             lambda: sum(platform_findings.evaluate(dry_run=False).values()),
+        ),
+        "metabase-bootstrap": (
+            "Provisioning Metabase dashboards",
+            main.bootstrap_metabase,
         ),
         "notifications-dispatch": (
             "Sending notifications",
