@@ -91,6 +91,9 @@ class JobDefinition:
     supersession_rank: int = 0
     handler_version: str = "registry-v1"
     timeout_minutes: int = 90
+    priority: int = 50
+    coalescing_scope: str = "definition_scope"
+    concurrency_scope: str = "resource_keys"
     retry_policy: str = "manual_only_unreviewed"
     progress_contract: str = "stage"
     result_contract: str = "rows_or_outcome"
@@ -126,6 +129,9 @@ class JobDefinition:
             "supersession_family": self.supersession_family,
             "supersession_rank": self.supersession_rank,
             "timeout_minutes": self.timeout_minutes,
+            "priority": self.priority,
+            "coalescing_scope": self.coalescing_scope,
+            "concurrency_scope": self.concurrency_scope,
             "retry_policy": self.retry_policy,
             "progress_contract": self.progress_contract,
             "result_contract": self.result_contract,
@@ -882,6 +888,12 @@ def _validate_dependency_contracts() -> None:
                 errors.append(f"{job.key} has unsupported dependency failure rule")
         if not 1 <= job.timeout_minutes <= 1440:
             errors.append(f"{job.key} has an invalid timeout")
+        if not 0 <= job.priority <= 100:
+            errors.append(f"{job.key} has an invalid priority")
+        if job.coalescing_scope != "definition_scope":
+            errors.append(f"{job.key} has an unsupported coalescing scope")
+        if job.concurrency_scope != "resource_keys":
+            errors.append(f"{job.key} has an unsupported concurrency scope")
         if job.progress_contract != "stage":
             errors.append(f"{job.key} has an unsupported progress contract")
         if job.result_contract != "rows_or_outcome":

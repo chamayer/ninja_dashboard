@@ -1458,3 +1458,20 @@ checks, Python compilation, undefined-name lint, and `git diff --check` pass.
 PostgreSQL execution remains unavailable while the local stack is inactive.
 Next action: commit/push this contract correction, then continue the full
 requirement audit.
+
+Priority-contract correction in progress (2026-09-30): admission still got
+the legacy table default priority instead of an immutable definition contract.
+Add priority, coalescing scope, and concurrency scope to every snapshot, and
+apply the definition priority in a fenced `BEFORE INSERT` trigger for v1 run
+admission. This keeps the existing priority-aging claim order but removes an
+untracked request-time default.
+
+Priority-contract correction checkpoint (2026-09-30): snapshots now include
+priority, coalescing scope, and concurrency scope alongside the previously
+added timeout/progress/result/permission contracts. Migration 0231 applies
+the immutable priority with a security-definer, before-insert trigger for v1
+Jobs, while preserving legacy rows and the reviewed priority-aging claim
+order. Focused registry/worker/UI/migration tests (22), Django checks, Python
+compilation, undefined-name lint, and `git diff --check` pass. PostgreSQL
+execution remains unavailable while the local stack is inactive. Next action:
+commit/push this correction and continue the full requirement audit.
