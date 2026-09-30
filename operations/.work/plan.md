@@ -1271,3 +1271,17 @@ safety, registry, operator, inventory, and worker-topology tests pass, with
 Python compilation, undefined-name lint, and diff checks. Next action: enforce
 the accepted workflow-root rule so a requested root remains Waiting until all
 required descendants complete, then audit worker shutdown and health parity.
+
+Workflow-root checkpoint (2026-09-29): migration 0222 distinguishes handler
+completion from requested-work completion. A successful run with required
+children releases its resource claims and deadline, clears its worker fence,
+and remains visibly Waiting without consuming execution capacity. Terminal
+child state is reconciled recursively: all-success rolls Completed up through
+diamond joins, while failure or cancellation rolls Needs attention up and
+blocks unstarted descendants. Waiting coordinators can be cancelled without a
+nonexistent worker acknowledgement. The Job activity UI labels this state
+explicitly and does not claim a worker is active. Focused migration, registry,
+and operator tests, compilation, undefined-name lint, and diff checks pass;
+PostgreSQL execution remains pending while the stack is inactive. Next action:
+complete the declared source/intelligence edge families, then close worker
+shutdown and Admin Health parity gaps.

@@ -8858,7 +8858,12 @@ def _operator_job_runs(*, limit: int = 100, run_id: str = "", batch_id: str = ""
                 "dependency": "Dependency", "recovery": "Recovery",
             }.get(row[19], "Automatic" if row[3] is None else "Operator"),
             "requested_at": row[4], "started_at": row[5], "completed_at": row[6],
-            "status": row[7], "status_label": status_labels.get(row[7], row[7]),
+            "status": row[7],
+            "status_label": (
+                "Waiting for required work"
+                if row[20] == "workflow"
+                else status_labels.get(row[7], row[7])
+            ),
             "attempts": row[8], "rows_touched": row[9], "error": row[10],
             "stage": row[11], "stage_detail": row[12], "stage_updated_at": row[13],
             "lane": row[14], "heartbeat_at": row[15], "queue_position": row[16],
