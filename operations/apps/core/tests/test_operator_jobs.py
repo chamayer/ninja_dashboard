@@ -51,8 +51,9 @@ def test_jobs_status_uses_operator_language_and_safe_controls():
     assert '"queued": "Queued"' in views
     assert '"stalled": "Needs attention"' in views
     assert "def admin_job_cancel" in views
-    assert "status = 'queued'" in views
-    assert "Cannot safely stop" in template
+    assert "jobs_cancel_v1" in views
+    assert "Request cancellation" in template
+    assert "Cancellation pending" in template
     assert "Job activity" in template
     assert "Queue position" in template
     assert "Current work" in template
@@ -61,7 +62,9 @@ def test_jobs_status_uses_operator_language_and_safe_controls():
     assert "Not started" in template
     assert "Waiting for work already running in this lane" in views
     assert "Recent system activity" in template
-    assert '"origin": "Automatic"' in views
+    assert '"automatic": "Automatic"' in views
+    assert '"dependency": "Dependency"' in views
+    assert "Safety deadline" in template
     assert "Show error details" in template
     assert "admin_job_history_retry" in template
     assert "_HISTORY_RETRYABLE_KINDS" in views

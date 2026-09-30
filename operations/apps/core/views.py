@@ -8272,6 +8272,7 @@ def admin_jobs(request: HttpRequest) -> HttpResponse:
     run_log_status: dict[str, dict] = {}
     queued_job_status: dict[str, dict] = {}
     recent_runs: list[dict] = []
+    now = timezone.now()
     try:
         with transaction.atomic(), connection.cursor() as cur:
             cur.execute("SET LOCAL operations.tenant_id = 1")
@@ -8391,12 +8392,16 @@ def admin_jobs(request: HttpRequest) -> HttpResponse:
             "no_run_now": True,  # per-instance triggers go through the /run/sources/enqueue form
         })
 
-    now = timezone.now()
     jobs = []
     categories = set()
     for entry in list(_JOB_CATALOG) + dynamic_source_entries:
         categories.add(entry["category"])
-        available, availability_label = capability_state(entry["id"], enabled_capabilities)
+        if entry["id"] in _JOB_INDEX:
+            available, availability_label = capability_state(
+                entry["id"], enabled_capabilities
+            )
+        else:
+            available, availability_label = True, "Available"
         disabled_reason = "" if available else availability_label
         if not available:
             # Disabled definitions have no executable capability. Do not offer
@@ -8654,7 +8659,10 @@ def _operator_job_runs(*, limit: int = 100, run_id: str = "", batch_id: str = ""
                              WHERE running.tenant_id = 1 AND running.lane = job.lane
                                AND running.status = 'running'
                         ) THEN 'Waiting for work already running in this lane.'
-                        ELSE 'Waiting for earlier queued work in this lane.' END END AS queue_reason
+                        ELSE 'Waiting for earlier queued work in this lane.' END END AS queue_reason,
+                        contract_version, trigger_kind, wait_category, wait_reason,
+                        cancellation_requested_at, cancellation_reason, deadline_at,
+                        correlation_id, retry_of_run_id, result, terminal_reason
                    FROM operations.operator_job_runs
                   AS job
                   WHERE {' AND '.join(clauses)}
@@ -8709,13 +8717,22 @@ def _operator_job_runs(*, limit: int = 100, run_id: str = "", batch_id: str = ""
     return [
         {
             "id": row[0], "job_key": row[1], "name": labels.get(row[1], row[1]),
-            "batch_id": row[2], "origin": "Automatic" if row[3] is None else "Operator",
+            "batch_id": row[2] or row[25],
+            "origin": {
+                "automatic": "Automatic", "operator": "Operator",
+                "dependency": "Dependency", "recovery": "Recovery",
+            }.get(row[19], "Automatic" if row[3] is None else "Operator"),
             "requested_at": row[4], "started_at": row[5], "completed_at": row[6],
             "status": row[7], "status_label": status_labels.get(row[7], row[7]),
             "attempts": row[8], "rows_touched": row[9], "error": row[10],
             "stage": row[11], "stage_detail": row[12], "stage_updated_at": row[13],
             "lane": row[14], "heartbeat_at": row[15], "queue_position": row[16],
-            "queue_reason": row[17], "result_label": result_label(row[7], row[9], row[10]),
+            "queue_reason": row[21] or row[17], "wait_category": row[20],
+            "contract_version": row[18], "cancellation_requested_at": row[22],
+            "cancellation_reason": row[23], "deadline_at": row[24],
+            "correlation_id": row[25], "retry_of_run_id": row[26],
+            "result": row[27] or {}, "terminal_reason": row[28],
+            "result_label": result_label(row[7], row[9], row[10]),
             "elapsed": elapsed_label(row[5], row[6]),
             "events": events_by_job.get(row[0], []),
         }
