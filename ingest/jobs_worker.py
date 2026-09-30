@@ -74,6 +74,27 @@ def _finish_child(child: _Child) -> None:
         operator_job_queue._finish_v1(child.run_id, child.claim_token, "failed", error=str(result.get("error", "Jobs child failed."))[:2000])
 
 
+def _shutdown_children(children: dict[str, _Child]) -> None:
+    """Reconcile exited children and fence all still-running work before exit.
+
+    No handler is certified kill-safe. The supervisor therefore does not send
+    a termination signal itself; container shutdown owns process teardown after
+    the durable run and resource claims have been marked uncertain.
+    """
+    for child in children.values():
+        try:
+            if child.process.poll() is not None:
+                _finish_child(child)
+            else:
+                operator_job_queue._interrupt_v1(
+                    child.run_id,
+                    child.claim_token,
+                    "Jobs worker shutdown interrupted the handler; verify external and database effects before retrying.",
+                )
+        except Exception:
+            log.exception("Jobs child shutdown reconciliation failed: run=%s", child.run_id)
+
+
 def run() -> int:
     """Supervise one isolated child per lane without blocking other lanes."""
     global _stopping
@@ -119,6 +140,7 @@ def run() -> int:
             time.sleep(_POLL_SECONDS)
     finally:
         _READY_PATH.unlink(missing_ok=True)
+        _shutdown_children(children)
     return 0
 
 

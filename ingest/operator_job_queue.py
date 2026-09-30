@@ -354,6 +354,17 @@ def _finish_cancelled_v1(job_id: Any, claim_token: uuid.UUID) -> None:
         )
 
 
+def _interrupt_v1(job_id: Any, claim_token: uuid.UUID, reason: str) -> bool:
+    """Fence an interrupted child and retain its claims for manual review."""
+    with db.transaction() as cur:
+        cur.execute("SET LOCAL operations.tenant_id = 1")
+        cur.execute(
+            "SELECT operations.jobs_interrupt_v1(%s, %s, %s, %s)",
+            (1, job_id, claim_token, reason[:500]),
+        )
+        return bool(cur.fetchone()[0])
+
+
 def _execute(job_key: str, progress: V1JobProgress) -> int | None:
     """Run a catalog job synchronously in the bounded queue worker.
 

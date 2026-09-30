@@ -1300,3 +1300,15 @@ inventory, operator, and topology tests pass (59 tests), along with Python
 compilation, undefined-name lint, and diff checks. Next action: make worker
 shutdown explicitly terminate/reconcile children and add registry/scheduler/
 worker mismatch evidence to Admin Health.
+
+Worker-shutdown checkpoint (2026-09-29): migration 0224 adds a fenced worker
+interruption transition. On graceful supervisor shutdown, exited children use
+their normal terminal transition; still-running unaudited handlers become
+Needs attention, lose their ledger fence, retain contained resource claims,
+and block required descendants before the container owns process teardown.
+The supervisor never calls terminate or kill because no handler is certified
+kill-safe. Focused migration/topology tests, compilation, undefined-name lint,
+and diff checks pass. Next action: replace the provisional broad source and
+intelligence completion chains with dependency metadata and revision-aware,
+affected-scope admission required by ADR-0024, then add Jobs control-plane
+health evidence.
