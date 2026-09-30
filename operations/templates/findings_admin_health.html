@@ -126,6 +126,10 @@
                     {% if f.job_status_url %}
                     <a href="{{ f.job_status_url }}">Open Job status</a>
                     {% endif %}
+                    {% if f.control_plane_url %}
+                    {% if f.job_status_url %}<br>{% endif %}
+                    <a href="{{ f.control_plane_url }}">Open control-plane evidence</a>
+                    {% endif %}
                     {% if f.status == "open" %}
                     <form method="post" action="{% url 'admin_finding_acknowledge' f.id %}" style="display: inline;">
                         {% csrf_token %}

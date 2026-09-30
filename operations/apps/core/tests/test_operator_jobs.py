@@ -136,3 +136,13 @@ def test_scoped_software_requests_wait_for_the_governed_queue_worker():
 
 def test_jobs_control_plane_template_compiles():
     get_template("admin_jobs_control_plane.html")
+
+
+def test_admin_health_links_jobs_findings_to_their_durable_evidence():
+    views = Path("apps/core/views.py").read_text(encoding="utf-8")
+    template = Path("templates/findings_admin_health.html").read_text(encoding="utf-8")
+
+    assert 'details.get("job_run_id")' in views
+    assert 'details.get("job_key")' in views
+    assert 'details.get("control_section")' in views
+    assert "control_plane_url" in template

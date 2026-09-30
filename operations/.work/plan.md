@@ -1392,3 +1392,26 @@ code-only condition taxonomy. Policy parsing, Python compilation, and
 `git diff --check` pass. Next action: commit/push the policy prerequisite,
 then implement the evaluator's seven measured, deduplicated conditions and
 their Job deep links.
+
+Evaluator handoff: implement the seven measurements in
+`ingest/platform_findings.py` using durable Jobs schedules, runs,
+dependencies, queue registry, immutable definition revisions, and runtime
+heartbeats. Each emitted detail must retain `job_key`, `job_run_id`, or
+schedule/control-plane section data for the Admin Health deep link; resolve
+only after a fresh governing condition assessment permits clearing.
+
+Jobs health evaluator checkpoint (2026-09-30): migration 0229 exposes a
+tenant-bound, security-definer measurement API to the platform-health Job,
+so the ingest role does not gain direct access to control-plane tables. The
+evaluator now emits all seven policy-registered conditions from durable
+schedules, run outcomes, dependencies, queue policy, immutable definition
+snapshots, lane/resource policy, and runtime heartbeats. Queue and dependency
+age thresholds come from the `operator.jobs` registry; repeated failures and
+timeouts retain a bounded 24-hour observation window. Each finding has a Job
+activity run/definition link or a control-plane section link. Focused
+condition-safety and Jobs/migration tests, Django checks, compilation,
+undefined-name lint, formatter checks for changed implementation files, and
+`git diff --check` pass. PostgreSQL execution remains unavailable while the
+local stack is inactive. Next action: review the full requirements against the
+current framework, correct any remaining cross-surface or handler gaps, then
+commit/push this evaluator slice with this checkpoint.

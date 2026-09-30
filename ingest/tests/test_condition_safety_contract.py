@@ -220,6 +220,22 @@ def test_platform_health_emits_admin_findings_not_entity_findings():
     assert "preserve_operator_episode" in section
 
 
+def test_platform_health_measures_all_governed_jobs_conditions_via_restricted_api():
+    source = (Path(__file__).parents[1] / "platform_findings.py").read_text()
+    assert "jobs_health_measurements_v1" in source
+    for condition in (
+        "jobs_schedule_failure",
+        "jobs_required_disabled",
+        "jobs_queue_backlog",
+        "jobs_repeated_failure",
+        "jobs_timeout",
+        "jobs_registry_mismatch",
+        "jobs_unmet_dependency",
+    ):
+        assert condition in source
+    assert '"control_section"' in source
+
+
 def test_assessment_policy_digest_is_required_and_bound_to_version():
     migration = (
         Path(__file__).parents[2]

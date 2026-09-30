@@ -11031,9 +11031,23 @@ def findings_admin_health(request: HttpRequest) -> HttpResponse:
         finding.observed_name = ref.get("observed_name") or ""
         finding.source_name = source_names.get(str(ref.get("source_id")), "")
         finding.source_url = reverse("sources_status") if finding.source_name else ""
-        finding.job_status_url = (
-            reverse("admin_job_status")
-            if details.get("queue_key") == "operator.jobs"
+        if details.get("job_run_id") or details.get("dependent_job_run_id"):
+            finding.job_status_url = reverse("admin_job_status") + "?" + urlencode(
+                {"run": details.get("job_run_id") or details["dependent_job_run_id"]}
+            )
+        elif details.get("job_key"):
+            finding.job_status_url = reverse("admin_job_status") + "?" + urlencode(
+                {"job": details["job_key"]}
+            )
+        elif details.get("queue_key") == "operator.jobs":
+            finding.job_status_url = reverse("admin_job_status")
+        else:
+            finding.job_status_url = ""
+        finding.control_plane_url = (
+            reverse("admin_jobs_control_plane") + "?" + urlencode(
+                {"section": details["control_section"]}
+            )
+            if details.get("control_section")
             else ""
         )
 

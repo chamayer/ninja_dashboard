@@ -1,4 +1,4 @@
-"""Platform-health findings: ingest failures and stalled queues.
+"""Platform-health findings: ingest and durable Jobs control-plane health.
 
 Two conditions were registered as `finding_class='admin'` finding types but
 nothing ever emitted them. Meanwhile `activities` failed 20 times in 7 days,
@@ -8,6 +8,8 @@ nothing ever emitted them. Meanwhile `activities` failed 20 times in 7 days,
   - `source_failure`         — an ingest domain whose most recent run failed.
   - `software_queue_stalled` — a registered queue over its own `max_depth`
                                or `max_pending_age_m` threshold.
+  - `jobs_*` — measured health conditions for durable schedules, executions,
+                dependencies, and the registry/runtime control plane.
 
 Both surface on the Operations admin health page (`findings_admin_health`),
 which lists `FindingType.objects.filter(finding_class="admin")` — no UI work
@@ -24,14 +26,13 @@ Default is dry-run: nothing is written unless `dry_run=False` is passed.
 
 from __future__ import annotations
 
-import logging
 import json
+import logging
 import uuid
 from datetime import UTC, datetime
 from typing import Any
 
 from psycopg import sql
-from shared.conditions.contracts import Condition, EvaluationCoverage, Participant
 
 from ingest import db
 from ingest.cmdb_findings import (
@@ -40,6 +41,15 @@ from ingest.cmdb_findings import (
 )
 from ingest.condition_evidence import preserve_operator_episode
 from ingest.conditions import record_assessment
+from shared.conditions.contracts import Condition, EvaluationCoverage, Participant
+from shared.jobs_registry import (
+    INITIAL_EXECUTION_CAPACITY,
+    INITIAL_LANE_CAPACITIES,
+    definition,
+    definitions,
+    registry_digest,
+    schedule_definitions,
+)
 
 log = logging.getLogger(__name__)
 
@@ -89,8 +99,14 @@ def _upsert_admin_finding(
         RETURNING id
         """,
         (
-            TENANT_ID, finding_type_id, condition_key, severity,
-            json.dumps(subject_ref), json.dumps(details), now, now,
+            TENANT_ID,
+            finding_type_id,
+            condition_key,
+            severity,
+            json.dumps(subject_ref),
+            json.dumps(details),
+            now,
+            now,
         ),
     )
     row = cur.fetchone()
@@ -102,15 +118,39 @@ def _upsert_admin_finding(
 def evaluate(*, dry_run: bool = True) -> dict[str, int]:
     """Emit platform-health findings. Returns per-condition counts."""
     now = datetime.now(UTC)
-    counts = {"source_failure": 0, "software_queue_stalled": 0, "queues_skipped": 0}
+    counts = {
+        "source_failure": 0,
+        "software_queue_stalled": 0,
+        "queues_skipped": 0,
+        "jobs_schedule_failure": 0,
+        "jobs_required_disabled": 0,
+        "jobs_queue_backlog": 0,
+        "jobs_repeated_failure": 0,
+        "jobs_timeout": 0,
+        "jobs_registry_mismatch": 0,
+        "jobs_unmet_dependency": 0,
+    }
 
     with db.transaction() as cur:
         cur.execute("SET LOCAL operations.tenant_id = %s", (TENANT_ID,))
         ft_failure = _finding_type_id(cur, "source_failure")
         ft_queue = _finding_type_id(cur, "software_queue_stalled")
+        jobs_types = {
+            name: _finding_type_id(cur, name)
+            for name in (
+                "jobs_schedule_failure",
+                "jobs_required_disabled",
+                "jobs_queue_backlog",
+                "jobs_repeated_failure",
+                "jobs_timeout",
+                "jobs_registry_mismatch",
+                "jobs_unmet_dependency",
+            )
+        }
 
         failure_keys = _eval_source_failures(cur, ft_failure, now, counts, dry_run)
         queue_keys = _eval_stalled_queues(cur, ft_queue, now, counts, dry_run)
+        jobs_keys = _eval_jobs_health(cur, jobs_types, now, counts, dry_run)
 
         if not dry_run:
             _resolve_admin_absent(
@@ -119,6 +159,10 @@ def evaluate(*, dry_run: bool = True) -> dict[str, int]:
             _resolve_admin_absent(
                 cur, ft_queue, queue_keys, now, assessment_required=True
             )
+            for name, finding_type_id in jobs_types.items():
+                _resolve_admin_absent(
+                    cur, finding_type_id, jobs_keys[name], now, assessment_required=True
+                )
 
     log.info("platform findings: %s (dry_run=%s)", counts, dry_run)
     return counts
@@ -221,7 +265,9 @@ def _eval_source_failures(
                 "error": (error_text or "")[:500],
             },
         )
-        _record_platform_assessment(cur, finding_id, key, "source_failure", subject_id, now)
+        _record_platform_assessment(
+            cur, finding_id, key, "source_failure", subject_id, now
+        )
     return keys
 
 
@@ -266,21 +312,33 @@ def _eval_stalled_queues(
             if dry_run:
                 continue
             finding_id = _upsert_admin_finding(
-                cur, finding_type_id=finding_type_id, condition_key=key,
-                severity="high" if failed_count or (over_depth and over_age) else "medium",
+                cur,
+                finding_type_id=finding_type_id,
+                condition_key=key,
+                severity="high"
+                if failed_count or (over_depth and over_age)
+                else "medium",
                 now=now,
                 subject_ref={
-                    "signal_kind": "queue", "signal_id": str(_subject("queue", queue_key)),
+                    "signal_kind": "queue",
+                    "signal_id": str(_subject("queue", queue_key)),
                 },
                 details={
-                    "queue_key": queue_key, "pending_depth": depth,
+                    "queue_key": queue_key,
+                    "pending_depth": depth,
                     "oldest_pending_minutes": round(oldest_age_m, 1),
                     "failed_or_stalled": failed_count,
-                    "max_pending_age_m": max_age_m, "max_depth": max_depth,
+                    "max_pending_age_m": max_age_m,
+                    "max_depth": max_depth,
                 },
             )
             _record_platform_assessment(
-                cur, finding_id, key, "software_queue_stalled", _subject("queue", queue_key), now,
+                cur,
+                finding_id,
+                key,
+                "software_queue_stalled",
+                _subject("queue", queue_key),
+                now,
                 measured=True,
             )
             continue
@@ -288,7 +346,8 @@ def _eval_stalled_queues(
             counts["queues_skipped"] += 1
             log.warning(
                 "platform findings: queue %s (%s) not measurable — skipped",
-                queue_key, table_name,
+                queue_key,
+                table_name,
             )
             continue
 
@@ -326,7 +385,8 @@ def _eval_stalled_queues(
             severity="high" if (over_depth and over_age) else "medium",
             now=now,
             subject_ref={
-                "signal_kind": "queue", "signal_id": str(_subject("queue", queue_key)),
+                "signal_kind": "queue",
+                "signal_id": str(_subject("queue", queue_key)),
             },
             details={
                 "queue_key": queue_key,
@@ -341,10 +401,406 @@ def _eval_stalled_queues(
             },
         )
         _record_platform_assessment(
-            cur, finding_id, key, "software_queue_stalled", _subject("queue", queue_key), now,
+            cur,
+            finding_id,
+            key,
+            "software_queue_stalled",
+            _subject("queue", queue_key),
+            now,
             measured=True,
         )
     return keys
+
+
+def _eval_jobs_health(
+    cur: Any,
+    finding_types: dict[str, int | None],
+    now: datetime,
+    counts: dict[str, int],
+    dry_run: bool,
+) -> dict[str, list[str]]:
+    """Evaluate durable Jobs health through its restricted measurement API.
+
+    The evaluator deliberately has no table privileges for the Jobs control
+    relations.  The security-definer API returns only the bounded operational
+    evidence needed to explain and link an Admin Finding.
+    """
+    cur.execute(
+        "SELECT kind, payload FROM operations.jobs_health_measurements_v1(%s)",
+        (TENANT_ID,),
+    )
+    measurements: dict[str, list[dict[str, Any]]] = {}
+    for kind, payload in cur.fetchall():
+        measurements.setdefault(kind, []).append(payload or {})
+
+    keys = {name: [] for name in finding_types}
+    _eval_jobs_schedule_failures(
+        cur,
+        finding_types["jobs_schedule_failure"],
+        measurements.get("schedule_failure", []),
+        now,
+        counts,
+        dry_run,
+        keys["jobs_schedule_failure"],
+    )
+    _eval_jobs_required_disabled(
+        cur,
+        finding_types["jobs_required_disabled"],
+        measurements.get("required_disabled", []),
+        now,
+        counts,
+        dry_run,
+        keys["jobs_required_disabled"],
+    )
+    _eval_jobs_queue_backlog(
+        cur,
+        finding_types["jobs_queue_backlog"],
+        measurements.get("queue_backlog", []),
+        now,
+        counts,
+        dry_run,
+        keys["jobs_queue_backlog"],
+    )
+    _eval_jobs_repeated_failures(
+        cur,
+        finding_types["jobs_repeated_failure"],
+        measurements.get("repeated_failure", []),
+        now,
+        counts,
+        dry_run,
+        keys["jobs_repeated_failure"],
+    )
+    _eval_jobs_timeouts(
+        cur,
+        finding_types["jobs_timeout"],
+        measurements.get("timeout", []),
+        now,
+        counts,
+        dry_run,
+        keys["jobs_timeout"],
+    )
+    _eval_jobs_unmet_dependencies(
+        cur,
+        finding_types["jobs_unmet_dependency"],
+        measurements.get("unmet_dependency", []),
+        now,
+        counts,
+        dry_run,
+        keys["jobs_unmet_dependency"],
+    )
+    _eval_jobs_registry_mismatch(
+        cur,
+        finding_types["jobs_registry_mismatch"],
+        measurements.get("control_snapshot", []),
+        now,
+        counts,
+        dry_run,
+        keys["jobs_registry_mismatch"],
+    )
+    return keys
+
+
+def _emit_jobs_finding(
+    cur: Any,
+    *,
+    finding_type_id: int | None,
+    type_name: str,
+    condition_key: str,
+    severity: str,
+    subject_key: str,
+    details: dict[str, Any],
+    now: datetime,
+    dry_run: bool,
+) -> None:
+    if finding_type_id is None:
+        raise RuntimeError(f"Jobs finding type is missing: {type_name}")
+    if dry_run:
+        return
+    subject_id = _subject("jobs", subject_key)
+    finding_id = _upsert_admin_finding(
+        cur,
+        finding_type_id=finding_type_id,
+        condition_key=condition_key,
+        severity=severity,
+        now=now,
+        subject_ref={"signal_kind": "jobs", "signal_id": str(subject_id)},
+        details=details,
+    )
+    _record_platform_assessment(
+        cur, finding_id, condition_key, type_name, subject_id, now, measured=True
+    )
+
+
+def _eval_jobs_schedule_failures(
+    cur: Any,
+    finding_type_id: int | None,
+    rows: list[dict[str, Any]],
+    now: datetime,
+    counts: dict[str, int],
+    dry_run: bool,
+    keys: list[str],
+) -> None:
+    for row in rows:
+        schedule_id = str(row["schedule_id"])
+        key = f"jobs_schedule_failure:{schedule_id}"
+        keys.append(key)
+        counts["jobs_schedule_failure"] += 1
+        outcome = str(row.get("last_outcome") or "")
+        _emit_jobs_finding(
+            cur,
+            finding_type_id=finding_type_id,
+            type_name="jobs_schedule_failure",
+            condition_key=key,
+            severity="high" if outcome in {"failed", "stalled"} else "medium",
+            subject_key=schedule_id,
+            details={
+                **row,
+                "control_section": "schedules",
+                "job_key": row.get("job_key"),
+            },
+            now=now,
+            dry_run=dry_run,
+        )
+
+
+def _eval_jobs_required_disabled(
+    cur: Any,
+    finding_type_id: int | None,
+    rows: list[dict[str, Any]],
+    now: datetime,
+    counts: dict[str, int],
+    dry_run: bool,
+    keys: list[str],
+) -> None:
+    for row in rows:
+        schedule_id = str(row["schedule_id"])
+        key = f"jobs_required_disabled:{schedule_id}"
+        keys.append(key)
+        counts["jobs_required_disabled"] += 1
+        _emit_jobs_finding(
+            cur,
+            finding_type_id=finding_type_id,
+            type_name="jobs_required_disabled",
+            condition_key=key,
+            severity="high",
+            subject_key=schedule_id,
+            details={
+                **row,
+                "control_section": "schedules",
+                "job_key": row.get("job_key"),
+            },
+            now=now,
+            dry_run=dry_run,
+        )
+
+
+def _eval_jobs_queue_backlog(
+    cur: Any,
+    finding_type_id: int | None,
+    rows: list[dict[str, Any]],
+    now: datetime,
+    counts: dict[str, int],
+    dry_run: bool,
+    keys: list[str],
+) -> None:
+    for row in rows:
+        if not row.get("breached"):
+            continue
+        queue_key = str(row["queue_key"])
+        key = f"jobs_queue_backlog:{queue_key}"
+        keys.append(key)
+        counts["jobs_queue_backlog"] += 1
+        _emit_jobs_finding(
+            cur,
+            finding_type_id=finding_type_id,
+            type_name="jobs_queue_backlog",
+            condition_key=key,
+            severity="high" if set(row["breached"]) == {"depth", "age"} else "medium",
+            subject_key=queue_key,
+            details={
+                **row,
+                "control_section": "runs",
+            },
+            now=now,
+            dry_run=dry_run,
+        )
+
+
+def _eval_jobs_repeated_failures(
+    cur: Any,
+    finding_type_id: int | None,
+    rows: list[dict[str, Any]],
+    now: datetime,
+    counts: dict[str, int],
+    dry_run: bool,
+    keys: list[str],
+) -> None:
+    for row in rows:
+        job_key = str(row["job_key"])
+        key = f"jobs_repeated_failure:{job_key}"
+        keys.append(key)
+        counts["jobs_repeated_failure"] += 1
+        _emit_jobs_finding(
+            cur,
+            finding_type_id=finding_type_id,
+            type_name="jobs_repeated_failure",
+            condition_key=key,
+            severity="high",
+            subject_key=job_key,
+            details={**row, "control_section": "runs", "job_key": job_key},
+            now=now,
+            dry_run=dry_run,
+        )
+
+
+def _eval_jobs_timeouts(
+    cur: Any,
+    finding_type_id: int | None,
+    rows: list[dict[str, Any]],
+    now: datetime,
+    counts: dict[str, int],
+    dry_run: bool,
+    keys: list[str],
+) -> None:
+    for row in rows:
+        run_id = str(row["job_run_id"])
+        key = f"jobs_timeout:{run_id}"
+        keys.append(key)
+        counts["jobs_timeout"] += 1
+        _emit_jobs_finding(
+            cur,
+            finding_type_id=finding_type_id,
+            type_name="jobs_timeout",
+            condition_key=key,
+            severity="high",
+            subject_key=run_id,
+            details={**row, "control_section": "runs"},
+            now=now,
+            dry_run=dry_run,
+        )
+
+
+def _eval_jobs_unmet_dependencies(
+    cur: Any,
+    finding_type_id: int | None,
+    rows: list[dict[str, Any]],
+    now: datetime,
+    counts: dict[str, int],
+    dry_run: bool,
+    keys: list[str],
+) -> None:
+    for row in rows:
+        dependency_id = str(row["dependency_id"])
+        key = f"jobs_unmet_dependency:{dependency_id}"
+        keys.append(key)
+        counts["jobs_unmet_dependency"] += 1
+        _emit_jobs_finding(
+            cur,
+            finding_type_id=finding_type_id,
+            type_name="jobs_unmet_dependency",
+            condition_key=key,
+            severity="high" if row.get("state") == "blocked" else "medium",
+            subject_key=dependency_id,
+            details={**row, "control_section": "dependencies"},
+            now=now,
+            dry_run=dry_run,
+        )
+
+
+def _eval_jobs_registry_mismatch(
+    cur: Any,
+    finding_type_id: int | None,
+    rows: list[dict[str, Any]],
+    now: datetime,
+    counts: dict[str, int],
+    dry_run: bool,
+    keys: list[str],
+) -> None:
+    if not rows:
+        return
+    snapshot = rows[0]
+    stored_versions = {
+        (row.get("definition_key"), row.get("definition_digest"))
+        for row in snapshot.get("definition_versions", [])
+    }
+    expected_versions = {(item.key, item.snapshot_digest()) for item in definitions()}
+    missing_versions = sorted(
+        key for key, digest in expected_versions if (key, digest) not in stored_versions
+    )
+    schedules = {
+        row.get("definition_key"): row for row in snapshot.get("schedules", [])
+    }
+    missing_schedules = sorted(
+        {item.job_key for item in schedule_definitions()} - schedules.keys()
+    )
+    stale_schedules = sorted(
+        key
+        for key, row in schedules.items()
+        if key in {item.key for item in definitions()}
+        and row.get("definition_digest") != definition(key).snapshot_digest()
+    )
+    expected_lanes = dict(INITIAL_LANE_CAPACITIES)
+    actual_lanes = {
+        row.get("lane"): row.get("capacity") for row in snapshot.get("lane_limits", [])
+    }
+    expected_resources = {"execution:deployment": INITIAL_EXECUTION_CAPACITY}
+    for item in definitions():
+        for resource in item.resource_keys:
+            expected_resources.setdefault(resource, 1)
+    actual_resources = {
+        row.get("resource_template"): row.get("capacity")
+        for row in snapshot.get("resource_limits", [])
+    }
+    expected_digest = registry_digest()
+    live = [
+        row
+        for row in snapshot.get("runtimes", [])
+        if not row.get("stopped_at") and row.get("fresh")
+    ]
+    live_kinds = {str(row.get("runtime_kind")) for row in live}
+    runtime_mismatch = sorted(
+        {
+            str(row.get("runtime_kind"))
+            for row in live
+            if row.get("registry_digest") != expected_digest
+        }
+    )
+    missing_runtimes = sorted({"scheduler", "worker"} - live_kinds)
+    issues: dict[str, Any] = {}
+    if missing_versions:
+        issues["missing_definition_versions"] = missing_versions
+    if missing_schedules:
+        issues["missing_schedules"] = missing_schedules
+    if stale_schedules:
+        issues["stale_schedules"] = stale_schedules
+    if actual_lanes != expected_lanes:
+        issues["lane_policy_mismatch"] = True
+    if actual_resources != expected_resources:
+        issues["resource_policy_mismatch"] = True
+    if runtime_mismatch:
+        issues["runtime_digest_mismatch"] = runtime_mismatch
+    if missing_runtimes:
+        issues["missing_runtime_heartbeats"] = missing_runtimes
+    if not issues:
+        return
+    key = "jobs_registry_mismatch:control-plane"
+    keys.append(key)
+    counts["jobs_registry_mismatch"] += 1
+    _emit_jobs_finding(
+        cur,
+        finding_type_id=finding_type_id,
+        type_name="jobs_registry_mismatch",
+        condition_key=key,
+        severity="high",
+        subject_key="control-plane",
+        details={
+            "job_key": "platform-health-evaluate",
+            "control_section": "definition_versions",
+            **issues,
+        },
+        now=now,
+        dry_run=dry_run,
+    )
 
 
 def _record_platform_assessment(
