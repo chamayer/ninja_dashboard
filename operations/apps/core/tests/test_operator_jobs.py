@@ -56,7 +56,7 @@ def test_jobs_status_uses_operator_language_and_safe_controls():
     assert "Worker active" in template
     assert "Not started" in template
     assert "Waiting for work already running in this lane" in views
-    assert "Recent system activity" in template
+    assert "System activity" in template
     assert '"automatic": "Automatic"' in views
     assert '"dependency": "Dependency"' in views
     assert "Safety deadline" in template
@@ -99,6 +99,27 @@ def test_jobs_status_uses_operator_language_and_safe_controls():
     assert "Runtime heartbeats" in views
     control_start = views.index("def admin_jobs_control_plane")
     assert "@require_admin" in views[views.rfind("@login_required", 0, control_start):control_start]
+
+
+def test_job_activity_has_complete_filtered_pagination_and_compiles():
+    views = Path("apps/core/views.py").read_text(encoding="utf-8")
+    template = Path("templates/admin_job_status.html").read_text(encoding="utf-8")
+
+    assert "SELECT count(*) FROM operations.operator_job_runs job" in views
+    assert "LIMIT %s OFFSET %s" in views
+    assert "job.status = ANY(%s::text[])" in views
+    assert "SELECT count(*) FROM operations.run_log" in views
+    assert "def _jobs_activity_date" in views
+    assert "def _jobs_activity_query" in views
+    for field in (
+        "job", "scope", "lane", "origin", "status", "owner", "correlation",
+        "batch", "from", "to", "technical",
+    ):
+        assert f'name="{field}"' in template
+    assert "Durable Job activity pages" in template
+    assert "System activity pages" in template
+    assert "Origin / owner" in template
+    get_template("admin_job_status.html")
 
 
 def test_scoped_software_requests_wait_for_the_governed_queue_worker():

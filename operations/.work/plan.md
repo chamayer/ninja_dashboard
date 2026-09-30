@@ -1349,3 +1349,16 @@ execution remains unavailable while the stack is inactive. Next action:
 review and commit/push this slice, then complete Job activity filters/
 pagination and remaining request/schedule outcome semantics before the final
 requirement audit.
+
+Job activity checkpoint (2026-09-30): in progress. The activity query now has
+bounded durable pagination with a count, filtering for Job, source/client
+scope, lane, origin, status, owner, correlation/batch identifiers, requested
+date range, and technical lineage identifiers. System run-log history is
+separately counted and paginated, so neither list silently truncates. The
+Jobs home asks the same authoritative run query for the finite set of active
+definition states rather than relying on an arbitrary 200-row cap. Focused
+validation passed: five Jobs/UI tests, Django system checks, Python
+compilation, undefined-name lint, and `git diff --check`. PostgreSQL-backed
+request checks remain unavailable while the local stack is inactive. Next
+action: commit/push this slice, then add durable terminal schedule outcomes
+and continue the requirement audit.

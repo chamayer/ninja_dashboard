@@ -8706,11 +8706,13 @@ def admin_jobs(request: HttpRequest) -> HttpResponse:
         host_no_port = request.get_host().split(":")[0]
         ingest_public_url = f"{request.scheme}://{host_no_port}:8090"
 
-    active_queue = _operator_job_runs(limit=200)
-    active_by_job = {
-        run["job_key"]: run for run in active_queue
-        if run["status"] in {"queued", "running"}
-    }
+    _active_total, active_queue = _operator_job_runs(
+        limit=len(definition_keys()) * 2,
+        filters={"statuses": ("queued", "running")},
+    )
+    active_by_job: dict[str, dict] = {}
+    for active_run in active_queue:
+        active_by_job.setdefault(active_run["job_key"], active_run)
     for job in jobs:
         job["active_run"] = active_by_job.get(job["id"])
 
@@ -8902,18 +8904,79 @@ def _queue_software_rebuild_after_commit(user_id: int) -> None:
     transaction.on_commit(enqueue)
 
 
-def _operator_job_runs(*, limit: int = 100, run_id: str = "", batch_id: str = "") -> list[dict]:
-    clauses = ["tenant_id = 1"]
+def _operator_job_runs(
+    *,
+    limit: int = 50,
+    offset: int = 0,
+    run_id: str = "",
+    batch_id: str = "",
+    filters: dict[str, object] | None = None,
+) -> tuple[int, list[dict]]:
+    clauses = ["job.tenant_id = 1"]
     params: list[object] = []
     if run_id:
-        clauses.append("id = %s")
+        clauses.append("job.id::text = %s")
         params.append(run_id)
     if batch_id:
-        clauses.append("batch_id = %s")
+        clauses.append("job.batch_id::text = %s")
         params.append(batch_id)
-    params.append(limit)
+    active_filters = filters or {}
+    simple_filters = {
+        "job_key": "job.job_key = %s",
+        "lane": "job.lane = %s",
+        "origin": "job.trigger_kind = %s",
+        "status": "job.status = %s",
+        "correlation": "job.correlation_id::text = %s",
+        "batch": "job.batch_id::text = %s",
+    }
+    for key, sql in simple_filters.items():
+        if active_filters.get(key):
+            clauses.append(sql)
+            params.append(active_filters[key])
+    if active_filters.get("statuses"):
+        clauses.append("job.status = ANY(%s::text[])")
+        params.append(list(active_filters["statuses"]))
+    if active_filters.get("scope"):
+        pattern = f"%{active_filters['scope']}%"
+        clauses.append(
+            "(job.scope_identity ILIKE %s OR "
+            "COALESCE(job.request_payload, '{}'::jsonb)::text ILIKE %s)"
+        )
+        params.extend((pattern, pattern))
+    if active_filters.get("owner"):
+        owner = str(active_filters["owner"])
+        owner_keys = [item.key for item in definitions() if owner == item.owner]
+        if owner_keys:
+            clauses.append("job.job_key = ANY(%s::text[])")
+            params.append(owner_keys)
+        else:
+            clauses.append("FALSE")
+    if active_filters.get("from_at"):
+        clauses.append("job.requested_at >= %s")
+        params.append(active_filters["from_at"])
+    if active_filters.get("to_at"):
+        clauses.append("job.requested_at < %s")
+        params.append(active_filters["to_at"])
+    if active_filters.get("technical"):
+        pattern = f"%{active_filters['technical']}%"
+        clauses.append(
+            "(job.id::text ILIKE %s OR job.job_key ILIKE %s OR "
+            "COALESCE(job.definition_digest, '') ILIKE %s OR "
+            "COALESCE(job.correlation_id::text, '') ILIKE %s OR "
+            "COALESCE(job.batch_id::text, '') ILIKE %s OR "
+            "COALESCE(job.parent_run_id::text, '') ILIKE %s OR "
+            "COALESCE(job.root_run_id::text, '') ILIKE %s OR "
+            "COALESCE(job.retry_of_run_id::text, '') ILIKE %s)"
+        )
+        params.extend([pattern] * 8)
+    where_sql = " AND ".join(clauses)
     with transaction.atomic(), connection.cursor() as cur:
         cur.execute("SET LOCAL operations.tenant_id = 1")
+        cur.execute(
+            f"SELECT count(*) FROM operations.operator_job_runs job WHERE {where_sql}",
+            params,
+        )
+        total = int(cur.fetchone()[0])
         cur.execute(
             f"""SELECT id, job_key, batch_id, requested_by_id, requested_at, started_at, completed_at,
                         status, attempts, rows_touched, error, stage, stage_detail, stage_updated_at,
@@ -8935,9 +8998,9 @@ def _operator_job_runs(*, limit: int = 100, run_id: str = "", batch_id: str = ""
                         correlation_id, retry_of_run_id, result, terminal_reason
                    FROM operations.operator_job_runs
                   AS job
-                  WHERE {' AND '.join(clauses)}
-                  ORDER BY requested_at DESC LIMIT %s""",
-            params,
+                  WHERE {where_sql}
+                  ORDER BY job.requested_at DESC, job.id DESC LIMIT %s OFFSET %s""",
+            [*params, limit, offset],
         )
         rows = cur.fetchall()
         job_ids = [row[0] for row in rows]
@@ -9051,10 +9114,10 @@ def _operator_job_runs(*, limit: int = 100, run_id: str = "", batch_id: str = ""
             return f"{seconds // 60}m"
         return f"{seconds // 3600}h {(seconds % 3600) // 60}m"
 
-    return [
+    runs = [
         {
             "id": row[0], "job_key": row[1], "name": labels.get(row[1], row[1]),
-            "batch_id": row[2] or row[25],
+            "batch_id": row[2],
             "origin": {
                 "automatic": "Automatic", "operator": "Operator",
                 "dependency": "Dependency", "recovery": "Recovery",
@@ -9074,6 +9137,7 @@ def _operator_job_runs(*, limit: int = 100, run_id: str = "", batch_id: str = ""
             "cancellation_reason": row[23], "deadline_at": row[24],
             "correlation_id": row[25], "retry_of_run_id": row[26],
             "result": row[27] or {}, "terminal_reason": row[28],
+            "owner": definition(row[1]).owner if row[1] in definition_keys() else "",
             "result_label": result_label(row[7], row[9], row[10]),
             "elapsed": elapsed_label(row[5], row[6]),
             "events": events_by_job.get(row[0], []),
@@ -9084,6 +9148,7 @@ def _operator_job_runs(*, limit: int = 100, run_id: str = "", batch_id: str = ""
         }
         for row in rows
     ]
+    return total, runs
 
 
 _HISTORY_RETRYABLE_KINDS = {
@@ -9097,19 +9162,21 @@ _HISTORY_RETRYABLE_KINDS = {
 }
 
 
-def _recent_job_history(*, limit: int = 100) -> list[dict]:
+def _recent_job_history(*, limit: int = 25, offset: int = 0) -> tuple[int, list[dict]]:
     """Show observed system work not represented by a durable queue row."""
     with transaction.atomic(), connection.cursor() as cur:
         cur.execute("SET LOCAL operations.tenant_id = 1")
+        cur.execute("SELECT count(*) FROM operations.run_log WHERE tenant_id = 1")
+        total = int(cur.fetchone()[0])
         cur.execute(
             """SELECT kind, ok, started_at, ended_at, rows, COALESCE(error, '')
                  FROM operations.run_log
                 WHERE tenant_id = 1
-                ORDER BY started_at DESC
-                LIMIT %s""",
-            (limit,),
+                ORDER BY started_at DESC, id DESC
+                LIMIT %s OFFSET %s""",
+            (limit, offset),
         )
-        return [
+        rows = [
             {
                 "name": row[0].replace("_", " ").replace(".", " · ").title(),
                 "origin": "Automatic", "started_at": row[2], "completed_at": row[3],
@@ -9118,21 +9185,122 @@ def _recent_job_history(*, limit: int = 100) -> list[dict]:
             }
             for row in cur.fetchall()
         ]
+    return total, rows
+
+
+def _jobs_activity_date(value: str, *, end: bool = False) -> datetime | None:
+    """Parse one inclusive activity date into a UTC query boundary."""
+    try:
+        boundary = datetime.strptime(value, "%Y-%m-%d").replace(tzinfo=dt_timezone.utc)
+    except ValueError:
+        return None
+    return boundary + timedelta(days=1) if end else boundary
+
+
+def _jobs_activity_query(request: HttpRequest, *excluded: str) -> str:
+    """Retain all active filters while changing one pagination dimension."""
+    omitted = set(excluded)
+    pairs = [
+        (key, value)
+        for key in request.GET
+        if key not in omitted
+        for value in request.GET.getlist(key)
+    ]
+    return urlencode(pairs)
 
 
 @login_required
 @require_admin
 def admin_job_status(request: HttpRequest) -> HttpResponse:
+    run_id = (request.GET.get("run") or "").strip()
+    raw_filters = {
+        "job_key": (request.GET.get("job") or "").strip(),
+        "scope": (request.GET.get("scope") or "").strip(),
+        "lane": (request.GET.get("lane") or "").strip(),
+        "origin": (request.GET.get("origin") or "").strip(),
+        "status": (request.GET.get("status") or "").strip(),
+        "owner": (request.GET.get("owner") or "").strip(),
+        "correlation": (request.GET.get("correlation") or "").strip(),
+        "batch": (request.GET.get("batch") or "").strip(),
+        "from": (request.GET.get("from") or "").strip(),
+        "to": (request.GET.get("to") or "").strip(),
+        "technical": (request.GET.get("technical") or "").strip(),
+    }
+    allowed_lanes = {item.lane for item in definitions()}
+    allowed_origins = {"automatic", "operator", "dependency", "recovery"}
+    allowed_statuses = {
+        "queued", "running", "completed", "failed", "stalled", "cancelled",
+    }
+    filters: dict[str, object] = {
+        key: value
+        for key, value in raw_filters.items()
+        if value and key not in {"from", "to"}
+    }
+    if filters.get("job_key") not in definition_keys():
+        filters.pop("job_key", None)
+    if filters.get("lane") not in allowed_lanes:
+        filters.pop("lane", None)
+    if filters.get("origin") not in allowed_origins:
+        filters.pop("origin", None)
+    if filters.get("status") not in allowed_statuses:
+        filters.pop("status", None)
+    from_at = _jobs_activity_date(raw_filters["from"])
+    to_at = _jobs_activity_date(raw_filters["to"], end=True)
+    if from_at is not None:
+        filters["from_at"] = from_at
+    if to_at is not None:
+        filters["to_at"] = to_at
+    try:
+        page = max(1, min(20001, int(request.GET.get("page") or "1")))
+    except ValueError:
+        page = 1
+    try:
+        history_page = max(1, min(20001, int(request.GET.get("history_page") or "1")))
+    except ValueError:
+        history_page = 1
+    page_size = 50
+    history_page_size = 25
+    if run_id:
+        page = 1
+        filters = {}
+    run_total, runs = _operator_job_runs(
+        limit=page_size,
+        offset=(page - 1) * page_size,
+        run_id=run_id,
+        filters=filters,
+    )
+    history_total, history = _recent_job_history(
+        limit=history_page_size,
+        offset=(history_page - 1) * history_page_size,
+    )
     return render(
         request,
         "admin_job_status.html",
         {
             "admin_group": "integrations", "admin_tab": "jobs",
-            "runs": _operator_job_runs(
-                run_id=(request.GET.get("run") or "").strip(),
-                batch_id=(request.GET.get("batch") or "").strip(),
-            ),
-            "history": _recent_job_history(),
+            "runs": runs,
+            "run_total": run_total,
+            "run_page": page,
+            "run_has_previous": page > 1,
+            "run_previous_page": page - 1,
+            "run_has_next": page * page_size < run_total,
+            "run_next_page": page + 1,
+            "activity_query": _jobs_activity_query(request, "page", "run"),
+            "history": history,
+            "history_total": history_total,
+            "history_page": history_page,
+            "history_has_previous": history_page > 1,
+            "history_previous_page": history_page - 1,
+            "history_has_next": history_page * history_page_size < history_total,
+            "history_next_page": history_page + 1,
+            "history_query": _jobs_activity_query(request, "history_page", "run"),
+            "active_filters": raw_filters,
+            "selected_run": run_id,
+            "job_choices": [
+                (item.key, item.display_name) for item in definitions()
+            ],
+            "lane_choices": sorted(allowed_lanes),
+            "owner_choices": sorted({item.owner for item in definitions()}),
         },
     )
 

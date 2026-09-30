@@ -19,6 +19,12 @@
   .job-progress { min-width:16rem; }
   .job-progress-note { display:block; font-size:.78rem; color:var(--muted); margin-top:.2rem; }
   .job-section { margin:1.5rem 0 .6rem; font-size:1rem; }
+  .job-filters { display:grid; grid-template-columns:repeat(auto-fit,minmax(11rem,1fr)); gap:.65rem; margin:0 0 1rem; padding:.8rem; border:1px solid var(--border); border-radius:6px; background:var(--surface); }
+  .job-filters label { display:flex; flex-direction:column; gap:.25rem; color:var(--muted); font-size:.72rem; text-transform:uppercase; letter-spacing:.04em; }
+  .job-filters input,.job-filters select { min-width:0; padding:.4rem .5rem; border:1px solid var(--border); border-radius:4px; background:#fff; color:inherit; }
+  .job-filter-actions { display:flex; align-items:end; gap:.5rem; }
+  .job-filter-actions button,.job-filter-actions a { padding:.45rem .7rem; border:1px solid var(--border); border-radius:4px; background:#fff; font-size:.82rem; text-decoration:none; cursor:pointer; }
+  .job-pages { display:flex; justify-content:space-between; gap:1rem; margin:.75rem 0; }
 </style>
 
 <div class="job-status-head">
@@ -26,12 +32,32 @@
   <div><a href="{% url 'admin_jobs' %}">Back to Jobs</a> · <a href="{% url 'admin_jobs_control_plane' %}">Control plane</a></div>
 </div>
 
+{% if selected_run %}
+<p class="muted">Showing run {{ selected_run }}. <a href="{% url 'admin_job_status' %}">Return to all activity</a>.</p>
+{% else %}
+<form method="get" class="job-filters">
+  <label>Job<select name="job"><option value="">All jobs</option>{% for key, label in job_choices %}<option value="{{ key }}"{% if active_filters.job_key == key %} selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
+  <label>Source/client scope<input name="scope" value="{{ active_filters.scope }}" placeholder="Client, source, or scope"></label>
+  <label>Lane<select name="lane"><option value="">All lanes</option>{% for lane in lane_choices %}<option value="{{ lane }}"{% if active_filters.lane == lane %} selected{% endif %}>{{ lane|title }}</option>{% endfor %}</select></label>
+  <label>Origin<select name="origin"><option value="">All origins</option><option value="automatic"{% if active_filters.origin == 'automatic' %} selected{% endif %}>Automatic</option><option value="operator"{% if active_filters.origin == 'operator' %} selected{% endif %}>Operator</option><option value="dependency"{% if active_filters.origin == 'dependency' %} selected{% endif %}>Dependency</option><option value="recovery"{% if active_filters.origin == 'recovery' %} selected{% endif %}>Recovery</option></select></label>
+  <label>Status<select name="status"><option value="">All statuses</option><option value="queued"{% if active_filters.status == 'queued' %} selected{% endif %}>Queued</option><option value="running"{% if active_filters.status == 'running' %} selected{% endif %}>Running</option><option value="completed"{% if active_filters.status == 'completed' %} selected{% endif %}>Completed</option><option value="failed"{% if active_filters.status == 'failed' %} selected{% endif %}>Failed</option><option value="stalled"{% if active_filters.status == 'stalled' %} selected{% endif %}>Needs attention</option><option value="cancelled"{% if active_filters.status == 'cancelled' %} selected{% endif %}>Cancelled</option></select></label>
+  <label>Owner<select name="owner"><option value="">All owners</option>{% for owner in owner_choices %}<option value="{{ owner }}"{% if active_filters.owner == owner %} selected{% endif %}>{{ owner }}</option>{% endfor %}</select></label>
+  <label>Correlation ID<input name="correlation" value="{{ active_filters.correlation }}"></label>
+  <label>Batch ID<input name="batch" value="{{ active_filters.batch }}"></label>
+  <label>Requested from<input type="date" name="from" value="{{ active_filters.from }}"></label>
+  <label>Requested through<input type="date" name="to" value="{{ active_filters.to }}"></label>
+  <label>Technical key<input name="technical" value="{{ active_filters.technical }}" placeholder="Run, definition, lineage ID"></label>
+  <div class="job-filter-actions"><button type="submit">Apply filters</button><a href="{% url 'admin_job_status' %}">Clear</a></div>
+</form>
+{% endif %}
+
+<p class="muted">{{ run_total }} durable Job run{{ run_total|pluralize }}{% if run_total %} · page {{ run_page }}{% endif %}.</p>
 {% if runs %}
 <table class="job-status-table">
-  <thead><tr><th>Job</th><th>Started by</th><th>Current work</th><th>Requested</th><th>Started</th><th>Finished</th><th>Result</th><th>Action</th></tr></thead>
+  <thead><tr><th>Job</th><th>Origin / owner</th><th>Current work</th><th>Requested</th><th>Started</th><th>Finished</th><th>Result</th><th>Action</th></tr></thead>
   <tbody>{% for run in runs %}<tr>
     <td><strong>{{ run.name }}</strong><br><span class="muted">{{ run.lane|title }} lane</span>{% if run.batch_id %}<br><span class="muted">Batch run</span>{% endif %}</td>
-    <td>{{ run.origin }}</td>
+    <td>{{ run.origin }}{% if run.owner %}<br><span class="muted">{{ run.owner }}</span>{% endif %}</td>
     <td class="job-progress"><span class="job-state {{ run.status }}">{{ run.status_label }}</span><strong class="job-progress-note">{% if run.status == 'queued' %}Not started{% else %}{{ run.stage }}{% endif %}</strong>{% if run.status == 'queued' %}<span class="job-progress-note">Queue position {{ run.queue_position }} in the {{ run.lane }} lane</span><span class="job-progress-note">{{ run.queue_reason }}</span>{% elif run.stage_detail %}<span class="job-progress-note">{{ run.stage_detail }}</span>{% endif %}{% if run.cancellation_requested_at %}<span class="job-progress-note">Cancellation requested {{ run.cancellation_requested_at|date:"Y-m-d H:i:s" }}</span>{% endif %}{% if run.deadline_at and run.status == 'running' %}<span class="job-progress-note">Safety deadline {{ run.deadline_at|date:"Y-m-d H:i:s" }}</span>{% endif %}{% if run.elapsed %}<span class="job-progress-note">Elapsed {{ run.elapsed }}</span>{% endif %}{% if run.stage_updated_at and run.status != 'queued' %}<span class="job-progress-note">Updated {{ run.stage_updated_at|date:"Y-m-d H:i:s" }}</span>{% endif %}{% if run.heartbeat_at and run.status == 'running' and run.wait_category != 'workflow' %}<span class="job-progress-note">Worker active {{ run.heartbeat_at|date:"Y-m-d H:i:s" }}</span>{% endif %}</td>
     <td>{{ run.requested_at|date:"Y-m-d H:i:s" }}</td><td>{% if run.started_at %}{{ run.started_at|date:"Y-m-d H:i:s" }}{% else %}Not started{% endif %}</td><td>{% if run.completed_at %}{{ run.completed_at|date:"Y-m-d H:i:s" }}{% else %}Not completed{% endif %}</td>
     <td>
@@ -54,8 +80,14 @@
 </table>
 {% else %}<p class="muted">No queued or requested jobs match this view.</p>{% endif %}
 
-<h2 class="job-section">Recent system activity</h2>
+<nav class="job-pages" aria-label="Durable Job activity pages">
+  <span>{% if run_has_previous %}<a href="?{% if activity_query %}{{ activity_query }}&amp;{% endif %}page={{ run_previous_page }}">← Previous Job runs</a>{% endif %}</span>
+  <span>{% if run_has_next %}<a href="?{% if activity_query %}{{ activity_query }}&amp;{% endif %}page={{ run_next_page }}">Next Job runs →</a>{% endif %}</span>
+</nav>
+
+<h2 class="job-section">System activity</h2>
 <p class="muted">Recorded system work, including supporting jobs outside this queue. A completed queued job can also appear here after it records its run history.</p>
+<p class="muted">{{ history_total }} system record{{ history_total|pluralize }}{% if history_total %} · page {{ history_page }}{% endif %}.</p>
 {% if history %}
 <table class="job-status-table">
   <thead><tr><th>Job</th><th>Started by</th><th>Started</th><th>Finished</th><th>Result</th><th>Action</th></tr></thead>
@@ -67,4 +99,8 @@
   </tr>{% endfor %}</tbody>
 </table>
 {% else %}<p class="muted">No recorded system activity yet.</p>{% endif %}
+<nav class="job-pages" aria-label="System activity pages">
+  <span>{% if history_has_previous %}<a href="?{% if history_query %}{{ history_query }}&amp;{% endif %}history_page={{ history_previous_page }}">← Previous system records</a>{% endif %}</span>
+  <span>{% if history_has_next %}<a href="?{% if history_query %}{{ history_query }}&amp;{% endif %}history_page={{ history_next_page }}">Next system records →</a>{% endif %}</span>
+</nav>
 {% endblock %}
