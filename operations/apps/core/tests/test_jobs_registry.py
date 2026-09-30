@@ -51,6 +51,7 @@ def test_checked_scheduler_source_matches_registry_schedule_keys():
         if record["callable"] == "operator_job_queue.enqueue_automatic"
     }
     assert scheduled <= scheduled_definition_keys()
+    assert not scheduled
     assert "source-demand" in scheduled_definition_keys()
 
 

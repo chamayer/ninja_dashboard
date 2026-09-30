@@ -283,6 +283,7 @@ runtime changes, deployment, or numeric capacity settings.
    enforcing RLS on new Jobs paths. Reject unsupported tenants explicitly and
    require verified ownership for
    legacy domain links rather than guessing or bulk stamping old rows.
+
 2. **Completion semantics:** use the workflow-root rule above, including
    visible failure when a required resolver/projector/evaluator fails,
    with required consumers identified before cutover.
@@ -291,6 +292,11 @@ runtime changes, deployment, or numeric capacity settings.
    retry or forced kill for unaudited handlers. Automatic
    rolling coexistence with old direct-thread executors cannot enforce the
    new exclusive resource contract.
+
+The version-0 execution cutover is fail-closed: queued legacy runs become
+Cancelled with a retry instruction, while running legacy rows become Needs
+attention and require external-effect verification. Their rows and events are
+retained. New execution is exclusively fenced version 1 in isolated children.
 
 Numeric capacities, child memory limits, grace periods, and per-handler
 deadlines remain unselected. Successful-run percentiles and a local pool

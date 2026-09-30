@@ -37,33 +37,6 @@
       {
         "file": "ingest/main.py",
         "owner": "main",
-        "id": "f'operator_job_queue_{lane}'",
-        "callable": "operator_job_queue.process_next",
-        "trigger": "'interval'",
-        "options": {
-          "seconds": "10",
-          "args": "[lane]",
-          "max_instances": "1"
-        },
-        "guards": [
-          "for lane in operator_job_queue.WORKER_LANES"
-        ]
-      },
-      {
-        "file": "ingest/main.py",
-        "owner": "main",
-        "id": "'operator_job_queue_stale_recovery'",
-        "callable": "operator_job_queue.recover_stale",
-        "trigger": "'interval'",
-        "options": {
-          "minutes": "1",
-          "max_instances": "1"
-        },
-        "guards": []
-      },
-      {
-        "file": "ingest/main.py",
-        "owner": "main",
         "id": "'jobs_v1_timeout_containment'",
         "callable": "operator_job_queue.contain_expired_v1",
         "trigger": "'interval'",
@@ -236,18 +209,6 @@
         "file": "ingest/main.py",
         "owner": "main",
         "expression": "threading.Thread(target=bootstrap_metabase, daemon=True)",
-        "guards": []
-      },
-      {
-        "file": "ingest/operator_job_queue.py",
-        "owner": "_process_next_in_lane",
-        "expression": "threading.Thread(target=_heartbeat_loop, args=(progress, stopped), daemon=True)",
-        "guards": []
-      },
-      {
-        "file": "ingest/operator_job_queue.py",
-        "owner": "process_next_v1",
-        "expression": "threading.Thread(target=_heartbeat_loop, args=(progress, stopped), daemon=True)",
         "guards": []
       }
     ],
@@ -1028,12 +989,6 @@
       {
         "file": "ingest/main.py",
         "owner": "main",
-        "expression": "operator_job_queue.recover_interrupted()",
-        "guards": []
-      },
-      {
-        "file": "ingest/main.py",
-        "owner": "main",
         "expression": "BackgroundScheduler()",
         "guards": []
       },
@@ -1144,7 +1099,6 @@
       {
         "relation": "operations.operator_job_runs",
         "files": [
-          "ingest/operator_job_queue.py",
           "ingest/platform_findings.py",
           "operations/apps/core/views.py"
         ]
@@ -1216,8 +1170,6 @@
       {
         "file": "ingest/operator_job_queue.py",
         "relations": [
-          "operations.operator_job_events",
-          "operations.operator_job_runs",
           "operations.source_action_requests",
           "operations.source_run_queue"
         ]

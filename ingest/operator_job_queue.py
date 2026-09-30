@@ -9,7 +9,6 @@ from __future__ import annotations
 import json
 import hashlib
 import logging
-import threading
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -26,22 +25,6 @@ log = logging.getLogger(__name__)
 
 class JobCancellationRequested(RuntimeError):
     """Raised only at a reviewed worker stage boundary."""
-
-_TABLE = "operations.operator_job_runs"
-_LEASE_MINUTES = 90
-_HEARTBEAT_SECONDS = 30
-_WORKER_CAPACITY = threading.BoundedSemaphore(2)
-
-_SOFTWARE_CLASSIFIER_JOBS = (
-    "software-classify",
-    "software-classify-only",
-    "software-classify-full",
-)
-_SOFTWARE_JOB_PRIORITY = {
-    "software-classify-only": 1,
-    "software-classify-full": 2,
-    "software-classify": 3,
-}
 
 # Keep this independent from the registry so an omitted or extra dispatcher
 # handler prevents readiness instead of becoming an unreviewed live path.
@@ -222,46 +205,6 @@ def lane_for(job_key: str) -> str:
 
 WORKER_LANES = ("collection", "evaluation", "software", "intelligence", "service")
 
-# Automatic Jobs are now admitted only by produce_due_schedules().  The old
-# APScheduler entries remain temporarily for unrelated maintenance wakeups;
-# treating their automatic callbacks as no-ops prevents duplicate producers.
-DURABLE_SCHEDULES_ACTIVE = True
-
-
-class JobProgress:
-    """Persist a factual current stage for one active Jobs run."""
-
-    def __init__(self, job_id: Any) -> None:
-        self.job_id = job_id
-
-    def update(self, stage: str, detail: str = "") -> None:
-        with db.transaction() as cur:
-            cur.execute("SET LOCAL operations.tenant_id = 1")
-            cur.execute(
-                f"""UPDATE {_TABLE}
-                       SET stage = %s, stage_detail = %s, stage_updated_at = NOW(), heartbeat_at = NOW(),
-                           lease_expires_at = NOW() + INTERVAL '{_LEASE_MINUTES} minutes'
-                     WHERE tenant_id = 1 AND id = %s AND status = 'running'""",
-                (stage, detail, self.job_id),
-            )
-            cur.execute(
-                """INSERT INTO operations.operator_job_events
-                       (tenant_id, job_id, event_type, stage, detail)
-                    VALUES (1, %s, 'stage', %s, %s)""",
-                (self.job_id, stage, detail),
-            )
-
-    def heartbeat(self) -> None:
-        with db.transaction() as cur:
-            cur.execute("SET LOCAL operations.tenant_id = 1")
-            cur.execute(
-                f"""UPDATE {_TABLE}
-                       SET heartbeat_at = NOW(),
-                           lease_expires_at = NOW() + INTERVAL '{_LEASE_MINUTES} minutes'
-                     WHERE tenant_id = 1 AND id = %s AND status = 'running'""",
-                (self.job_id,),
-            )
-
 
 class V1JobProgress:
     """Record v1 progress exclusively through the fenced Jobs API."""
@@ -296,46 +239,6 @@ class V1JobProgress:
             )
 
 
-def enqueue_automatic(job_key: str) -> bool:
-    """Queue scheduled work through the same durable path as Jobs.
-
-    A null requester means the scheduler initiated it.  The active-row index
-    coalesces an overdue cadence with work already queued or running, which is
-    preferable to accumulating duplicate automatic runs while the worker is
-    busy.
-    """
-    if DURABLE_SCHEDULES_ACTIVE:
-        log.info(
-            "legacy automatic admission for %s ignored; durable schedule owns it",
-            job_key,
-        )
-        return False
-    job = definition(job_key)
-    request_identity = hashlib.sha256(
-        f"automatic:{job_key}:{uuid.uuid4()}".encode()
-    ).hexdigest()
-    request_api = (
-        "operations.jobs_request_software_v1"
-        if job.supersession_family == "software-classifier"
-        else "operations.jobs_request"
-    )
-    try:
-        with db.transaction() as cur:
-            cur.execute("SET LOCAL operations.tenant_id = 1")
-            cur.execute(
-                f"SELECT {request_api}(%s, %s, %s, %s, %s, %s, NULL, %s::jsonb, %s::jsonb, NULL)",
-                (1, job.key, job.snapshot_digest(), "tenant:1", request_identity,
-                 "automatic", "{}", "{}"),
-            )
-            return cur.fetchone() is not None
-    except PoolTimeout:
-        log.warning("automatic job %s waiting for database capacity", job_key)
-        return False
-    except Exception:
-        log.exception("automatic job %s was deferred by Jobs admission", job_key)
-        return False
-
-
 def request_system_job(job_key: str, request_source: str) -> uuid.UUID:
     """Admit an explicit internal HTTP request through the governed v1 API."""
     job = definition(job_key)
@@ -360,209 +263,12 @@ def request_system_job(job_key: str, request_source: str) -> uuid.UUID:
     return row[0]
 
 
-def _admit_software_classifier(cur, job_key: str) -> bool:
-    """Coalesce classifier modes by the work each one subsumes.
-
-    Incremental work is narrower than a full rebuild; auto-intel is broader
-    than both. Queued narrower work is superseded, but running work is never
-    interrupted. An advisory lock serializes competing scheduler and UI
-    requests before they can create cross-key duplicates.
-    """
-    priority = _SOFTWARE_JOB_PRIORITY.get(job_key)
-    if priority is None:
-        return True
-    cur.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))", ("operations.software_classifier",))
-    cur.execute(
-        f"""SELECT id, job_key, status FROM {_TABLE}
-             WHERE tenant_id = 1 AND job_key = ANY(%s::text[])
-               AND status IN ('queued', 'running')
-             FOR UPDATE""",
-        (list(_SOFTWARE_CLASSIFIER_JOBS),),
-    )
-    active = cur.fetchall()
-    if any(_SOFTWARE_JOB_PRIORITY[row[1]] >= priority for row in active):
-        return False
-    superseded = [row[0] for row in active if row[2] == "queued"]
-    if superseded:
-        cur.execute(
-            f"""UPDATE {_TABLE}
-                   SET status = 'cancelled', stage = 'Superseded',
-                       stage_detail = 'Superseded by a broader Software classifier run.',
-                       stage_updated_at = NOW(), completed_at = NOW(),
-                       error = 'Superseded before work started.'
-                 WHERE tenant_id = 1 AND id = ANY(%s) AND status = 'queued'""",
-            (superseded,),
-        )
-    return True
-
-
-def process_next(lane: str = "evaluation") -> dict[str, int]:
-    """Recover expired work, then execute one queued job from its lane."""
-    if lane not in WORKER_LANES:
-        raise ValueError(f"Unknown Jobs worker lane: {lane}")
-    if not _WORKER_CAPACITY.acquire(blocking=False):
-        return {"completed": 0, "failed": 0}
-    try:
-        return _process_next_in_lane(lane)
-    finally:
-        _WORKER_CAPACITY.release()
-
-
-def _process_next_in_lane(lane: str) -> dict[str, int]:
-    recover_stale()
-    try:
-        row = _claim_next(lane)
-    except PoolTimeout:
-        log.warning("operator jobs waiting for database capacity")
-        return {"completed": 0, "failed": 0}
-    if row is None:
-        return {"completed": 0, "failed": 0}
-    progress = JobProgress(row["id"])
-    stopped = threading.Event()
-    heartbeat = threading.Thread(
-        target=_heartbeat_loop, args=(progress, stopped), daemon=True
-    )
-    heartbeat.start()
-    try:
-        rows = _execute(row["job_key"], progress)
-    except Exception as exc:
-        log.exception("operator job %s failed", row["job_key"])
-        _finish(row["id"], "failed", error=str(exc)[:2000])
-        return {"completed": 0, "failed": 1}
-    finally:
-        stopped.set()
-        heartbeat.join(timeout=1)
-    _finish(row["id"], "completed", rows=rows)
-    return {"completed": 1, "failed": 0}
-
-
-def process_next_v1(lane: str, worker_incarnation: uuid.UUID) -> dict[str, int]:
-    """Execute one converted run through the fenced v1 worker APIs."""
-    if lane not in WORKER_LANES:
-        raise ValueError(f"Unknown Jobs worker lane: {lane}")
-    row = _claim_next_v1(lane, worker_incarnation)
-    if row is None:
-        return {"completed": 0, "failed": 0}
-    progress = V1JobProgress(row["id"], row["claim_token"])
-    stopped = threading.Event()
-    heartbeat = threading.Thread(target=_heartbeat_loop, args=(progress, stopped), daemon=True)
-    heartbeat.start()
-    try:
-        rows = _execute(row["job_key"], progress)
-    except Exception as exc:
-        log.exception("converted operator job %s failed", row["job_key"])
-        _finish_v1(row["id"], row["claim_token"], "failed", error=str(exc)[:2000])
-        return {"completed": 0, "failed": 1}
-    finally:
-        stopped.set()
-        heartbeat.join(timeout=1)
-    _finish_v1(row["id"], row["claim_token"], "completed", rows=rows)
-    return {"completed": 1, "failed": 0}
-
-
-def recover_stale() -> int:
-    try:
-        with db.transaction() as cur:
-            cur.execute("SET LOCAL operations.tenant_id = 1")
-            cur.execute(
-                f"""
-                UPDATE {_TABLE}
-                   SET status = 'stalled', stage = 'Needs attention',
-                       stage_detail = 'No progress update before the safety deadline.',
-                       stage_updated_at = NOW(), completed_at = NOW(), lease_expires_at = NULL,
-                       error = 'Run stopped responding. Review and retry when ready.'
-                 WHERE tenant_id = 1 AND contract_version = 0 AND status = 'running'
-                   AND heartbeat_at < NOW() - INTERVAL '{_LEASE_MINUTES} minutes'
-                """
-            )
-            return cur.rowcount
-    except PoolTimeout:
-        # Capacity is temporarily unavailable (for example, during startup
-        # bootstrap). Leave work visibly queued and try again next cadence.
-        log.warning("operator jobs waiting for database capacity")
-        return 0
-
-
 def contain_expired_v1() -> int:
     """Make expired converted work visible without releasing unsafe claims."""
     with db.transaction() as cur:
         cur.execute("SET LOCAL operations.tenant_id = 1")
         cur.execute("SELECT operations.jobs_contain_expired_v1(%s)", (1,))
         return cur.fetchone()[0]
-
-
-def recover_interrupted() -> int:
-    """Close runs left behind by this process being replaced or restarted."""
-    with db.transaction() as cur:
-        cur.execute("SET LOCAL operations.tenant_id = 1")
-        cur.execute(
-            f"""UPDATE {_TABLE}
-                   SET status = 'stalled', stage = 'Interrupted by service restart',
-                       stage_detail = 'The worker was replaced before this run finished.',
-                       stage_updated_at = NOW(), heartbeat_at = NOW(), completed_at = NOW(),
-                       lease_expires_at = NULL,
-                       error = 'Interrupted by service restart. Retry when ready.'
-                 WHERE tenant_id = 1 AND contract_version = 0 AND status = 'running'
-             RETURNING id"""
-        )
-        interrupted_ids = [row[0] for row in cur.fetchall()]
-        interrupted = len(interrupted_ids)
-        if interrupted_ids:
-            cur.execute(
-                """INSERT INTO operations.operator_job_events
-                       (tenant_id, job_id, event_type, stage, detail)
-                    SELECT tenant_id, id, 'interrupted', stage, stage_detail
-                      FROM operations.operator_job_runs
-                     WHERE tenant_id = 1 AND id = ANY(%s)""",
-                (interrupted_ids,),
-            )
-    if interrupted:
-        log.warning("operator jobs: marked %d run(s) interrupted by service restart", interrupted)
-    return interrupted
-
-
-def _heartbeat_loop(progress: JobProgress, stopped: threading.Event) -> None:
-    while not stopped.wait(_HEARTBEAT_SECONDS):
-        try:
-            progress.heartbeat()
-        except Exception:
-            log.exception("operator job heartbeat failed")
-
-
-def _claim_next(lane: str) -> dict[str, Any] | None:
-    with db.transaction() as cur:
-        cur.execute("SET LOCAL operations.tenant_id = 1")
-        cur.execute(
-            f"""
-            WITH candidate AS (
-                SELECT id FROM {_TABLE}
-                 WHERE tenant_id = 1 AND lane = %s AND status = 'queued'
-                   AND contract_version = 0
-                   AND (
-                       job_key <> ALL(%s::text[])
-                       OR NOT EXISTS (
-                           SELECT 1 FROM {_TABLE} running
-                            WHERE running.tenant_id = 1
-                              AND running.status = 'running'
-                              AND running.job_key = ANY(%s::text[])
-                       )
-                   )
-                 ORDER BY priority DESC, requested_at, id
-                 FOR UPDATE SKIP LOCKED LIMIT 1
-            )
-            UPDATE {_TABLE} job
-               SET status = 'running', stage = 'Starting', stage_detail = '',
-                   stage_updated_at = NOW(), started_at = NOW(),
-                   lease_expires_at = NOW() + INTERVAL '{_LEASE_MINUTES} minutes',
-                   attempts = attempts + 1
-              FROM candidate
-             WHERE job.id = candidate.id
-            RETURNING job.id, job.job_key
-            """,
-            (lane, list(_SOFTWARE_CLASSIFIER_JOBS), list(_SOFTWARE_CLASSIFIER_JOBS)),
-        )
-        row = cur.fetchone()
-    return {"id": row[0], "job_key": row[1]} if row else None
 
 
 def _claim_next_v1(lane: str, worker_incarnation: uuid.UUID) -> dict[str, Any] | None:
@@ -576,26 +282,6 @@ def _claim_next_v1(lane: str, worker_incarnation: uuid.UUID) -> dict[str, Any] |
     if row is None:
         return None
     return {"id": row[0], "claim_token": row[1], "job_key": row[2]}
-
-
-def _finish(job_id: Any, status: str, *, rows: int | None = None, error: str = "") -> None:
-    with db.transaction() as cur:
-        cur.execute("SET LOCAL operations.tenant_id = 1")
-        cur.execute(
-            f"""UPDATE {_TABLE}
-                 SET status = %s, stage = %s, stage_detail = %s,
-                       stage_updated_at = NOW(), completed_at = NOW(), lease_expires_at = NULL,
-                       rows_touched = %s, error = %s
-                 WHERE id = %s AND status = 'running'""",
-            (
-                status,
-                "Completed" if status == "completed" else "Failed",
-                "Finished" if status == "completed" else "Review the recorded error.",
-                rows,
-                error,
-                job_id,
-            ),
-        )
 
 
 def _finish_v1(
@@ -623,7 +309,7 @@ def _finish_cancelled_v1(job_id: Any, claim_token: uuid.UUID) -> None:
         )
 
 
-def _execute(job_key: str, progress: JobProgress) -> int | None:
+def _execute(job_key: str, progress: V1JobProgress) -> int | None:
     """Run a catalog job synchronously in the bounded queue worker.
 
     Importing main here avoids its startup import cycle. The direct lower-level
@@ -760,7 +446,7 @@ def _execute(job_key: str, progress: JobProgress) -> int | None:
 
 
 def _software_classify_with_intel(
-    progress: JobProgress, matcher: Any, winget: Any, chocolatey: Any, main: Any
+    progress: V1JobProgress, matcher: Any, winget: Any, chocolatey: Any, main: Any
 ) -> int | None:
     """Run the advertised auto-intel sequence with each real stage recorded."""
     if main.settings.INTEL_ENABLED:

@@ -1226,3 +1226,13 @@ remain direct control-plane duties by design. Registry/inventory tests,
 compilation, and diff checks pass. Next action: quiesce or preserve any queued
 version-0 runs through an explicit cutover migration, then remove the legacy
 in-process v0 worker and recovery callbacks.
+
+Version-0 cutover checkpoint (2026-09-29): migration 0220 truthfully
+terminalizes any remaining active v0 rows without deleting history: queued
+runs become Cancelled and running runs become Needs attention, both with
+retry/review guidance and events. The in-process v0 worker, heartbeat, raw
+ledger mutation, startup recovery, and stale watchdog are removed. All new
+execution now uses fenced v1 APIs and isolated child processes. Focused tests,
+compilation, undefined-name lint, and diff checks pass; migration execution is
+pending because the stack remains inactive. Next action: complete dependency
+runtime semantics and expose workflow/run detail from the common ledger.

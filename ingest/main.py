@@ -32,7 +32,7 @@ from datetime import datetime, timedelta, timezone
 import httpx
 from apscheduler.schedulers.background import BackgroundScheduler
 
-from ingest import db, migrations, retention_observations, runlog
+from ingest import db, migrations, retention_observations
 from ingest.derived import refresh_after_collection
 from ingest.config import settings
 from ingest.logging_utils import install_log_safety
@@ -2345,10 +2345,6 @@ def main() -> None:
     operator_job_queue.register_definition_snapshots()
     operator_job_queue.reconcile_schedule_catalog()
 
-    # A durable Jobs attempt cannot survive this process. Mark it immediately
-    # so operators can retry instead of waiting for its lease to expire.
-    operator_job_queue.recover_interrupted()
-
     scheduler = BackgroundScheduler()
     # Durable schedules retain their cadence and due tick in Postgres.  This
     # poller only admits due work; the dedicated Jobs worker performs it.
@@ -2357,26 +2353,6 @@ def main() -> None:
         "interval",
         minutes=1,
         id="jobs_durable_schedule_producer",
-        max_instances=1,
-    )
-    # Durable Jobs have bounded lanes. A slow evaluator must not block source
-    # collection, Intel refresh, or service work; the queue module applies the
-    # shared two-worker capacity ceiling for the ingest connection pool.
-    for lane in operator_job_queue.WORKER_LANES:
-        scheduler.add_job(
-            operator_job_queue.process_next,
-            "interval",
-            seconds=10,
-            args=[lane],
-            id=f"operator_job_queue_{lane}",
-            max_instances=1,
-        )
-    # Separate from the worker: a wedged run must still become visible.
-    scheduler.add_job(
-        operator_job_queue.recover_stale,
-        "interval",
-        minutes=1,
-        id="operator_job_queue_stale_recovery",
         max_instances=1,
     )
     scheduler.add_job(

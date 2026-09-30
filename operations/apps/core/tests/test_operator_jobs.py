@@ -9,19 +9,15 @@ def test_operator_jobs_use_a_durable_queue_and_separate_stall_watchdog():
     workflow_migration = Path("apps/core/migrations/0180_operator_job_workflow_controls.py").read_text(encoding="utf-8")
     software_lane_migration = Path("apps/core/migrations/0182_software_job_lane_and_operations_controls.py").read_text(encoding="utf-8")
 
-    assert "operations.operator_job_runs" in queue
-    assert "FOR UPDATE SKIP LOCKED" in queue
-    assert "status = 'stalled'" in queue
-    assert "class JobProgress" in queue
-    assert "stage_updated_at" in queue
+    assert "operations.jobs_claim_next_v3" in queue
+    assert "operations.jobs_finish_v1" in queue
+    assert "operations.jobs_record_v1_progress" in queue
+    assert "class V1JobProgress" in queue
     assert "_software_classify_with_intel" in queue
-    assert "recover_interrupted" in queue
     assert "WORKER_LANES" in queue
-    assert "operator jobs waiting for database capacity" in queue
     assert "except PoolTimeout:" in queue
-    assert 'id=f"operator_job_queue_{lane}"' in main
-    assert 'id="operator_job_queue_stale_recovery"' in main
-    assert "def enqueue_automatic" in queue
+    assert "contract_version = 0" not in queue
+    assert "def enqueue_automatic" not in queue
     assert 'id="jobs_durable_schedule_producer"' in main
     assert "operator_job_queue.enqueue_automatic" not in main
     assert "uq_operator_job_runs_active" in migration
@@ -31,9 +27,6 @@ def test_operator_jobs_use_a_durable_queue_and_separate_stall_watchdog():
     assert "heartbeat_at" in workflow_migration
     assert '"software-classify-full"' in queue
     assert "incremental=True" in queue
-    assert "_SOFTWARE_CLASSIFIER_JOBS" in queue
-    assert "job_key <> ALL" in queue
-    assert "_admit_software_classifier" in queue
     assert '"software"' in queue
     assert "software-classify-full" in Path("apps/core/views.py").read_text(encoding="utf-8")
     assert "_queue_software_rebuild_after_commit" in Path("apps/core/views.py").read_text(encoding="utf-8")
