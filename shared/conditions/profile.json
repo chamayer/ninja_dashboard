@@ -61,6 +61,7 @@
     {"key": "data_collection", "label": "Data collection", "types": [
       {"key": "collection_failures", "label": "Collection failures", "conditions": ["source_failure"]},
       {"key": "processing_delays", "label": "Processing delays", "conditions": ["software_queue_stalled"]},
+      {"key": "jobs_health", "label": "Jobs control plane", "conditions": ["jobs_schedule_failure", "jobs_required_disabled", "jobs_queue_backlog", "jobs_repeated_failure", "jobs_timeout", "jobs_registry_mismatch", "jobs_unmet_dependency"]},
       {"key": "collector_reporting", "label": "Collector reporting", "conditions": ["stale_collector_binding"]}
     ]}
   ],
@@ -573,6 +574,62 @@
       "label": "Processing queue delayed",
       "category": "System Health",
       "type": "Processing delayed",
+      "lifecycle": "active",
+      "rules": []
+    },
+    {
+      "name": "jobs_schedule_failure",
+      "label": "Scheduled Job failed",
+      "category": "System Health",
+      "type": "Jobs control plane",
+      "lifecycle": "active",
+      "rules": []
+    },
+    {
+      "name": "jobs_required_disabled",
+      "label": "Required Job is disabled",
+      "category": "System Health",
+      "type": "Jobs control plane",
+      "lifecycle": "active",
+      "rules": []
+    },
+    {
+      "name": "jobs_queue_backlog",
+      "label": "Jobs queue delayed",
+      "category": "System Health",
+      "type": "Jobs control plane",
+      "lifecycle": "active",
+      "rules": []
+    },
+    {
+      "name": "jobs_repeated_failure",
+      "label": "Job fails repeatedly",
+      "category": "System Health",
+      "type": "Jobs control plane",
+      "lifecycle": "active",
+      "rules": []
+    },
+    {
+      "name": "jobs_timeout",
+      "label": "Job timed out",
+      "category": "System Health",
+      "type": "Jobs control plane",
+      "lifecycle": "active",
+      "rules": []
+    },
+    {
+      "name": "jobs_registry_mismatch",
+      "label": "Jobs registry mismatch",
+      "category": "System Health",
+      "type": "Jobs control plane",
+      "lifecycle": "active",
+      "rules": []
+    },
+    {
+      "name": "jobs_unmet_dependency",
+      "label": "Job dependency is unmet",
+      "category": "System Health",
+      "type": "Jobs control plane",
       "lifecycle": "active",
       "rules": []
     },

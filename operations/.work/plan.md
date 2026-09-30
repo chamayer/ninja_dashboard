@@ -1383,3 +1383,12 @@ contract. Focused condition-safety tests (37), Python compilation,
 undefined-name lint, and `git diff --check` pass. Next action: commit/push
 this regression correction, then register and evaluate the seven required
 Jobs health conditions.
+
+Jobs health policy checkpoint (2026-09-30): migration 0228 registers the
+seven required Jobs Admin Finding types under platform health and clones the
+active condition policy into a new validated revision with a Jobs control-plane
+taxonomy entry. The shared policy carries the same definitions, preventing a
+code-only condition taxonomy. Policy parsing, Python compilation, and
+`git diff --check` pass. Next action: commit/push the policy prerequisite,
+then implement the evaluator's seven measured, deduplicated conditions and
+their Job deep links.
