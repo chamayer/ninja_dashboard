@@ -1167,3 +1167,11 @@ deployed. The user explicitly prohibited direct Portainer deployment, so no
 restart/redeploy was attempted. Continue implementation locally, but final
 production validation requires the automatic updater/stack to be restored
 outside this task or new explicit recovery direction.
+
+Schedule presentation checkpoint (2026-09-29): the Jobs catalog now reads
+tenant-scoped `job_schedules` state as the schedule authority. Scheduled rows
+show persisted capability state, next due time, and the last request outcome;
+conditional source-domain schedules distinguish waiting for demand from a
+disabled capability. Focused Jobs tests, Python compilation, and diff checks
+pass. Next action: harden and populate the source-demand/source-action Job-run
+links with same-tenant constraints and lifecycle ownership.

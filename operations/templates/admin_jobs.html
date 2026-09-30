@@ -175,6 +175,19 @@
             {% if j.disabled_reason %}
                 <div class="err-preview" style="color:var(--muted);">{{ j.disabled_reason }}</div>
             {% endif %}
+            {% if j.scheduled %}
+                <div class="err-preview" style="color:var(--muted);">
+                    Automatic:
+                    {% if j.schedule_enabled and j.next_due_at %}
+                        next due {{ j.next_due_at|date:"Y-m-d H:i" }} UTC
+                    {% else %}
+                        {{ j.schedule_reason }}
+                    {% endif %}
+                    {% if j.last_schedule_outcome %}
+                        · last {{ j.last_schedule_outcome }}{% if j.last_schedule_requested_at %} {{ j.last_schedule_requested_at|date:"Y-m-d H:i" }} UTC{% endif %}
+                    {% endif %}
+                </div>
+            {% endif %}
             {% if j.active_run %}
                 <div class="err-preview" style="color:#1d4ed8;">{{ j.active_run.status_label }} — <a href="{% url 'admin_job_status' %}?run={{ j.active_run.id }}">view progress</a></div>
             {% endif %}

@@ -74,7 +74,11 @@ def test_jobs_status_uses_operator_language_and_safe_controls():
     assert "queued_job_status" in views
     assert "operator_job_runs" in views
     assert "capability_state" in views
+    assert "scheduled_definition_keys" in views
+    assert "FROM operations.job_schedules" in views
     assert "disabled_reason" in views
     assert "The durable Jobs queue is the history authority" in views
     assert "No recorded run yet" in jobs_template
     assert "No run available" in jobs_template
+    assert "next due" in jobs_template
+    assert "last_schedule_outcome" in jobs_template

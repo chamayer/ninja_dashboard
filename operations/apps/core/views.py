@@ -38,7 +38,13 @@ from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 from django.utils.text import slugify
 from django.views.decorators.http import require_GET, require_POST
-from shared.jobs_registry import capability_state, catalog_entries, definition, validate_registry
+from shared.jobs_registry import (
+    capability_state,
+    catalog_entries,
+    definition,
+    scheduled_definition_keys,
+    validate_registry,
+)
 
 from . import capability as capability_evidence
 from . import category as category_evidence
@@ -8271,6 +8277,7 @@ def admin_jobs(request: HttpRequest) -> HttpResponse:
 
     run_log_status: dict[str, dict] = {}
     queued_job_status: dict[str, dict] = {}
+    schedule_status: dict[str, dict] = {}
     recent_runs: list[dict] = []
     now = timezone.now()
     try:
@@ -8322,6 +8329,27 @@ def admin_jobs(request: HttpRequest) -> HttpResponse:
                     "last_error": (r[6] or "")[:200],
                     "activity_label": "Last run" if r[1] in {"completed", "failed", "stalled", "cancelled"} else "Requested",
                 }
+            cur.execute(
+                """
+                SELECT definition_key, enabled, capability_reason, cadence,
+                       next_due_at, last_consumed_due_at, last_requested_at,
+                       last_outcome, last_run_id
+                  FROM operations.job_schedules
+                 WHERE tenant_id = 1
+                 ORDER BY definition_key, scope_identity
+                """
+            )
+            for r in cur.fetchall():
+                schedule_status[r[0]] = {
+                    "enabled": r[1],
+                    "reason": r[2],
+                    "cadence": r[3],
+                    "next_due_at": r[4],
+                    "last_consumed_due_at": r[5],
+                    "last_requested_at": r[6],
+                    "last_outcome": r[7] or "",
+                    "last_run_id": r[8],
+                }
             # Aggregate recent activity for the panel at the bottom.
             cur.execute(
                 """
@@ -8358,6 +8386,7 @@ def admin_jobs(request: HttpRequest) -> HttpResponse:
     except Exception:
         run_log_status = {}
         queued_job_status = {}
+        schedule_status = {}
         recent_runs = []
     recent_runs.sort(key=lambda r: r["started_at"] or now - timedelta(days=365), reverse=True)
     recent_runs = recent_runs[:25]
@@ -8394,13 +8423,20 @@ def admin_jobs(request: HttpRequest) -> HttpResponse:
 
     jobs = []
     categories = set()
+    scheduled_keys = scheduled_definition_keys()
     for entry in list(_JOB_CATALOG) + dynamic_source_entries:
         categories.add(entry["category"])
         if entry["id"] in _JOB_INDEX:
-            available, availability_label = capability_state(
-                entry["id"], enabled_capabilities
-            )
+            schedule = schedule_status.get(entry["id"])
+            if entry["id"] in scheduled_keys and schedule is not None:
+                availability_label = schedule["reason"]
+                available = not availability_label.startswith("Disabled")
+            else:
+                available, availability_label = capability_state(
+                    entry["id"], enabled_capabilities
+                )
         else:
+            schedule = None
             available, availability_label = True, "Available"
         disabled_reason = "" if available else availability_label
         if not available:
@@ -8447,6 +8483,15 @@ def admin_jobs(request: HttpRequest) -> HttpResponse:
             "disabled_reason": disabled_reason,
             "is_stale": is_stale,
             "no_run_now": entry.get("no_run_now", False),
+            "scheduled": entry["id"] in scheduled_keys,
+            "schedule_enabled": schedule["enabled"] if schedule else False,
+            "schedule_reason": schedule["reason"] if schedule else (
+                "Automatic schedule awaiting reconciliation."
+                if entry["id"] in scheduled_keys else ""
+            ),
+            "next_due_at": schedule["next_due_at"] if schedule else None,
+            "last_schedule_outcome": schedule["last_outcome"] if schedule else "",
+            "last_schedule_requested_at": schedule["last_requested_at"] if schedule else None,
         })
 
     if category_filter:
