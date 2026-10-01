@@ -1545,3 +1545,14 @@ confirmation-gated administrator recovery for contained claims. Do not
 automatically release uncertain claims or call Portainer. Next action: add
 the migration, worker/API/UI integration, focused tests, then commit/push and
 verify automatic GitOps deployment before any explicit recovery action.
+
+Worker finalization corrective checkpoint (2026-10-01): after 0232 deployed,
+the fair claim path correctly admitted an independent `intel-kev` Job while
+the old tenant-state claim remained contained. Its exited child then exposed
+an existing supervisor bug: repeated `communicate()` calls read an already
+closed stdout pipe and left the run running. Read a completed child's stdout
+once after `poll()`, and when any finalization transition cannot be recorded,
+fence it through the existing worker-interruption containment API instead of
+retrying forever. Next action: commit/push this worker correction, verify the
+automatic rollout contains the stranded run, then use the administrator
+recovery surface only after explicit process/effect verification.

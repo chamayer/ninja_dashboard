@@ -62,7 +62,11 @@ def _start_child(lane: str, incarnation: uuid.UUID) -> _Child | None:
 
 
 def _finish_child(child: _Child) -> None:
-    output, _ = child.process.communicate()
+    # The supervisor calls this only after poll() observes child exit. Reading
+    # stdout directly avoids Python closing that pipe during a repeated
+    # communicate() attempt after an interrupted supervisor cycle.
+    output = child.process.stdout.read() if child.process.stdout is not None else ""
+    child.process.wait()
     try:
         result = json.loads(output.strip().splitlines()[-1])
     except (IndexError, json.JSONDecodeError):
@@ -90,7 +94,15 @@ def _shutdown_children(children: dict[str, _Child]) -> None:
     for child in children.values():
         try:
             if child.process.poll() is not None:
-                _finish_child(child)
+                try:
+                    _finish_child(child)
+                except Exception:
+                    operator_job_queue._interrupt_v1(
+                        child.run_id,
+                        child.claim_token,
+                        "Jobs worker could not record the exited child result; verify effects before retrying.",
+                    )
+                    raise
             else:
                 operator_job_queue._interrupt_v1(
                     child.run_id,
@@ -150,6 +162,15 @@ def run() -> int:
                             del children[lane]
                         except Exception:
                             log.exception("Jobs child finish transition failed: run=%s", child.run_id)
+                            try:
+                                operator_job_queue._interrupt_v1(
+                                    child.run_id,
+                                    child.claim_token,
+                                    "Jobs worker could not record the exited child result; verify effects before retrying.",
+                                )
+                            except Exception:
+                                log.exception("Jobs child containment failed: run=%s", child.run_id)
+                            del children[lane]
                     continue
                 child = _start_child(lane, worker_incarnation)
                 if child is not None:

@@ -29,6 +29,8 @@ def test_worker_uses_only_fenced_v1_queue_apis():
     assert "jobs_finish_cancelled_v1" in queue
     assert "_shutdown_children(children)" in worker
     assert "_interrupt_v1" in worker
+    assert "child.process.stdout.read()" in worker
+    assert "could not record the exited child result" in worker
     assert ".terminate(" not in worker
     assert ".kill(" not in worker
     assert "jobs_interrupt_v1" in queue
