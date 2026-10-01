@@ -1579,3 +1579,10 @@ tenant-validated security-definer relation API for the selected Job IDs and
 make the activity page use it. Next action: implement migration 0233 and the
 view adapter, validate locally, commit/push, then verify the automatic rollout
 returns the Jobs page successfully.
+
+Jobs relation API correction (2026-10-01): migration 0233 deployed but its
+first runtime-role probe found a PL/pgSQL output-column collision in the
+null-array validation alias (`run_id`). Add migration 0234 that replaces the
+function using an explicitly named unnest column, then repeat the controlled
+API probe and Jobs-page verification. No permissions or data were changed by
+the failed read.
