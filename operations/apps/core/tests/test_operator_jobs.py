@@ -82,7 +82,6 @@ def test_jobs_status_uses_operator_language_and_safe_controls():
     assert "next due" in jobs_template
     assert "last_schedule_outcome" in jobs_template
     assert "jobs_activity_relations_v1" in views
-    assert "jobs_activity_relations_v1" in views
     assert "Technical details" in template
     assert "Domain work" in template
     assert "Dependencies" in template
@@ -90,8 +89,8 @@ def test_jobs_status_uses_operator_language_and_safe_controls():
     assert "jobs_add_revision_dependency_v1" in views
     assert "_admit_workflow" in queue
     assert "jobs_add_revision_dependency_v1" in queue
-    assert "dependency.required_input_revisions" in views
-    assert "dependency.required_output_revision" in views
+    assert '"contract": item["contract"]' in views
+    assert '"required_revision": item["required_revision"]' in views
     assert "Output revisions:" in template
     assert "output_revisions, request_payload" in views
     assert "output_revisions, requested_input" not in views
