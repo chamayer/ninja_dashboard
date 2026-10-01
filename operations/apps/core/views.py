@@ -9015,16 +9015,36 @@ def _operator_job_runs(
         contained_claims_by_job: dict[uuid.UUID, int] = {}
         if job_ids:
             cur.execute(
-                """SELECT job_id, event_at, event_type, stage, detail
-                     FROM operations.operator_job_events
-                    WHERE tenant_id = 1 AND job_id = ANY(%s)
-                    ORDER BY event_at DESC, id DESC""",
-                (job_ids,),
+                "SELECT run_id, relation_kind, item "
+                "FROM operations.jobs_activity_relations_v1(%s, %s::uuid[])",
+                (1, job_ids),
             )
-            for event in cur.fetchall():
-                events_by_job.setdefault(event[0], []).append(
-                    {"at": event[1], "type": event[2], "stage": event[3], "detail": event[4]}
-                )
+            for related_run_id, relation_kind, raw_item in cur.fetchall():
+                item = json.loads(raw_item) if isinstance(raw_item, str) else raw_item
+                if relation_kind == "event":
+                    events_by_job.setdefault(related_run_id, []).append(item)
+                elif relation_kind == "dependency":
+                    target = (
+                        prerequisites_by_job
+                        if item["direction"] == "prerequisite"
+                        else dependents_by_job
+                    )
+                    target.setdefault(related_run_id, []).append(
+                        {
+                            "id": item["id"],
+                            "job_key": item["job_key"],
+                            "status": item["status"],
+                            "state": item["state"],
+                            "reason": item["reason"],
+                            "contract": item["contract"] or {},
+                            "required_revision": item["required_revision"],
+                            "failure_rule": item["failure_rule"],
+                        }
+                    )
+                elif relation_kind == "domain_attempt":
+                    domain_attempts_by_job.setdefault(related_run_id, []).append(item)
+                elif relation_kind == "contained_claims":
+                    contained_claims_by_job[related_run_id] = int(item["count"])
             cur.execute(
                 """SELECT id, definition_digest, scope_identity, input_revisions,
                           output_revisions, request_payload, parent_run_id, root_run_id
@@ -9039,63 +9059,6 @@ def _operator_job_runs(
                     "request_payload": detail[5] or {},
                     "parent_run_id": detail[6], "root_run_id": detail[7],
                 }
-            cur.execute(
-                """SELECT dependency.dependent_run_id, dependency.prerequisite_run_id,
-                          dependency.state, dependency.reason,
-                          prerequisite.job_key, prerequisite.status,
-                          dependent.job_key, dependent.status,
-                          dependency.required_input_revisions,
-                          dependency.required_output_revision,
-                          dependency.failure_rule
-                     FROM operations.job_dependencies dependency
-                     JOIN operations.operator_job_runs prerequisite
-                       ON prerequisite.tenant_id = dependency.tenant_id
-                      AND prerequisite.id = dependency.prerequisite_run_id
-                     JOIN operations.operator_job_runs dependent
-                       ON dependent.tenant_id = dependency.tenant_id
-                      AND dependent.id = dependency.dependent_run_id
-                    WHERE dependency.tenant_id = 1
-                      AND (dependency.dependent_run_id = ANY(%s)
-                           OR dependency.prerequisite_run_id = ANY(%s))
-                    ORDER BY dependency.created_at, dependency.id""",
-                (job_ids, job_ids),
-            )
-            for dependency in cur.fetchall():
-                prerequisites_by_job.setdefault(dependency[0], []).append({
-                    "id": dependency[1], "job_key": dependency[4],
-                    "status": dependency[5], "state": dependency[2],
-                    "reason": dependency[3], "contract": dependency[8] or {},
-                    "required_revision": dependency[9],
-                    "failure_rule": dependency[10],
-                })
-                dependents_by_job.setdefault(dependency[1], []).append({
-                    "id": dependency[0], "job_key": dependency[6],
-                    "status": dependency[7], "state": dependency[2],
-                    "reason": dependency[3], "contract": dependency[8] or {},
-                    "required_revision": dependency[9],
-                    "failure_rule": dependency[10],
-                })
-            cur.execute(
-                """SELECT job_run_id, domain_kind, domain_record_id,
-                          attempt_number, linked_at
-                     FROM operations.job_domain_attempts
-                    WHERE tenant_id = 1 AND job_run_id = ANY(%s)
-                    ORDER BY linked_at, id""",
-                (job_ids,),
-            )
-            for attempt in cur.fetchall():
-                domain_attempts_by_job.setdefault(attempt[0], []).append({
-                    "kind": attempt[1], "record_id": attempt[2],
-                    "attempt": attempt[3], "linked_at": attempt[4],
-                })
-            cur.execute(
-                """SELECT run_id, count(*)
-                     FROM operations.job_resource_claims
-                    WHERE tenant_id = 1 AND run_id = ANY(%s) AND state = 'contained'
-                    GROUP BY run_id""",
-                (job_ids,),
-            )
-            contained_claims_by_job = {run_id: count for run_id, count in cur.fetchall()}
     labels = {entry["id"]: entry["name"] for entry in _JOB_CATALOG}
     status_labels = {
         "queued": "Queued", "running": "Running", "completed": "Completed",

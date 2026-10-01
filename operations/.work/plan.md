@@ -1556,3 +1556,26 @@ fence it through the existing worker-interruption containment API instead of
 retrying forever. Next action: commit/push this worker correction, verify the
 automatic rollout contains the stranded run, then use the administrator
 recovery surface only after explicit process/effect verification.
+
+Live verification checkpoint (2026-10-01): automatic GitOps deployed commits
+`3227e39` and `c97a0ef`; migration 0232 is applied and all three containers
+are healthy. The scheduler now records durable `deferred` outcomes rather
+than emitting conflict errors, and the worker code has the stdout/finalization
+fix. The previously stuck `intel-kev` child was safely timed out, so there are
+zero held claims and zero running runs. Six claims are deliberately
+contained: three from the prior interrupted `agent-observations` collector
+and three from `intel-kev` (deployment, intelligence lane, and CVE corpus).
+The Jobs activity page now exposes a CSRF-protected, administrator-only
+confirmation action to release contained claims after process/effect
+verification. Do not impersonate an operator or release these claims through
+SSH: an authenticated administrator must perform the explicit recovery.
+
+Jobs-page authorization correction in progress (2026-10-01): live navigation
+to `/admin/jobs/` returned HTTP 500 because `_operator_job_runs` directly
+queried tenant-protected `job_dependencies` (and would next reach similarly
+protected domain-attempt and claim relations) under `operations_app`. Preserve
+the intentional no-direct-table-grant boundary: add a bounded,
+tenant-validated security-definer relation API for the selected Job IDs and
+make the activity page use it. Next action: implement migration 0233 and the
+view adapter, validate locally, commit/push, then verify the automatic rollout
+returns the Jobs page successfully.

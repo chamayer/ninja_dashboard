@@ -81,8 +81,8 @@ def test_jobs_status_uses_operator_language_and_safe_controls():
     assert "No run available" in jobs_template
     assert "next due" in jobs_template
     assert "last_schedule_outcome" in jobs_template
-    assert "job_domain_attempts" in views
-    assert "operations.job_dependencies" in views
+    assert "jobs_activity_relations_v1" in views
+    assert "jobs_activity_relations_v1" in views
     assert "Technical details" in template
     assert "Domain work" in template
     assert "Dependencies" in template
@@ -97,6 +97,7 @@ def test_jobs_status_uses_operator_language_and_safe_controls():
     assert "output_revisions, requested_input" not in views
     assert "admin_jobs_control_plane" in urls
     assert "jobs_admin_diagnostics_v1" in views
+    assert "jobs_activity_relations_v1" in views
     assert "_jobs_control_health" in views
     control_template = Path("templates/admin_jobs_control_plane.html").read_text(encoding="utf-8")
     assert "row.items" in control_template
