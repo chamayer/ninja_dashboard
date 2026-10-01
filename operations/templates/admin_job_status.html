@@ -25,6 +25,10 @@
   .job-filter-actions { display:flex; align-items:end; gap:.5rem; }
   .job-filter-actions button,.job-filter-actions a { padding:.45rem .7rem; border:1px solid var(--border); border-radius:4px; background:#fff; font-size:.82rem; text-decoration:none; cursor:pointer; }
   .job-pages { display:flex; justify-content:space-between; gap:1rem; margin:.75rem 0; }
+  .job-group { margin:1.25rem 0; }
+  .job-group h2 { margin:0 0 .45rem; font-size:1rem; }
+  .job-bulk-actions { display:flex; align-items:center; gap:.65rem; margin:.75rem 0; padding:.7rem; border:1px solid var(--border); border-radius:6px; background:var(--surface); }
+  .job-bulk-actions button { padding:.4rem .65rem; border:1px solid var(--border); border-radius:4px; background:#fff; cursor:pointer; }
 </style>
 
 <div class="job-status-head">
@@ -53,10 +57,20 @@
 
 <p class="muted">{{ run_total }} durable Job run{{ run_total|pluralize }}{% if run_total %} · page {{ run_page }}{% endif %}.</p>
 {% if runs %}
-<table class="job-status-table">
+<form id="job-bulk-action" method="post" action="{% url 'admin_job_bulk_cancel' %}" onsubmit="return confirm('Cancel selected queued work and request cancellation for selected running work?');">
+  {% csrf_token %}
+  <div class="job-bulk-actions">
+    <button type="submit">Cancel selected / request cancellation</button>
+    <span class="muted">Queued work is cancelled. Running work stops only at its next safe checkpoint.</span>
+</div>
+ </form>
+{% for group in job_groups %}
+<section class="job-group">
+  <h2>{{ group.name }}</h2>
+  <table class="job-status-table">
   <thead><tr><th>Job</th><th>Origin / owner</th><th>Current work</th><th>Requested</th><th>Started</th><th>Finished</th><th>Result</th><th>Action</th></tr></thead>
-  <tbody>{% for run in runs %}<tr>
-    <td><strong>{{ run.name }}</strong><br><span class="muted">{{ run.lane|title }} lane</span>{% if run.batch_id %}<br><span class="muted">Batch run</span>{% endif %}</td>
+  <tbody>{% for run in group.runs %}<tr>
+    <td>{% if run.status == 'queued' or run.status == 'running' and not run.cancellation_requested_at %}<input form="job-bulk-action" type="checkbox" name="run_id" value="{{ run.id }}" aria-label="Select {{ run.name }} run">{% endif %}<strong>{{ run.name }}</strong><br><span class="muted">{{ run.lane|title }} lane</span>{% if run.batch_id %}<br><span class="muted">Batch run</span>{% endif %}</td>
     <td>{{ run.origin }}{% if run.owner %}<br><span class="muted">{{ run.owner }}</span>{% endif %}</td>
     <td class="job-progress"><span class="job-state {{ run.status }}">{{ run.status_label }}</span><strong class="job-progress-note">{% if run.status == 'queued' %}Not started{% else %}{{ run.stage }}{% endif %}</strong>{% if run.status == 'queued' %}<span class="job-progress-note">Queue position {{ run.queue_position }} in the {{ run.lane }} lane</span><span class="job-progress-note">{{ run.queue_reason }}</span>{% elif run.stage_detail %}<span class="job-progress-note">{{ run.stage_detail }}</span>{% endif %}{% if run.cancellation_requested_at %}<span class="job-progress-note">Cancellation requested {{ run.cancellation_requested_at|date:"Y-m-d H:i:s" }}</span>{% endif %}{% if run.deadline_at and run.status == 'running' %}<span class="job-progress-note">Safety deadline {{ run.deadline_at|date:"Y-m-d H:i:s" }}</span>{% endif %}{% if run.elapsed %}<span class="job-progress-note">Elapsed {{ run.elapsed }}</span>{% endif %}{% if run.stage_updated_at and run.status != 'queued' %}<span class="job-progress-note">Updated {{ run.stage_updated_at|date:"Y-m-d H:i:s" }}</span>{% endif %}{% if run.heartbeat_at and run.status == 'running' and run.wait_category != 'workflow' %}<span class="job-progress-note">Worker active {{ run.heartbeat_at|date:"Y-m-d H:i:s" }}</span>{% endif %}</td>
     <td>{{ run.requested_at|date:"Y-m-d H:i:s" }}</td><td>{% if run.started_at %}{{ run.started_at|date:"Y-m-d H:i:s" }}{% else %}Not started{% endif %}</td><td>{% if run.completed_at %}{{ run.completed_at|date:"Y-m-d H:i:s" }}{% else %}Not completed{% endif %}</td>
@@ -75,9 +89,11 @@
         {% if run.correlation_id %}<li>Correlation: {{ run.correlation_id }}</li>{% endif %}{% if run.retry_of_run_id %}<li>Retry of: <a href="?run={{ run.retry_of_run_id }}">{{ run.retry_of_run_id }}</a></li>{% endif %}{% if run.technical.parent_run_id %}<li>Parent: <a href="?run={{ run.technical.parent_run_id }}">{{ run.technical.parent_run_id }}</a></li>{% endif %}{% if run.technical.root_run_id %}<li>Root: <a href="?run={{ run.technical.root_run_id }}">{{ run.technical.root_run_id }}</a></li>{% endif %}{% if run.terminal_reason %}<li>Terminal reason: {{ run.terminal_reason }}</li>{% endif %}
       </ul></details>
     </td>
-    <td>{% if run.contained_claim_count %}<form method="post" action="{% url 'admin_job_release_contained_claim' run.id %}" onsubmit="return confirm('Confirm the interrupted process has stopped. This releases {{ run.contained_claim_count }} protected resource claim(s).');">{% csrf_token %}<input type="hidden" name="confirm_release" value="release"><button class="job-cancel" type="submit">Release {{ run.contained_claim_count }} verified claim{{ run.contained_claim_count|pluralize }}</button></form><span class="job-progress-note">Requires verification before retry.</span>{% elif run.status == 'queued' %}<form method="post" action="{% url 'admin_job_cancel' run.id %}">{% csrf_token %}<button class="job-cancel" type="submit">Cancel</button></form>{% elif run.status == 'running' and not run.cancellation_requested_at %}<form method="post" action="{% url 'admin_job_cancel' run.id %}">{% csrf_token %}<button class="job-cancel" type="submit">Request cancellation</button></form>{% elif run.status == 'running' %}<span class="muted">Cancellation pending</span>{% elif run.status == 'failed' or run.status == 'stalled' %}<form method="post" action="{% url 'admin_job_retry' run.id %}">{% csrf_token %}<button class="job-cancel" type="submit">Retry</button></form>{% else %}<span class="muted">No action</span>{% endif %}</td>
+    <td>{% if run.contained_claim_count %}<strong>Recovery review required</strong><span class="job-progress-note">This job ended without a verified result. Related work remains paused to avoid duplicate changes. Recovery evidence is not available on this page; escalate through the platform incident process.</span>{% elif run.status == 'queued' %}<form method="post" action="{% url 'admin_job_cancel' run.id %}">{% csrf_token %}<button class="job-cancel" type="submit">Cancel</button></form>{% elif run.status == 'running' and not run.cancellation_requested_at %}<form method="post" action="{% url 'admin_job_cancel' run.id %}">{% csrf_token %}<button class="job-cancel" type="submit">Request cancellation</button></form>{% elif run.status == 'running' %}<span class="muted">Cancellation pending</span>{% elif run.status == 'failed' or run.status == 'stalled' %}<form method="post" action="{% url 'admin_job_retry' run.id %}">{% csrf_token %}<button class="job-cancel" type="submit">Retry</button></form>{% else %}<span class="muted">No action</span>{% endif %}</td>
   </tr>{% endfor %}</tbody>
-</table>
+  </table>
+</section>
+{% endfor %}
 {% else %}<p class="muted">No queued or requested jobs match this view.</p>{% endif %}
 
 <nav class="job-pages" aria-label="Durable Job activity pages">

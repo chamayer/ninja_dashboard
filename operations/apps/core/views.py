@@ -9245,6 +9245,13 @@ def admin_job_status(request: HttpRequest) -> HttpResponse:
         run_id=run_id,
         filters=filters,
     )
+    grouped_runs: dict[str, dict] = {}
+    for run in runs:
+        group = grouped_runs.setdefault(
+            run["job_key"],
+            {"name": run["name"], "job_key": run["job_key"], "runs": []},
+        )
+        group["runs"].append(run)
     history_total, history = _recent_job_history(
         limit=history_page_size,
         offset=(history_page - 1) * history_page_size,
@@ -9255,6 +9262,7 @@ def admin_job_status(request: HttpRequest) -> HttpResponse:
         {
             "admin_group": "integrations", "admin_tab": "jobs",
             "runs": runs,
+            "job_groups": list(grouped_runs.values()),
             "run_total": run_total,
             "run_page": page,
             "run_has_previous": page > 1,
@@ -9305,6 +9313,44 @@ def admin_job_cancel(request: HttpRequest, run_id: uuid.UUID) -> HttpResponse:
 @login_required
 @require_admin
 @require_POST
+def admin_job_bulk_cancel(request: HttpRequest) -> HttpResponse:
+    """Apply the existing safe cancellation transition to selected active runs."""
+    run_ids: list[uuid.UUID] = []
+    for raw_id in request.POST.getlist("run_id")[:50]:
+        try:
+            run_id = uuid.UUID(raw_id)
+        except (TypeError, ValueError):
+            continue
+        if run_id not in run_ids:
+            run_ids.append(run_id)
+    if not run_ids:
+        messages.info(request, "Select queued or running Jobs before applying a bulk action.")
+        return redirect(reverse("admin_job_status"))
+
+    outcomes = {"cancelled": 0, "requested": 0, "unchanged": 0}
+    with transaction.atomic(), connection.cursor() as cur:
+        cur.execute("SET LOCAL operations.tenant_id = 1")
+        for run_id in run_ids:
+            cur.execute(
+                "SELECT operations.jobs_cancel_v1(%s, %s, %s, %s)",
+                (1, run_id, request.user.id, "Bulk action by an administrator."),
+            )
+            outcome = cur.fetchone()[0]
+            outcomes[outcome if outcome in outcomes else "unchanged"] += 1
+    detail = []
+    if outcomes["cancelled"]:
+        detail.append(f"{outcomes['cancelled']} cancelled")
+    if outcomes["requested"]:
+        detail.append(f"{outcomes['requested']} cancellation request(s) sent")
+    if outcomes["unchanged"]:
+        detail.append(f"{outcomes['unchanged']} already finished or unavailable")
+    messages.success(request, "Bulk Job action: " + "; ".join(detail) + ".")
+    return redirect(reverse("admin_job_status"))
+
+
+@login_required
+@require_admin
+@require_POST
 def admin_job_retry(request: HttpRequest, run_id: uuid.UUID) -> HttpResponse:
     """Retry only a terminal run by placing a new durable request."""
     with transaction.atomic(), connection.cursor() as cur:
@@ -9327,30 +9373,6 @@ def admin_job_retry(request: HttpRequest, run_id: uuid.UUID) -> HttpResponse:
     else:
         messages.info(request, "An equivalent run is already queued or running.")
     return redirect(reverse("admin_job_status") + f"?run={new_id}")
-
-
-@login_required
-@require_admin
-@require_POST
-def admin_job_release_contained_claim(request: HttpRequest, run_id: uuid.UUID) -> HttpResponse:
-    """Release only claims an administrator has explicitly verified as safe."""
-    if request.POST.get("confirm_release") != "release":
-        messages.error(request, "Confirm that the interrupted process has stopped before releasing its claim.")
-        return redirect(request.META.get("HTTP_REFERER") or reverse("admin_job_status"))
-    with transaction.atomic(), connection.cursor() as cur:
-        cur.execute("SET LOCAL operations.tenant_id = 1")
-        cur.execute(
-            "SELECT operations.jobs_release_contained_claim_v1(%s, %s, %s, %s)",
-            (
-                1,
-                run_id,
-                request.user.id,
-                "Administrator verified the interrupted process has stopped and released contained claims.",
-            ),
-        )
-        released = int(cur.fetchone()[0])
-    messages.success(request, f"Released {released} contained resource claim(s) after administrator review.")
-    return redirect(request.META.get("HTTP_REFERER") or reverse("admin_job_status"))
 
 
 @login_required

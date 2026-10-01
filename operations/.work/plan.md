@@ -1586,3 +1586,45 @@ null-array validation alias (`run_id`). Add migration 0234 that replaces the
 function using an explicitly named unnest column, then repeat the controlled
 API probe and Jobs-page verification. No permissions or data were changed by
 the failed read.
+
+Jobs-page verification checkpoint (2026-10-01): automatic GitOps deployed
+`dce9b45`, `3d10dcb`, and `3282fd7`; migrations 0233 and 0234 are applied.
+The relation API now succeeds under `operations_app`, and a read-only internal
+render of `/admin/jobs/` with the deployed host header returns HTTP 200. The
+prior 500 was fully corrected without granting direct access to control-plane
+tables. The six contained claims remain intentionally unreleased pending an
+authenticated administrator's explicit recovery confirmation.
+
+Recovery-safety correction in progress (2026-10-01): the contained-claim
+action improperly asked an administrator to attest to an outcome that the
+Jobs ledger cannot prove. The activity screen has technical history but no
+verified child termination or domain-effect evidence, so it must not present
+claim release as an operator decision. Retire the direct release capability
+from the Operations runtime role and replace it with clear, domain-facing
+recovery guidance that identifies the owning service and explains that the
+affected work remains safely paused pending owner-provided recovery evidence.
+Preserve the contained claims and history; do not invent evidence or release
+any live claims. Add focused regression coverage and validate the migration,
+template, and request surface before the authorized commit/push.
+
+Job-activity usability addition (2026-10-01): group the bounded activity
+page by Job name so an operator can scan related attempts together. Add a
+selection-based bulk queue control that delegates every selected run to the
+existing tenant- and actor-validated cancellation API; queued work is
+cancelled and running work receives only a cooperative cancellation request.
+Do not provide bulk retry, recovery, or claim-release controls because their
+safe eligibility evidence has not been implemented.
+
+Recovery-safety and activity usability checkpoint (2026-10-01): migration
+0235 revokes the direct contained-claim release function from
+`operations_app`; the release endpoint and misleading confirmation control
+are removed. Contained work is now described as a paused, unverified outcome
+that requires platform incident escalation, rather than a decision an
+administrator can make from incomplete evidence. Job activity is grouped by
+Job name and has a maximum-50-selection bulk control that uses the existing
+fenced cancellation API for each selected run. Focused Jobs/migration tests
+(12) and Django checks pass; `git diff --check` passes. The repository-wide
+ruff invocation still reports existing violations in `views.py`; the new
+migration and URL module pass targeted ruff. Next action: commit and push the
+reviewed code plus migration 0235, then verify automatic GitOps deployment
+and the read-only Jobs page.

@@ -66,10 +66,15 @@ def test_jobs_status_uses_operator_language_and_safe_controls():
     assert "admin_job_history_retry" in urls
     assert "admin_job_status" in urls
     assert "admin_job_retry" in urls
-    assert "admin_job_release_contained_claim" in urls
-    assert "def admin_job_release_contained_claim" in views
-    assert "jobs_release_contained_claim_v1" in views
-    assert "Release" in template
+    assert "admin_job_bulk_cancel" in urls
+    assert "def admin_job_bulk_cancel" in views
+    assert "jobs_cancel_v1" in views
+    assert "job-bulk-action" in template
+    assert "Cancel selected / request cancellation" in template
+    assert "Recovery review required" in template
+    assert "escalate through the platform incident process" in template
+    assert "admin_job_release_contained_claim" not in urls
+    assert "def admin_job_release_contained_claim" not in views
     assert "queued_job_status" in views
     assert "operator_job_runs" in views
     assert "capability_state" in views
@@ -82,6 +87,8 @@ def test_jobs_status_uses_operator_language_and_safe_controls():
     assert "next due" in jobs_template
     assert "last_schedule_outcome" in jobs_template
     assert "jobs_activity_relations_v1" in views
+    assert "job_groups" in views
+    assert "group.runs" in template
     assert "Technical details" in template
     assert "Domain work" in template
     assert "Dependencies" in template
