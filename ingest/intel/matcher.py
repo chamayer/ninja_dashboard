@@ -446,6 +446,48 @@ def _match_and_upsert() -> int:
             (_TENANT_ID, _TENANT_ID),
         )
         material_changed = bool(cur.fetchone()[0])
+        if material_changed:
+            # Preserve the exact affected identity before the next matcher
+            # refresh replaces this set. Version matches are exact; product
+            # level matches safely target installations by canonical name.
+            # Operations applies its migration independently from ingest.  Do
+            # not make the matcher unavailable during that short startup gap.
+            cur.execute("SELECT to_regclass('operations.software_reclassification_targets')")
+            if cur.fetchone()[0] is not None:
+                cur.execute(
+                """
+                INSERT INTO operations.software_reclassification_targets
+                    (tenant_id, target_key, software_version_id, canonical_name, source)
+                SELECT DISTINCT %s,
+                       CASE WHEN changed.software_version_id IS NOT NULL
+                            THEN 'version:' || changed.software_version_id::text
+                            ELSE 'name:' || LOWER(changed.canonical_name) END,
+                       changed.software_version_id,
+                       CASE WHEN changed.software_version_id IS NULL
+                            THEN LOWER(changed.canonical_name) ELSE '' END,
+                       'cve_match'
+                  FROM (
+                      (SELECT canonical_name, software_version_id, cve_id,
+                              match_kind, version_range, confidence
+                         FROM operations.cve_match WHERE tenant_id = %s
+                       EXCEPT
+                       SELECT canonical_name, software_version_id, cve_id,
+                              match_kind, version_range, confidence
+                         FROM cve_match_before)
+                      UNION
+                      (SELECT canonical_name, software_version_id, cve_id,
+                              match_kind, version_range, confidence
+                         FROM cve_match_before
+                       EXCEPT
+                       SELECT canonical_name, software_version_id, cve_id,
+                              match_kind, version_range, confidence
+                         FROM operations.cve_match WHERE tenant_id = %s)
+                  ) changed
+                ON CONFLICT (tenant_id, target_key, source) WHERE consumed_at IS NULL
+                DO UPDATE SET queued_at = now()
+                """,
+                    (_TENANT_ID, _TENANT_ID, _TENANT_ID),
+                )
 
     log.info(
         "Intel matcher: %d titles matched (%d product+version pairs), "

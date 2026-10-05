@@ -132,6 +132,9 @@ def test_initial_workflow_edges_are_registered_and_acyclic():
     assert shape("intel-nvd", frozenset({"material_change"})) == (
         ("intel-nvd", "intel-matcher", "intel.cves", "material_change"),
     )
+    assert shape("intel-matcher", frozenset({"material_change"})) == (
+        ("intel-matcher", "software-classify-only", "software.cve-match", "material_change"),
+    )
 
     for item in definitions():
         for successor in item.successors:

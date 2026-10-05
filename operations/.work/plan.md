@@ -1865,3 +1865,24 @@ One old full-classification run retains its immutable pre-fairness broad lock
 until completion, so this is visible transitional serialization rather than a
 stalled worker. Next action: validate rendering, commit/push, and inspect the
 automatic rollout.
+
+Routine classification scope refinement in progress (2026-10-05): routine
+software classification already uses exact installation-state markers and the
+full rebuild cadence already defaults to weekly (168 hours). The registry was
+nevertheless sending every material intelligence update to the full rebuild.
+Route those automatic follow-ons to the incremental classifier instead, so
+routine work handles only new or changed installations. Preserve the weekly
+full rebuild and explicit full-rebuild control as the authoritative fleet-wide
+reconciliation path; allow the current healthy full run to finish. Next
+action: validate registry/worker behavior, commit/push, and confirm new
+material-change dependencies target incremental classification after rollout.
+
+Software target implementation (2026-10-05): migration 0250 creates a
+tenant-scoped durable target queue. The CVE matcher compares its old and new
+match sets and records only changed version identities or product-level names;
+incremental classification merges those targets with its existing installation
+hash scope and consumes them only after a successful transaction. Material
+intelligence dependencies now request incremental classification, while the
+full classifier is restored as an independent weekly schedule. Patch scoping
+is the next implementation slice and must preserve device and client finding
+resolution semantics.

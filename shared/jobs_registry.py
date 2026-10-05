@@ -860,15 +860,19 @@ _WORKFLOW_SUCCESSORS = MappingProxyType({
     "intel-cpe-dict": (DependencyDefinition("intel-matcher", "intel.cpes", "material_change"),),
     "intel-kev": (DependencyDefinition("intel-matcher", "intel.kev", "material_change"),),
     "intel-epss": (DependencyDefinition("intel-matcher", "intel.epss", "material_change"),),
-    "intel-matcher": (DependencyDefinition("software-classify-full", "software.cve-match", "material_change"),),
-    "intel-winget": (DependencyDefinition("software-classify-full", "software.winget-signals", "material_change"),),
-    "intel-chocolatey": (DependencyDefinition("software-classify-full", "software.chocolatey-signals", "material_change"),),
-    "intel-capability": (DependencyDefinition("software-classify-full", "software.capabilities", "material_change"),),
-    "intel-lolrmm": (DependencyDefinition("software-classify-full", "software.lolrmm", "material_change"),),
-    "intel-otx": (DependencyDefinition("software-classify-full", "software.otx-signals", "material_change"),),
-    "intel-abusech": (DependencyDefinition("software-classify-full", "software.abusech-signals", "material_change"),),
-    "intel-endoflife": (DependencyDefinition("software-classify-full", "software.end-of-life", "material_change"),),
-    "intel-category": (DependencyDefinition("software-classify-full", "software.categories", "material_change"),),
+    # Routine intelligence changes feed the incremental classifier.  It touches
+    # only installations whose source state is new or changed; the separately
+    # scheduled full rebuild remains the weekly safety net for fleet-wide rule,
+    # decision, and intelligence reconciliation.
+    "intel-matcher": (DependencyDefinition("software-classify-only", "software.cve-match", "material_change"),),
+    "intel-winget": (DependencyDefinition("software-classify-only", "software.winget-signals", "material_change"),),
+    "intel-chocolatey": (DependencyDefinition("software-classify-only", "software.chocolatey-signals", "material_change"),),
+    "intel-capability": (DependencyDefinition("software-classify-only", "software.capabilities", "material_change"),),
+    "intel-lolrmm": (DependencyDefinition("software-classify-only", "software.lolrmm", "material_change"),),
+    "intel-otx": (DependencyDefinition("software-classify-only", "software.otx-signals", "material_change"),),
+    "intel-abusech": (DependencyDefinition("software-classify-only", "software.abusech-signals", "material_change"),),
+    "intel-endoflife": (DependencyDefinition("software-classify-only", "software.end-of-life", "material_change"),),
+    "intel-category": (DependencyDefinition("software-classify-only", "software.categories", "material_change"),),
 })
 if set(_RESOURCE_KEYS_BY_DEFINITION) != {item.key for item in _RAW_DEFINITIONS}:
     raise RegistryValidationError("Missing Jobs resource policy")

@@ -111,6 +111,11 @@ def classify(tenant_id: int = _TENANT_ID, *, incremental: bool = False) -> int:
         with db.pool.connection() as conn, conn.cursor() as cur:
             cur.execute(f"SET LOCAL operations.tenant_id = {tenant_id}")
             incremental_scope = _incremental_scope(cur, tenant_id) if incremental else None
+            targeted_scope, target_ids = (
+                _reclassification_target_scope(cur, tenant_id) if incremental else ([], [])
+            )
+            if incremental and incremental_scope is not None:
+                incremental_scope = _merge_scopes(incremental_scope, targeted_scope)
             if incremental and incremental_scope == []:
                 log.info("software_findings: no changed installations to classify")
                 return 0
@@ -488,6 +493,8 @@ def classify(tenant_id: int = _TENANT_ID, *, incremental: bool = False) -> int:
             )
             if marker_scope is not None:
                 _mark_incremental_scope(cur, marker_scope)
+            if target_ids:
+                _consume_reclassification_targets(cur, tenant_id, target_ids)
 
     except Exception as exc:
         error = str(exc)[:2000]
@@ -522,7 +529,10 @@ def incremental_pending_count(tenant_id: int = _TENANT_ID) -> int | None:
     with db.pool.connection() as conn, conn.cursor() as cur:
         cur.execute(f"SET LOCAL operations.tenant_id = {tenant_id}")
         scope = _incremental_scope(cur, tenant_id)
-        return None if scope is None else len(scope)
+        if scope is None:
+            return None
+        targeted_scope, _target_ids = _reclassification_target_scope(cur, tenant_id)
+        return len(_merge_scopes(scope, targeted_scope))
 
 
 def _incremental_scope(cur, tenant_id: int) -> list[tuple] | None:
@@ -532,6 +542,60 @@ def _incremental_scope(cur, tenant_id: int) -> list[tuple] | None:
                for column in required):
         return None
     return _installation_scope(cur, tenant_id, changed_only=True)
+
+
+def _reclassification_target_scope(cur, tenant_id: int) -> tuple[list[tuple], list[uuid.UUID]]:
+    """Return installations affected by durable intelligence-change targets."""
+    if not _table_exists(cur, "operations.software_reclassification_targets"):
+        return [], []
+    cur.execute(
+        """
+        SELECT id, software_version_id, canonical_name
+          FROM operations.software_reclassification_targets
+         WHERE tenant_id = %s AND consumed_at IS NULL
+         ORDER BY queued_at, id
+        """,
+        (tenant_id,),
+    )
+    targets = cur.fetchall()
+    if not targets:
+        return [], []
+    target_ids = [row[0] for row in targets]
+    version_ids = [row[1] for row in targets if row[1] is not None]
+    names = [row[2] for row in targets if row[1] is None]
+    cur.execute(
+        """
+        SELECT installation_uuid, device_id, material_hash,
+               (stale_since IS NULL AND deleted_at IS NULL) AS active
+          FROM operations.software_installations_current
+         WHERE tenant_id = %s
+           AND (software_version_id = ANY(%s::bigint[])
+                OR LOWER(canonical_name) = ANY(%s::text[]))
+        """,
+        (tenant_id, version_ids or [-1], names or ["__no_reclassification_target__"]),
+    )
+    return list(cur.fetchall()), target_ids
+
+
+def _merge_scopes(*scopes: list[tuple]) -> list[tuple]:
+    """Deduplicate installation scopes while preserving their current snapshot."""
+    return list({row[0]: row for scope in scopes for row in scope}.values())
+
+
+def _table_exists(cur, qualified_name: str) -> bool:
+    cur.execute("SELECT to_regclass(%s) IS NOT NULL", (qualified_name,))
+    return bool(cur.fetchone()[0])
+
+
+def _consume_reclassification_targets(cur, tenant_id: int, target_ids: list[uuid.UUID]) -> None:
+    cur.execute(
+        """
+        UPDATE operations.software_reclassification_targets
+           SET consumed_at = now()
+         WHERE tenant_id = %s AND id = ANY(%s::uuid[]) AND consumed_at IS NULL
+        """,
+        (tenant_id, target_ids),
+    )
 
 
 def _full_reconciliation_scope(cur, tenant_id: int) -> list[tuple] | None:
