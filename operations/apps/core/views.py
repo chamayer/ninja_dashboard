@@ -9284,6 +9284,14 @@ def admin_job_status(request: HttpRequest) -> HttpResponse:
         run_id=run_id,
         filters=filters,
     )
+    if activity_view == "current" and not run_id:
+        # Current work answers the operator question "what is this Job doing
+        # now?" One latest active attempt per definition is enough here; the
+        # History view remains the complete immutable run ledger.
+        latest_by_job: dict[str, dict] = {}
+        for run in runs:
+            latest_by_job.setdefault(run["job_key"], run)
+        runs = list(latest_by_job.values())
     with transaction.atomic(), connection.cursor() as cur:
         cur.execute("SET LOCAL operations.tenant_id = 1")
         cur.execute(
@@ -9303,6 +9311,7 @@ def admin_job_status(request: HttpRequest) -> HttpResponse:
         {
             "admin_group": "integrations", "admin_tab": "jobs",
             "runs": runs,
+            "displayed_run_total": len(runs),
             "current_summary": {
                 "running": current_summary.get("running", 0),
                 "queued": current_summary.get("queued", 0),

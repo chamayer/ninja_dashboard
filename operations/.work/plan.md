@@ -1729,3 +1729,8 @@ compact current-work summary and one table per selected view: Current work,
 Needs attention, or Run history. Preserve all run detail, recovery evidence,
 safe controls, filters, and diagnostic links. Next action: validate the
 focused UI checks, commit/push, then confirm the deployed page renders.
+
+Latest-status refinement in progress (2026-10-05): Current work should answer
+the status of each Job rather than list every simultaneous attempt. Collapse
+the default view to the latest active attempt per Job and link that Job to its
+complete immutable Run history; attention and history retain individual runs.

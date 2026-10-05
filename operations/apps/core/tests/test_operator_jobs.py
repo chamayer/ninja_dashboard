@@ -91,6 +91,8 @@ def test_jobs_status_uses_operator_language_and_safe_controls():
     assert "current_summary" in views
     assert "Current Job summary" in template
     assert "Needs attention" in template
+    assert "latest_by_job" in views
+    assert "latest active attempt" in template
     assert "Technical details" in template
     assert "Domain work" in template
     assert "Dependencies" in template
