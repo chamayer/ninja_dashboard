@@ -1713,3 +1713,11 @@ keep terminal records in a separate Run history view, and expose durable
 recovery evidence as "Recovered automatically" without changing the original
 run outcome. Next action: run focused checks, commit/push the migration and UI
 change, then verify the live default page shows only current work.
+
+abuse.ch recovery completion in progress (2026-10-05): the 0242 automatic
+rollout interrupted one `intel-abusech` run, leaving three contained claims.
+The handler reads only public MalwareBazaar and ThreatFox feeds and performs
+transaction-scoped conditional local-signal upserts; it has no external
+mutation. Migration 0243 authorizes only the interrupted immutable revision
+for replay-safe recovery. Next action: validate, commit/push, and verify the
+worker records recovery evidence and clears the final contained claims.

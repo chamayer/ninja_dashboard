@@ -663,6 +663,11 @@ REPLAY_SAFE_RECOVERY_EVIDENCE = MappingProxyType({
         "transaction-scoped conditional upserts of local threat signals. A later replay "
         "converges to current feed state and has no external mutation."
     ),
+    "intel-abusech": (
+        "The abuse.ch refresh only reads public MalwareBazaar and ThreatFox feeds and "
+        "performs transaction-scoped conditional upserts of local threat signals. A later "
+        "replay converges to current feed state and has no external mutation."
+    ),
     "intel-epss": (
         "The EPSS refresh only performs a transaction-scoped conditional update "
         "of existing CVE scores. A later replay converges to the current public "
