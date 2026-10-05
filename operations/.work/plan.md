@@ -1789,3 +1789,10 @@ connector metadata. A focused test covers the projection boundary; it cannot
 collect on the local Python install because that environment lacks ingest's
 `pydantic` dependency. Next action: commit/push this narrow compatibility fix
 and verify the automatic rollout moves the queue past agent compliance.
+
+Agent-compliance follow-on (2026-10-05): the resumed handler also exposed a
+pooled-connection RLS context gap in the Ninja presence connector. Its read of
+the protected device-detail projection did not establish tenant 1 and could
+inherit an empty setting. The connector now sets the transaction-local tenant
+before that read. Next action: commit/push both queue-resume fixes and verify
+the automatic rollout completes an agent-compliance run.

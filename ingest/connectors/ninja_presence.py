@@ -27,6 +27,10 @@ def _contains_no_av(value: object) -> bool:
 def fetch(source: SourceConfig, observed_at: datetime) -> list[dict]:
     with db.pool.connection() as conn:
         with conn.cursor(row_factory=dict_row) as cur:
+            # This connector reads an RLS-protected Operations projection.
+            # A pooled connection can retain an empty tenant setting from a
+            # previous request, so establish the local tenant explicitly.
+            cur.execute("SELECT set_config('operations.tenant_id', '1', true)")
             cur.execute(
                 """
                 SELECT
