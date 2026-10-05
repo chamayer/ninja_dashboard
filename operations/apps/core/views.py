@@ -8753,8 +8753,62 @@ def admin_jobs(request: HttpRequest) -> HttpResponse:
     active_by_job: dict[str, dict] = {}
     for active_run in active_queue:
         active_by_job.setdefault(active_run["job_key"], active_run)
+
+    # A finished entry step must not make its operation disappear while a
+    # linked follow-on step is active.  The root-run lineage is the durable
+    # sequence identity; use it to show the status of each visible step from
+    # the same operation execution rather than unrelated latest runs.
+    sequence_roots = {
+        str(run["technical"].get("root_run_id") or run["id"])
+        for run in active_queue
+    }
+    active_sequence_by_entry: dict[str, str] = {}
+    sequence_steps: dict[str, dict[str, dict]] = {}
+    if sequence_roots:
+        with transaction.atomic(), connection.cursor() as cur:
+            cur.execute("SET LOCAL operations.tenant_id = 1")
+            cur.execute(
+                """SELECT id, job_key FROM operations.operator_job_runs
+                     WHERE tenant_id = 1 AND id = ANY(%s::uuid[])""",
+                (list(sequence_roots),),
+            )
+            root_entries = {str(row[0]): row[1] for row in cur.fetchall()}
+            tracked_roots = [
+                root_id for root_id, job_key in root_entries.items()
+                if job_key in _OPERATION_ENTRY_BY_JOB
+            ]
+            if tracked_roots:
+                cur.execute(
+                    """SELECT id, root_run_id, job_key, status, requested_at
+                         FROM operations.operator_job_runs
+                        WHERE tenant_id = 1
+                          AND (id = ANY(%s::uuid[]) OR root_run_id = ANY(%s::uuid[]))
+                        ORDER BY requested_at DESC, id DESC""",
+                    (tracked_roots, tracked_roots),
+                )
+                for run_id, root_run_id, job_key, status, _requested_at in cur.fetchall():
+                    root_id = str(root_run_id or run_id)
+                    active_sequence_by_entry[root_entries[root_id]] = root_id
+                    sequence_steps.setdefault(root_id, {}).setdefault(
+                        job_key,
+                        {"id": job_key, "name": definition(job_key).display_name, "state": status},
+                    )
     for job in jobs:
         job["active_run"] = active_by_job.get(job["id"])
+        sequence_id = active_sequence_by_entry.get(job["id"])
+        if sequence_id:
+            sequence_state = sequence_steps.get(sequence_id, {})
+            job["steps"] = [
+                sequence_state.get(
+                    step_key,
+                    {"id": step_key, "name": definition(step_key).display_name, "state": "not_started"},
+                )
+                for step_key in _OPERATION_ENTRY_BY_JOB[job["id"]]["step_keys"]
+            ]
+            job["active_run"] = {
+                "id": sequence_id,
+                "status_label": "Operation in progress",
+            }
 
     return render(
         request,

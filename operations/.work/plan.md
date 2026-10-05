@@ -1767,3 +1767,14 @@ tests pass, Django check passes, and diff check passes. Next action: review
 the staged diff, commit and push the approved migration/UI/scheduler change,
 then verify automatic GitOps migration, recovery evidence, terminalized old
 coordinator rows, and queue progress without a direct Portainer action.
+
+Post-rollout verification (2026-10-05): commit `5ae4890` was pushed to origin
+and the required mirror. Automatic GitOps applied 0244 and 0245; the worker
+recorded one replay-safe matcher recovery and became healthy. The retired
+dependent schedules are disabled and the three former pseudo-running
+coordinators are terminal `completed` records. The catalog was then refined
+so an operation stays visibly in progress when its completed entry has linked
+active steps; each displayed step now uses that operation run's root lineage,
+not an unrelated latest Job run. Focused tests and template/Django checks pass.
+Next action: commit/push the lineage display refinement and make one final
+read-only queue-progress verification.
