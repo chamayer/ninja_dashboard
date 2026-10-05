@@ -8721,23 +8721,6 @@ def admin_jobs(request: HttpRequest) -> HttpResponse:
             ],
         })
 
-    if category_filter:
-        jobs = [j for j in jobs if j["category"].lower() == category_filter]
-    if status_filter == "never_run":
-        jobs = [j for j in jobs if j["state"] == "never_run"]
-    elif status_filter == "failed":
-        jobs = [j for j in jobs if j["state"] not in ("ok", "never_run")]
-    elif status_filter == "stale":
-        jobs = [j for j in jobs if j["is_stale"] and j["state"] != "never_run"]
-    elif status_filter == "ok":
-        jobs = [j for j in jobs if j["state"] == "ok" and not j["is_stale"]]
-
-    # Group by category so the template can render sections instead of
-    # a flat list. Preserve catalog order within each group.
-    jobs_by_category: dict[str, list[dict]] = {}
-    for j in jobs:
-        jobs_by_category.setdefault(j["category"], []).append(j)
-
     # Ingest exposes its on-demand org/device selector forms on
     # port 8090. Compute a browser-reachable URL for the operator by
     # rewriting the current host's port. Overridable via the
@@ -8766,6 +8749,7 @@ def admin_jobs(request: HttpRequest) -> HttpResponse:
     }
     active_sequence_by_entry: dict[str, str] = {}
     sequence_steps: dict[str, dict[str, dict]] = {}
+    active_sequence_run: dict[str, dict] = {}
     if sequence_roots:
         with transaction.atomic(), connection.cursor() as cur:
             cur.execute("SET LOCAL operations.tenant_id = 1")
@@ -8779,6 +8763,20 @@ def admin_jobs(request: HttpRequest) -> HttpResponse:
                 root_id for root_id, job_key in root_entries.items()
                 if job_key in _OPERATION_ENTRY_BY_JOB
             ]
+            for run in active_queue:
+                root_id = str(run["technical"].get("root_run_id") or run["id"])
+                if root_id not in tracked_roots:
+                    continue
+                current = active_sequence_run.get(root_id)
+                if (
+                    current is None
+                    or (run["status"] == "running" and current["status"] != "running")
+                    or (
+                        run["status"] == current["status"]
+                        and run["requested_at"] > current["requested_at"]
+                    )
+                ):
+                    active_sequence_run[root_id] = run
             if tracked_roots:
                 cur.execute(
                     """SELECT id, root_run_id, job_key, status, requested_at
@@ -8793,10 +8791,16 @@ def admin_jobs(request: HttpRequest) -> HttpResponse:
                     active_sequence_by_entry[root_entries[root_id]] = root_id
                     sequence_steps.setdefault(root_id, {}).setdefault(
                         job_key,
-                        {"id": job_key, "name": definition(job_key).display_name, "state": status},
+                        {
+                            "id": job_key,
+                            "name": definition(job_key).display_name,
+                            "state": status,
+                        },
                     )
     for job in jobs:
         job["active_run"] = active_by_job.get(job["id"])
+        if job["active_run"]:
+            job["state"] = job["active_run"]["status"]
         sequence_id = active_sequence_by_entry.get(job["id"])
         if sequence_id:
             sequence_state = sequence_steps.get(sequence_id, {})
@@ -8807,10 +8811,29 @@ def admin_jobs(request: HttpRequest) -> HttpResponse:
                 )
                 for step_key in _OPERATION_ENTRY_BY_JOB[job["id"]]["step_keys"]
             ]
-            job["active_run"] = {
-                "id": sequence_id,
-                "status_label": "Operation in progress",
-            }
+            job["active_run"] = active_sequence_run[sequence_id]
+            job["state"] = job["active_run"]["status"]
+
+    if category_filter:
+        jobs = [j for j in jobs if j["category"].lower() == category_filter]
+    if status_filter in {"queued", "running", "never_run"}:
+        jobs = [j for j in jobs if j["state"] == status_filter]
+    elif status_filter == "failed":
+        jobs = [j for j in jobs if j["state"] not in ("ok", "never_run", "queued", "running")]
+    elif status_filter == "stale":
+        jobs = [j for j in jobs if j["is_stale"] and j["state"] != "never_run"]
+    elif status_filter == "ok":
+        jobs = [j for j in jobs if j["state"] == "ok" and not j["is_stale"]]
+
+    # Group only after the active sequence has updated its entry operation.
+    jobs_by_category: dict[str, list[dict]] = {}
+    for job in jobs:
+        jobs_by_category.setdefault(job["category"], []).append(job)
+    operation_summary = {
+        "running": sum(job["state"] == "running" for job in jobs),
+        "queued": sum(job["state"] == "queued" for job in jobs),
+        "attention": sum(job["state"] in {"failed", "stalled"} for job in jobs),
+    }
 
     return render(
         request,
@@ -8823,6 +8846,7 @@ def admin_jobs(request: HttpRequest) -> HttpResponse:
             "categories": sorted(categories),
             "active_category": category_filter,
             "active_status": status_filter,
+            "operation_summary": operation_summary,
             "recent_runs": recent_runs,
             "ingest_public_url": ingest_public_url,
             "active_job_count": len(active_by_job),

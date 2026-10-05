@@ -1851,3 +1851,17 @@ metadata belongs to their underlying Job definition. Resolve status from that
 definition when available, preserve dynamic-source metadata, and treat an
 absent fallback as no recorded run. Next action: run focused view/template
 checks, commit/push, and verify `/admin/jobs/` after automatic rollout.
+
+Jobs and activity alignment in progress (2026-10-05): the Jobs page showed
+an operation's stale entry-step status even while a linked step was active,
+and its card layout hid the current stage, wait reason, and elapsed time that
+the Activity page exposes. Make an operation inherit the current state of its
+active sequence, retain visible step rows and guarded controls, add the same
+running/queued/attention summary, and use Activity-style operation tables
+with current status, result, schedule, and action columns. Live queue review
+shows two heartbeating Jobs occupying the reviewed deployment capacity; four
+dependent Jobs wait for their current revisions and five await capacity.
+One old full-classification run retains its immutable pre-fairness broad lock
+until completion, so this is visible transitional serialization rather than a
+stalled worker. Next action: validate rendering, commit/push, and inspect the
+automatic rollout.

@@ -42,6 +42,19 @@
   .jobs-section-label form button:hover { background: #eef2ff; border-color: #4338ca; color: #312e81; }
 
   .jobs-list { display: grid; gap: 0.5rem; }
+  .operation-table { width:100%; border-collapse:collapse; background:var(--surface); border:1px solid var(--border); border-radius:6px; overflow:hidden; font-size:.85rem; }
+  .operation-table th,.operation-table td { padding:.65rem .75rem; border-bottom:1px solid var(--border); text-align:left; vertical-align:top; }
+  .operation-table th { color:var(--muted); font-size:.72rem; text-transform:uppercase; letter-spacing:.05em; }
+  .operation-table .status-note { display:block; font-size:.78rem; color:var(--muted); margin-top:.2rem; max-width:30rem; }
+  .operation-table .job-state { font-weight:700; }
+  .operation-table .job-state.running { color:#7c3aed; }
+  .operation-table .job-state.queued { color:#1d4ed8; }
+  .operation-table .job-state.ok { color:#15803d; }
+  .operation-table .job-state.failed,.operation-table .job-state.stalled { color:#b91c1c; }
+  .operation-table .job-state.never_run,.operation-table .job-state.disabled { color:#64748b; }
+  .job-summary { display:grid; grid-template-columns:repeat(3,minmax(9rem,1fr)); gap:.65rem; margin:0 0 1rem; }
+  .job-summary a { display:block; padding:.7rem .8rem; border:1px solid var(--border); border-radius:6px; background:var(--surface); color:inherit; text-decoration:none; }
+  .job-summary strong { display:block; font-size:1.35rem; } .job-summary span { color:var(--muted); font-size:.78rem; }
   .job-row {
     display: grid; grid-template-columns: 1fr auto auto; gap: 0.9rem; align-items: center;
     padding: 0.75rem 1rem; background: var(--surface); border: 1px solid var(--border); border-radius: 6px;
@@ -129,6 +142,8 @@
     <label>Status</label>
     <select name="status" onchange="this.form.submit()">
         <option value="">All statuses</option>
+        <option value="running"   {% if active_status == 'running'   %}selected{% endif %}>Running</option>
+        <option value="queued"    {% if active_status == 'queued'    %}selected{% endif %}>Queued</option>
         <option value="ok"        {% if active_status == 'ok'        %}selected{% endif %}>Ok, recent</option>
         <option value="stale"     {% if active_status == 'stale'     %}selected{% endif %}>Stale (>2 days)</option>
         <option value="failed"    {% if active_status == 'failed'    %}selected{% endif %}>Failed</option>
@@ -139,37 +154,19 @@
     {% endif %}
 </form>
 
+<div class="job-summary" aria-label="Current operation summary">
+    <a href="?status=running"><strong>{{ operation_summary.running }}</strong><span>Running operations</span></a>
+    <a href="?status=queued"><strong>{{ operation_summary.queued }}</strong><span>Queued operations</span></a>
+    <a href="?status=failed"><strong>{{ operation_summary.attention }}</strong><span>Needs attention</span></a>
+</div>
+
 {% for category, group in jobs_by_category.items %}
 <div class="jobs-section-label">
     <span>{{ category }}</span>
 </div>
-<div class="jobs-list">
-    {% for j in group %}
-    <div class="job-row">
-        <div>
-            <div>
-                <span class="name">{{ j.name }}</span>
-                {% if j.state == 'ok' %}
-                    {% if j.is_stale %}
-                        <span class="state-pill stale">Stale</span>
-                    {% else %}
-                        <span class="state-pill ok">Ok</span>
-                    {% endif %}
-                {% elif j.state == 'disabled' %}
-                    <span class="state-pill disabled">Disabled</span>
-                {% elif j.state == 'running' %}
-                    <span class="state-pill running">Running</span>
-                {% elif j.state == 'queued' %}
-                    <span class="state-pill queued">Queued</span>
-                {% elif j.state == 'cancelled' %}
-                    <span class="state-pill cancelled">Cancelled</span>
-                {% elif j.state == 'never_run' %}
-                    <span class="state-pill never_run" title="No recorded run yet">Never run</span>
-                {% else %}
-                    <span class="state-pill failed">{{ j.state|title }}</span>
-                {% endif %}
-            </div>
-            <div class="desc">{{ j.description }}</div>
+<table class="operation-table"><thead><tr><th>Operation</th><th>Current status</th><th>Latest result</th><th>Automatic</th><th>Action</th></tr></thead><tbody>
+    {% for j in group %}<tr>
+        <td><strong>{{ j.name }}</strong><div class="desc">{{ j.description }}</div>
             {% if j.steps %}
                 <div class="operation-steps" aria-label="Steps">
                     {% for step in j.steps %}
@@ -187,38 +184,19 @@
                     {% endfor %}
                 </div>
             {% endif %}
-            {% if j.disabled_reason %}
-                <div class="err-preview" style="color:var(--muted);">{{ j.disabled_reason }}</div>
-            {% endif %}
-            {% if j.scheduled %}
-                <div class="err-preview" style="color:var(--muted);">
-                    Automatic:
-                    {% if j.schedule_enabled and j.next_due_at %}
-                        next due {{ j.next_due_at|date:"Y-m-d H:i" }} UTC
-                    {% else %}
-                        {{ j.schedule_reason }}
-                    {% endif %}
-                    {% if j.last_schedule_outcome %}
-                        · last {{ j.last_schedule_outcome }}{% if j.last_schedule_requested_at %} {{ j.last_schedule_requested_at|date:"Y-m-d H:i" }} UTC{% endif %}
-                    {% endif %}
-                </div>
-            {% endif %}
-            {% if j.active_run %}
-                <div class="err-preview" style="color:#1d4ed8;">{{ j.active_run.status_label }} — <a href="{% url 'admin_job_status' %}?run={{ j.active_run.id }}">view progress</a></div>
-            {% endif %}
-            {% if j.last_error %}
-                <div class="err-preview">Last error: {{ j.last_error }}</div>
-            {% endif %}
-        </div>
-        <div class="meta">
+        </td>
+        <td>{% if j.active_run %}<span class="job-state {{ j.active_run.status }}">{{ j.active_run.status_label }}</span><strong class="status-note">{{ j.active_run.stage }}</strong><span class="status-note">{% if j.active_run.status == 'queued' %}{{ j.active_run.queue_reason }}{% else %}{{ j.active_run.stage_detail }}{% endif %}</span><span class="status-note">{% if j.active_run.elapsed %}Elapsed {{ j.active_run.elapsed }} · {% endif %}<a href="{% url 'admin_job_status' %}?run={{ j.active_run.id }}">view progress</a></span>{% else %}<span class="job-state {{ j.state }}"{% if j.state == 'never_run' %} title="No recorded run yet"{% endif %}>{% if j.state == 'ok' and j.is_stale %}Stale{% else %}{{ j.state|title }}{% endif %}</span>{% if j.disabled_reason %}<span class="status-note">{{ j.disabled_reason }}</span>{% endif %}{% endif %}</td>
+        <td class="meta">
             {% if j.last_run_at %}
                 {{ j.activity_label }}<br><strong>{{ j.last_run_at|date:"Y-m-d H:i" }}</strong>
                 {% if j.rows_touched %}<br>{{ j.rows_touched }} rows{% endif %}
+                {% if j.last_error %}<div class="err-preview">Last error: {{ j.last_error }}</div>{% endif %}
             {% else %}
                 <em>{% if j.disabled_reason %}not enabled{% else %}no runs recorded{% endif %}</em>
             {% endif %}
         </div>
-        <div>
+        <td>{% if j.scheduled %}{% if j.schedule_enabled and j.next_due_at %}next due {{ j.next_due_at|date:"Y-m-d H:i" }} UTC{% else %}{{ j.schedule_reason }}{% endif %}{% if j.last_schedule_outcome %}<span class="status-note">Last: {{ j.last_schedule_outcome }}</span>{% endif %}{% else %}<span class="muted">Manual only</span>{% endif %}</td>
+        <td>
             {% if j.disabled_reason %}
                 <span class="muted" style="font-size:0.82rem;">No run available</span>
             {% elif j.no_run_now %}
@@ -232,10 +210,8 @@
                 <button type="submit">{% if j.active_run %}View run{% else %}Run now{% endif %}</button>
             </form>
             {% endif %}
-        </div>
-    </div>
-    {% endfor %}
-</div>
+        </td></tr>{% endfor %}
+</tbody></table>
 {% empty %}
 <p class="muted">No jobs match the current filter.</p>
 {% endfor %}
