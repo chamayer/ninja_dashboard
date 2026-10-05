@@ -552,7 +552,7 @@ def _execute(job_key: str, progress: V1JobProgress) -> int | JobExecutionResult 
     from ingest import cmdb_findings
 
     jobs = {
-        "patch-classify": ("Classifying patch state", lambda: main.patch_classify(tenant_id=1)),
+        "patch-classify": ("Classifying changed patch state", lambda: main.patch_classify(tenant_id=1, incremental=True)),
         "platform-evaluate": (
             "Evaluating platform conditions",
             lambda: main.platform_evaluate(tenant_id=1),

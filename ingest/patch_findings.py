@@ -37,6 +37,7 @@ import logging
 from datetime import datetime, timezone
 
 from ingest import db
+from ingest.config import settings
 from ingest.conditions import record_assessment
 from ingest.condition_evidence import (
     device_identity_signal,
@@ -81,13 +82,19 @@ def _policy(cur, tenant_id: int) -> dict[str, int]:
     return policy
 
 
-def classify(tenant_id: int = _TENANT_ID) -> int:
+def classify(tenant_id: int = _TENANT_ID, *, incremental: bool = True) -> int:
     now = datetime.now(timezone.utc)
     error: str | None = None
     affected = 0
     try:
         with db.pool.connection() as conn, conn.cursor() as cur:
             cur.execute(f"SET LOCAL operations.tenant_id = {tenant_id}")
+            full_due = incremental and _full_reconciliation_due(cur, tenant_id, now)
+            incremental = incremental and not full_due
+            scoped = _prepare_evaluation_scope(cur, tenant_id, incremental=incremental)
+            if not scoped:
+                log.info("patch_findings: no changed patch/device state to evaluate")
+                return 0
             ft_ids = _finding_type_ids(cur)
             policy = _policy(cur, tenant_id)
 
@@ -100,6 +107,7 @@ def classify(tenant_id: int = _TENANT_ID) -> int:
             affected += _emit_approval_backlog(cur, tenant_id, ft_ids, now, emitted_keys, policy)
 
             _auto_resolve(cur, tenant_id, emitted_keys, now, policy)
+            _mark_evaluation_scope(cur, tenant_id)
     except Exception as exc:
         error = str(exc)[:2000]
         raise
@@ -113,14 +121,80 @@ def classify(tenant_id: int = _TENANT_ID) -> int:
                         (id, tenant_id, kind, subject_ref, started_at,
                          ended_at, ok, rows, error)
                     VALUES (gen_random_uuid(), %s, 'patch_findings',
-                            '{}'::jsonb, %s, NOW(), %s, %s, %s)
+                            jsonb_build_object('mode', %s), %s, NOW(), %s, %s, %s)
                     """,
-                    (tenant_id, now, error is None, affected, error or ""),
+                    (tenant_id, 'incremental' if incremental else 'full', now, error is None, affected, error or ""),
                 )
         except Exception:
             log.exception("patch_findings: run_log write failed")
     log.info("patch_findings: tenant=%d affected=%d", tenant_id, affected)
     return affected
+
+
+def _prepare_evaluation_scope(cur, tenant_id: int, *, incremental: bool) -> bool:
+    """Materialize changed patch/device state for every evaluator query."""
+    if not _table_exists(cur, "operations.patch_evaluation_state"):
+        cur.execute("CREATE TEMP TABLE patch_eval_scope (device_id uuid PRIMARY KEY, client_id uuid, state_digest text) ON COMMIT DROP")
+        cur.execute(
+            """INSERT INTO patch_eval_scope (device_id, client_id, state_digest)
+                 SELECT device_id, client_id, md5(device_id::text)
+                   FROM operations.v_device
+                  WHERE tenant_id=%s AND effective_patching_scope='Included' AND lifecycle_status <> 'retired'""",
+            (tenant_id,),
+        )
+        return True
+    cur.execute("CREATE TEMP TABLE patch_eval_scope (device_id uuid PRIMARY KEY, client_id uuid, state_digest text) ON COMMIT DROP")
+    cur.execute(
+        """
+        INSERT INTO patch_eval_scope (device_id, client_id, state_digest)
+        SELECT v.device_id, v.client_id,
+               md5(concat_ws('|', v.needs_reboot::text, v.last_boot_at::text,
+                   MAX(signal.last_seen_at)::text, BOOL_OR(COALESCE(signal.ever_installed, false))::text))
+          FROM operations.v_device v
+          JOIN operations.v_device_source_link link ON link.tenant_id=v.tenant_id AND link.device_id=v.device_id
+          JOIN operations.sources source ON source.id=link.source_id AND source.name='Ninja'
+          LEFT JOIN ninja_patches.device_patch_signal signal
+            ON signal.device_id = CASE WHEN link.external_id ~ '^[0-9]+$' THEN link.external_id::int END
+          LEFT JOIN operations.patch_evaluation_state prior
+            ON prior.tenant_id=v.tenant_id AND prior.device_id=v.device_id
+         WHERE v.tenant_id=%s AND v.effective_patching_scope='Included' AND v.lifecycle_status <> 'retired'
+         GROUP BY v.device_id, v.client_id, v.needs_reboot, v.last_boot_at, prior.state_digest
+        HAVING %s OR prior.state_digest IS DISTINCT FROM md5(concat_ws('|', v.needs_reboot::text, v.last_boot_at::text,
+                   MAX(signal.last_seen_at)::text, BOOL_OR(COALESCE(signal.ever_installed, false))::text))
+        """,
+        (tenant_id, not incremental),
+    )
+    cur.execute("SELECT EXISTS (SELECT 1 FROM patch_eval_scope)")
+    return bool(cur.fetchone()[0])
+
+
+def _full_reconciliation_due(cur, tenant_id: int, now: datetime) -> bool:
+    cur.execute(
+        """SELECT ended_at FROM operations.run_log
+             WHERE tenant_id=%s AND kind='patch_findings' AND ok
+               AND subject_ref->>'mode'='full'
+             ORDER BY ended_at DESC LIMIT 1""",
+        (tenant_id,),
+    )
+    row = cur.fetchone()
+    return row is None or row[0] is None or (now - row[0]).total_seconds() >= settings.PATCH_CLASSIFY_FULL_REBUILD_HOURS * 3600
+
+
+def _mark_evaluation_scope(cur, tenant_id: int) -> None:
+    if not _table_exists(cur, "operations.patch_evaluation_state"):
+        return
+    cur.execute(
+        """INSERT INTO operations.patch_evaluation_state (tenant_id, device_id, state_digest, evaluated_at)
+           SELECT %s, device_id, state_digest, now() FROM patch_eval_scope
+           ON CONFLICT (tenant_id, device_id) DO UPDATE
+             SET state_digest=EXCLUDED.state_digest, evaluated_at=EXCLUDED.evaluated_at""",
+        (tenant_id,),
+    )
+
+
+def _table_exists(cur, qualified_name: str) -> bool:
+    cur.execute("SELECT to_regclass(%s) IS NOT NULL", (qualified_name,))
+    return bool(cur.fetchone()[0])
 
 
 def _finding_type_ids(cur) -> dict[str, int]:
@@ -151,6 +225,7 @@ _INSCOPE_SIGNAL_CTE = """
             MAX(dps.last_seen_at)                              AS max_last_seen_at,
             COUNT(*) FILTER (WHERE dps.device_id IS NOT NULL)  AS signal_rows
         FROM operations.v_device_source_link dl
+        JOIN pg_temp.patch_eval_scope scope ON scope.device_id = dl.device_id
         JOIN operations.sources s
           ON s.id = dl.source_id AND s.name = 'Ninja'
         LEFT JOIN ninja_patches.device_patch_signal dps
@@ -264,6 +339,7 @@ def _emit_reboot_pending(cur, tenant_id, ft_ids, now, keys, policy) -> int:
         SELECT v.device_id, v.client_id, v.canonical_hostname,
                v.last_boot_at
         FROM operations.v_device v
+        JOIN pg_temp.patch_eval_scope scope ON scope.device_id = v.device_id
         WHERE v.tenant_id = %s
           AND v.effective_patching_scope = 'Included'
           AND v.lifecycle_status <> 'retired'
@@ -319,6 +395,7 @@ def _emit_failing_repeatedly(cur, tenant_id, ft_ids, now, keys, policy) -> int:
                         THEN dl.external_id::int END AS ninja_id,
                    v.client_id, v.canonical_hostname
             FROM operations.v_device v
+            JOIN pg_temp.patch_eval_scope scope ON scope.device_id = v.device_id
             JOIN operations.v_device_source_link dl
               ON dl.device_id = v.device_id AND dl.tenant_id = v.tenant_id
             JOIN operations.sources s
@@ -404,6 +481,9 @@ def _emit_approval_backlog(cur, tenant_id, ft_ids, now, keys, policy) -> int:
                      AND ninja_presence.reported_online IS TRUE
               )
         ),
+        changed_clients AS (
+            SELECT DISTINCT client_id FROM pg_temp.patch_eval_scope
+        ),
         approved_latest AS (
             SELECT DISTINCT ON (pf.device_id, pf.patch_uid)
                 pf.device_id, pf.patch_uid, pf.status
@@ -416,6 +496,7 @@ def _emit_approval_backlog(cur, tenant_id, ft_ids, now, keys, policy) -> int:
         JOIN included i ON i.ninja_id = a.device_id
         JOIN operations.clients c
           ON c.id = i.client_id AND c.deleted_at IS NULL
+        JOIN changed_clients changed ON changed.client_id = i.client_id
         WHERE a.status = 'APPROVED'
         GROUP BY i.client_id, c.display_name
         HAVING COUNT(*) >= {policy['approval_backlog_count']}
@@ -694,6 +775,14 @@ def _auto_resolve(cur, tenant_id, emitted_keys, now, policy) -> None:
           AND f.status IN ('open', 'acknowledged')
           AND NOT (f.condition_key = ANY(%s::text[]))
           AND to_regclass('operations.condition_assessments') IS NOT NULL
+          AND (
+              (f.subject_type = 'device' AND EXISTS (
+                  SELECT 1 FROM pg_temp.patch_eval_scope scope WHERE scope.device_id = f.subject_id
+              ))
+              OR (f.subject_type = 'client' AND EXISTS (
+                  SELECT 1 FROM pg_temp.patch_eval_scope scope WHERE scope.client_id = f.subject_id
+              ))
+          )
           AND EXISTS (
                SELECT 1 FROM operations.condition_assessments a
               WHERE a.tenant_id = f.tenant_id AND a.row_kind = 'entity'

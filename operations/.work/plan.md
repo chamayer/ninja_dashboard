@@ -1877,6 +1877,15 @@ reconciliation path; allow the current healthy full run to finish. Next
 action: validate registry/worker behavior, commit/push, and confirm new
 material-change dependencies target incremental classification after rollout.
 
+Patch-classification scope implementation (2026-10-05): migration 0251 adds
+durable per-device patch evaluation state. The classifier builds a
+transaction-local scope of devices whose patch signal, reboot state, or boot
+state changed, evaluates only that scope, evaluates approval backlog for its
+affected clients, and limits auto-resolution to the same scope. It falls back
+to a full reconciliation every 168 hours (`PATCH_CLASSIFY_FULL_REBUILD_HOURS`)
+and records the mode in run history. Next action: commit/push, verify the
+automatic migration, then inspect a live incremental run and its scoped state.
+
 Software target implementation (2026-10-05): migration 0250 creates a
 tenant-scoped durable target queue. The CVE matcher compares its old and new
 match sets and records only changed version identities or product-level names;
