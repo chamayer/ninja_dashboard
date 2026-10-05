@@ -664,6 +664,11 @@ REPLAY_SAFE_RECOVERY_EVIDENCE = MappingProxyType({
         "refreshes a local read model afterward. A later replay converges to current "
         "installed software and intelligence data and has no external mutation."
     ),
+    "intel-endoflife": (
+        "The end-of-life refresh only reads the public endoflife.date API and "
+        "upserts local corpus rows. A later replay converges to current source data "
+        "and has no external mutation."
+    ),
     "intel-kev": (
         "The KEV refresh only performs a transaction-scoped conditional upsert "
         "of the public CISA exploited-vulnerability feed. A later replay converges "

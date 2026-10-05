@@ -1796,3 +1796,12 @@ the protected device-detail projection did not establish tenant 1 and could
 inherit an empty setting. The connector now sets the transaction-local tenant
 before that read. Next action: commit/push both queue-resume fixes and verify
 the automatic rollout completes an agent-compliance run.
+
+Automatic-rollout recovery (2026-10-05): the worker restart during the
+queue-resume deployment interrupted `intel-endoflife` while it held the shared
+execution, software-catalog, intelligence-lane, and tenant-state resources.
+Handler review confirms it only reads endoflife.date and applies convergent
+local upserts. Migration 0246 authorizes only its recorded immutable digest
+for replay-safe claim release. Next action: validate, commit/push 0246, then
+verify this final contained hold is automatically released and queued work is
+claimed.
