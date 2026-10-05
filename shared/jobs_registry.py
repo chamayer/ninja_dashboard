@@ -64,6 +64,22 @@ class WorkflowEdge:
 
 
 @dataclass(frozen=True)
+class OperationDefinition:
+    """One operator-facing operation and its entry Job.
+
+    Jobs remain the executable units.  An operation gives the scheduler and
+    Operations UI one meaningful entry point while retaining the complete
+    dependency graph as visible steps beneath that entry point.
+    """
+
+    key: str
+    name: str
+    description: str
+    category: str
+    entry_job_key: str
+
+
+@dataclass(frozen=True)
 class JobDefinition:
     """Presentation and current execution metadata for one Jobs definition.
 
@@ -643,6 +659,11 @@ _RAW_DEFINITIONS = (
 # audited statement about replay after an interrupted run, not permission to
 # change the historical definition that admitted that run.
 REPLAY_SAFE_RECOVERY_EVIDENCE = MappingProxyType({
+    "intel-matcher": (
+        "The CVE matcher rebuilds local match rows in one database transaction and "
+        "refreshes a local read model afterward. A later replay converges to current "
+        "installed software and intelligence data and has no external mutation."
+    ),
     "intel-kev": (
         "The KEV refresh only performs a transaction-scoped conditional upsert "
         "of the public CISA exploited-vulnerability feed. A later replay converges "
@@ -862,8 +883,70 @@ def registry_digest() -> str:
 
 
 def schedule_definitions() -> tuple[ScheduleDefinition, ...]:
-    """Return every declared automatic cadence in stable registry order."""
-    return _SCHEDULE_DEFINITIONS
+    """Return cadences for operation entry points, never dependent steps."""
+    dependent_keys = {
+        successor.successor
+        for item in _DEFINITIONS
+        for successor in item.successors
+    }
+    return tuple(
+        schedule for schedule in _SCHEDULE_DEFINITIONS
+        if schedule.job_key not in dependent_keys
+    )
+
+
+_OPERATION_PRESENTATION = MappingProxyType({
+    "patches": ("refresh-ninja-data", "Refresh Ninja data", "Refresh computers, patches, and activity from Ninja.", "Data updates"),
+    "agent-observations": ("refresh-agent-data", "Refresh agent data", "Refresh records from connected security and support tools.", "Data updates"),
+    "documentation-observations": ("refresh-documentation-data", "Refresh documentation data", "Refresh documentation records from Hudu.", "Data updates"),
+    "software-queue-drain": ("update-software-inventory", "Update software inventory", "Process requested software inventory and update its classification.", "Software and security"),
+    "agent-compliance": ("check-device-compliance", "Check device compliance", "Refresh device compliance observations and evaluate their effect.", "Software and security"),
+    "agent-compliance-evaluate": ("review-device-compliance", "Review device compliance", "Review current device compliance results.", "Software and security"),
+    "intel-nvd": ("update-nvd-data", "Update vulnerability data (NVD)", "Refresh the NVD vulnerability feed and match changed records.", "Software and security"),
+    "intel-cpe-dict": ("update-cpe-data", "Update software matching data", "Refresh the CPE dictionary used to match installed software.", "Software and security"),
+    "intel-kev": ("update-kev-data", "Update known exploited vulnerabilities", "Refresh CISA known exploited vulnerability data.", "Software and security"),
+    "intel-epss": ("update-epss-data", "Update vulnerability likelihood", "Refresh EPSS likelihood data for known vulnerabilities.", "Software and security"),
+    "intel-winget": ("update-winget-data", "Update software catalog (WinGet)", "Refresh WinGet software catalog data.", "Software and security"),
+    "intel-chocolatey": ("update-chocolatey-data", "Update software catalog (Chocolatey)", "Refresh Chocolatey software catalog data.", "Software and security"),
+    "intel-otx": ("update-threat-data-otx", "Update threat information (OTX)", "Refresh AlienVault OTX threat information.", "Software and security"),
+    "intel-abusech": ("update-threat-data-abusech", "Update threat information (abuse.ch)", "Refresh abuse.ch threat information.", "Software and security"),
+    "intel-endoflife": ("update-end-of-life-data", "Update end-of-life data", "Refresh software end-of-life information.", "Software and security"),
+    "intel-capability": ("update-software-capabilities", "Update software capabilities", "Refresh software capability information.", "Software and security"),
+    "intel-category": ("update-software-categories", "Update software categories", "Refresh software category information.", "Software and security"),
+    "intel-lolrmm": ("update-remote-access-data", "Update remote access software data", "Refresh known remote-management software information.", "Software and security"),
+    "notifications-dispatch": ("send-alerts", "Send alerts", "Deliver pending operational alerts.", "Reports"),
+    "notifications-digest": ("send-summary", "Send summary", "Deliver the scheduled operational summary.", "Reports"),
+    "retention-history": ("clean-up-history", "Clean up history", "Apply the configured history retention policy.", "Maintenance"),
+    "source-actions": ("process-source-actions", "Process source actions", "Apply pending source maintenance actions.", "Maintenance"),
+    "source-demand": ("process-source-requests", "Process source requests", "Process pending source refresh requests.", "Maintenance"),
+    "source-demand-recovery": ("recover-source-requests", "Recover source requests", "Recover pending source request records.", "Maintenance"),
+    "run-log-recovery": ("recover-run-records", "Recover run records", "Recover incomplete diagnostic run records.", "Maintenance"),
+    "platform-health-evaluate": ("check-platform-health", "Check platform health", "Evaluate platform health from current operational data.", "Maintenance"),
+    "software-enqueue-orgs": ("schedule-software-inventory", "Schedule software inventory", "Queue the configured software inventory refreshes.", "Maintenance"),
+})
+
+
+def operation_definitions() -> tuple[OperationDefinition, ...]:
+    """Return the meaningful scheduled entry points shown to operators."""
+    definitions_by_key = _INDEX
+    result: list[OperationDefinition] = []
+    for schedule in schedule_definitions():
+        presentation = _OPERATION_PRESENTATION.get(schedule.job_key)
+        if presentation is None:
+            job = definitions_by_key[schedule.job_key]
+            presentation = (job.key, job.display_name, job.description, "Maintenance")
+        key, name, description, category = presentation
+        result.append(OperationDefinition(key, name, description, category, schedule.job_key))
+    return tuple(result)
+
+
+def operation_steps(entry_job_key: str) -> tuple[str, ...]:
+    """Return an entry Job followed by the unique dependent steps in order."""
+    steps = [entry_job_key]
+    for edge in workflow_edges(entry_job_key, frozenset({"always", "identity_source", "documentation_source", "material_change"})):
+        if edge.dependent not in steps:
+            steps.append(edge.dependent)
+    return tuple(steps)
 
 
 def workflow_edges(
@@ -983,9 +1066,7 @@ def catalog_entries() -> tuple[dict[str, object], ...]:
 
 
 def scheduled_definition_keys() -> frozenset[str]:
-    return frozenset(
-        definition.key for definition in _DEFINITIONS if definition.schedule_ids
-    )
+    return frozenset(schedule.job_key for schedule in schedule_definitions())
 
 
 def capability_state(

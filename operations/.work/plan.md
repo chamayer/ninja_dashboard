@@ -1734,3 +1734,36 @@ Latest-status refinement in progress (2026-10-05): Current work should answer
 the status of each Job rather than list every simultaneous attempt. Collapse
 the default view to the latest active attempt per Job and link that Job to its
 complete immutable Run history; attention and history retain individual runs.
+
+Operations orchestration rework in progress (2026-10-05): retain the durable
+Job ledger, worker, claims, dependency edges, recovery evidence, and history,
+but stop presenting or scheduling every executable step as an independent
+operator Job. Define a small registry layer of operator-facing Operations
+tasks with an entry step, scheduled cadence, and visible step list. The
+scheduler must admit/coalesce a task entry only; dependent steps are admitted
+from that sequence. A completed step must become terminal and release claims
+immediately, while the sequence separately tracks unfinished follow-on work.
+The Jobs surface will show Operations tasks and their always-visible steps;
+individual technical controls stay on step rows behind guarded controls. Do
+not delete existing schedules or run history during migration. Next action:
+inventory schedule roots versus dependent steps, design the durable task and
+sequence contract, then implement migrations and worker/UI changes in small
+validated slices.
+
+Operations orchestration implementation checkpoint (2026-10-05): the shared
+registry now treats only operation entry points as automatic schedules and
+retains every dependent Job as a visible linked step. Operations Jobs presents
+those entry points in four plain-language areas (Data updates, Software and
+security, Reports, Maintenance) with the constituent steps shown on the same
+row. Forward migration 0244 makes every completed Job terminal, preserves
+root/parent dependency lineage as the sequence record, retires only enabled
+dependent schedules without deleting their history, and corrects the prior
+handler-complete pseudo-running coordinator rows. Live inspection found the
+existing queue is also blocked by a contained `intel-matcher` run
+`fa825f0a-14f6-46e1-87b1-4efb4a508944`; 0245 records digest-specific,
+audited replay-safe recovery because that handler rebuilds local data in a
+transaction and makes no external mutation. Focused registry and Operations
+tests pass, Django check passes, and diff check passes. Next action: review
+the staged diff, commit and push the approved migration/UI/scheduler change,
+then verify automatic GitOps migration, recovery evidence, terminalized old
+coordinator rows, and queue progress without a direct Portainer action.

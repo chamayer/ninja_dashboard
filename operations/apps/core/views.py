@@ -46,6 +46,8 @@ from shared.jobs_registry import (
     definition,
     definition_keys,
     definitions,
+    operation_definitions,
+    operation_steps,
     registry_digest,
     schedule_definitions,
     scheduled_definition_keys,
@@ -8235,6 +8237,18 @@ _JOB_CATALOG: list[dict] = list(catalog_entries())
 validate_registry(catalog_keys=(entry["id"] for entry in _JOB_CATALOG))
 
 _JOB_INDEX = {j["id"]: j for j in _JOB_CATALOG}
+_OPERATION_CATALOG: list[dict] = [
+    {
+        "id": operation.entry_job_key,
+        "operation_key": operation.key,
+        "name": operation.name,
+        "description": operation.description,
+        "category": operation.category,
+        "step_keys": operation_steps(operation.entry_job_key),
+    }
+    for operation in operation_definitions()
+]
+_OPERATION_ENTRY_BY_JOB = {entry["id"]: entry for entry in _OPERATION_CATALOG}
 _SOFTWARE_CLASSIFIER_JOBS = (
     "software-classify-only", "software-classify-full", "software-classify",
 )
@@ -8438,25 +8452,9 @@ def _job_lane(job_key: str) -> str:
     return definition(job_key).lane
 
 
-_JOB_PRESENTATION = {
-    "source ingest": ("Data updates", "Refresh sources"),
-    "collection": ("Data updates", "Refresh sources"),
-    "intel": ("Software and security", "Update vulnerability and threat information"),
-    "evaluation": ("Software and security", "Check software risk"),
-    "software": ("Software and security", "Update software information"),
-    "notifications": ("Reports", "Send alerts and summaries"),
-    "maintenance": ("Maintenance", "Internal upkeep"),
-    "service": ("Maintenance", "Internal upkeep"),
-}
-
-
-def _job_presentation(category: str) -> tuple[str, str]:
-    return _JOB_PRESENTATION.get(category, ("Maintenance", "Internal upkeep"))
-
-
 @login_required
 def admin_jobs(request: HttpRequest) -> HttpResponse:
-    """List every schedulable job with last-run status and a run-now button."""
+    """List meaningful Operations entry points with their visible Job steps."""
     category_filter = (request.GET.get("category") or "").strip().lower()
     status_filter = (request.GET.get("status") or "").strip().lower()
     enabled_capabilities = {
@@ -8628,7 +8626,7 @@ def admin_jobs(request: HttpRequest) -> HttpResponse:
         dynamic_source_entries.append({
             "id": f"source-{instance.lower().replace('.', '-')}",
             "name": f"Source: {instance}",
-            "category": "source ingest",
+            "category": "Data updates",
             "endpoint": "run/sources/enqueue",  # opens the ingest form
             "status_key": kind,
             "status_source": "run_log",
@@ -8639,8 +8637,9 @@ def admin_jobs(request: HttpRequest) -> HttpResponse:
     jobs = []
     categories = set()
     scheduled_keys = scheduled_definition_keys()
-    for entry in list(_JOB_CATALOG) + dynamic_source_entries:
-        presentation_category, presentation_area = _job_presentation(entry["category"])
+    for entry in list(_OPERATION_CATALOG) + dynamic_source_entries:
+        presentation_category = entry["category"]
+        presentation_area = ""
         categories.add(presentation_category)
         if entry["id"] in _JOB_INDEX:
             schedule = schedule_status.get(entry["id"])
@@ -8709,6 +8708,15 @@ def admin_jobs(request: HttpRequest) -> HttpResponse:
             "next_due_at": schedule["next_due_at"] if schedule else None,
             "last_schedule_outcome": schedule["last_outcome"] if schedule else "",
             "last_schedule_requested_at": schedule["last_requested_at"] if schedule else None,
+            "steps": [
+                {
+                    "id": step_key,
+                    "name": definition(step_key).display_name,
+                    "state": (queued_job_status.get(step_key) or {}).get("last_status", "never_run"),
+                }
+                for step_key in entry.get("step_keys", (entry["id"],))
+                if step_key in _JOB_INDEX
+            ],
         })
 
     if category_filter:
@@ -8775,10 +8783,11 @@ def admin_jobs_run(request: HttpRequest, job_id: str) -> HttpResponse:
         messages.error(request, f"Unknown job '{job_id}'.")
         return redirect("admin_jobs")
     run_id, created = _enqueue_operator_job(job_id, request.user.id)
+    operation_name = _OPERATION_ENTRY_BY_JOB.get(job_id, entry)["name"]
     if created:
-        messages.success(request, f"{entry['name']} is queued. Follow its progress in Job status.")
+        messages.success(request, f"{operation_name} is queued. Follow its progress in Job activity.")
     else:
-        messages.info(request, f"{entry['name']} is already queued or running.")
+        messages.info(request, f"{operation_name} is already queued or running.")
     return redirect(reverse("admin_job_status") + f"?run={run_id}")
 
 
@@ -8786,12 +8795,12 @@ def admin_jobs_run(request: HttpRequest, job_id: str) -> HttpResponse:
 @require_admin
 @require_POST
 def admin_jobs_run_all(request: HttpRequest) -> HttpResponse:
-    """Queue a controlled batch; it executes one job at a time."""
+    """Queue the selected Operations entry points through the governed API."""
     category = (request.POST.get("category") or "").strip().lower()
     targets = [
-        j for j in _JOB_CATALOG
+        j for j in _OPERATION_CATALOG
         if j.get("run_all", True) and (
-            not category or _job_presentation(j["category"])[0].lower() == category
+            not category or j["category"].lower() == category
         )
     ]
     if not targets:
@@ -8807,9 +8816,9 @@ def admin_jobs_run_all(request: HttpRequest) -> HttpResponse:
         else:
             already_active += 1
     scope = category or "all"
-    note = f"Queued {queued} job{'s' if queued != 1 else ''} for {scope}. They will run one at a time."
+    note = f"Queued {queued} operation{'s' if queued != 1 else ''} for {scope}."
     if already_active:
-        note += f" {already_active} already active job{'s' if already_active != 1 else ''} were kept."
+        note += f" {already_active} already active operation{'s' if already_active != 1 else ''} were kept."
     messages.success(request, note)
     return redirect(reverse("admin_job_status") + f"?batch={batch_id}")
 

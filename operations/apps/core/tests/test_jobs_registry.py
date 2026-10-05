@@ -14,6 +14,8 @@ from shared.jobs_registry import (
     definition,
     definition_keys,
     definitions,
+    operation_definitions,
+    operation_steps,
     schedule_definitions,
     scheduled_definition_keys,
     workflow_edges,
@@ -78,11 +80,24 @@ def test_scheduler_parity_constant_exactly_matches_registered_schedules():
 def test_every_declared_automatic_schedule_has_one_cadence_contract():
     schedules = schedule_definitions()
 
-    assert {schedule.schedule_id for schedule in schedules} == {
+    dependent_keys = {successor.successor for item in definitions() for successor in item.successors}
+    assert {schedule.job_key for schedule in schedules}.isdisjoint(dependent_keys)
+    assert {schedule.schedule_id for schedule in schedules} < {
         schedule_id for item in definitions() for schedule_id in item.schedule_ids
     }
     assert len({schedule.schedule_id for schedule in schedules}) == len(schedules)
     assert all(schedule.cadence_setting for schedule in schedules)
+
+
+def test_operations_are_meaningful_scheduled_entry_points_with_visible_steps():
+    operations = operation_definitions()
+
+    assert {operation.entry_job_key for operation in operations} == scheduled_definition_keys()
+    assert all(operation.category in {"Data updates", "Software and security", "Reports", "Maintenance"}
+               for operation in operations)
+    assert operation_steps("patches") == (
+        "patches", "patch-classify", "platform-evaluate", "resolver",
+    )
 
 
 def test_initial_workflow_edges_are_registered_and_acyclic():

@@ -96,11 +96,9 @@ _PATCH_CYCLE_LOCK_ID = 6_803_904_731_027_441
 SCHEDULED_OPERATOR_JOB_KEYS = frozenset(
     {
         "patches", "agent-observations", "documentation-observations",
-        "agent-compliance", "agent-compliance-evaluate", "resolver",
-        "platform-evaluate", "notifications-dispatch", "notifications-digest",
+        "agent-compliance", "agent-compliance-evaluate", "notifications-dispatch", "notifications-digest",
         "retention-history", "software-enqueue-orgs", "software-queue-drain",
-        "software-classify-only", "software-classify-full", "intel-nvd",
-        "intel-cpe-dict", "intel-kev", "intel-epss", "intel-matcher",
+        "intel-nvd", "intel-cpe-dict", "intel-kev", "intel-epss",
         "intel-winget", "intel-chocolatey", "intel-otx", "intel-abusech",
         "intel-endoflife", "intel-capability", "intel-category", "intel-lolrmm",
         "source-actions", "source-demand", "source-demand-recovery",
