@@ -643,6 +643,11 @@ _RAW_DEFINITIONS = (
 # audited statement about replay after an interrupted run, not permission to
 # change the historical definition that admitted that run.
 REPLAY_SAFE_RECOVERY_EVIDENCE = MappingProxyType({
+    "intel-kev": (
+        "The KEV refresh only performs a transaction-scoped conditional upsert "
+        "of the public CISA exploited-vulnerability feed. A later replay converges "
+        "to the current feed and has no external mutation."
+    ),
     "intel-epss": (
         "The EPSS refresh only performs a transaction-scoped conditional update "
         "of existing CVE scores. A later replay converges to the current public "
@@ -651,6 +656,11 @@ REPLAY_SAFE_RECOVERY_EVIDENCE = MappingProxyType({
     "software-classify-only": (
         "Incremental software classification only reconciles Operations findings "
         "and exact-state markers in one database transaction. A later replay "
+        "converges to the current installation and policy state and has no external mutation."
+    ),
+    "software-classify-full": (
+        "Full software classification only reconciles Operations intelligence, "
+        "findings, and a read model from current source data. A later replay "
         "converges to the current installation and policy state and has no external mutation."
     ),
 })

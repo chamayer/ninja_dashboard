@@ -1661,3 +1661,16 @@ treated the API as unavailable and did not retry, leaving the reviewed holds
 contained. Retry idempotent recovery-policy registration and reconciliation on
 the worker's existing heartbeat interval, then push and verify the automated
 assessment and queue drain. Do not invoke the recovery function manually.
+
+Final replay-safe recovery correction (2026-10-05): retry-on-heartbeat
+deployed and released the original eight held resources with two durable
+assessments. A pre-existing `intel-kev` child was correctly interrupted by the
+rollout and contained because it lacked an approved policy. Its handler is a
+transaction-scoped conditional upsert of a public feed, so migration 0237
+adds its exact reviewed revision. The only active child is the full software
+classifier; its read-only upstream fetches and deterministic Operations
+reconciliation are also replay-safe, so migration 0238 records its exact
+reviewed revision before the final deployment. Focused Jobs, registry, and
+migration tests (24), Django checks, Python compilation, and `git diff
+--check` pass. Next action: commit/push migrations 0237/0238, then verify
+the final automatic rollout clears remaining contained claims and Jobs drain.
