@@ -648,6 +648,11 @@ REPLAY_SAFE_RECOVERY_EVIDENCE = MappingProxyType({
         "of the public CISA exploited-vulnerability feed. A later replay converges "
         "to the current feed and has no external mutation."
     ),
+    "intel-nvd": (
+        "The NVD refresh only performs transaction-scoped conditional upserts "
+        "of a public vulnerability feed. A later replay converges to the current "
+        "feed and has no external mutation."
+    ),
     "intel-epss": (
         "The EPSS refresh only performs a transaction-scoped conditional update "
         "of existing CVE scores. A later replay converges to the current public "

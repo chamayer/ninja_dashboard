@@ -1674,3 +1674,14 @@ reviewed revision before the final deployment. Focused Jobs, registry, and
 migration tests (24), Django checks, Python compilation, and `git diff
 --check` pass. Next action: commit/push migrations 0237/0238, then verify
 the final automatic rollout clears remaining contained claims and Jobs drain.
+
+NVD replay-safe recovery correction (2026-10-05): final rollout correctly
+recorded recovery assessments for KEV and the full classifier, but also
+contained an already-running NVD feed refresh. NVD is an audited,
+transaction-scoped conditional upsert of a public feed, so migration 0239
+adds its exact reviewed revision. The active Ninja collection cycle is not
+included: it remains deliberately unreviewed for automatic replay and will
+stay visible/escalated if interrupted. Focused Jobs, registry, and migration
+tests (22), Django checks, and `git diff --check` pass. Next action:
+commit/push migration 0239 and verify NVD recovery plus the durable queue
+progress; do not force-release collection work.
