@@ -1834,3 +1834,20 @@ completed prerequisites, then uses the normal propagation function to release
 them. It does not rerun work or release failed dependencies. Next action:
 review the migration, run focused checks, commit/push, and verify the queue
 claims released work after automatic rollout.
+
+Completion-regression recovery verified (2026-10-05): commit `2f5636d` was
+pushed to origin and the required mirror. Automatic GitOps applied migration
+0249. Live inspection shows two genuine Jobs running (`patches` and
+`software-classify-full`); the former completed-prerequisite waits are no
+longer the only queue state. Remaining queued rows are either normal resource
+contention for the two worker slots or valid downstream dependencies. Next
+action: continue the broader Jobs framework audit and address any separate
+handler failures found during normal execution.
+
+Jobs page availability fix in progress (2026-10-05): live request logging
+identified a `KeyError` in the operation-row status fallback. Operation entries
+intentionally contain presentation and step metadata, while historical status
+metadata belongs to their underlying Job definition. Resolve status from that
+definition when available, preserve dynamic-source metadata, and treat an
+absent fallback as no recorded run. Next action: run focused view/template
+checks, commit/push, and verify `/admin/jobs/` after automatic rollout.

@@ -79,6 +79,8 @@ def test_jobs_status_uses_operator_language_and_safe_controls():
     assert "operator_job_runs" in views
     assert "capability_state" in views
     assert "scheduled_definition_keys" in views
+    assert 'status_entry = _JOB_INDEX.get(entry["id"], entry)' in views
+    assert 'source = status_entry.get("status_source")' in views
     assert "FROM operations.job_schedules" in views
     assert "disabled_reason" in views
     assert "The durable Jobs queue is the history authority" in views

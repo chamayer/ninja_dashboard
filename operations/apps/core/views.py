@@ -8664,13 +8664,15 @@ def admin_jobs(request: HttpRequest) -> HttpResponse:
             # and for dynamic source rows, which are not queue jobs.
             status = queued_job_status.get(entry["id"]) or {}
             if not status:
-                source = entry["status_source"]
-                if source == "intel":
-                    status = intel_status.get(entry["status_key"]) or {}
-                elif source == "run_log_like":
-                    status = _lookup_run_log_like(entry["status_key"])
-                else:
-                    status = run_log_status.get(entry["status_key"]) or {}
+                status_entry = _JOB_INDEX.get(entry["id"], entry)
+                source = status_entry.get("status_source")
+                status_key = status_entry.get("status_key")
+                if source == "intel" and status_key:
+                    status = intel_status.get(status_key) or {}
+                elif source == "run_log_like" and status_key:
+                    status = _lookup_run_log_like(status_key)
+                elif status_key:
+                    status = run_log_status.get(status_key) or {}
         last_run_at = status.get("last_run_at")
         last_success_at = status.get("last_success_at")
         state = "disabled" if disabled_reason else "never_run"
