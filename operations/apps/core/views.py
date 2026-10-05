@@ -8438,6 +8438,22 @@ def _job_lane(job_key: str) -> str:
     return definition(job_key).lane
 
 
+_JOB_PRESENTATION = {
+    "source ingest": ("Data updates", "Refresh sources"),
+    "collection": ("Data updates", "Refresh sources"),
+    "intel": ("Software and security", "Update vulnerability and threat information"),
+    "evaluation": ("Software and security", "Check software risk"),
+    "software": ("Software and security", "Update software information"),
+    "notifications": ("Reports", "Send alerts and summaries"),
+    "maintenance": ("Maintenance", "Internal upkeep"),
+    "service": ("Maintenance", "Internal upkeep"),
+}
+
+
+def _job_presentation(category: str) -> tuple[str, str]:
+    return _JOB_PRESENTATION.get(category, ("Maintenance", "Internal upkeep"))
+
+
 @login_required
 def admin_jobs(request: HttpRequest) -> HttpResponse:
     """List every schedulable job with last-run status and a run-now button."""
@@ -8624,7 +8640,8 @@ def admin_jobs(request: HttpRequest) -> HttpResponse:
     categories = set()
     scheduled_keys = scheduled_definition_keys()
     for entry in list(_JOB_CATALOG) + dynamic_source_entries:
-        categories.add(entry["category"])
+        presentation_category, presentation_area = _job_presentation(entry["category"])
+        categories.add(presentation_category)
         if entry["id"] in _JOB_INDEX:
             schedule = schedule_status.get(entry["id"])
             if entry["id"] in scheduled_keys and schedule is not None:
@@ -8670,7 +8687,8 @@ def admin_jobs(request: HttpRequest) -> HttpResponse:
         jobs.append({
             "id": entry["id"],
             "name": entry["name"],
-            "category": entry["category"],
+            "category": presentation_category,
+            "area": presentation_area,
             "description": entry["description"],
             "state": state,
             "last_run_at": last_run_at,
@@ -8694,7 +8712,7 @@ def admin_jobs(request: HttpRequest) -> HttpResponse:
         })
 
     if category_filter:
-        jobs = [j for j in jobs if j["category"] == category_filter]
+        jobs = [j for j in jobs if j["category"].lower() == category_filter]
     if status_filter == "never_run":
         jobs = [j for j in jobs if j["state"] == "never_run"]
     elif status_filter == "failed":
@@ -8772,7 +8790,9 @@ def admin_jobs_run_all(request: HttpRequest) -> HttpResponse:
     category = (request.POST.get("category") or "").strip().lower()
     targets = [
         j for j in _JOB_CATALOG
-        if j.get("run_all", True) and (not category or j["category"] == category)
+        if j.get("run_all", True) and (
+            not category or _job_presentation(j["category"])[0].lower() == category
+        )
     ]
     if not targets:
         messages.warning(request, f"No jobs matched category '{category or 'all'}'.")

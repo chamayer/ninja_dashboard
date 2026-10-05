@@ -116,11 +116,11 @@
 </div>
 
 <form action="" method="get" class="jobs-filterbar">
-    <label>Category</label>
+    <label>Area</label>
     <select name="category" onchange="this.form.submit()">
-        <option value="">All categories</option>
+        <option value="">All Jobs</option>
         {% for c in categories %}
-            <option value="{{ c }}" {% if active_category == c %}selected{% endif %}>{{ c|title }}</option>
+            <option value="{{ c|lower }}" {% if active_category == c|lower %}selected{% endif %}>{{ c }}</option>
         {% endfor %}
     </select>
     <label>Status</label>
@@ -138,12 +138,12 @@
 
 {% for category, group in jobs_by_category.items %}
 <div class="jobs-section-label">
-    <span>{{ category|title }}</span>
+    <span>{{ category }}</span>
     <form method="post" action="{% url 'admin_jobs_run_all' %}"
           onsubmit="return confirm('Fire every job in the {{ category|title }} category?');">
         {% csrf_token %}
-        <input type="hidden" name="category" value="{{ category }}">
-        <button type="submit">Run all in this category</button>
+        <input type="hidden" name="category" value="{{ category|lower }}">
+        <button type="submit">Run all</button>
     </form>
 </div>
 <div class="jobs-list">
