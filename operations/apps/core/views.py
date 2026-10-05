@@ -9309,9 +9309,17 @@ def admin_job_status(request: HttpRequest) -> HttpResponse:
         # now?" One latest active attempt per definition is enough here; the
         # History view remains the complete immutable run ledger.
         latest_by_job: dict[str, dict] = {}
+        queued_by_job: dict[str, int] = {}
+        status_priority = {"stalled": 0, "failed": 0, "running": 1, "queued": 2}
         for run in runs:
-            latest_by_job.setdefault(run["job_key"], run)
+            if run["status"] == "queued":
+                queued_by_job[run["job_key"]] = queued_by_job.get(run["job_key"], 0) + 1
+            current = latest_by_job.get(run["job_key"])
+            if current is None or status_priority.get(run["status"], 3) < status_priority.get(current["status"], 3):
+                latest_by_job[run["job_key"]] = run
         runs = list(latest_by_job.values())
+        for run in runs:
+            run["queued_follow_up_count"] = queued_by_job.get(run["job_key"], 0)
     with transaction.atomic(), connection.cursor() as cur:
         cur.execute("SET LOCAL operations.tenant_id = 1")
         cur.execute(
