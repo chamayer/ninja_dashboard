@@ -105,6 +105,13 @@ def test_jobs_status_uses_operator_language_and_safe_controls():
     assert "jobs_admin_diagnostics_v1" in views
     assert "jobs_activity_relations_v1" in views
     assert "_jobs_control_health" in views
+    assert "recovery_authorities" in views
+    assert "recovery_policies" in views
+    assert "recovery_assessments" in views
+    assert "jobs_recovery_diagnostics_v1" in views
+    assert '"Recovery authority"' in views
+    assert '"Recovery policy"' in views
+    assert '"Recovery evidence"' in views
     control_template = Path("templates/admin_jobs_control_plane.html").read_text(encoding="utf-8")
     assert "row.items" in control_template
     assert "Runtime heartbeats" in views
@@ -166,3 +173,16 @@ def test_sources_surface_links_active_demand_to_its_durable_job_run():
     assert "job_run_id" in views[views.index("def sources_status"):]
     assert "active_job_url" in views
     assert "Open Job status" in template
+
+
+def test_worker_reconciles_only_durable_replay_safe_containment_before_claiming_work():
+    queue = Path("../ingest/operator_job_queue.py").read_text(encoding="utf-8")
+    worker = Path("../ingest/jobs_worker.py").read_text(encoding="utf-8")
+
+    assert "def reconcile_replay_safe_containment" in queue
+    assert "jobs_reconcile_replay_safe_containment_v1" in queue
+    assert (
+        "register_definition_snapshots()\n"
+        "    operator_job_queue.register_recovery_policies()\n"
+        "    operator_job_queue.reconcile_replay_safe_containment()"
+    ) in worker

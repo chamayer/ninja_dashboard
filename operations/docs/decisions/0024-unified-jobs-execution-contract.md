@@ -1,23 +1,25 @@
 # 0024 — Unified Jobs execution contract
 
-Status: Three rollout decisions accepted; detailed contract proposed, not implemented
+Status: Implemented for converted v1 Jobs; unsafe recovery remains explicitly escalated
 Date: 2026-09-24
 
 ## Review boundary
 
-This is the step 1.1 architecture proposal. The user retains design decisions.
-It is not authorization to add migrations, change grants, start workers, or
-deploy. The companion [migration design](0024-unified-jobs-migration-design.md)
-identifies proposed schema changes and their acceptance tests. Executable SQL
-and PostgreSQL integration validation are still required before the plan's
-step 1.2 migration approval gate can pass.
+This record is the execution-contract authority for converted v1 Jobs. The
+implementation has durable migrations, restricted APIs, isolated workers,
+runtime diagnostics, and focused validation. Historical planning language is
+retained below as the decision record; it does not make a deployed contract
+optional or authorize a legacy execution path.
 
 Step 0.2 remains a prerequisite: the current inventory is a list of names,
 not the required per-entry handler, scope, side-effect, prerequisite, result,
 retry, and cancellation audit. Its tests establish only the categories they
-actually scan. No existing handler is certified idempotent or kill-safe by
-this document. Source-specific identifiers and customer data do not belong in
-the shared registry or checked-in evidence.
+actually scan. No handler is presumed idempotent or kill-safe. Replay safety
+is an explicit, immutable-revision recovery policy with durable evidence: the
+only current approved policies are for EPSS reconciliation and incremental
+software classification. All other interrupted work remains contained and is
+escalated. Source-specific identifiers and customer data do not belong in the
+shared registry or checked-in evidence.
 
 ## Verified starting point
 

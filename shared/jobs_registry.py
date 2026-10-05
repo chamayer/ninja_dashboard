@@ -639,6 +639,22 @@ _RAW_DEFINITIONS = (
     ),
 )
 
+# Recovery policy is deliberately separate from execution snapshots: it is an
+# audited statement about replay after an interrupted run, not permission to
+# change the historical definition that admitted that run.
+REPLAY_SAFE_RECOVERY_EVIDENCE = MappingProxyType({
+    "intel-epss": (
+        "The EPSS refresh only performs a transaction-scoped conditional update "
+        "of existing CVE scores. A later replay converges to the current public "
+        "EPSS feed and has no external mutation."
+    ),
+    "software-classify-only": (
+        "Incremental software classification only reconciles Operations findings "
+        "and exact-state markers in one database transaction. A later replay "
+        "converges to the current installation and policy state and has no external mutation."
+    ),
+})
+
 
 _SCHEDULE_DEFINITIONS = (
     ScheduleDefinition("patch_ingest_cycle", "patches", "PATCH_INGEST_SCHEDULE_HOURS"),
@@ -918,6 +934,11 @@ def _validate_dependency_contracts() -> None:
 
     for key in graph:
         visit(key)
+    for key, evidence in REPLAY_SAFE_RECOVERY_EVIDENCE.items():
+        if key not in _INDEX:
+            errors.append(f"Jobs recovery policy has unknown definition {key}")
+        if not 20 <= len(evidence) <= 2000:
+            errors.append(f"Jobs recovery policy has invalid evidence for {key}")
     if errors:
         raise RegistryValidationError("; ".join(errors))
 

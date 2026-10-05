@@ -127,6 +127,8 @@ def run() -> int:
 
     db.init(settings.postgres_dsn)
     operator_job_queue.register_definition_snapshots()
+    operator_job_queue.register_recovery_policies()
+    operator_job_queue.reconcile_replay_safe_containment()
     worker_incarnation = uuid.uuid4()
     children: dict[str, _Child] = {}
     _READY_PATH.touch()

@@ -1628,3 +1628,28 @@ ruff invocation still reports existing violations in `views.py`; the new
 migration and URL module pass targeted ruff. Next action: commit and push the
 reviewed code plus migration 0235, then verify automatic GitOps deployment
 and the read-only Jobs page.
+
+Recovery-completion work in progress (2026-10-05): production now has 26
+queued runs, no running run, 30 Needs-attention runs, and 8 contained resource
+holds. The prior safety gate correctly blocks unsupported operator release but
+does not provide the service-owned evidence path required by ADR-0024, so the
+framework is not operationally complete. Implement a durable recovery-evidence
+contract and per-definition reconciler only where the handler can prove a
+safe replay boundary; retain an escalation state for every other definition.
+The reconciliation result must be visible on Job activity, enforceable by
+the claim-release API, and tested under tenant/RLS boundaries. Then deploy by
+the approved GitOps push, verify recovery of the known contained work, and
+prove queued Jobs can drain without direct Portainer action.
+
+Replay-safe recovery checkpoint (2026-10-05): migration 0236 adds an
+append-only recovery-policy/evidence ledger and tenant-protected diagnostics.
+Only the exact historical revisions of `intel-epss` and
+`software-classify-only` are approved for automatic release: both reconcile
+database state transactionally, converge on a later replay, and have no
+external mutation. The worker registers reviewed current policy revisions and
+reconciles only those contained runs before it claims work; all other
+interrupted definitions remain safely escalated. Focused Jobs, registry, and
+migration tests (23), Django checks, Python compilation, and `git diff
+--check` pass. Next action: commit/push migration 0236 and verify the
+automatic rollout records recovery evidence, clears the eight reviewed holds,
+and drains queued work.

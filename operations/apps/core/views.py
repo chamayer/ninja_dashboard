@@ -8256,9 +8256,15 @@ _JOBS_DIAGNOSTIC_SECTIONS = (
     ("lane_limits", "Lane policy"),
     ("resource_limits", "Resource policy"),
     ("resource_claims", "Resource claims"),
+    ("recovery_authorities", "Recovery authority"),
+    ("recovery_policies", "Recovery policy"),
+    ("recovery_assessments", "Recovery evidence"),
     ("runtimes", "Runtime heartbeats"),
 )
 _JOBS_DIAGNOSTIC_KEYS = frozenset(key for key, _label in _JOBS_DIAGNOSTIC_SECTIONS)
+_JOBS_RECOVERY_DIAGNOSTIC_KEYS = frozenset({
+    "recovery_authorities", "recovery_policies", "recovery_assessments",
+})
 
 
 def _jobs_diagnostic_query(
@@ -8271,8 +8277,13 @@ def _jobs_diagnostic_query(
             return _jobs_diagnostic_query(
                 section, limit=limit, offset=offset, cursor=cur
             )
+    diagnostic_function = (
+        "operations.jobs_recovery_diagnostics_v1"
+        if section in _JOBS_RECOVERY_DIAGNOSTIC_KEYS
+        else "operations.jobs_admin_diagnostics_v1"
+    )
     cursor.execute(
-        "SELECT total_count, item FROM operations.jobs_admin_diagnostics_v1(%s, %s, %s, %s)",
+        f"SELECT total_count, item FROM {diagnostic_function}(%s, %s, %s, %s)",
         (1, section, limit, offset),
     )
     rows = cursor.fetchall()

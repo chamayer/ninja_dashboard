@@ -6,8 +6,8 @@ queues: its entries represent registered platform work, not a source mutation.
 
 from __future__ import annotations
 
-import json
 import hashlib
+import json
 import logging
 import uuid
 from dataclasses import dataclass
@@ -20,6 +20,7 @@ from psycopg_pool import PoolTimeout
 from ingest import db
 from ingest.config import settings
 from shared.jobs_registry import (
+    REPLAY_SAFE_RECOVERY_EVIDENCE,
     definition,
     definitions,
     registry_digest,
@@ -83,6 +84,20 @@ def register_definition_snapshots() -> None:
             )
 
 
+def register_recovery_policies() -> None:
+    """Persist reviewed replay-safe policy for the current immutable revision."""
+    try:
+        with db.transaction() as cur:
+            cur.execute("SET LOCAL operations.tenant_id = 1")
+            for job_key, evidence_summary in REPLAY_SAFE_RECOVERY_EVIDENCE.items():
+                cur.execute(
+                    "SELECT operations.jobs_register_recovery_policy_v1(%s, %s, %s, %s)",
+                    (1, job_key, definition(job_key).snapshot_digest(), evidence_summary),
+                )
+    except UndefinedFunction:
+        return
+
+
 def record_runtime_heartbeat(
     runtime_kind: str,
     runtime_identity: uuid.UUID,
@@ -126,6 +141,26 @@ def stop_runtime(runtime_kind: str, runtime_identity: uuid.UUID) -> bool:
         log.exception("Jobs %s stop heartbeat failed", runtime_kind)
         return False
     return True
+
+
+def reconcile_replay_safe_containment() -> int:
+    """Release only holds backed by a durable, reviewed replay-safety policy."""
+    try:
+        with db.transaction() as cur:
+            cur.execute("SET LOCAL operations.tenant_id = 1")
+            cur.execute(
+                "SELECT operations.jobs_reconcile_replay_safe_containment_v1(%s)",
+                (1,),
+            )
+            released = int(cur.fetchone()[0])
+    except UndefinedFunction:
+        return 0
+    except Exception:
+        log.exception("Jobs replay-safe containment reconciliation failed")
+        return 0
+    if released:
+        log.warning("Jobs reconciled %d replay-safe contained run(s)", released)
+    return released
 
 
 def _schedule_cadence(schedule: Any) -> dict[str, int | str]:
