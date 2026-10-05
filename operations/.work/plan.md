@@ -1823,3 +1823,14 @@ domain resource claims remain the safety boundary. Existing queued records
 retain their old immutable broad-lock snapshot and will drain as a short
 transition backlog. Next action: deploy and verify two disjoint Jobs claim
 the available slots concurrently.
+
+Completion-regression recovery in progress (2026-10-05): live inspection
+found three queued Jobs with completed prerequisites whose dependency edges
+remained waiting. Migration 0244's terminal-step rewrite accidentally omitted
+the immutable output-revision publication that the dependency release function
+requires. Migration 0249 restores publication for future completions and
+reconstructs only missing revisions from existing waiting workflow edges on
+completed prerequisites, then uses the normal propagation function to release
+them. It does not rerun work or release failed dependencies. Next action:
+review the migration, run focused checks, commit/push, and verify the queue
+claims released work after automatic rollout.
