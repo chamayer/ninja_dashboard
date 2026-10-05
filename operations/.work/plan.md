@@ -1653,3 +1653,11 @@ migration tests (23), Django checks, Python compilation, and `git diff
 --check` pass. Next action: commit/push migration 0236 and verify the
 automatic rollout records recovery evidence, clears the eight reviewed holds,
 and drains queued work.
+
+Recovery rollout race correction in progress (2026-10-05): migration 0236
+deployed and its authorities/policies are present, but the Jobs worker started
+before Operations completed the migration. Its startup reconciliation safely
+treated the API as unavailable and did not retry, leaving the reviewed holds
+contained. Retry idempotent recovery-policy registration and reconciliation on
+the worker's existing heartbeat interval, then push and verify the automated
+assessment and queue drain. Do not invoke the recovery function manually.

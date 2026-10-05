@@ -186,3 +186,6 @@ def test_worker_reconciles_only_durable_replay_safe_containment_before_claiming_
         "    operator_job_queue.register_recovery_policies()\n"
         "    operator_job_queue.reconcile_replay_safe_containment()"
     ) in worker
+    heartbeat = worker[worker.index("if now >= next_runtime_heartbeat:"):]
+    assert "operator_job_queue.register_recovery_policies()" in heartbeat
+    assert "operator_job_queue.reconcile_replay_safe_containment()" in heartbeat

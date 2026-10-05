@@ -138,6 +138,12 @@ def run() -> int:
         while not _stopping:
             now = time.monotonic()
             if now >= next_runtime_heartbeat:
+                # Operations migrations and the worker can start in parallel
+                # during a GitOps rollout. Retry these idempotent control-plane
+                # registrations after startup so a temporarily unavailable
+                # recovery API cannot strand reviewed work until another deploy.
+                operator_job_queue.register_recovery_policies()
+                operator_job_queue.reconcile_replay_safe_containment()
                 operator_job_queue.record_runtime_heartbeat(
                     "worker",
                     worker_incarnation,
