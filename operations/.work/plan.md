@@ -1814,3 +1814,12 @@ and add every new template to the durable resource-limit policy. The change
 must not weaken protection for two handlers that write the same derived data.
 Next action: register reviewed per-definition domain ownership, migrate the
 resource policy, then validate parallel claims only occur for disjoint domains.
+
+Fairness validation refinement (2026-10-05): the global capacity is already
+two, but every lane was also limited to one. That prevents two disjoint Jobs
+in the same lane from occupying both reviewed global slots. Migration 0248
+raises each lane ceiling to two; the deployment-wide ceiling remains two and
+domain resource claims remain the safety boundary. Existing queued records
+retain their old immutable broad-lock snapshot and will drain as a short
+transition backlog. Next action: deploy and verify two disjoint Jobs claim
+the available slots concurrently.

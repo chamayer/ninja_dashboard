@@ -202,11 +202,11 @@ def test_capability_labels_do_not_make_unreviewed_execution_safe():
 def test_registry_exposes_the_approved_conservative_resource_policy():
     assert INITIAL_EXECUTION_CAPACITY == 2
     assert dict(INITIAL_LANE_CAPACITIES) == {
-        "collection": 1,
-        "evaluation": 1,
-        "software": 1,
-        "intelligence": 1,
-        "service": 1,
+        "collection": 2,
+        "evaluation": 2,
+        "software": 2,
+        "intelligence": 2,
+        "service": 2,
     }
     assert definition("patches").resource_keys == ("tenant:{tenant_id}:ninja-source",)
     assert definition("agent-observations").resource_keys == ("tenant:{tenant_id}:agent-sources",)

@@ -757,11 +757,11 @@ _SCHEDULE_DEFINITIONS = (
 # not a worker-service replica count or a claim that narrower scopes are unsafe.
 INITIAL_EXECUTION_CAPACITY = 2
 INITIAL_LANE_CAPACITIES = MappingProxyType({
-    "collection": 1,
-    "evaluation": 1,
-    "software": 1,
-    "intelligence": 1,
-    "service": 1,
+    "collection": 2,
+    "evaluation": 2,
+    "software": 2,
+    "intelligence": 2,
+    "service": 2,
 })
 
 _GLOBAL_ONLY = frozenset({
