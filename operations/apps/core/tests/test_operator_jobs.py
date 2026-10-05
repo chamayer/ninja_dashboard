@@ -87,6 +87,7 @@ def test_jobs_status_uses_operator_language_and_safe_controls():
     assert "next due" in jobs_template
     assert "last_schedule_outcome" in jobs_template
     assert "jobs_activity_relations_v1" in views
+    assert "jobs_activity_current_v1" in views
     assert "job_groups" in views
     assert "group.runs" in template
     assert "Technical details" in template
@@ -115,6 +116,9 @@ def test_jobs_status_uses_operator_language_and_safe_controls():
     control_template = Path("templates/admin_jobs_control_plane.html").read_text(encoding="utf-8")
     assert "row.items" in control_template
     assert "Runtime heartbeats" in views
+    assert "Recovered automatically" in views
+    assert "Recovery evidence" in template
+    assert "Run history" in template
     control_start = views.index("def admin_jobs_control_plane")
     assert "@require_admin" in views[views.rfind("@login_required", 0, control_start):control_start]
 
@@ -126,6 +130,8 @@ def test_job_activity_has_complete_filtered_pagination_and_compiles():
     assert "SELECT count(*) FROM operations.operator_job_runs job" in views
     assert "LIMIT %s OFFSET %s" in views
     assert "job.status = ANY(%s::text[])" in views
+    assert "current_only" in views
+    assert "history_only" in views
     assert "SELECT count(*) FROM operations.run_log" in views
     assert "def _jobs_activity_date" in views
     assert "def _jobs_activity_query" in views

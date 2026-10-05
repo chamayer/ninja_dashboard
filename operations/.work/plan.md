@@ -1704,3 +1704,12 @@ provider-side mutation. Migration 0241 therefore authorizes only that exact
 immutable digest for replay-safe recovery. Next action: run focused checks,
 commit/push the migration, and verify the automatic GitOps rollout records
 recovery evidence and clears containment without direct Portainer action.
+
+Current-status separation in progress (2026-10-05): immutable terminal Job
+records were appearing beside queued and running work, making historical
+interruptions look like active failures. Add a bounded control-plane current
+work relation (queued, running, or still protected by contained resources),
+keep terminal records in a separate Run history view, and expose durable
+recovery evidence as "Recovered automatically" without changing the original
+run outcome. Next action: run focused checks, commit/push the migration and UI
+change, then verify the live default page shows only current work.

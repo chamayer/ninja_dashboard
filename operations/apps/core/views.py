@@ -8950,6 +8950,14 @@ def _operator_job_runs(
     if active_filters.get("statuses"):
         clauses.append("job.status = ANY(%s::text[])")
         params.append(list(active_filters["statuses"]))
+    if active_filters.get("current_only"):
+        clauses.append(
+            "job.id IN (SELECT run_id FROM operations.jobs_activity_current_v1(1))"
+        )
+    if active_filters.get("history_only"):
+        clauses.append(
+            "job.id NOT IN (SELECT run_id FROM operations.jobs_activity_current_v1(1))"
+        )
     if active_filters.get("scope"):
         pattern = f"%{active_filters['scope']}%"
         clauses.append(
@@ -9024,6 +9032,7 @@ def _operator_job_runs(
         dependents_by_job: dict[uuid.UUID, list[dict]] = {job_id: [] for job_id in job_ids}
         domain_attempts_by_job: dict[uuid.UUID, list[dict]] = {job_id: [] for job_id in job_ids}
         contained_claims_by_job: dict[uuid.UUID, int] = {}
+        recovery_by_job: dict[uuid.UUID, dict] = {}
         if job_ids:
             cur.execute(
                 "SELECT run_id, relation_kind, item "
@@ -9056,6 +9065,8 @@ def _operator_job_runs(
                     domain_attempts_by_job.setdefault(related_run_id, []).append(item)
                 elif relation_kind == "contained_claims":
                     contained_claims_by_job[related_run_id] = int(item["count"])
+                elif relation_kind == "recovery_assessment":
+                    recovery_by_job[related_run_id] = item
             cur.execute(
                 """SELECT id, definition_digest, scope_identity, input_revisions,
                           output_revisions, request_payload, parent_run_id, root_run_id
@@ -9110,8 +9121,12 @@ def _operator_job_runs(
             }.get(row[19], "Automatic" if row[3] is None else "Operator"),
             "requested_at": row[4], "started_at": row[5], "completed_at": row[6],
             "status": row[7],
+            "recovery": recovery_by_job.get(row[0]),
+            "status_class": "completed" if row[0] in recovery_by_job else row[7],
             "status_label": (
-                "Waiting for required work"
+                "Recovered automatically"
+                if row[0] in recovery_by_job
+                else "Waiting for required work"
                 if row[20] == "workflow"
                 else status_labels.get(row[7], row[7])
             ),
@@ -9200,6 +9215,9 @@ def _jobs_activity_query(request: HttpRequest, *excluded: str) -> str:
 @require_admin
 def admin_job_status(request: HttpRequest) -> HttpResponse:
     run_id = (request.GET.get("run") or "").strip()
+    activity_view = (request.GET.get("view") or "current").strip()
+    if activity_view not in {"current", "history"}:
+        activity_view = "current"
     raw_filters = {
         "job_key": (request.GET.get("job") or "").strip(),
         "scope": (request.GET.get("scope") or "").strip(),
@@ -9237,6 +9255,13 @@ def admin_job_status(request: HttpRequest) -> HttpResponse:
         filters["from_at"] = from_at
     if to_at is not None:
         filters["to_at"] = to_at
+    if not run_id:
+        if activity_view == "current":
+            filters["current_only"] = True
+        else:
+            filters["history_only"] = True
+            if "status" not in filters:
+                filters["statuses"] = ["completed", "failed", "stalled", "cancelled"]
     try:
         page = max(1, min(20001, int(request.GET.get("page") or "1")))
     except ValueError:
@@ -9281,6 +9306,8 @@ def admin_job_status(request: HttpRequest) -> HttpResponse:
             "run_has_next": page * page_size < run_total,
             "run_next_page": page + 1,
             "activity_query": _jobs_activity_query(request, "page", "run"),
+            "activity_view_query": _jobs_activity_query(request, "view", "page", "run"),
+            "activity_view": activity_view,
             "history": history,
             "history_total": history_total,
             "history_page": history_page,
