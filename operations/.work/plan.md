@@ -1778,3 +1778,14 @@ active steps; each displayed step now uses that operation run's root lineage,
 not an unrelated latest Job run. Focused tests and template/Django checks pass.
 Next action: commit/push the lineage display refinement and make one final
 read-only queue-progress verification.
+
+Queue-resume compatibility fix (2026-10-05): after the matcher containment
+was safely released, `agent-compliance` reached execution and failed because a
+shared connector identity field (`external_namespace`) was passed to the
+legacy `ninja_agent_compliance.platform_observations` projection, which does
+not own that column. The projection now explicitly persists only its stable
+schema columns, preserving all compliance data while ignoring shared-only
+connector metadata. A focused test covers the projection boundary; it cannot
+collect on the local Python install because that environment lacks ingest's
+`pydantic` dependency. Next action: commit/push this narrow compatibility fix
+and verify the automatic rollout moves the queue past agent compliance.

@@ -35,6 +35,18 @@ log = logging.getLogger(__name__)
 
 _TENANT_ID = 1
 
+# This is the legacy compliance projection, not the shared observation store.
+# Connected-source rows can carry identity fields used elsewhere; persist only
+# columns owned by this table so a new connector field cannot break the whole
+# scheduled compliance operation.
+_PLATFORM_OBSERVATION_COLUMNS = (
+    "source_run_id", "observed_at", "platform", "source_id", "source_name",
+    "source_client_name", "resolved_client_id", "resolved_client_name",
+    "platform_group_name", "platform_group_id", "platform_device_id", "hostname",
+    "norm_name", "match_name", "device_type", "os_name", "domain_name",
+    "is_online", "last_seen_at", "resolution_method", "confidence", "raw_data",
+)
+
 _FETCHERS = {
     "Ninja": ninja.fetch,
     "SentinelOne": sentinelone.fetch,
@@ -443,9 +455,9 @@ def _insert_observations(source_run_id: int, rows: list[dict[str, Any]]) -> None
         # normalizes earlier so its matrix builder sees the same value.
         _normalize_device_types([r])
         r["source_run_id"] = source_run_id
-        insert_rows.append(r)
+        insert_rows.append({key: r.get(key) for key in _PLATFORM_OBSERVATION_COLUMNS})
     with db.transaction() as cur:
-        columns = list(insert_rows[0].keys())
+        columns = _PLATFORM_OBSERVATION_COLUMNS
         placeholders = ", ".join(f"%({c})s" for c in columns)
         cur.executemany(
             f"""
