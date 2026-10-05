@@ -208,7 +208,9 @@ def test_registry_exposes_the_approved_conservative_resource_policy():
         "intelligence": 1,
         "service": 1,
     }
-    assert definition("patches").resource_keys == ("tenant:{tenant_id}:state",)
+    assert definition("patches").resource_keys == ("tenant:{tenant_id}:ninja-source",)
+    assert definition("agent-observations").resource_keys == ("tenant:{tenant_id}:agent-sources",)
+    assert definition("patch-classify").resource_keys == ("tenant:{tenant_id}:patch-state",)
     assert "global:intel-cve-corpus" in definition("intel-nvd").resource_keys
     assert "global:software-catalog" in definition("software-classify").resource_keys
     assert definition("software-classify-only").supersession_rank == 1

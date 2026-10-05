@@ -1805,3 +1805,12 @@ local upserts. Migration 0246 authorizes only its recorded immutable digest
 for replay-safe claim release. Next action: validate, commit/push 0246, then
 verify this final contained hold is automatically released and queued work is
 claimed.
+
+Resource fairness rework in progress (2026-10-05): live queue inspection
+proves the blanket `tenant:{tenant_id}:state` lock serializes unrelated work.
+Replace it with explicit domain locks; retain global corpus/catalog and
+delivery locks, keep per-lane limits and the deployment-wide capacity of two,
+and add every new template to the durable resource-limit policy. The change
+must not weaken protection for two handlers that write the same derived data.
+Next action: register reviewed per-definition domain ownership, migrate the
+resource policy, then validate parallel claims only occur for disjoint domains.

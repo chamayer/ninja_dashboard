@@ -769,8 +769,40 @@ _GLOBAL_ONLY = frozenset({
     "intel-capability", "intel-lolrmm", "intel-category",
 })
 _RESOURCE_KEYS_BY_DEFINITION: dict[str, tuple[str, ...]] = {
-    item.key: (() if item.key in _GLOBAL_ONLY else ("tenant:{tenant_id}:state",))
-    for item in _RAW_DEFINITIONS
+    "patches": ("tenant:{tenant_id}:ninja-source",),
+    "agent-observations": ("tenant:{tenant_id}:agent-sources",),
+    "documentation-observations": ("tenant:{tenant_id}:documentation-source",),
+    "software-classify": ("tenant:{tenant_id}:software-state",),
+    "software-classify-only": ("tenant:{tenant_id}:software-state",),
+    "software-classify-full": ("tenant:{tenant_id}:software-state",),
+    "patch-classify": ("tenant:{tenant_id}:patch-state",),
+    "platform-evaluate": ("tenant:{tenant_id}:platform-findings",),
+    "cmdb-evaluate": ("tenant:{tenant_id}:cmdb-findings",),
+    "resolver": ("tenant:{tenant_id}:identity-state",),
+    "parity-check": ("tenant:{tenant_id}:parity-state",),
+    "agent-compliance": ("tenant:{tenant_id}:legacy-agent-compliance",),
+    "agent-compliance-evaluate": ("tenant:{tenant_id}:legacy-agent-compliance",),
+    "agent-compliance-review-digest": (
+        "tenant:{tenant_id}:legacy-agent-compliance",
+        "tenant:{tenant_id}:notification-delivery",
+    ),
+    "intel-kev": (), "intel-nvd": (), "intel-cpe-dict": (), "intel-epss": (),
+    "intel-matcher": ("tenant:{tenant_id}:software-cve-match",),
+    "intel-winget": (), "intel-chocolatey": (), "intel-capability": (),
+    "intel-lolrmm": (), "intel-otx": ("tenant:{tenant_id}:threat-intelligence",),
+    "intel-abusech": ("tenant:{tenant_id}:threat-intelligence",),
+    "intel-endoflife": (), "intel-category": (),
+    "notifications-dispatch": ("tenant:{tenant_id}:notification-delivery",),
+    "notifications-digest": ("tenant:{tenant_id}:notification-delivery",),
+    "retention-history": ("tenant:{tenant_id}:history-retention",),
+    "software-enqueue-orgs": ("tenant:{tenant_id}:software-inventory",),
+    "software-queue-drain": ("tenant:{tenant_id}:software-inventory",),
+    "source-actions": ("tenant:{tenant_id}:source-actions",),
+    "source-demand": ("tenant:{tenant_id}:source-demand",),
+    "source-demand-recovery": ("tenant:{tenant_id}:source-demand",),
+    "run-log-recovery": ("tenant:{tenant_id}:run-history",),
+    "platform-health-evaluate": ("tenant:{tenant_id}:platform-health",),
+    "metabase-bootstrap": ("tenant:{tenant_id}:reporting",),
 }
 for _key in ("intel-nvd", "intel-cpe-dict", "intel-kev", "intel-epss", "intel-matcher"):
     _RESOURCE_KEYS_BY_DEFINITION[_key] += ("global:intel-cve-corpus",)
@@ -785,16 +817,6 @@ for _key in (
     "software-classify-only", "software-classify-full",
 ):
     _RESOURCE_KEYS_BY_DEFINITION[_key] += ("tenant:{tenant_id}:software-inventory",)
-for _key in (
-    "notifications-dispatch", "notifications-digest",
-    "agent-compliance-review-digest",
-):
-    _RESOURCE_KEYS_BY_DEFINITION[_key] += ("tenant:{tenant_id}:notification-delivery",)
-for _key in (
-    "agent-compliance", "agent-compliance-evaluate",
-    "agent-compliance-review-digest",
-):
-    _RESOURCE_KEYS_BY_DEFINITION[_key] += ("tenant:{tenant_id}:legacy-agent-compliance",)
 
 _SUPERSESSION_RANKS = MappingProxyType({
     "software-classify-only": 1,
