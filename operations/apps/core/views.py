@@ -9216,7 +9216,7 @@ def _jobs_activity_query(request: HttpRequest, *excluded: str) -> str:
 def admin_job_status(request: HttpRequest) -> HttpResponse:
     run_id = (request.GET.get("run") or "").strip()
     activity_view = (request.GET.get("view") or "current").strip()
-    if activity_view not in {"current", "history"}:
+    if activity_view not in {"current", "attention", "history"}:
         activity_view = "current"
     raw_filters = {
         "job_key": (request.GET.get("job") or "").strip(),
@@ -9258,6 +9258,9 @@ def admin_job_status(request: HttpRequest) -> HttpResponse:
     if not run_id:
         if activity_view == "current":
             filters["current_only"] = True
+        elif activity_view == "attention":
+            filters["current_only"] = True
+            filters["statuses"] = ["failed", "stalled"]
         else:
             filters["history_only"] = True
             if "status" not in filters:
@@ -9281,13 +9284,15 @@ def admin_job_status(request: HttpRequest) -> HttpResponse:
         run_id=run_id,
         filters=filters,
     )
-    grouped_runs: dict[str, dict] = {}
-    for run in runs:
-        group = grouped_runs.setdefault(
-            run["job_key"],
-            {"name": run["name"], "job_key": run["job_key"], "runs": []},
+    with transaction.atomic(), connection.cursor() as cur:
+        cur.execute("SET LOCAL operations.tenant_id = 1")
+        cur.execute(
+            """SELECT status, count(*) FROM operations.operator_job_runs
+                 WHERE tenant_id = 1 AND id IN (
+                     SELECT run_id FROM operations.jobs_activity_current_v1(1)
+                 ) GROUP BY status"""
         )
-        group["runs"].append(run)
+        current_summary = dict(cur.fetchall())
     history_total, history = _recent_job_history(
         limit=history_page_size,
         offset=(history_page - 1) * history_page_size,
@@ -9298,7 +9303,11 @@ def admin_job_status(request: HttpRequest) -> HttpResponse:
         {
             "admin_group": "integrations", "admin_tab": "jobs",
             "runs": runs,
-            "job_groups": list(grouped_runs.values()),
+            "current_summary": {
+                "running": current_summary.get("running", 0),
+                "queued": current_summary.get("queued", 0),
+                "attention": current_summary.get("failed", 0) + current_summary.get("stalled", 0),
+            },
             "run_total": run_total,
             "run_page": page,
             "run_has_previous": page > 1,

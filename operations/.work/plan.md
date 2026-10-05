@@ -1721,3 +1721,11 @@ transaction-scoped conditional local-signal upserts; it has no external
 mutation. Migration 0243 authorizes only the interrupted immutable revision
 for replay-safe recovery. Next action: validate, commit/push, and verify the
 worker records recovery evidence and clears the final contained claims.
+
+Jobs activity usability refinement in progress (2026-10-05): the page exposed
+the ledger grouping as repeated Job-specific tables, forcing operators to scan
+long sections and repeatedly interpret status. Replace that layout with a
+compact current-work summary and one table per selected view: Current work,
+Needs attention, or Run history. Preserve all run detail, recovery evidence,
+safe controls, filters, and diagnostic links. Next action: validate the
+focused UI checks, commit/push, then confirm the deployed page renders.

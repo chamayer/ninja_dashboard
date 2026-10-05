@@ -88,8 +88,9 @@ def test_jobs_status_uses_operator_language_and_safe_controls():
     assert "last_schedule_outcome" in jobs_template
     assert "jobs_activity_relations_v1" in views
     assert "jobs_activity_current_v1" in views
-    assert "job_groups" in views
-    assert "group.runs" in template
+    assert "current_summary" in views
+    assert "Current Job summary" in template
+    assert "Needs attention" in template
     assert "Technical details" in template
     assert "Domain work" in template
     assert "Dependencies" in template
