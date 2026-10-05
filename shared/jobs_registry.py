@@ -653,6 +653,11 @@ REPLAY_SAFE_RECOVERY_EVIDENCE = MappingProxyType({
         "of a public vulnerability feed. A later replay converges to the current "
         "feed and has no external mutation."
     ),
+    "intel-cpe-dict": (
+        "The CPE dictionary refresh only performs cursor-backed, transaction-scoped "
+        "conditional upserts of a public feed. A later replay resumes or converges "
+        "to the current dictionary and has no external mutation."
+    ),
     "intel-epss": (
         "The EPSS refresh only performs a transaction-scoped conditional update "
         "of existing CVE scores. A later replay converges to the current public "
@@ -667,6 +672,11 @@ REPLAY_SAFE_RECOVERY_EVIDENCE = MappingProxyType({
         "Full software classification only reconciles Operations intelligence, "
         "findings, and a read model from current source data. A later replay "
         "converges to the current installation and policy state and has no external mutation."
+    ),
+    "patches": (
+        "The Ninja collection cycle only reads the vendor API and reconciles local "
+        "source projections from the current response. A later replay converges to "
+        "current source state and has no vendor-side mutation."
     ),
 })
 

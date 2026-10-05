@@ -1685,3 +1685,13 @@ stay visible/escalated if interrupted. Focused Jobs, registry, and migration
 tests (22), Django checks, and `git diff --check` pass. Next action:
 commit/push migration 0239 and verify NVD recovery plus the durable queue
 progress; do not force-release collection work.
+
+Collection recovery completion in progress (2026-10-05): inspection verified
+that CPE dictionary and Ninja collection handlers only read external sources
+and converge local state through cursor-backed or source-projection
+reconciliation; neither invokes a vendor-side mutation. Migration 0240 adds
+their exact reviewed revisions, while source actions, notifications, and all
+other unreviewed mutation handlers remain escalation-only. Focused Jobs,
+registry, and migration tests (22), Django checks, and `git diff --check`
+pass. Next action: commit/push migration 0240 and verify automatic recovery
+clears the remaining contained claims and the queue resumes.
