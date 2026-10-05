@@ -1695,3 +1695,12 @@ other unreviewed mutation handlers remain escalation-only. Focused Jobs,
 registry, and migration tests (22), Django checks, and `git diff --check`
 pass. Next action: commit/push migration 0240 and verify automatic recovery
 clears the remaining contained claims and the queue resumes.
+
+OTX recovery completion in progress (2026-10-05): after the 0240 rollout,
+one interrupted `intel-otx` run retained three contained claims. Handler audit
+confirms it only reads AlienVault's subscribed-pulse feed and conditionally
+upserts local `safety_signal` records in one transaction; it has no
+provider-side mutation. Migration 0241 therefore authorizes only that exact
+immutable digest for replay-safe recovery. Next action: run focused checks,
+commit/push the migration, and verify the automatic GitOps rollout records
+recovery evidence and clears containment without direct Portainer action.

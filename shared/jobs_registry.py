@@ -658,6 +658,11 @@ REPLAY_SAFE_RECOVERY_EVIDENCE = MappingProxyType({
         "conditional upserts of a public feed. A later replay resumes or converges "
         "to the current dictionary and has no external mutation."
     ),
+    "intel-otx": (
+        "The AlienVault OTX refresh only reads the subscribed-pulse feed and performs "
+        "transaction-scoped conditional upserts of local threat signals. A later replay "
+        "converges to current feed state and has no external mutation."
+    ),
     "intel-epss": (
         "The EPSS refresh only performs a transaction-scoped conditional update "
         "of existing CVE scores. A later replay converges to the current public "
