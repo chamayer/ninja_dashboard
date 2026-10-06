@@ -191,8 +191,8 @@ _RAW_DEFINITIONS = (
     ),
     JobDefinition(
         "documentation-observations",
-        "Documentation observations",
-        "Refresh documentation records from Hudu.",
+        "Hudu records",
+        "Refresh Hudu CMDB records.",
         "source ingest",
         "collection",
         "run/sources/enqueue",
@@ -1110,8 +1110,8 @@ _JOB_PRESENTATION = MappingProxyType(
             "Refresh records from connected security and support tools.",
         ),
         "documentation-observations": (
-            "Refresh documentation data",
-            "Refresh documentation records from connected documentation sources.",
+            "Refresh Hudu records",
+            "Refresh Hudu CMDB records.",
         ),
         "software-queue-drain": (
             "Refresh software inventory",
@@ -1127,8 +1127,8 @@ _JOB_PRESENTATION = MappingProxyType(
             "Update computer, coverage, identity, and lifecycle findings.",
         ),
         "cmdb-evaluate": (
-            "Evaluate documentation data",
-            "Update findings from current documentation data.",
+            "Review Hudu records",
+            "Update findings from current Hudu CMDB records.",
         ),
         "resolver": ("Match records", "Match source records to the correct client and computer."),
         "parity-check": (

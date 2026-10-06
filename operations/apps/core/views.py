@@ -8375,6 +8375,75 @@ _JOBS_RECOVERY_DIAGNOSTIC_KEYS = frozenset(
     }
 )
 
+_MANAGED_SCHEDULE_REASON = "Managed by its operation entry point."
+_NO_MEASURABLE_TOTAL = "This job does not publish a measurable work total."
+
+
+def _job_has_upstream_trigger(execution_keys: tuple[str, ...]) -> bool:
+    """Return whether another registered Job can start this Job."""
+    return any(
+        successor.successor in execution_keys
+        for candidate in definitions()
+        for successor in candidate.successors
+    )
+
+
+def _schedule_cadence_label(cadence: dict | None) -> str:
+    """Render one persisted cadence without exposing its storage shape."""
+    if not cadence:
+        return ""
+    if cadence.get("kind") == "daily":
+        return "Every day"
+    minutes = cadence.get("minutes")
+    if not isinstance(minutes, int) or minutes < 1:
+        return ""
+    if minutes == 60:
+        return "Every hour"
+    if minutes % 1440 == 0:
+        days = minutes // 1440
+        return "Every day" if days == 1 else f"Every {days} days"
+    if minutes % 60 == 0:
+        return f"Every {minutes // 60} hours"
+    return f"Every {minutes} minutes"
+
+
+def _job_schedule_presentation(
+    execution_keys: tuple[str, ...],
+    schedules: list[dict],
+    *,
+    available: bool,
+    availability_label: str,
+) -> dict:
+    """Describe how an operator can expect a Job to start."""
+    if not available:
+        return {"label": "Disabled", "detail": availability_label, "next_due_at": None}
+
+    enabled = [schedule for schedule in schedules if schedule["enabled"]]
+    data_triggered = any(
+        schedule["reason"] == _MANAGED_SCHEDULE_REASON for schedule in schedules
+    ) or _job_has_upstream_trigger(execution_keys)
+    if enabled:
+        cadence = _schedule_cadence_label(enabled[0]["cadence"])
+        detail = "When input data changes" if data_triggered else cadence
+        if data_triggered and cadence:
+            detail += f"; {cadence.lower()}"
+        return {
+            "label": "Runs automatically",
+            "detail": detail,
+            "next_due_at": min(
+                (schedule["next_due_at"] for schedule in enabled if schedule["next_due_at"]),
+                default=None,
+            ),
+        }
+    if data_triggered:
+        return {"label": "Runs when input data changes", "detail": "", "next_due_at": None}
+    if schedules:
+        reason = next((schedule["reason"] for schedule in schedules if schedule["reason"]), "")
+        if reason.startswith("Waiting for source"):
+            return {"label": "Runs when requested", "detail": "", "next_due_at": None}
+        return {"label": "Disabled", "detail": reason or "Not available", "next_due_at": None}
+    return {"label": "Run manually", "detail": "", "next_due_at": None}
+
 
 def _jobs_diagnostic_query(
     section: str, *, limit: int = 100, offset: int = 0, cursor=None
@@ -8659,6 +8728,7 @@ def admin_jobs(request: HttpRequest) -> HttpResponse:
     }
 
     latest_by_execution: dict[str, dict] = {}
+    latest_terminal_by_execution: dict[str, dict] = {}
     schedule_status: dict[str, dict] = {}
     try:
         with transaction.atomic(), connection.cursor() as cur:
@@ -8693,6 +8763,23 @@ def admin_jobs(request: HttpRequest) -> HttpResponse:
                 }
             cur.execute(
                 """
+                SELECT DISTINCT ON (job_key)
+                       job_key, status, completed_at, rows_touched, error
+                  FROM operations.operator_job_runs
+                 WHERE tenant_id = 1
+                   AND status IN ('completed', 'failed', 'stalled', 'cancelled')
+                 ORDER BY job_key, completed_at DESC NULLS LAST, requested_at DESC, id DESC
+                """
+            )
+            for r in cur.fetchall():
+                latest_terminal_by_execution[r[0]] = {
+                    "status": r[1],
+                    "completed_at": r[2],
+                    "rows_touched": r[3],
+                    "error": (r[4] or "")[:240],
+                }
+            cur.execute(
+                """
                 SELECT definition_key, enabled, capability_reason, cadence,
                        next_due_at, last_consumed_due_at, last_requested_at,
                        last_outcome, last_run_id
@@ -8714,6 +8801,7 @@ def admin_jobs(request: HttpRequest) -> HttpResponse:
                 }
     except Exception:
         latest_by_execution = {}
+        latest_terminal_by_execution = {}
         schedule_status = {}
 
     try:
@@ -8747,6 +8835,29 @@ def admin_jobs(request: HttpRequest) -> HttpResponse:
             key=lambda item: item["requested_at"],
             default=None,
         )
+        latest_terminal_candidates = [
+            latest_terminal_by_execution[key]
+            for key in execution_keys
+            if key in latest_terminal_by_execution
+        ]
+        latest_terminal = max(
+            latest_terminal_candidates,
+            key=lambda item: item["completed_at"] or datetime.min.replace(tzinfo=dt_timezone.utc),
+            default=None,
+        )
+        last_result = ""
+        last_result_at = None
+        if latest_terminal:
+            last_result_at = latest_terminal["completed_at"]
+            if latest_terminal["status"] == "completed":
+                if latest_terminal["rows_touched"] is not None:
+                    last_result = f"Last completed: {latest_terminal['rows_touched']} updated"
+                else:
+                    last_result = "Last completed"
+            elif latest_terminal["status"] == "cancelled":
+                last_result = "Last stopped"
+            else:
+                last_result = "Last failed"
         if active_run:
             state = active_run["lifecycle"]
             status_label = {
@@ -8756,6 +8867,8 @@ def admin_jobs(request: HttpRequest) -> HttpResponse:
             }.get(state, active_run["status_label"])
             if state == "running":
                 status_detail = active_run["stage_detail"] or active_run["stage"]
+                if status_detail == _NO_MEASURABLE_TOTAL:
+                    status_detail = active_run["stage"]
             else:
                 status_detail = active_run["status_detail"]
             latest_run_id = active_run["id"]
@@ -8794,13 +8907,11 @@ def admin_jobs(request: HttpRequest) -> HttpResponse:
         available, availability_label = capability_state(
             primary_definition.key, enabled_capabilities
         )
-        enabled_schedules = [schedule for schedule in schedules if schedule["enabled"]]
-        next_due_at = min(
-            (schedule["next_due_at"] for schedule in enabled_schedules if schedule["next_due_at"]),
-            default=None,
-        )
-        configuration_label = (
-            "Disabled" if not available else "Automatic" if enabled_schedules else "Manual"
+        schedule_presentation = _job_schedule_presentation(
+            execution_keys,
+            schedules,
+            available=available,
+            availability_label=availability_label,
         )
         needs_attention = state == "failed"
         jobs.append(
@@ -8812,14 +8923,16 @@ def admin_jobs(request: HttpRequest) -> HttpResponse:
                 "status_label": status_label,
                 "status_detail": status_detail,
                 "latest_at": latest_at,
+                "last_result": last_result if active_run else "",
+                "last_result_at": last_result_at if active_run else None,
                 "latest_run_id": latest_run_id,
                 "rows_touched": rows_touched,
                 "error": error,
                 "active_run": active_run,
                 "needs_attention": needs_attention,
-                "configuration_label": configuration_label,
-                "configuration_reason": "" if available else availability_label,
-                "next_due_at": next_due_at,
+                "schedule_label": schedule_presentation["label"],
+                "schedule_detail": schedule_presentation["detail"],
+                "next_due_at": schedule_presentation["next_due_at"],
                 "run_key": entry["primary_execution_key"],
             }
         )
@@ -8934,6 +9047,28 @@ def admin_job_detail(request: HttpRequest, job_id: str) -> HttpResponse:
     except DatabaseError:
         log.exception("Job schedule query failed: job=%s", job.key)
 
+    primary_definition = definition(job.primary_execution_key)
+    available, availability_label = capability_state(
+        primary_definition.key,
+        {
+            "always": True,
+            "intel": os.environ.get("INTEL_ENABLED", "false").strip().lower()
+            in {"1", "true", "yes", "on"},
+            "notifications": os.environ.get("NOTIFY_ENABLED", "false").strip().lower()
+            in {"1", "true", "yes", "on"},
+            "notification_digest": os.environ.get("NOTIFY_DIGEST_ENABLED", "false")
+            .strip()
+            .lower()
+            in {"1", "true", "yes", "on"},
+        },
+    )
+    schedule_presentation = _job_schedule_presentation(
+        job.execution_keys,
+        schedules,
+        available=available,
+        availability_label=availability_label,
+    )
+
     return render(
         request,
         "admin_job_detail.html",
@@ -8950,7 +9085,7 @@ def admin_job_detail(request: HttpRequest, job_id: str) -> HttpResponse:
             "previous_page": page - 1,
             "has_next": page * page_size < run_total,
             "next_page": page + 1,
-            "schedules": schedules,
+            "schedule_presentation": schedule_presentation,
         },
     )
 

@@ -88,7 +88,7 @@ Result: {{ selected_run.result }}</pre></details>
 
 <section class="job-section">
   <h2>Schedule</h2>
-  {% for schedule in schedules %}<div>{% if schedule.enabled %}<strong>Automatic</strong>{% else %}<strong>Manual</strong>{% endif %}{% if schedule.cadence %} · {{ schedule.cadence }}{% endif %}{% if schedule.next_due_at %}<span class="job-note">Next {{ schedule.next_due_at|date:"Y-m-d H:i:s" }}</span>{% elif schedule.reason %}<span class="job-note">{{ schedule.reason }}</span>{% endif %}</div>{% empty %}<p class="muted">Run manually or when requested by another Job.</p>{% endfor %}
+  <div><strong>{{ schedule_presentation.label }}</strong>{% if schedule_presentation.detail %}<span class="job-note">{{ schedule_presentation.detail }}</span>{% endif %}{% if schedule_presentation.next_due_at %}<span class="job-note">Next {{ schedule_presentation.next_due_at|date:"Y-m-d H:i:s" }}</span>{% endif %}</div>
 </section>
 
 <section class="job-section">

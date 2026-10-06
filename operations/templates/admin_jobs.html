@@ -92,24 +92,25 @@
 
 {% if jobs %}
 <table class="jobs-table">
-  <thead><tr><th></th><th>Job</th><th>Latest status</th><th>Schedule</th><th>Action</th></tr></thead>
+  <thead><tr><th></th><th>Job</th><th>Status</th><th>Schedule</th><th>Action</th></tr></thead>
   <tbody>
   {% for job in jobs %}
     <tr>
       <td>{% if job.active_run %}<input form="job-bulk-action" type="checkbox" name="run_id" value="{{ job.active_run.id }}" aria-label="Select {{ job.name }}">{% endif %}</td>
       <td><a class="jobs-name" href="{% url 'admin_job_detail' job_id=job.id %}">{{ job.name }}</a><span class="jobs-description">{{ job.description }}</span></td>
       <td>
-        <span class="jobs-state {{ job.state }}">{{ job.status_label }}{% if job.needs_attention %} — needs attention{% endif %}</span>
+        <span class="jobs-state {{ job.state }}">Status: {{ job.status_label }}{% if job.needs_attention %} — needs attention{% endif %}</span>
         {% if job.status_detail %}<span class="jobs-detail">{{ job.status_detail }}</span>{% endif %}
-        {% if job.latest_at %}<span class="jobs-detail">{{ job.latest_at|date:"Y-m-d H:i:s" }}</span>{% endif %}
+        {% if job.latest_at %}<span class="jobs-detail">as of {{ job.latest_at|timesince }} ago</span>{% endif %}
+        {% if job.last_result %}<span class="jobs-detail">{{ job.last_result }}{% if job.last_result_at %} · {{ job.last_result_at|timesince }} ago{% endif %}</span>{% endif %}
       </td>
-      <td>{{ job.configuration_label }}{% if job.next_due_at %}<span class="jobs-detail">Next {{ job.next_due_at|date:"Y-m-d H:i:s" }}</span>{% elif job.configuration_reason %}<span class="jobs-detail">{{ job.configuration_reason }}</span>{% endif %}</td>
+      <td>{{ job.schedule_label }}{% if job.schedule_detail %}<span class="jobs-detail">{{ job.schedule_detail }}</span>{% endif %}{% if job.next_due_at %}<span class="jobs-detail">Next {{ job.next_due_at|date:"Y-m-d H:i:s" }}</span>{% endif %}</td>
       <td>
         {% if job.active_run %}
           <form method="post" action="{% url 'admin_job_cancel' job.active_run.id %}">{% csrf_token %}<button class="jobs-action" type="submit">{% if job.state == 'running' %}Request stop{% else %}Cancel{% endif %}</button></form>
         {% elif job.needs_attention and job.latest_run_id %}
           <form method="post" action="{% url 'admin_job_retry' job.latest_run_id %}">{% csrf_token %}<button class="jobs-action" type="submit">Retry</button></form>
-        {% elif job.configuration_label != 'Disabled' %}
+        {% elif job.schedule_label != 'Disabled' %}
           <form method="post" action="{% url 'admin_jobs_run' job_id=job.id %}">{% csrf_token %}<button class="jobs-action" type="submit">Run now</button></form>
         {% else %}<span class="muted">Unavailable</span>{% endif %}
       </td>

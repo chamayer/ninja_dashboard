@@ -588,7 +588,7 @@ def _execute(job_key: str, progress: V1JobProgress) -> int | JobExecutionResult 
             lambda: main.run_agent_observations_once(),
         ),
         "documentation-observations": (
-            "Collecting documentation observations",
+            "Collecting Hudu records",
             lambda: main.run_documentation_observations_once(),
         ),
         "agent-compliance": (

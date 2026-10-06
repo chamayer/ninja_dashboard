@@ -31,7 +31,11 @@ def test_jobs_present_one_list_detail_and_configuration_surface():
     assert "def admin_job_status" in views
     assert 'return redirect("admin_jobs")' in views
     assert "admin_job_detail" in urls
-    assert "Latest status" in jobs_template
+    assert "<th>Status</th>" in jobs_template
+    assert "Status: {{ job.status_label }}" in jobs_template
+    assert "as of {{ job.latest_at|timesince }} ago" in jobs_template
+    assert "Last completed:" in views
+    assert "Runs when input data changes" in views
     assert "Job configuration" in jobs_template
     assert "Run history" in detail_template
     assert "Waiting for" in detail_template

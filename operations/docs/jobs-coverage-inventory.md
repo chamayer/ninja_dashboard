@@ -30,11 +30,11 @@ subject categories.
 | --- | --- | --- |
 | `patches` | Refresh Ninja data | One source snapshot with a shared source lock. Device, patch, and activity updates are stages in its detail, not new Jobs. |
 | `agent-observations` | Refresh connected-agent data | A current source collection Job. Split only if an individual source needs a distinct schedule or control. |
-| `documentation-observations` | Refresh documentation data | A current source collection Job. It remains one Job while its source cadence and controls are shared. |
+| `documentation-observations` | Refresh Hudu records | A current Hudu CMDB collection Job. It remains one Job while its source cadence and controls are shared. |
 | `software-classify-only`, `software-classify-full` | Update software status | One Job with normal and full-update modes. The combined `software-classify` entry is compatibility behavior, not another Job. |
 | `patch-classify` | Update patch status | Independent result and dependency target. |
 | `platform-evaluate` | Evaluate client status | Independent findings evaluation. |
-| `cmdb-evaluate` | Evaluate documentation data | Independent findings evaluation for documentation data. |
+| `cmdb-evaluate` | Review Hudu records | Independent findings evaluation for current Hudu CMDB records. |
 | `resolver` | Match records | One Job until client matching and device matching need separate controls or outcomes. |
 | `parity-check` | Check data consistency | Independent diagnostic result. |
 | `intel-kev` | Update known exploited vulnerabilities | Independent feed, schedule, status, and retry. |

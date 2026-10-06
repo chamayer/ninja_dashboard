@@ -1,16 +1,71 @@
 # Jobs ecosystem final-design reset
 
+## Hudu terminology (2026-10-06)
+
+## Status
+
+Complete — operator-facing terminology now names the current source as Hudu,
+and the Jobs list/detail distinguish automatic, data-triggered, manual-only,
+and disabled starts without exposing internal scheduler language.
+
+## Scope and validation
+
+- Update Job names, descriptions, live stage text, and the Jobs coverage
+  inventory where they describe the Hudu source or its evaluation.
+- Show `Status: …` with a status timestamp and compact result from the last
+  completed run. Hide non-actionable technical progress copy and distinguish
+  scheduled, data-triggered, manual-only, and disabled Jobs.
+- Confirm focused registry and Jobs presentation tests still pass.
+
+## Checkpoint and next action
+
+The registry confirms that the current documentation collector is exclusively
+Hudu. The Jobs list now shows `Status: …`, a status timestamp, current
+activity, and—while work is active—the last completed outcome. It suppresses
+the non-actionable measurable-total message. Focused registry/Jobs tests (18),
+`manage.py check`, targeted Ruff import checks, and `git diff --check` passed.
+Next: commit and push the reviewed operator-language correction.
+
+## Contained-claim drain and prevention (2026-10-06)
+
+## Status
+
+Complete — the legacy run's four claims were released through the audited
+contained-claim recovery API after confirming its worker had stopped. The
+dispatcher immediately used the freed capacity for normal Jobs. The apparent
+automatic-recovery gap was correctly refusing a newer, unapproved legacy
+definition digest; permanently disabling legacy admission removes the source
+of recurrence, while the existing replay-safe policy mechanism continues to
+recover reviewed current handlers.
+
+## Scope and validation
+
+- Verify the contained run's immutable definition, recovery policy, worker
+  reconciliation behavior, and absence of a live handler before releasing it.
+- Preserve containment for any handler without explicit replay-safety evidence.
+- Validate the live queue drains, recovery evidence is recorded, and focused
+  Jobs tests pass. Do not manually deploy.
+
+## Checkpoint and next action
+
+The released run was `45c0b52c-afde-47d9-a764-94b6b2430539`; its originating
+worker was recorded stopped. Its digest (`7b1d...`) did not match the only old
+legacy replay-safe policy (`2aa2...`), so automated release was intentionally
+refused. At recovery, the contained-claim count became zero and the dispatcher
+started `intel-matcher`, `software-queue-drain`, and `patches`, each with a
+current heartbeat and deadline. Remaining queue entries are ordinary capacity
+or prerequisite waits, not stranded protection. No code change beyond the
+already-pushed legacy admission shutdown is needed for this incident.
+
 ## Legacy Agent compliance shutdown (2026-10-06)
 
 ## Status
 
-In progress — production diagnostics confirmed that the retired Agent
-compliance schedules remained enabled through an obsolete environment gate.
-They continued admitting runs and a timed-out historical run retained contained
-capacity claims. The approved correction permanently disables automatic
-admission for every legacy definition and cancels its queued runs. Contained
-claims are deliberately not released in this change because doing so is a
-separate safety recovery decision.
+Complete — commit `26d87da` permanently disables automatic admission for every
+legacy definition, and the live schedules were disabled with queued legacy
+runs cancelled. The timed-out historical run's contained capacity claims were
+intentionally left intact; releasing them remains a separate safety recovery
+decision.
 
 ## Scope, decision, and validation
 
@@ -24,15 +79,15 @@ separate safety recovery decision.
 
 ## Checkpoint and next action
 
-Live state at 2026-10-06: `agent-compliance` and
-`agent-compliance-evaluate` were enabled and had scheduled runs; no legacy run
-was active. Four timeout-contained claims from the historical
-`agent-compliance` run still occupy protected resources and explain the wider
-capacity wait. The permanent registry-based gate and focused regression check
-are complete. The first live transaction was rolled back on a schema mismatch;
-the corrected request could not reach the host, so it made no change. Next:
-commit and push the safeguard, then retry the approved live schedule and queue
-shutdown when the host is reachable.
+Live verification: both durable legacy schedules are disabled with no next due
+time and the two queued legacy runs were cancelled. There are no queued or
+running legacy Agent compliance runs. The first live transaction was rolled
+back on a schema mismatch; a corrected, later transaction succeeded without
+releasing contained claims. Focused registry tests (15) and `manage.py check`
+passed; targeted Ruff identified only pre-existing style findings in
+`operator_job_queue.py`. The commit is pushed to `origin/master` and
+`a-m-rose/master` as `26d87da`. Next: if capacity remains blocked, conduct the
+separate contained-claim recovery under explicit safety review.
 
 ## Status
 
