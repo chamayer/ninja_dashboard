@@ -1,3 +1,97 @@
+# Jobs ecosystem final-design reset
+
+## Status
+
+Implementation in progress — ADR-0027 is accepted as the implementation-
+independent product and execution model. The Jobs list, Job detail/history,
+Job configuration, registry classification, and compatibility redirects are
+implemented in the working tree; focused validation is in progress.
+
+## Goal and scope
+
+Replace piecemeal Jobs-page changes with one settled operator model before any
+further implementation. The scope is the Jobs information architecture,
+operator vocabulary, Job/run/dependency relationship, scheduling and
+configuration boundary, capacity presentation, and completion criteria. The
+existing durable execution, data-lock, and tenant/RLS contracts are preserved
+unless a subsequent approved implementation identifies a concrete defect.
+
+## Authority and decisions
+
+- Design authority: `operations/docs/decisions/0027-jobs-operator-model.md`.
+  `operations/docs/jobs-coverage-inventory.md` is a current-implementation
+  audit used only to map existing entries into the design.
+- ADR-0024 and ADR-0026 remain the execution-safety authorities. The new
+  design replaces their operator presentation where they expose lanes,
+  Operations/steps, Control plane, or internal wait terminology.
+- The main operator surface is a concise Jobs list, with a focused per-Job
+  detail/history route. Configuration is Admin > Job configuration. There are
+  no artificial subject categories and no generic activity laundry list. Only
+  administrator Jobs appear there; technical entries are classified as a Job,
+  supporting process, System service, or Legacy entry. A Job is not split
+  merely because its handler has multiple stages: Ninja remains one source
+  Job, while independent feeds remain independent Jobs.
+- ADR-0027 defines one Job -> Run -> Stage model, prerequisite relationships,
+  lifecycle, coalescing, capacity, data safety, recovery, tenant safety, Jobs,
+  Job detail, configuration, and completion criteria independently of current
+  registry and UI structures.
+
+## Implementation scope
+
+- Replace Operation/category presentation with one row per actual Job.
+- Centralize Latest status, attention, configuration, and waiting explanation.
+- Add one Job-detail route with paginated history and prerequisite context.
+- Fold safe bulk actions and explicit refresh controls into Jobs.
+- Rename/move Control plane to Admin > Job configuration and expose System
+  services through Health/diagnostics.
+- Preserve existing URLs as redirects until all internal links move.
+- Audit technical registry entries against the Job boundary and remove System
+  services from the operator Job catalog without weakening their health
+  evidence or execution controls.
+
+## Implementation sequence
+
+1. Define the implementation mapping from current registry entries to Jobs,
+   Stages, and System services, with registry validation.
+2. Build one shared status/view-model authority and focused tests.
+3. Implement Jobs list, controls, refresh, and filtering.
+4. Implement Job detail and paginated history.
+5. Implement Job configuration/coverage and compatibility redirects.
+6. Validate execution invariants, tenant/RLS behavior, templates, and links;
+   then commit and push under the existing authorized Jobs workflow without
+   invoking Portainer directly. In progress.
+
+## Validation
+
+- Compared current Jobs, Job activity, and control-plane templates and views
+  with ADR-0024, ADR-0026, migrations 0255/0256, and the durable plan.
+- Preserved unrelated modified templates and untracked diagnostic material.
+- Design consistency review remains the next action; implementation validation
+  will be defined only after approval.
+
+## Checkpoint and next action
+
+The 38 current registry entries are classified in the coverage inventory. The
+boundary rule was rechecked against the Ninja source cycle: its shared source
+snapshot and lock justify one Job with detailed stages, not an artificial
+split. The working tree now presents one compact Job row per administrator
+Job, a per-Job detail/history route, and Job configuration with coverage;
+System services and legacy bridges are visible there rather than masquerading
+as Jobs. The former Job activity URL redirects into the relevant Job detail,
+and old status wording is not rendered. No migration is needed because the
+current execution procedure already completes each Job Run independently and
+uses durable prerequisite edges for follow-on Jobs.
+
+Focused validation: `PYTHONPATH=.. ..\\.venv\\Scripts\\python.exe -m pytest
+apps/core/tests/test_jobs_registry.py apps/core/tests/test_operator_jobs.py
+apps/core/tests/test_findings_queue.py -q` passed (75); `PYTHONPATH=.. manage.py
+check` passed; focused Ruff
+import/undefined-name and format checks passed; `git diff --check` passed.
+Next action: commit and push the reviewed implementation only under the
+user's separate release authorization; do not invoke Portainer directly.
+
+---
+
 # Admin navigation consistency
 
 ## Status

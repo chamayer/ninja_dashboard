@@ -45,11 +45,13 @@ from shared.jobs_registry import (
     definition,
     definition_keys,
     definitions,
-    operation_definitions,
-    operation_steps,
+    legacy_job_definition_keys,
+    operator_job_definition,
+    operator_job_definitions,
+    operator_job_key_for_execution,
     registry_digest,
     schedule_definitions,
-    scheduled_definition_keys,
+    system_service_definition_keys,
     validate_registry,
     workflow_edges,
 )
@@ -138,6 +140,8 @@ log = logging.getLogger(__name__)
 _NINJA_PATCH_DEVICE_ID_MAX = 2_147_483_647
 _LIFECYCLE_REASON_MAX_LENGTH = 120
 _FINDING_DETAIL_KEY_RE = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
+
+
 def _safe_ninja_external_id_integer_sql(alias: str) -> str:
     """Return a total SQL cast for a Ninja-owned numeric external ID.
 
@@ -258,10 +262,7 @@ def _issue_taxonomy() -> tuple[list[dict], dict[str, dict]]:
         for type_item in category["types"]:
             condition_names = set(type_item["conditions"])
             category_types.update(condition_names)
-            legacy_names.update(
-                profile.definitions[name]["category"]
-                for name in condition_names
-            )
+            legacy_names.update(profile.definitions[name]["category"] for name in condition_names)
             group = {
                 "value": type_item["key"],
                 "label": type_item["label"],
@@ -273,9 +274,7 @@ def _issue_taxonomy() -> tuple[list[dict], dict[str, dict]]:
                     }
                     for name in type_item["conditions"]
                 ),
-                "legacy_types": {
-                    profile.definitions[name]["type"] for name in condition_names
-                },
+                "legacy_types": {profile.definitions[name]["type"] for name in condition_names},
                 "category": category["key"],
             }
             type_groups[type_item["key"]] = group
@@ -307,9 +306,17 @@ def _operator_issue_taxonomy() -> tuple[list[dict], dict[str, dict]]:
         }
     operator_categories = []
     for category in categories:
-        category_types = set().union(
-            *(group["types"] for group in operator_groups.values() if group["category"] == category["key"]),
-        ) if any(group["category"] == category["key"] for group in operator_groups.values()) else set()
+        category_types = (
+            set().union(
+                *(
+                    group["types"]
+                    for group in operator_groups.values()
+                    if group["category"] == category["key"]
+                ),
+            )
+            if any(group["category"] == category["key"] for group in operator_groups.values())
+            else set()
+        )
         if category_types:
             operator_categories.append({**category, "types": category_types})
     return operator_categories, operator_groups
@@ -348,7 +355,16 @@ def _condition_assessment_display(row_kind: str, finding_ids) -> dict[str, dict]
         rows = cursor.fetchall()
 
     result: dict[str, dict] = {}
-    for finding_id, policy_version, policy_digest, assessed_at, response, participant_kind, participant_id, participant_role in rows:
+    for (
+        finding_id,
+        policy_version,
+        policy_digest,
+        assessed_at,
+        response,
+        participant_kind,
+        participant_id,
+        participant_role,
+    ) in rows:
         key = str(finding_id)
         assessment_response = json.loads(response) if isinstance(response, str) else response
         assessment_response = assessment_response or {}
@@ -369,15 +385,15 @@ def _condition_assessment_display(row_kind: str, finding_ids) -> dict[str, dict]
         item["dispositions"].add(assessment_response.get("disposition", "unknown"))
         item["reasons"].update(assessment_response.get("reasons") or [])
         item["blockers"].update(assessment_response.get("blockers") or [])
-        item["scopes"].add(
-            f"{participant_kind}:{participant_id}:{participant_role}"
-        )
+        item["scopes"].add(f"{participant_kind}:{participant_id}:{participant_role}")
         item["may_execute"] = item["may_execute"] and bool(assessment_response.get("may_execute"))
     for item in result.values():
         for field in ("reasons", "blockers"):
             item[field] = sorted(item[field])
         item["scopes"] = sorted(item["scopes"])
-        item["disposition"] = next(iter(item["dispositions"])) if len(item["dispositions"]) == 1 else "mixed"
+        item["disposition"] = (
+            next(iter(item["dispositions"])) if len(item["dispositions"]) == 1 else "mixed"
+        )
         del item["dispositions"]
     return result
 
@@ -418,11 +434,9 @@ def _condition_response_ids(finding_ids) -> dict[str, set[str]]:
         )
         assessed_ids = {row[0] for row in cursor.fetchall()}
         candidate_ids = [finding_id for finding_id in ids if finding_id in assessed_ids]
-        result["pending"].update(
-            finding_id for finding_id in ids if finding_id not in assessed_ids
-        )
+        result["pending"].update(finding_id for finding_id in ids if finding_id not in assessed_ids)
         for offset in range(0, len(candidate_ids), 1000):
-            batch = candidate_ids[offset:offset + 1000]
+            batch = candidate_ids[offset : offset + 1000]
             cursor.execute(
                 """
             WITH expected AS (
@@ -479,10 +493,19 @@ def _condition_response_ids(finding_ids) -> dict[str, set[str]]:
                 [batch, batch],
             )
             rows = cursor.fetchall()
-            for finding_id, expected, condition_execute, assessed, participant_execute, blocked, _unknown in rows:
+            for (
+                finding_id,
+                expected,
+                condition_execute,
+                assessed,
+                participant_execute,
+                blocked,
+                _unknown,
+            ) in rows:
                 key = str(finding_id)
                 complete = (
-                    bool(condition_execute) if not expected
+                    bool(condition_execute)
+                    if not expected
                     else assessed == expected and participant_execute == expected
                 )
                 if complete:
@@ -632,20 +655,20 @@ def _condition_operator_states(finding_ids, *, now=None) -> dict[str, dict[str, 
     )
     assessment_ids = list(dict.fromkeys([*ids, *(str(value) for value in critical_candidate_ids)]))
     response_ids = _condition_response_ids(assessment_ids)
-    response_by_id = {
-        key: ATTENTION_NEEDS_ACTION
-        for key in response_ids["actionable"]
-    }
-    response_by_id.update(
-        {key: ATTENTION_BLOCKED for key in response_ids["blocked"]}
+    response_by_id = {key: ATTENTION_NEEDS_ACTION for key in response_ids["actionable"]}
+    response_by_id.update({key: ATTENTION_BLOCKED for key in response_ids["blocked"]})
+    response_by_id.update({key: ATTENTION_PENDING for key in response_ids["pending"]})
+    rows = list(
+        Finding.objects.filter(tenant_id=1, id__in=assessment_ids).values(
+            "id",
+            "status",
+            "snoozed_until",
+            "severity",
+            "subject_type",
+            "subject_id",
+            "finding_type__name",
+        )
     )
-    response_by_id.update(
-        {key: ATTENTION_PENDING for key in response_ids["pending"]}
-    )
-    rows = list(Finding.objects.filter(tenant_id=1, id__in=assessment_ids).values(
-        "id", "status", "snoozed_until", "severity", "subject_type", "subject_id",
-        "finding_type__name",
-    ))
     states = {}
     for row in rows:
         key = str(row["id"])
@@ -682,14 +705,17 @@ def _condition_operator_states(finding_ids, *, now=None) -> dict[str, dict[str, 
                 ATTENTION_PAUSED: "Paused by operator",
             }.get(attention, ""),
         }
-        states[key].update({"subject_type": row["subject_type"], "subject_id": str(row["subject_id"])})
+        states[key].update(
+            {"subject_type": row["subject_type"], "subject_id": str(row["subject_id"])}
+        )
 
     # State projection can cover the complete fleet. Index the loaded rows
     # before identifying Critical findings: scanning ``rows`` once per ready
     # finding made the default Issues view quadratic in the queue size.
     row_by_id = {str(row["id"]): row for row in rows}
     critical_ids = {
-        key for key, state in states.items()
+        key
+        for key, state in states.items()
         if state["attention"] == ATTENTION_NEEDS_ACTION
         and row_by_id[key]["severity"] == Finding.Severity.CRITICAL
     }
@@ -720,40 +746,51 @@ def _condition_operator_states(finding_ids, *, now=None) -> dict[str, dict[str, 
         )
         for key, state in states.items():
             row = row_by_id[key]
-            if key in critical_ids or row["severity"] not in {
-                Finding.Severity.MEDIUM,
-                Finding.Severity.LOW,
-                Finding.Severity.INFO,
-            } or state["attention"] in {ATTENTION_PAUSED, ATTENTION_PENDING, ATTENTION_BLOCKED}:
+            if (
+                key in critical_ids
+                or row["severity"]
+                not in {
+                    Finding.Severity.MEDIUM,
+                    Finding.Severity.LOW,
+                    Finding.Severity.INFO,
+                }
+                or state["attention"] in {ATTENTION_PAUSED, ATTENTION_PENDING, ATTENTION_BLOCKED}
+            ):
                 continue
             same_subject = (row["subject_type"], str(row["subject_id"])) in critical_subjects
             same_participant = bool(participant_keys.get(key, set()) & critical_participants)
             if same_subject or same_participant:
                 critical_key = next(
-                    critical for critical in critical_ids
+                    critical
+                    for critical in critical_ids
                     if (
-                        (row_by_id[critical]["subject_type"], str(row_by_id[critical]["subject_id"]))
+                        (
+                            row_by_id[critical]["subject_type"],
+                            str(row_by_id[critical]["subject_id"]),
+                        )
                         == (row["subject_type"], str(row["subject_id"]))
                         or participant_keys.get(critical, set()) & participant_keys.get(key, set())
                     )
                 )
-                states[key].update({
-                    "attention": ATTENTION_BLOCKED,
-                    "reason": "Critical issue takes priority",
-                    "critical_finding_id": critical_key,
-                    "critical_subject_id": str(row_by_id[critical_key]["subject_id"]),
-                    "critical_type": row_by_id[critical_key]["finding_type__name"],
-                })
+                states[key].update(
+                    {
+                        "attention": ATTENTION_BLOCKED,
+                        "reason": "Critical issue takes priority",
+                        "critical_finding_id": critical_key,
+                        "critical_subject_id": str(row_by_id[critical_key]["subject_id"]),
+                        "critical_type": row_by_id[critical_key]["finding_type__name"],
+                    }
+                )
     return {key: states[key] for key in ids if key in states}
 
 
 def _operator_issue_type_groups(
-    finding_types: list[FindingType], category_key: str,
-    categories: list[dict], type_groups: dict[str, dict],
+    finding_types: list[FindingType],
+    category_key: str,
+    categories: list[dict],
+    type_groups: dict[str, dict],
 ) -> list[dict]:
-    allowed = next(
-        (item["types"] for item in categories if item["key"] == category_key), None
-    )
+    allowed = next((item["types"] for item in categories if item["key"] == category_key), None)
     available = {ft.name for ft in finding_types}
     result = []
     for group in type_groups.values():
@@ -773,9 +810,7 @@ def _affected_device_rows(findings) -> list[dict]:
     predicates. It remains tenant-scoped at every relationship boundary.
     """
     matching = findings.order_by().values("id")
-    matching_sql, matching_params = matching.query.get_compiler(
-        connection=connection
-    ).as_sql()
+    matching_sql, matching_params = matching.query.get_compiler(connection=connection).as_sql()
     with connection.cursor() as cur:
         cur.execute(
             f"""
@@ -830,6 +865,7 @@ def _affected_device_rows(findings) -> list[dict]:
             for row in cur.fetchall()
         ]
 
+
 # Fallback only. The real list is read from operations.sources so that
 # registering a source makes it appear everywhere it should — dashboard tile,
 # staleness check, coverage drilldown — without a code change. Used verbatim
@@ -865,6 +901,7 @@ def _registered_sources() -> tuple[str, ...]:
     except Exception:  # pragma: no cover - dashboard must not hard-fail
         log.exception("source list query failed — using fallback")
         return _SOURCES_FALLBACK
+
 
 _DASHBOARD_DOMAIN_CATEGORIES = {
     "patching": "patching",
@@ -2510,7 +2547,10 @@ def device_detail(request: HttpRequest, org_slug: str, device_id: str) -> HttpRe
     for candidate in MergeCandidate.objects.filter(
         tenant_id=1, client_id=device.client_id, status=MergeCandidate.Status.OPEN
     ).only("id", "member_snapshots"):
-        if any(str(device.id) == str(member.get("device_id")) for member in (candidate.member_snapshots or [])):
+        if any(
+            str(device.id) == str(member.get("device_id"))
+            for member in (candidate.member_snapshots or [])
+        ):
             merge_candidate = candidate
             break
     if active_tab == "overview":
@@ -2556,11 +2596,7 @@ def device_detail(request: HttpRequest, org_slug: str, device_id: str) -> HttpRe
     response_ids = _condition_response_ids(finding.id for finding in active_findings)
     for finding in active_findings:
         finding.condition_response = next(
-            (
-                state
-                for state, ids in response_ids.items()
-                if str(finding.id) in ids
-            ),
+            (state for state, ids in response_ids.items() if str(finding.id) in ids),
             "pending",
         )
         if finding.snoozed_until and finding.snoozed_until > timezone.now():
@@ -2902,15 +2938,76 @@ def device_detail(request: HttpRequest, org_slug: str, device_id: str) -> HttpRe
         def _attribute_section(key: str, display_name: str) -> str:
             """Place every normalized claim in an operator-readable section."""
             text = f"{key} {display_name}".lower()
-            if any(term in text for term in ("ip", "mac", "network", "gateway", "dns", "adapter", "subnet")):
+            if any(
+                term in text
+                for term in ("ip", "mac", "network", "gateway", "dns", "adapter", "subnet")
+            ):
                 return "network"
-            if any(term in text for term in ("serial", "manufacturer", "model", "cpu", "processor", "memory", "ram", "disk", "storage", "bios", "chassis", "virtual", "vm ", "vm_", "hypervisor")):
+            if any(
+                term in text
+                for term in (
+                    "serial",
+                    "manufacturer",
+                    "model",
+                    "cpu",
+                    "processor",
+                    "memory",
+                    "ram",
+                    "disk",
+                    "storage",
+                    "bios",
+                    "chassis",
+                    "virtual",
+                    "vm ",
+                    "vm_",
+                    "hypervisor",
+                )
+            ):
                 return "hardware"
-            if any(term in text for term in ("operating system", "os_", "windows", "kernel", "boot", "uptime", "architecture", "release", "build")):
+            if any(
+                term in text
+                for term in (
+                    "operating system",
+                    "os_",
+                    "windows",
+                    "kernel",
+                    "boot",
+                    "uptime",
+                    "architecture",
+                    "release",
+                    "build",
+                )
+            ):
                 return "operating_system"
-            if any(term in text for term in ("name", "hostname", "domain", "fqdn", "asset tag", "role", "device type", "client")):
+            if any(
+                term in text
+                for term in (
+                    "name",
+                    "hostname",
+                    "domain",
+                    "fqdn",
+                    "asset tag",
+                    "role",
+                    "device type",
+                    "client",
+                )
+            ):
                 return "identity"
-            if any(term in text for term in ("patch", "reboot", "threat", "security", "antivirus", "agent", "maintenance", "health", "user", "power")):
+            if any(
+                term in text
+                for term in (
+                    "patch",
+                    "reboot",
+                    "threat",
+                    "security",
+                    "antivirus",
+                    "agent",
+                    "maintenance",
+                    "health",
+                    "user",
+                    "power",
+                )
+            ):
                 return "management"
             return "other"
 
@@ -2945,9 +3042,7 @@ def device_detail(request: HttpRequest, org_slug: str, device_id: str) -> HttpRe
             value_groups = [
                 {
                     "value": value,
-                    "sources": [
-                        sources[source_key] for source_key in sorted(sources)
-                    ],
+                    "sources": [sources[source_key] for source_key in sorted(sources)],
                 }
                 for value, sources in field["values"].items()
             ]
@@ -2965,9 +3060,7 @@ def device_detail(request: HttpRequest, org_slug: str, device_id: str) -> HttpRe
         attribute_sections = [
             {
                 "name": section_labels[section],
-                "fields": [
-                    field for field in attribute_fields if field["section"] == section
-                ],
+                "fields": [field for field in attribute_fields if field["section"] == section],
             }
             for section in section_labels
         ]
@@ -3044,8 +3137,7 @@ def device_detail(request: HttpRequest, org_slug: str, device_id: str) -> HttpRe
             name, publisher = row[0], row[1]
             pub_entry = by_publisher.get(publisher) if publisher else None
             if pub_entry and (
-                name not in decisions_map
-                or pub_entry["tier"] > decisions_map[name]["tier"]
+                name not in decisions_map or pub_entry["tier"] > decisions_map[name]["tier"]
             ):
                 decisions_map[name] = pub_entry
 
@@ -3065,11 +3157,7 @@ def device_detail(request: HttpRequest, org_slug: str, device_id: str) -> HttpRe
                 else (
                     "device"
                     if decisions_map[r[0]]["device_id"] is not None
-                    else (
-                        "client"
-                        if decisions_map[r[0]]["client_id"] is not None
-                        else "global"
-                    )
+                    else ("client" if decisions_map[r[0]]["client_id"] is not None else "global")
                 )
             ),
         }
@@ -3081,14 +3169,11 @@ def device_detail(request: HttpRequest, org_slug: str, device_id: str) -> HttpRe
         _coverage_policy_rows(device, exemptions) if active_tab == "overview" else []
     )
     required_agent_rows = [
-        row
-        for row in coverage_policy_rows
-        if row["platform"] != "—" and not row["exempt"]
+        row for row in coverage_policy_rows if row["platform"] != "—" and not row["exempt"]
     ]
     current_agent_records = {
         (source, entity_type)
-        for _observation_id, source, entity_type, _external_id, _source_url, active, _last_seen,
-        _reported_online, _last_contact, record_lifecycle in observations
+        for _observation_id, source, entity_type, _external_id, _source_url, active, _last_seen, _reported_online, _last_contact, record_lifecycle in observations
         if active and record_lifecycle not in {"archived", "retired", "decommissioned"}
     }
     agent_summary = {
@@ -3294,8 +3379,7 @@ def device_detail(request: HttpRequest, org_slug: str, device_id: str) -> HttpRe
             "can_view_entity_evidence": bool(
                 device.entity_id
                 and (
-                    request.user.is_superuser
-                    or request.user.has_perm("operations.manage_catalog")
+                    request.user.is_superuser or request.user.has_perm("operations.manage_catalog")
                 )
             ),
             "can_manage_lifecycle": can_manage_lifecycle(request.user),
@@ -3341,9 +3425,7 @@ def device_lifecycle_set(
         deleted_at__isnull=True,
     )
     desired_status = (
-        Device.LifecycleStatus.RETIRED
-        if target == "retired"
-        else Device.LifecycleStatus.ACTIVE
+        Device.LifecycleStatus.RETIRED if target == "retired" else Device.LifecycleStatus.ACTIVE
     )
     if device.lifecycle_status == desired_status:
         messages.info(
@@ -3367,9 +3449,7 @@ def device_lifecycle_set(
     entity.retired_reason = reason if target == "retired" else ""
     entity.updated_at = now
     entity.updated_reason = f"operator.lifecycle_{target}"
-    entity.save(
-        update_fields=["retired_at", "retired_reason", "updated_at", "updated_reason"]
-    )
+    entity.save(update_fields=["retired_at", "retired_reason", "updated_at", "updated_reason"])
     _audit(
         request,
         f"device.lifecycle.{target}",
@@ -3526,8 +3606,7 @@ def search(request: HttpRequest) -> HttpResponse:
     if not include_retired:
         devices_qs = devices_qs.exclude(lifecycle_status=Device.LifecycleStatus.RETIRED)
     devices = list(
-        devices_qs
-        .filter(Q(canonical_hostname__icontains=q) | Q(canonical_serial__icontains=q))
+        devices_qs.filter(Q(canonical_hostname__icontains=q) | Q(canonical_serial__icontains=q))
         .select_related("client")
         .order_by("canonical_hostname")[:100]
     )
@@ -3613,22 +3692,21 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
 
     # Normalize legacy technical values into the operator-facing filter groups.
     category_filter = next(
-        (
-            item["key"] for item in issue_categories
-            if category_filter in item["categories"]
-        ),
+        (item["key"] for item in issue_categories if category_filter in item["categories"]),
         category_filter,
     )
     if category_filter == requested_category_filter and requested_category_filter:
         # Preserve old bookmarked category URLs by resolving the legacy
         # registry category to the policy-owned taxonomy category.
         legacy_type_names = set(
-            FindingType.objects.filter(category__name=requested_category_filter)
-            .values_list("name", flat=True)
+            FindingType.objects.filter(category__name=requested_category_filter).values_list(
+                "name", flat=True
+            )
         )
         category_filter = next(
             (
-                item["key"] for item in issue_categories
+                item["key"]
+                for item in issue_categories
                 if legacy_type_names.intersection(item["types"])
             ),
             category_filter,
@@ -3647,9 +3725,9 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
             break
 
     selected_type = issue_type_groups.get(type_filter)
-    valid_issue_names = {
-        issue["value"] for issue in selected_type["issues"]
-    } if selected_type else set()
+    valid_issue_names = (
+        {issue["value"] for issue in selected_type["issues"]} if selected_type else set()
+    )
     if issue_filter and issue_filter not in valid_issue_names:
         issue_filter = ""
 
@@ -3678,7 +3756,9 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
             snoozed_until__gt=timezone.now(),
         )
     elif status_filter == "resolved":
-        qs = qs.filter(status__in=(Finding.Status.RESOLVED, Finding.Status.SUPPRESSED, Finding.Status.WONTFIX))
+        qs = qs.filter(
+            status__in=(Finding.Status.RESOLVED, Finding.Status.SUPPRESSED, Finding.Status.WONTFIX)
+        )
     if not show_snoozed:
         qs = qs.filter(Q(snoozed_until__isnull=True) | Q(snoozed_until__lt=timezone.now()))
 
@@ -3688,7 +3768,11 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
             {category_filter},
         )
         category_types = next(
-            (item.get("types", set()) for item in issue_categories if item["key"] == category_filter),
+            (
+                item.get("types", set())
+                for item in issue_categories
+                if item["key"] == category_filter
+            ),
             set(),
         )
         if category_types:
@@ -3835,23 +3919,17 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
         status__in=_FINDING_ACTIVE_STATUSES,
     ).exclude(finding_type__name__in=_SOFTWARE_POLICY_CANDIDATE_TYPES)
     fleet_ids = (
-        list(fleet_governed_qs.values_list("id", flat=True))
-        if needs_per_finding_states
-        else []
+        list(fleet_governed_qs.values_list("id", flat=True)) if needs_per_finding_states else []
     )
     fleet_id_keys = {str(finding_id) for finding_id in fleet_ids}
     fleet_states = _condition_operator_states(fleet_ids)
-    fleet_state_counts_by_type = (
-        {} if needs_per_finding_states else _fleet_condition_state_counts()
-    )
+    fleet_state_counts_by_type = {} if needs_per_finding_states else _fleet_condition_state_counts()
 
     # Attention is separate from operator Status. Governed findings are
     # filtered only after all subject and evidence filters have been applied.
     governed_qs = qs
     governed_ids = (
-        list(governed_qs.values_list("id", flat=True))
-        if needs_per_finding_states
-        else []
+        list(governed_qs.values_list("id", flat=True)) if needs_per_finding_states else []
     )
     governed_id_keys = {str(finding_id) for finding_id in governed_ids}
     operator_states = (
@@ -3861,8 +3939,7 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
     )
     if attention_filter:
         selected_ids = {
-            key for key, state in operator_states.items()
-            if state["attention"] == attention_filter
+            key for key, state in operator_states.items() if state["attention"] == attention_filter
         }
         qs = qs.filter(id__in=selected_ids)
 
@@ -3872,9 +3949,7 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
     actionable_qs = qs
     if needs_per_finding_states:
         fleet_counts = {
-            attention: sum(
-                1 for state in fleet_states.values() if state["attention"] == attention
-            )
+            attention: sum(1 for state in fleet_states.values() if state["attention"] == attention)
             for attention in (
                 ATTENTION_NEEDS_ACTION,
                 ATTENTION_BLOCKED,
@@ -3885,8 +3960,7 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
     else:
         fleet_counts = {
             attention: sum(
-                counts.get(attention, 0)
-                for counts in fleet_state_counts_by_type.values()
+                counts.get(attention, 0) for counts in fleet_state_counts_by_type.values()
             )
             for attention in (
                 ATTENTION_NEEDS_ACTION,
@@ -3954,8 +4028,7 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
     # out of Python memory.
     table_filter_keys = ("severity", "finding", "subject", "context", "status")
     table_filters = {
-        key: (request.GET.get(f"table_{key}") or "").strip()
-        for key in table_filter_keys
+        key: (request.GET.get(f"table_{key}") or "").strip() for key in table_filter_keys
     }
     sort_key = request.GET.get("sort", "group")
     if sort_key not in {"group", "severity", "finding", "subject", "context", "status"}:
@@ -3973,18 +4046,14 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
     }
     issue_labels = {
         type_name: (
-            profile.definitions.get(type_name, {}).get("label", type_name)
-            if profile else type_name
+            profile.definitions.get(type_name, {}).get("label", type_name) if profile else type_name
         )
         for type_name in type_labels
     }
 
     def _label_case(labels: dict[str, str]):
         return Case(
-            *[
-                When(finding_type__name=key, then=Value(value))
-                for key, value in labels.items()
-            ],
+            *[When(finding_type__name=key, then=Value(value)) for key, value in labels.items()],
             default=Value(""),
             output_field=CharField(),
         )
@@ -3992,10 +4061,7 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
     type_label_expression = _label_case(type_labels)
     issue_label_expression = _label_case(issue_labels)
     severity_label_expression = Case(
-        *[
-            When(severity=value, then=Value(label))
-            for value, label in Finding.Severity.choices
-        ],
+        *[When(severity=value, then=Value(label)) for value, label in Finding.Severity.choices],
         default=Value(""),
         output_field=CharField(),
     )
@@ -4032,7 +4098,10 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
             then=Coalesce(F("client__display_name"), Value("(unnamed client)")),
         ),
         When(
-            subject_type__in=(Finding.SubjectType.SOFTWARE_PRODUCT, Finding.SubjectType.SOFTWARE_VERSION),
+            subject_type__in=(
+                Finding.SubjectType.SOFTWARE_PRODUCT,
+                Finding.SubjectType.SOFTWARE_VERSION,
+            ),
             then=Coalesce(
                 RawSQL("finding_details->>'canonical_name'", []),
                 Value("(unnamed software)"),
@@ -4401,15 +4470,9 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
         if value:
             database_qs = database_qs.annotate(
                 **{f"rendered_{key}": database_annotations[f"rendered_{key}"]}
-            ).filter(
-                **{f"rendered_{key}__icontains": value}
-            )
+            ).filter(**{f"rendered_{key}__icontains": value})
     database_query_mode = sort_key in database_sort_fields
-    database_page_mode = (
-        show_finding_rows
-        and not wants_csv(request)
-        and database_query_mode
-    )
+    database_page_mode = show_finding_rows and not wants_csv(request) and database_query_mode
     database_page = None
     findings = []
     if show_finding_rows:
@@ -4500,9 +4563,7 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
         if name == "device_source_record_withdrawn":
             source = d.get("source") or "source"
             withdrawn_at = d.get("withdrawn_at")
-            return f"removed from {source}" + (
-                f" · {withdrawn_at[:10]}" if withdrawn_at else ""
-            )
+            return f"removed from {source}" + (f" · {withdrawn_at[:10]}" if withdrawn_at else "")
         if name == "device_missing_from_source":
             source = d.get("last_source")
             last_seen_at = d.get("last_seen_at")
@@ -4531,7 +4592,9 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
         if name == "cmdb_asset_stale":
             asset = d.get("name") or "Hudu record"
             layout = d.get("layout")
-            return f"{asset}" + (f" · {layout}" if layout else "") + " · linked source record is gone"
+            return (
+                f"{asset}" + (f" · {layout}" if layout else "") + " · linked source record is gone"
+            )
         if name == "cross_client_serial":
             devices = d.get("device_count")
             clients = d.get("client_count")
@@ -4665,7 +4728,9 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
         details = finding.finding_details or {}
         return {
             "hostname": device.get("hostname") or details.get("hostname", ""),
-            "os_name": details.get("os_name") or current.get("os_name") or device.get("os_name", ""),
+            "os_name": details.get("os_name")
+            or current.get("os_name")
+            or device.get("os_name", ""),
             "os_release_id": details.get("os_release_id") or current.get("os_release_id", ""),
             "os_build_number": details.get("os_build_number")
             or details.get("build_number")
@@ -4704,9 +4769,9 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
     }
     source_names_by_id = {
         source_id: name
-        for source_id, name in Source.objects.filter(id__in=client_name_conflict_sources).values_list(
-            "id", "name"
-        )
+        for source_id, name in Source.objects.filter(
+            id__in=client_name_conflict_sources
+        ).values_list("id", "name")
     }
 
     def _display_row(f: Finding) -> dict:
@@ -4787,7 +4852,7 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
         # the actual Computers. If a hostname is available, make the visible
         # Computer subject drill into that Computer rather than the client.
         if f.finding_type.name == "identity_conflict" and f.client:
-            candidate_ids = (details.get("candidate_device_ids") or [])
+            candidate_ids = details.get("candidate_device_ids") or []
             candidates = list(
                 Device.objects.filter(
                     tenant_id=1,
@@ -4849,9 +4914,7 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
         if detail := _detail_string(f):
             context_parts.insert(0, detail)
         if evidence_date:
-            context_parts.append(
-                f"{evidence_label}: {evidence_date.strftime('%Y-%m-%d %H:%M')}"
-            )
+            context_parts.append(f"{evidence_label}: {evidence_date.strftime('%Y-%m-%d %H:%M')}")
 
         return {
             "f": f,
@@ -4863,9 +4926,7 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
             "review_url": reverse("finding_review", kwargs={"finding_id": f.id}),
             "related_device": related_device,
             "hudu_url": hudu_url,
-            "archive_action": (
-                f.finding_type.name == "cmdb_asset_stale" and may_archive_hudu
-            ),
+            "archive_action": (f.finding_type.name == "cmdb_asset_stale" and may_archive_hudu),
             "context": " · ".join(context_parts),
             "canonical_name": details.get("canonical_name", ""),
             "publisher": details.get("publisher", ""),
@@ -4896,13 +4957,18 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
             if governed_state
             else projected["reason"]
         )
-        if row["operator_attention"] == ATTENTION_PENDING and row["operator_reason"] == "Ready for action":
+        if (
+            row["operator_attention"] == ATTENTION_PENDING
+            and row["operator_reason"] == "Ready for action"
+        ):
             row["operator_reason"] = "Pending current assessment"
-        elif row["operator_attention"] == ATTENTION_BLOCKED and row["operator_reason"] == "Ready for action":
+        elif (
+            row["operator_attention"] == ATTENTION_BLOCKED
+            and row["operator_reason"] == "Ready for action"
+        ):
             row["operator_reason"] = "Blocked by current evidence"
         row["work_status_label"] = (
-            OPERATOR_ATTENTION_LABELS.get(row["operator_attention"])
-            or row["operator_status_label"]
+            OPERATOR_ATTENTION_LABELS.get(row["operator_attention"]) or row["operator_status_label"]
         )
         # The normal state explanation merely repeats the work status (for
         # example, "Needs action — Ready for action"). Keep a note only when
@@ -4920,7 +4986,9 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
             }
             else row["operator_reason"],
         )
-        row["critical_finding_id"] = governed_state.get("critical_finding_id") if governed_state else ""
+        row["critical_finding_id"] = (
+            governed_state.get("critical_finding_id") if governed_state else ""
+        )
         row["refresh_available"] = row["operator_attention"] == ATTENTION_PENDING
         row["refresh_title"] = "Refresh the relevant current information for this Issue"
         row["refresh_available"] = row["operator_attention"] == ATTENTION_PENDING
@@ -5005,23 +5073,32 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
         if row["f"].finding_type.name == "patching_stalled":
             row["issue_label"] = _patching_inactive_label(row["f"].finding_details or {})
         type_group = next(
-            (group for group in issue_type_groups.values()
-             if row["f"].finding_type.name in group["types"]),
+            (
+                group
+                for group in issue_type_groups.values()
+                if row["f"].finding_type.name in group["types"]
+            ),
             None,
         )
         category_group = next(
-            (category for category in issue_categories
-             if row["f"].finding_type.name in category["types"]),
+            (
+                category
+                for category in issue_categories
+                if row["f"].finding_type.name in category["types"]
+            ),
             None,
         )
         row["issue_type_key"] = type_group["value"] if type_group else ""
         row["issue_type_label"] = type_group["label"] if type_group else "Unclassified issue"
         row["issue_category_key"] = category_group["key"] if category_group else ""
-        row["issue_category_label"] = category_group["label"] if category_group else "Unclassified issue"
+        row["issue_category_label"] = (
+            category_group["label"] if category_group else "Unclassified issue"
+        )
         row["issue_display_label"] = row["issue_label"]
         details = row["f"].finding_details or {}
         if details.get("platform") and row["f"].finding_type.name in {
-            "missing_required_platform", "stale_required_platform",
+            "missing_required_platform",
+            "stale_required_platform",
         }:
             row["issue_display_label"] += f": {details['platform']}"
         if details.get("reason_suppressed") == "device_offline":
@@ -5059,9 +5136,7 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
                 ),
                 (
                     "Security support ends",
-                    lambda r: (r["f"].finding_details or {}).get(
-                        "security_support_ends_on", ""
-                    ),
+                    lambda r: (r["f"].finding_details or {}).get("security_support_ends_on", ""),
                 ),
                 ("Context", "context"),
                 ("Online sources", "online_sources"),
@@ -5087,8 +5162,7 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
         ("status", lambda row: row["work_status_label"]),
     )
     table_filters = {
-        key: (request.GET.get(f"table_{key}") or "").strip()
-        for key, _getter in table_filter_specs
+        key: (request.GET.get(f"table_{key}") or "").strip() for key, _getter in table_filter_specs
     }
 
     def _table_value(value):
@@ -5124,8 +5198,8 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
     )
     response_matching = total_matching
     actionable_matching = total_matching
-    matching_qs = database_qs if database_query_mode else (
-        qs if not show_finding_rows else matching_qs
+    matching_qs = (
+        database_qs if database_query_mode else (qs if not show_finding_rows else matching_qs)
     )
     # The collapsed default queue has no rows selected for review. Do not
     # expand its entire Finding population through the software-exposure view
@@ -5177,8 +5251,7 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
     else:
         state_counts_by_type = {
             finding_type_name: {
-                state: counts.get(state, 0)
-                for state in ("needs_action", "blocked", "pending")
+                state: counts.get(state, 0) for state in ("needs_action", "blocked", "pending")
             }
             for finding_type_name, counts in fleet_state_counts_by_type.items()
         }
@@ -5242,7 +5315,9 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
         }
         source_names_by_id = {
             str(source_id): name
-            for source_id, name in Source.objects.filter(id__in=source_ids).values_list("id", "name")
+            for source_id, name in Source.objects.filter(id__in=source_ids).values_list(
+                "id", "name"
+            )
         }
         client_ids = {
             ref.get("client_id")
@@ -5256,19 +5331,17 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
             ).only("id", "slug", "display_name")
         }
         client_references_by_id: dict[str, list[dict]] = {}
-        if any(
-            finding.finding_type.name == "client_name_conflict"
-            for finding in admin_rows
-        ):
+        if any(finding.finding_type.name == "client_name_conflict" for finding in admin_rows):
             for reference in client_source_references():
-                client_references_by_id.setdefault(str(reference["client_id"]), []).append(reference)
+                client_references_by_id.setdefault(str(reference["client_id"]), []).append(
+                    reference
+                )
         for finding in admin_rows:
             ref = finding.subject_ref or {}
             client = clients_by_id.get(str(ref.get("client_id")))
             source_name = source_names_by_id.get(str(ref.get("source_id")), "")
-            source_reference = (
-                ref.get("external_id")
-                or " · ".join((finding.details or {}).get("external_ids") or [])
+            source_reference = ref.get("external_id") or " · ".join(
+                (finding.details or {}).get("external_ids") or []
             )
             references = client_references_by_id.get(str(ref.get("client_id")), [])
             matching_reference = next(
@@ -5307,7 +5380,9 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
                     ),
                     "issue_label": profile.definitions.get(finding.finding_type.name, {}).get(
                         "label", finding.finding_type.name
-                    ) if profile else finding.finding_type.name,
+                    )
+                    if profile
+                    else finding.finding_type.name,
                     "client_name": (
                         client.display_name
                         if client
@@ -5384,7 +5459,8 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
                     "expanded": bool(
                         type_filter == group["value"]
                         or issue_filter in names
-                        or active_group_key and names.intersection({type_filter})
+                        or active_group_key
+                        and names.intersection({type_filter})
                         or device_id_filter
                         or subject_id_filter
                     ),
@@ -5486,7 +5562,13 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
         for group in issue_type_groups.values()
     ]
     clients = Client.objects.filter(tenant_id=1, deleted_at__isnull=True).order_by("display_name")
-    os_choices = list(Device.objects.filter(tenant_id=1, deleted_at__isnull=True).exclude(os_name="").order_by("os_name").values_list("os_name", flat=True).distinct())
+    os_choices = list(
+        Device.objects.filter(tenant_id=1, deleted_at__isnull=True)
+        .exclude(os_name="")
+        .order_by("os_name")
+        .values_list("os_name", flat=True)
+        .distinct()
+    )
 
     page_query = request.GET.copy()
     page_query.pop("page", None)
@@ -5612,15 +5694,16 @@ def _source_name_for_refresh(finding: Finding) -> str:
     domain = str(details.get("domain") or "")
     if domain.startswith("source."):
         candidate = domain.removeprefix("source.").split(".", 1)[0]
-        return Source.objects.filter(name__iexact=candidate).values_list("name", flat=True).first() or ""
+        return (
+            Source.objects.filter(name__iexact=candidate).values_list("name", flat=True).first()
+            or ""
+        )
     return ""
 
 
 def _queue_source_refresh(source_name: str) -> tuple[bool, str]:
     """Queue the existing on-demand collector for one named source."""
-    endpoint = "run/sources/enqueue?" + urlencode(
-        {"source": source_name, "confirm": "1"}
-    )
+    endpoint = "run/sources/enqueue?" + urlencode({"source": source_name, "confirm": "1"})
     return _dispatch_job({"endpoint": endpoint})
 
 
@@ -5715,7 +5798,9 @@ def targeted_refresh(request: HttpRequest) -> HttpResponse:
     if search:
         computers = (
             Device.objects.filter(tenant_id=1, deleted_at__isnull=True)
-            .filter(Q(canonical_hostname__icontains=search) | Q(client__display_name__icontains=search))
+            .filter(
+                Q(canonical_hostname__icontains=search) | Q(client__display_name__icontains=search)
+            )
             .select_related("client")
             .order_by("canonical_hostname", "id")[:50]
         )
@@ -5767,11 +5852,15 @@ def finding_review(request: HttpRequest, finding_id: str) -> HttpResponse:
     review_links: list[dict[str, str]] = []
 
     if finding.subject_type == Finding.SubjectType.DEVICE:
-        device = Device.objects.filter(
-            tenant_id=1,
-            id=finding.subject_id,
-            deleted_at__isnull=True,
-        ).select_related("client").first()
+        device = (
+            Device.objects.filter(
+                tenant_id=1,
+                id=finding.subject_id,
+                deleted_at__isnull=True,
+            )
+            .select_related("client")
+            .first()
+        )
         if device and device.client:
             subject_label = device.canonical_hostname or "Unnamed Computer"
             subject_url = reverse(
@@ -5821,12 +5910,16 @@ def finding_review(request: HttpRequest, finding_id: str) -> HttpResponse:
 
     if finding.finding_type.name == "identity_conflict" and finding.client:
         candidate_ids = details.get("candidate_device_ids") or []
-        candidates = Device.objects.filter(
-            tenant_id=1,
-            client_id=finding.client_id,
-            id__in=candidate_ids,
-            deleted_at__isnull=True,
-        ).select_related("client").order_by("canonical_hostname", "id")
+        candidates = (
+            Device.objects.filter(
+                tenant_id=1,
+                client_id=finding.client_id,
+                id__in=candidate_ids,
+                deleted_at__isnull=True,
+            )
+            .select_related("client")
+            .order_by("canonical_hostname", "id")
+        )
         for index, device in enumerate(candidates, start=1):
             review_links.append(
                 {
@@ -5973,10 +6066,7 @@ def findings_bulk_action(request: HttpRequest) -> HttpResponse:
 
     registered_action = FINDING_ACTIONS.get(action)
     if registered_action is not None:
-        if not (
-            request.user.is_superuser
-            or request.user.has_perm(registered_action.permission)
-        ):
+        if not (request.user.is_superuser or request.user.has_perm(registered_action.permission)):
             raise PermissionDenied
         if registered_action.key == BULK_RETIRE_COMPUTERS.key:
             return _retire_selected_computers(request, ids, registered_action)
@@ -5988,9 +6078,7 @@ def findings_bulk_action(request: HttpRequest) -> HttpResponse:
 
     now = timezone.now()
     qs = Finding.objects.filter(tenant_id=1, id__in=ids)
-    policy_count = qs.filter(
-        finding_type__name__in=_SOFTWARE_POLICY_CANDIDATE_TYPES
-    ).count()
+    policy_count = qs.filter(finding_type__name__in=_SOFTWARE_POLICY_CANDIDATE_TYPES).count()
     qs = qs.exclude(finding_type__name__in=_SOFTWARE_POLICY_CANDIDATE_TYPES)
     if not qs.exists():
         messages.info(
@@ -6004,7 +6092,10 @@ def findings_bulk_action(request: HttpRequest) -> HttpResponse:
         refreshed = 0
         failures = 0
         for finding in qs.only("subject_type", "subject_id", "finding_details"):
-            if finding.subject_type == Finding.SubjectType.DEVICE and finding.subject_id in refreshed_device_ids:
+            if (
+                finding.subject_type == Finding.SubjectType.DEVICE
+                and finding.subject_id in refreshed_device_ids
+            ):
                 continue
             queued, target, _detail = _queue_refresh_for_finding(finding)
             if queued:
@@ -6014,12 +6105,11 @@ def findings_bulk_action(request: HttpRequest) -> HttpResponse:
             else:
                 failures += 1
         if refreshed:
-            message = (
-                f"Refresh queued for {refreshed} Issue"
-                f"{'s' if refreshed != 1 else ''}."
-            )
+            message = f"Refresh queued for {refreshed} Issue" f"{'s' if refreshed != 1 else ''}."
             if failures:
-                message += f" {failures} issue{'s' if failures != 1 else ''} could not be refreshed."
+                message += (
+                    f" {failures} issue{'s' if failures != 1 else ''} could not be refreshed."
+                )
         else:
             messages.warning(request, "The selected Issues could not be refreshed.")
             return redirect(request.POST.get("next") or "findings_queue")
@@ -6106,8 +6196,9 @@ def _retire_selected_computers(request: HttpRequest, ids: list[str], action) -> 
 
     device_ids = [finding.subject_id for finding in findings]
     devices = list(
-        Device.objects.select_for_update()
-        .filter(tenant_id=1, id__in=device_ids, deleted_at__isnull=True)
+        Device.objects.select_for_update().filter(
+            tenant_id=1, id__in=device_ids, deleted_at__isnull=True
+        )
     )
     devices_by_id = {device.id: device for device in devices}
     if len(devices_by_id) != len(device_ids) or any(
@@ -6147,9 +6238,7 @@ def _retire_selected_computers(request: HttpRequest, ids: list[str], action) -> 
         entity.retired_reason = reason
         entity.updated_at = now
         entity.updated_reason = "operator.finding_action.retire"
-        entity.save(
-            update_fields=["retired_at", "retired_reason", "updated_at", "updated_reason"]
-        )
+        entity.save(update_fields=["retired_at", "retired_reason", "updated_at", "updated_reason"])
         _audit(
             request,
             "finding_action.retire_computer",
@@ -6158,7 +6247,9 @@ def _retire_selected_computers(request: HttpRequest, ids: list[str], action) -> 
             {
                 "lifecycle_status": device.lifecycle_status,
                 "reason": reason,
-                "finding_ids": [str(finding.id) for finding in findings if finding.subject_id == device.id],
+                "finding_ids": [
+                    str(finding.id) for finding in findings if finding.subject_id == device.id
+                ],
             },
             entity_type="device",
         )
@@ -6174,9 +6265,7 @@ def _retire_selected_computers(request: HttpRequest, ids: list[str], action) -> 
     for finding in retiring_findings:
         details = dict(finding.finding_details or {})
         details["resolution"] = {"reason": "retired", "detail": reason}
-        Finding.objects.filter(id=finding.id, tenant_id=1).update(
-            finding_details=details
-        )
+        Finding.objects.filter(id=finding.id, tenant_id=1).update(finding_details=details)
     messages.success(
         request,
         f"Retired {len(devices)} Computer{'s' if len(devices) != 1 else ''}. "
@@ -6323,7 +6412,7 @@ def _software_page_data(request: HttpRequest) -> dict:
     # (browser/dev_tools/media/...) from catalog.v_product_category_effective
     # (migration 104) -- distinct table, distinct filter, never conflated.
     product_category_filter = request.GET.get("product_category", "")
-    safety_filter = request.GET.get("safety", "")      # high|medium|low|clean
+    safety_filter = request.GET.get("safety", "")  # high|medium|low|clean
     publisher_filter = (request.GET.get("publisher") or "").strip()
     flagged_filter = request.GET.get("flagged", "").strip().lower() in ("1", "true", "yes", "on")
     min_devices = request.GET.get("min_devices", "").strip()
@@ -6434,9 +6523,7 @@ def _software_page_data(request: HttpRequest) -> dict:
     # view (which timed out on fleets with tens of thousands of titles).
     safety_filter_names: list[str] = []
     if safety_filter in ("high", "medium", "low", "clean", "unknown"):
-        safety_filter_names = [
-            r[0] for r in all_safety_rows if r[2] == safety_filter
-        ]
+        safety_filter_names = [r[0] for r in all_safety_rows if r[2] == safety_filter]
         if not safety_filter_names:
             # No products in that band. Force the main query to return
             # zero title rows without scanning the whole fleet.
@@ -6576,9 +6663,7 @@ def _software_page_data(request: HttpRequest) -> dict:
         if product_category_filter == "uncategorized":
             where_clauses.append("pcbt.product_categories IS NULL")
         elif product_category_filter:
-            where_clauses.append(
-                "%s = ANY(COALESCE(pcbt.product_categories, ARRAY[]::text[]))"
-            )
+            where_clauses.append("%s = ANY(COALESCE(pcbt.product_categories, ARRAY[]::text[]))")
             params.append(product_category_filter)
         if decision_filter == "approved":
             where_clauses.append(
@@ -6737,8 +6822,10 @@ def _software_page_data(request: HttpRequest) -> dict:
             high_risk_titles += 1
         if cn in shown_set:
             safety_by_title[cn] = {
-                "score": score, "band": band,
-                "cve_count": cve_count, "kev_count": kev_count,
+                "score": score,
+                "band": band,
+                "cve_count": cve_count,
+                "kev_count": kev_count,
                 "osint_hits": osint_hits,
             }
 
@@ -6777,8 +6864,7 @@ def _software_page_data(request: HttpRequest) -> dict:
         # Derive new-high-risk from the safety snapshot rather than a
         # separate view scan.
         this_week["new_high_risk"] = sum(
-            1 for r in all_safety_rows
-            if r[2] == "high" and r[0] in new_products_set
+            1 for r in all_safety_rows if r[2] == "high" and r[0] in new_products_set
         )
     except Exception:
         pass
@@ -6833,9 +6919,7 @@ def _software_page_data(request: HttpRequest) -> dict:
         status__in=_FINDING_ACTIVE_STATUSES,
         finding_type__category__name="software",
     )
-    software_issues = software_open_qs.exclude(
-        finding_type__name="whitelist_suggestion"
-    ).count()
+    software_issues = software_open_qs.exclude(finding_type__name="whitelist_suggestion").count()
     # Resolve the registry id before the distinct JSON aggregate.  Filtering
     # through the category/type joins made PostgreSQL abandon the existing
     # partial expression index on `finding_details -> 'canonical_name'`; on
@@ -6844,9 +6928,7 @@ def _software_page_data(request: HttpRequest) -> dict:
     # (the type is itself a software finding) and uses
     # idx_findings_type_canonical.
     whitelist_type_id = (
-        FindingType.objects.filter(name="whitelist_suggestion")
-        .values_list("id", flat=True)
-        .first()
+        FindingType.objects.filter(name="whitelist_suggestion").values_list("id", flat=True).first()
     )
     whitelist_suggestions = (
         Finding.objects.filter(
@@ -6925,21 +7007,23 @@ def _software_page_data(request: HttpRequest) -> dict:
     for row in title_rows:
         canonical = row[0]
         safety = safety_by_title.get(canonical, {})
-        titles.append({
-            "canonical_name": canonical,
-            "publisher": row[1] or "",
-            "device_count": row[2],
-            "client_count": row[3],
-            "last_install": row[4],
-            "categories": row[5] or [],
-            "product_categories": row[6] or [],
-            "decision": row[7],
-            "safety_score": safety.get("score"),
-            "safety_band": safety.get("band", ""),
-            "safety_cve_count": safety.get("cve_count", 0),
-            "safety_kev_count": safety.get("kev_count", 0),
-            "safety_osint_hits": safety.get("osint_hits", 0),
-        })
+        titles.append(
+            {
+                "canonical_name": canonical,
+                "publisher": row[1] or "",
+                "device_count": row[2],
+                "client_count": row[3],
+                "last_install": row[4],
+                "categories": row[5] or [],
+                "product_categories": row[6] or [],
+                "decision": row[7],
+                "safety_score": safety.get("score"),
+                "safety_band": safety.get("band", ""),
+                "safety_cve_count": safety.get("cve_count", 0),
+                "safety_kev_count": safety.get("kev_count", 0),
+                "safety_osint_hits": safety.get("osint_hits", 0),
+            }
+        )
 
     return {
         "installations": installations,
@@ -6957,18 +7041,22 @@ def _software_page_data(request: HttpRequest) -> dict:
         # Every active filter, pre-encoded, so sort/page links can reuse it
         # without reconstructing the whole filter set inline in the
         # template -- append &sort=<key>&dir=<asc|desc> or &page=<n>.
-        "filter_qs": urlencode({
-            k: v for k, v in {
-                "q": q_filter,
-                "publisher": publisher_filter,
-                "min_devices": min_devices_int or "",
-                "safety": safety_filter,
-                "decision": decision_filter,
-                "category": category_filter,
-                "product_category": product_category_filter,
-                "flagged": "1" if flagged_filter else "",
-            }.items() if v
-        }),
+        "filter_qs": urlencode(
+            {
+                k: v
+                for k, v in {
+                    "q": q_filter,
+                    "publisher": publisher_filter,
+                    "min_devices": min_devices_int or "",
+                    "safety": safety_filter,
+                    "decision": decision_filter,
+                    "category": category_filter,
+                    "product_category": product_category_filter,
+                    "flagged": "1" if flagged_filter else "",
+                }.items()
+                if v
+            }
+        ),
         "total_filtered": total_filtered,
         "page_num": page_num,
         "page_size": page_size,
@@ -7142,8 +7230,7 @@ def software_detail(request: HttpRequest, name: str) -> HttpResponse:
             [canonical_name],
         )
         publisher_rows = [
-            {"publisher": row[0], "installs": row[1], "devices": row[2]}
-            for row in cur.fetchall()
+            {"publisher": row[0], "installs": row[1], "devices": row[2]} for row in cur.fetchall()
         ]
 
         # Version breakdown — one row per distinct version.
@@ -7187,9 +7274,7 @@ def software_detail(request: HttpRequest, name: str) -> HttpResponse:
             """,
             [canonical_name],
         )
-        location_rows = [
-            {"location": row[0], "installs": row[1]} for row in cur.fetchall()
-        ]
+        location_rows = [{"location": row[0], "installs": row[1]} for row in cur.fetchall()]
 
         # Per-device install list — bounded so a mega-title doesn't OOM.
         cur.execute(
@@ -7250,12 +7335,18 @@ def software_detail(request: HttpRequest, name: str) -> HttpResponse:
         row = cur.fetchone()
         if row:
             safety_summary = {
-                "score": row[0], "band": row[1],
-                "cve_count": row[2], "kev_count": row[3],
-                "osint_hits": row[4], "publisher_osint_hits": row[5],
-                "max_cvss": row[6], "max_epss": row[7],
-                "title_approved": row[8], "title_rejected": row[9],
-                "publisher_approved": row[10], "publisher_rejected": row[11],
+                "score": row[0],
+                "band": row[1],
+                "cve_count": row[2],
+                "kev_count": row[3],
+                "osint_hits": row[4],
+                "publisher_osint_hits": row[5],
+                "max_cvss": row[6],
+                "max_epss": row[7],
+                "title_approved": row[8],
+                "title_rejected": row[9],
+                "publisher_approved": row[10],
+                "publisher_rejected": row[11],
             }
         cur.execute(
             """
@@ -7270,12 +7361,19 @@ def software_detail(request: HttpRequest, name: str) -> HttpResponse:
             [canonical_name],
         )
         for r in cur.fetchall():
-            matched_cves.append({
-                "cve_id": r[0], "severity": r[1], "cvss_v3": r[2],
-                "epss_score": r[3], "kev_flag": r[4], "kev_added_at": r[5],
-                "description": (r[6] or "")[:400],
-                "confidence": r[7], "match_kind": r[8],
-            })
+            matched_cves.append(
+                {
+                    "cve_id": r[0],
+                    "severity": r[1],
+                    "cvss_v3": r[2],
+                    "epss_score": r[3],
+                    "kev_flag": r[4],
+                    "kev_added_at": r[5],
+                    "description": (r[6] or "")[:400],
+                    "confidence": r[7],
+                    "match_kind": r[8],
+                }
+            )
         cur.execute(
             """
             SELECT source, signal_type, severity, details, observed_at
@@ -7297,10 +7395,15 @@ def software_detail(request: HttpRequest, name: str) -> HttpResponse:
             [canonical_name, canonical_name],
         )
         for r in cur.fetchall():
-            osint_rows.append({
-                "source": r[0], "signal_type": r[1], "severity": r[2],
-                "details": r[3], "observed_at": r[4],
-            })
+            osint_rows.append(
+                {
+                    "source": r[0],
+                    "signal_type": r[1],
+                    "severity": r[2],
+                    "details": r[3],
+                    "observed_at": r[4],
+                }
+            )
 
     # Catalog metadata — categories, publisher hint, EOL, notes.
     catalog_entry = (
@@ -7324,9 +7427,7 @@ def software_detail(request: HttpRequest, name: str) -> HttpResponse:
 
     # Decision history — every scope for this canonical.
     decision_rows = list(
-        SoftwareDecision.objects.filter(
-            tenant_id=1, canonical_name__iexact=canonical_name
-        )
+        SoftwareDecision.objects.filter(tenant_id=1, canonical_name__iexact=canonical_name)
         .select_related("client", "device", "decided_by")
         .order_by("-decided_at", "-id")
     )
@@ -7355,7 +7456,8 @@ def software_detail(request: HttpRequest, name: str) -> HttpResponse:
             # from the confirm/reject controls above, which only cover keys
             # with existing evidence.
             "missing": [
-                (key, label) for key, label in all_capabilities
+                (key, label)
+                for key, label in all_capabilities
                 if key not in {r["capability"] for r in rows}
             ],
         }
@@ -7374,7 +7476,8 @@ def software_detail(request: HttpRequest, name: str) -> HttpResponse:
             "product_uuid": product_uuid,
             "rows": (rows := category_by_product.get(product_uuid, [])),
             "missing": [
-                (key, label) for key, label in all_categories
+                (key, label)
+                for key, label in all_categories
                 if key not in {r["category"] for r in rows}
             ],
         }
@@ -7485,7 +7588,9 @@ def software_capability_decide(request: HttpRequest) -> HttpResponse:
     decision = (request.POST.get("decision") or "").strip()
     rationale = (request.POST.get("rationale") or "").strip()
     if decision not in {"confirm", "reject"} or not product_uuid or not capability:
-        messages.error(request, "A product identity, capability, and confirm or reject decision are required.")
+        messages.error(
+            request, "A product identity, capability, and confirm or reject decision are required."
+        )
         return redirect(_safe_next(request, "software_page"))
     try:
         product_id = uuid.UUID(product_uuid)
@@ -7549,7 +7654,9 @@ def software_category_decide(request: HttpRequest) -> HttpResponse:
     decision = (request.POST.get("decision") or "").strip()
     rationale = (request.POST.get("rationale") or "").strip()
     if decision not in {"confirm", "reject"} or not product_uuid or not category:
-        messages.error(request, "A product identity, category, and confirm or reject decision are required.")
+        messages.error(
+            request, "A product identity, category, and confirm or reject decision are required."
+        )
         return redirect(_safe_next(request, "software_page"))
     try:
         product_id = uuid.UUID(product_uuid)
@@ -7615,10 +7722,14 @@ def software_product_authorize(request: HttpRequest) -> HttpResponse:
     # No default polarity anywhere in the write path: an authorization must
     # state whether it permits or denies.
     if decision not in {"permit", "deny"} or not product_uuid or not capability:
-        messages.error(request, "A product identity, capability, and permit or deny decision are required.")
+        messages.error(
+            request, "A product identity, capability, and permit or deny decision are required."
+        )
         return redirect(_safe_next(request, "software_page"))
     if not rationale:
-        messages.error(request, "A rationale is required so the authorization can be reviewed later.")
+        messages.error(
+            request, "A rationale is required so the authorization can be reviewed later."
+        )
         return redirect(_safe_next(request, "software_page"))
     try:
         product_id = uuid.UUID(product_uuid)
@@ -7758,7 +7869,9 @@ def software_publishers(request: HttpRequest) -> HttpResponse:
 
     # Filter by decision state after computing all decisions.
     if decision_filter == "approved":
-        publishers = [p for p in publishers if p["global_decision"] in ("approve", "approve_publisher")]
+        publishers = [
+            p for p in publishers if p["global_decision"] in ("approve", "approve_publisher")
+        ]
     elif decision_filter == "rejected":
         publishers = [p for p in publishers if p["global_decision"] == "reject"]
     elif decision_filter == "investigate":
@@ -7834,9 +7947,7 @@ def software_publisher_detail(request: HttpRequest, publisher: str) -> HttpRespo
             """,
             [pub],
         )
-        installations, titles, devices, clients, first_observed, last_observed = (
-            cur.fetchone()
-        )
+        installations, titles, devices, clients, first_observed, last_observed = cur.fetchone()
 
         # Titles under this publisher (bounded).
         cur.execute(
@@ -7921,13 +8032,9 @@ def software_publisher_detail(request: HttpRequest, publisher: str) -> HttpRespo
         (d for d in pub_decision_rows if d.client_id is None and d.device_id is None),
         None,
     )
-    client_pub_decisions = [
-        d for d in pub_decision_rows if d.client_id and not d.device_id
-    ]
+    client_pub_decisions = [d for d in pub_decision_rows if d.client_id and not d.device_id]
     device_pub_decisions = [d for d in pub_decision_rows if d.device_id]
-    decision_scope_clients, decision_scope_devices = _decision_scope_targets(
-        publisher_scope_rows
-    )
+    decision_scope_clients, decision_scope_devices = _decision_scope_targets(publisher_scope_rows)
 
     return render(
         request,
@@ -8134,9 +8241,7 @@ def software_user_risk(request: HttpRequest) -> HttpResponse:
     for entry in per_user.values():
         entry.pop("item_keys", None)
         entry["clients"] = sorted(entry["clients"])
-        entry["device_list"] = sorted(
-            entry["devices"].values(), key=lambda d: d["hostname"] or ""
-        )
+        entry["device_list"] = sorted(entry["devices"].values(), key=lambda d: d["hostname"] or "")
         entry.pop("devices", None)
         users.append(entry)
     users.sort(key=lambda u: (-u["item_count"], u["last_user"]))
@@ -8149,18 +8254,18 @@ def software_user_risk(request: HttpRequest) -> HttpResponse:
         for i in d["items"]
         if i["canonical_name"]
     }
-    ur_catalog_cats = {
-        c.canonical_name.lower(): ", ".join(c.categories or [])
-        for c in SoftwareCatalog.objects.filter(
-            canonical_name__in=list(all_ur_canonicals)
-        )
-    } if all_ur_canonicals else {}
+    ur_catalog_cats = (
+        {
+            c.canonical_name.lower(): ", ".join(c.categories or [])
+            for c in SoftwareCatalog.objects.filter(canonical_name__in=list(all_ur_canonicals))
+        }
+        if all_ur_canonicals
+        else {}
+    )
     for u in users:
         for d in u["device_list"]:
             for item in d["items"]:
-                item["category"] = ur_catalog_cats.get(
-                    (item["canonical_name"] or "").lower(), ""
-                )
+                item["category"] = ur_catalog_cats.get((item["canonical_name"] or "").lower(), "")
 
     # Apply user search and kind filter (post-fetch, small result set).
     if q_filter:
@@ -8172,9 +8277,7 @@ def software_user_risk(request: HttpRequest) -> HttpResponse:
             u["device_list"] = [d for d in u["device_list"] if d["items"]]
         users = [u for u in users if u["device_list"]]
 
-    clients = Client.objects.filter(
-        tenant_id=1, deleted_at__isnull=True
-    ).order_by("display_name")
+    clients = Client.objects.filter(tenant_id=1, deleted_at__isnull=True).order_by("display_name")
 
     if wants_csv(request):
         flat_rows: list[dict] = []
@@ -8235,29 +8338,19 @@ _INGEST_BASE_URL = os.environ.get("INGEST_BASE_URL", "http://ingest:8090")
 _JOB_CATALOG: list[dict] = list(catalog_entries())
 validate_registry(catalog_keys=(entry["id"] for entry in _JOB_CATALOG))
 
-_JOB_INDEX = {j["id"]: j for j in _JOB_CATALOG}
-_OPERATION_CATALOG: list[dict] = [
+_OPERATOR_JOB_CATALOG: list[dict] = [
     {
-        "id": operation.entry_job_key,
-        "operation_key": operation.key,
-        "name": operation.name,
-        "description": operation.description,
-        "category": operation.category,
-        "step_keys": operation_steps(operation.entry_job_key),
+        "id": job.key,
+        "name": job.name,
+        "description": job.description,
+        "execution_keys": job.execution_keys,
+        "primary_execution_key": job.primary_execution_key,
     }
-    for operation in operation_definitions()
+    for job in operator_job_definitions()
 ]
-_OPERATION_ENTRY_BY_JOB = {entry["id"]: entry for entry in _OPERATION_CATALOG}
-_SOFTWARE_CLASSIFIER_JOBS = (
-    "software-classify-only", "software-classify-full", "software-classify",
-)
-_SOFTWARE_JOB_PRIORITY = {
-    "software-classify-only": 1,
-    "software-classify-full": 2,
-    "software-classify": 3,
-}
 
 _JOBS_DIAGNOSTIC_SECTIONS = (
+    ("coverage", "Coverage"),
     ("definition_versions", "Definition revisions"),
     ("schedules", "Schedules"),
     ("schedule_events", "Schedule events"),
@@ -8266,7 +8359,7 @@ _JOBS_DIAGNOSTIC_SECTIONS = (
     ("events", "Run events"),
     ("dependencies", "Dependencies"),
     ("domain_attempts", "Domain attempts"),
-    ("resource_limits", "Execution capacity and protected data"),
+    ("resource_limits", "Execution limits and data safety"),
     ("resource_claims", "Resource claims"),
     ("recovery_authorities", "Recovery authority"),
     ("recovery_policies", "Recovery policy"),
@@ -8274,9 +8367,13 @@ _JOBS_DIAGNOSTIC_SECTIONS = (
     ("runtimes", "Runtime heartbeats"),
 )
 _JOBS_DIAGNOSTIC_KEYS = frozenset(key for key, _label in _JOBS_DIAGNOSTIC_SECTIONS)
-_JOBS_RECOVERY_DIAGNOSTIC_KEYS = frozenset({
-    "recovery_authorities", "recovery_policies", "recovery_assessments",
-})
+_JOBS_RECOVERY_DIAGNOSTIC_KEYS = frozenset(
+    {
+        "recovery_authorities",
+        "recovery_policies",
+        "recovery_assessments",
+    }
+)
 
 
 def _jobs_diagnostic_query(
@@ -8286,9 +8383,7 @@ def _jobs_diagnostic_query(
     if cursor is None:
         with transaction.atomic(), connection.cursor() as cur:
             cur.execute("SET LOCAL operations.tenant_id = 1")
-            return _jobs_diagnostic_query(
-                section, limit=limit, offset=offset, cursor=cur
-            )
+            return _jobs_diagnostic_query(section, limit=limit, offset=offset, cursor=cur)
     if section == "resource_limits":
         diagnostic_function = "operations.jobs_resource_policy_diagnostics_v1"
     elif section in _JOBS_RECOVERY_DIAGNOSTIC_KEYS:
@@ -8308,9 +8403,7 @@ def _jobs_diagnostic_all(section: str, cursor) -> list[dict]:
     offset = 0
     rows: list[dict] = []
     while True:
-        total, page = _jobs_diagnostic_query(
-            section, limit=100, offset=offset, cursor=cursor
-        )
+        total, page = _jobs_diagnostic_query(section, limit=100, offset=offset, cursor=cursor)
         rows.extend(page)
         offset += len(page)
         if not page or offset >= total:
@@ -8345,11 +8438,12 @@ def _jobs_control_health() -> dict:
     issues: list[str] = []
 
     stored_versions = {
-        (row.get("definition_key"), row.get("definition_digest"))
-        for row in version_rows
+        (row.get("definition_key"), row.get("definition_digest")) for row in version_rows
     }
     expected_versions = {(item.key, item.snapshot_digest()) for item in definitions()}
-    missing_versions = sorted(key for key, digest in expected_versions if (key, digest) not in stored_versions)
+    missing_versions = sorted(
+        key for key, digest in expected_versions if (key, digest) not in stored_versions
+    )
     if missing_versions:
         issues.append("Missing current definition revisions: " + ", ".join(missing_versions))
 
@@ -8368,7 +8462,8 @@ def _jobs_control_health() -> dict:
         issues.append("Schedules use old definitions: " + ", ".join(stale_schedules))
 
     pool_rows = {
-        row.get("resource_template"): row for row in resource_rows
+        row.get("resource_template"): row
+        for row in resource_rows
         if row.get("policy_kind") == "execution_pool"
     }
     missing_pools = sorted(set(EXECUTION_POOL_POLICIES) - set(pool_rows))
@@ -8378,7 +8473,9 @@ def _jobs_control_health() -> dict:
         actual = pool_rows.get(key, {}).get("capacity")
         if actual is not None and not policy["minimum"] <= actual <= policy["maximum"]:
             issues.append(f"Execution capacity for {key} is outside its reviewed range.")
-    if any(row.get("capacity") != 1 for row in resource_rows if row.get("policy_kind") == "domain_lock"):
+    if any(
+        row.get("capacity") != 1 for row in resource_rows if row.get("policy_kind") == "domain_lock"
+    ):
         issues.append("A protected data policy is not exclusive.")
 
     expected_registry = registry_digest()
@@ -8409,8 +8506,8 @@ def _jobs_control_health() -> dict:
 @login_required
 @require_admin
 def admin_jobs_control_plane(request: HttpRequest) -> HttpResponse:
-    """Paginated, read-only access to every persisted Jobs control relation."""
-    section = (request.GET.get("section") or "definition_versions").strip()
+    """Show administrator configuration and complete Jobs diagnostics."""
+    section = (request.GET.get("section") or "coverage").strip()
     if section not in _JOBS_DIAGNOSTIC_KEYS:
         section = "definition_versions"
     try:
@@ -8420,12 +8517,44 @@ def admin_jobs_control_plane(request: HttpRequest) -> HttpResponse:
     page_size = 25
     offset = (page - 1) * page_size
     unavailable = ""
-    try:
-        total, rows = _jobs_diagnostic_query(section, limit=page_size, offset=offset)
-    except DatabaseError:
-        log.exception("Jobs control-plane diagnostics query failed: section=%s", section)
-        total, rows = 0, []
-        unavailable = "Jobs diagnostics are unavailable or failed."
+    if section == "coverage":
+        visible_jobs = {
+            execution_key: job
+            for job in operator_job_definitions()
+            for execution_key in job.execution_keys
+        }
+        service_keys = system_service_definition_keys()
+        legacy_keys = legacy_job_definition_keys()
+        all_rows = []
+        for item in definitions():
+            visible_job = visible_jobs.get(item.key)
+            classification = (
+                "Job"
+                if visible_job
+                else "System service"
+                if item.key in service_keys
+                else "Legacy entry"
+                if item.key in legacy_keys
+                else "Unclassified"
+            )
+            all_rows.append(
+                {
+                    "name": visible_job.name if visible_job else item.display_name,
+                    "technical_key": item.key,
+                    "classification": classification,
+                    "schedule": "Configured" if item.schedule_ids else "Triggered as needed",
+                    "owner": item.owner,
+                }
+            )
+        total = len(all_rows)
+        rows = all_rows[offset : offset + page_size]
+    else:
+        try:
+            total, rows = _jobs_diagnostic_query(section, limit=page_size, offset=offset)
+        except DatabaseError:
+            log.exception("Jobs configuration query failed: section=%s", section)
+            total, rows = 0, []
+            unavailable = "Jobs configuration is unavailable or failed."
     if section == "resource_limits":
         for row in rows:
             policy = EXECUTION_POOL_POLICIES.get(str(row.get("resource_template") or ""))
@@ -8465,16 +8594,33 @@ def admin_jobs_capacity_update(request: HttpRequest) -> HttpResponse:
     except ValueError:
         capacity = 0
     policy = EXECUTION_POOL_POLICIES.get(key)
-    if kind != "pool" or policy is None or not reason or not policy["minimum"] <= capacity <= policy["maximum"]:
-        messages.error(request, "Choose an execution capacity and reason within its reviewed range.")
+    if (
+        kind != "pool"
+        or policy is None
+        or not reason
+        or not policy["minimum"] <= capacity <= policy["maximum"]
+    ):
+        messages.error(
+            request, "Choose an execution capacity and reason within its reviewed range."
+        )
         return redirect("admin_jobs_control_plane")
     try:
         with transaction.atomic(), connection.cursor() as cur:
             cur.execute("SET LOCAL operations.tenant_id = 1")
-            cur.execute("SELECT operations.jobs_set_execution_pool_capacity_v1(%s,%s,%s)", (1, key, capacity))
-        AuditLog.objects.create(tenant_id=1, actor=request.user, actor_kind=AuditLog.ActorKind.USER,
-            source=AuditLog.Source.UI, action="jobs.capacity.update", entity_type="jobs.execution_capacity",
-            before_state={}, after_state={"key": key, "capacity": capacity, "reason": reason})
+            cur.execute(
+                "SELECT operations.jobs_set_execution_pool_capacity_v1(%s,%s,%s)",
+                (1, key, capacity),
+            )
+        AuditLog.objects.create(
+            tenant_id=1,
+            actor=request.user,
+            actor_kind=AuditLog.ActorKind.USER,
+            source=AuditLog.Source.UI,
+            action="jobs.capacity.update",
+            entity_type="jobs.execution_capacity",
+            before_state={},
+            after_state={"key": key, "capacity": capacity, "reason": reason},
+        )
         messages.success(request, f"Updated {policy['label']} capacity to {capacity}.")
     except DatabaseError:
         log.exception("Jobs capacity update failed")
@@ -8484,93 +8630,60 @@ def admin_jobs_capacity_update(request: HttpRequest) -> HttpResponse:
 
 @login_required
 def admin_jobs(request: HttpRequest) -> HttpResponse:
-    """List meaningful Operations entry points with their visible Job steps."""
-    category_filter = (request.GET.get("category") or "").strip().lower()
+    """Show one truthful latest status for every administrator Job."""
     status_filter = (request.GET.get("status") or "").strip().lower()
+    search_filter = (request.GET.get("q") or "").strip().lower()
     enabled_capabilities = {
         "always": True,
-        "legacy_agent_compliance": os.environ.get("AGENT_COMPLIANCE_ENABLED", "false").strip().lower() in {"1", "true", "yes", "on"},
-        "intel": os.environ.get("INTEL_ENABLED", "false").strip().lower() in {"1", "true", "yes", "on"},
-        "notifications": os.environ.get("NOTIFY_ENABLED", "false").strip().lower() in {"1", "true", "yes", "on"},
+        "legacy_agent_compliance": os.environ.get("AGENT_COMPLIANCE_ENABLED", "false")
+        .strip()
+        .lower()
+        in {"1", "true", "yes", "on"},
+        "intel": os.environ.get("INTEL_ENABLED", "false").strip().lower()
+        in {"1", "true", "yes", "on"},
+        "notifications": os.environ.get("NOTIFY_ENABLED", "false").strip().lower()
+        in {"1", "true", "yes", "on"},
         "metabase_bootstrap": bool(
             os.environ.get("MB_BOOTSTRAP_USER") and os.environ.get("MB_BOOTSTRAP_PASS")
         ),
-        "notification_digest": os.environ.get("NOTIFY_DIGEST_ENABLED", "false").strip().lower() in {"1", "true", "yes", "on"},
-        "software_queue": os.environ.get("SOFTWARE_QUEUE_ENABLED", "false").strip().lower() in {"1", "true", "yes", "on"},
+        "notification_digest": os.environ.get("NOTIFY_DIGEST_ENABLED", "false").strip().lower()
+        in {"1", "true", "yes", "on"},
+        "software_queue": os.environ.get("SOFTWARE_QUEUE_ENABLED", "false").strip().lower()
+        in {"1", "true", "yes", "on"},
     }
 
-    intel_status: dict[str, dict] = {}
-    with transaction.atomic(), connection.cursor() as cur:
-        cur.execute("SET LOCAL operations.tenant_id = 1")
-        try:
-            cur.execute(
-                "SELECT connector, last_status, last_run_at, last_success_at,"
-                " rows_touched, last_error FROM operations.intel_ingest_status"
-            )
-            for r in cur.fetchall():
-                intel_status[r[0]] = {
-                    "last_status": r[1] or "",
-                    "last_run_at": r[2],
-                    "last_success_at": r[3],
-                    "rows_touched": r[4] or 0,
-                    "last_error": (r[5] or "")[:200],
-                }
-        except Exception:
-            intel_status = {}
-
-    run_log_status: dict[str, dict] = {}
-    queued_job_status: dict[str, dict] = {}
+    latest_by_execution: dict[str, dict] = {}
     schedule_status: dict[str, dict] = {}
-    recent_runs: list[dict] = []
-    now = timezone.now()
     try:
         with transaction.atomic(), connection.cursor() as cur:
             cur.execute("SET LOCAL operations.tenant_id = 1")
             cur.execute(
                 """
-                SELECT DISTINCT ON (kind) kind, ok, started_at, ended_at, rows, error
-                FROM operations.run_log
-                ORDER BY kind, started_at DESC
-                """
-            )
-            for r in cur.fetchall():
-                run_log_status[r[0]] = {
-                    "last_status": "ok" if r[1] else "failed",
-                    "last_run_at": r[2],
-                    "last_success_at": r[3] if r[1] else None,
-                    "rows_touched": r[4] or 0,
-                    "last_error": (r[5] or "")[:200],
-                }
-            # The durable Jobs queue is the history authority for registered
-            # scheduled/operator work.  Several queue handlers intentionally
-            # do not create legacy run_log rows, so using run_log alone makes
-            # successful work look as if it never ran.
-            cur.execute(
-                """
                 SELECT DISTINCT ON (job_key)
-                       job_key, status, requested_at, started_at, completed_at,
-                       rows_touched, error, wait_category
+                       job_key, id, status, requested_at, started_at,
+                       completed_at, rows_touched, error, wait_category,
+                       wait_reason, stage, stage_detail,
+                       cancellation_requested_at
                   FROM operations.operator_job_runs
                  WHERE tenant_id = 1
                  ORDER BY job_key, requested_at DESC, id DESC
                 """
             )
             for r in cur.fetchall():
-                queue_state = {
-                    "completed": "ok",
-                    "failed": "failed",
-                    "stalled": "stalled",
-                    "queued": "ready" if r[7] is None else "waiting",
-                    "running": "running",
-                    "cancelled": "cancelled",
-                }.get(r[1], r[1])
-                queued_job_status[r[0]] = {
-                    "last_status": queue_state,
-                    "last_run_at": r[4] or r[3] or r[2],
-                    "last_success_at": r[4] if r[1] == "completed" else None,
-                    "rows_touched": r[5] or 0,
-                    "last_error": (r[6] or "")[:200],
-                    "activity_label": "Last run" if r[1] in {"completed", "failed", "stalled", "cancelled"} else "Requested",
+                latest_by_execution[r[0]] = {
+                    "job_key": r[0],
+                    "id": r[1],
+                    "status": r[2],
+                    "requested_at": r[3],
+                    "started_at": r[4],
+                    "completed_at": r[5],
+                    "rows_touched": r[6],
+                    "error": (r[7] or "")[:240],
+                    "wait_category": r[8],
+                    "wait_reason": r[9] or "",
+                    "stage": r[10] or "",
+                    "stage_detail": r[11] or "",
+                    "cancellation_requested_at": r[12],
                 }
             cur.execute(
                 """
@@ -8593,278 +8706,140 @@ def admin_jobs(request: HttpRequest) -> HttpResponse:
                     "last_outcome": r[7] or "",
                     "last_run_id": r[8],
                 }
-            # Aggregate recent activity for the panel at the bottom.
-            cur.execute(
-                """
-                SELECT kind, ok, started_at, ended_at, rows, LEFT(COALESCE(error,''), 120)
-                FROM operations.run_log
-                ORDER BY started_at DESC
-                LIMIT 25
-                """
-            )
-            recent_runs = [
-                {
-                    "kind": r[0], "ok": r[1], "started_at": r[2],
-                    "ended_at": r[3], "rows": r[4] or 0, "error": r[5],
-                    "source": "run_log",
-                }
-                for r in cur.fetchall()
-            ]
-            # And the latest intel runs alongside.
-            cur.execute(
-                """
-                SELECT connector, last_status, last_run_at, last_success_at,
-                       rows_touched, LEFT(COALESCE(last_error,''), 120)
-                FROM operations.intel_ingest_status
-                ORDER BY last_run_at DESC NULLS LAST LIMIT 15
-                """
-            )
-            for r in cur.fetchall():
-                recent_runs.append({
-                    "kind": r[0], "ok": r[1] == "ok",
-                    "started_at": r[2], "ended_at": r[3],
-                    "rows": r[4] or 0, "error": r[5],
-                    "source": "intel",
-                })
     except Exception:
-        run_log_status = {}
-        queued_job_status = {}
+        latest_by_execution = {}
         schedule_status = {}
-        recent_runs = []
-    recent_runs.sort(key=lambda r: r["started_at"] or now - timedelta(days=365), reverse=True)
-    recent_runs = recent_runs[:25]
 
-    def _lookup_run_log_like(prefix: str) -> dict:
-        """Return the latest run_log entry whose kind starts with prefix."""
-        best: dict = {}
-        best_at = None
-        for kind, data in run_log_status.items():
-            if kind.startswith(prefix):
-                at = data.get("last_run_at")
-                if at and (best_at is None or at > best_at):
-                    best = data
-                    best_at = at
-        return best
-
-    # Dynamic per-source-instance rows — one entry per distinct
-    # source.<Platform>[.<Instance>] kind we've ever seen. These aren't
-    # in the static catalog because instance names come from data.
-    dynamic_source_entries: list[dict] = []
-    seen_source_kinds = [k for k in run_log_status.keys() if k.startswith("source.")]
-    for kind in seen_source_kinds:
-        instance = kind[len("source."):]
-        dynamic_source_entries.append({
-            "id": f"source-{instance.lower().replace('.', '-')}",
-            "name": f"Source: {instance}",
-            "category": "Data updates",
-            "endpoint": "run/sources/enqueue",  # opens the ingest form
-            "status_key": kind,
-            "status_source": "run_log",
-            "description": f"Ingest run history for {instance}.",
-            "no_run_now": True,  # per-instance triggers go through the /run/sources/enqueue form
-        })
-
-    jobs = []
-    categories = set()
-    scheduled_keys = scheduled_definition_keys()
-    for entry in list(_OPERATION_CATALOG) + dynamic_source_entries:
-        presentation_category = entry["category"]
-        presentation_area = ""
-        categories.add(presentation_category)
-        if entry["id"] in _JOB_INDEX:
-            schedule = schedule_status.get(entry["id"])
-            if entry["id"] in scheduled_keys and schedule is not None:
-                availability_label = schedule["reason"]
-                available = not availability_label.startswith("Disabled")
-            else:
-                available, availability_label = capability_state(
-                    entry["id"], enabled_capabilities
-                )
-        else:
-            schedule = None
-            available, availability_label = True, "Available"
-        disabled_reason = "" if available else availability_label
-        if not available:
-            # Disabled definitions have no executable capability. Do not offer
-            # Run now or treat their retained history as a failed schedule.
-            status = {}
-        else:
-            # A catalog job is registered work when it has a durable queue
-            # history.  Keep run_log as a fallback for pre-queue/direct runs
-            # and for dynamic source rows, which are not queue jobs.
-            status = queued_job_status.get(entry["id"]) or {}
-            if not status:
-                status_entry = _JOB_INDEX.get(entry["id"], entry)
-                source = status_entry.get("status_source")
-                status_key = status_entry.get("status_key")
-                if source == "intel" and status_key:
-                    status = intel_status.get(status_key) or {}
-                elif source == "run_log_like" and status_key:
-                    status = _lookup_run_log_like(status_key)
-                elif status_key:
-                    status = run_log_status.get(status_key) or {}
-        last_run_at = status.get("last_run_at")
-        last_success_at = status.get("last_success_at")
-        state = "disabled" if disabled_reason else "never_run"
-        if status.get("last_status") == "ok":
-            state = "ok"
-        elif status.get("last_status"):
-            state = status["last_status"]
-        if last_run_at is not None:
-            age = now - last_run_at
-        else:
-            age = None
-        is_stale = last_success_at is None or (now - last_success_at) > timedelta(days=2)
-        jobs.append({
-            "id": entry["id"],
-            "name": entry["name"],
-            "category": presentation_category,
-            "area": presentation_area,
-            "description": entry["description"],
-            "state": state,
-            "last_run_at": last_run_at,
-            "last_success_at": last_success_at,
-            "age": age,
-            "rows_touched": status.get("rows_touched", 0),
-            "last_error": status.get("last_error", ""),
-            "activity_label": status.get("activity_label", "Last run"),
-            "disabled_reason": disabled_reason,
-            "is_stale": is_stale,
-            "no_run_now": entry.get("no_run_now", False),
-            "scheduled": entry["id"] in scheduled_keys,
-            "schedule_enabled": schedule["enabled"] if schedule else False,
-            "schedule_reason": schedule["reason"] if schedule else (
-                "Automatic schedule awaiting reconciliation."
-                if entry["id"] in scheduled_keys else ""
-            ),
-            "next_due_at": schedule["next_due_at"] if schedule else None,
-            "last_schedule_outcome": schedule["last_outcome"] if schedule else "",
-            "last_schedule_requested_at": schedule["last_requested_at"] if schedule else None,
-            "steps": [
-                {
-                    "id": step_key,
-                    "name": definition(step_key).display_name,
-                    "state": (queued_job_status.get(step_key) or {}).get("last_status", "never_run"),
-                }
-                for step_key in entry.get("step_keys", (entry["id"],))
-                if step_key in _JOB_INDEX
-            ],
-        })
-
-    # Ingest exposes its on-demand org/device selector forms on
-    # port 8090. Compute a browser-reachable URL for the operator by
-    # rewriting the current host's port. Overridable via the
-    # ``INGEST_PUBLIC_URL`` env var for setups where 8090 isn't the
-    # public port (e.g. behind a reverse proxy).
-    ingest_public_url = os.environ.get("INGEST_PUBLIC_URL", "").strip()
-    if not ingest_public_url:
-        host_no_port = request.get_host().split(":")[0]
-        ingest_public_url = f"{request.scheme}://{host_no_port}:8090"
-
-    _active_total, active_queue = _operator_job_runs(
-        limit=len(definition_keys()) * 2,
-        filters={"statuses": ("queued", "running")},
-    )
-    active_by_job: dict[str, dict] = {}
+    try:
+        _active_total, active_queue = _operator_job_runs(
+            limit=len(definition_keys()) * 2,
+            filters={"statuses": ("queued", "running")},
+        )
+    except DatabaseError:
+        log.exception("Jobs latest-status query failed")
+        active_queue = []
+    active_by_job: dict[str, list[dict]] = {}
     for active_run in active_queue:
-        active_by_job.setdefault(active_run["job_key"], active_run)
+        catalog_key = operator_job_key_for_execution(active_run["job_key"])
+        if catalog_key:
+            active_by_job.setdefault(catalog_key, []).append(active_run)
 
-    # A finished entry step must not make its operation disappear while a
-    # linked follow-on step is active.  The root-run lineage is the durable
-    # sequence identity; use it to show the status of each visible step from
-    # the same operation execution rather than unrelated latest runs.
-    sequence_roots = {
-        str(run["technical"].get("root_run_id") or run["id"])
-        for run in active_queue
-    }
-    active_sequence_by_entry: dict[str, str] = {}
-    sequence_steps: dict[str, dict[str, dict]] = {}
-    active_sequence_run: dict[str, dict] = {}
-    if sequence_roots:
-        with transaction.atomic(), connection.cursor() as cur:
-            cur.execute("SET LOCAL operations.tenant_id = 1")
-            cur.execute(
-                """SELECT id, job_key FROM operations.operator_job_runs
-                     WHERE tenant_id = 1 AND id = ANY(%s::uuid[])""",
-                (list(sequence_roots),),
+    def active_priority(run: dict) -> tuple[int, float]:
+        rank = 0 if run["status"] == "running" else 1
+        return rank, -run["requested_at"].timestamp()
+
+    jobs: list[dict] = []
+    for entry in _OPERATOR_JOB_CATALOG:
+        execution_keys = tuple(entry["execution_keys"])
+        runs = sorted(active_by_job.get(entry["id"], []), key=active_priority)
+        active_run = runs[0] if runs else None
+        latest_candidates = [
+            latest_by_execution[key] for key in execution_keys if key in latest_by_execution
+        ]
+        latest = max(
+            latest_candidates,
+            key=lambda item: item["requested_at"],
+            default=None,
+        )
+        if active_run:
+            state = active_run["lifecycle"]
+            status_label = {
+                "running": "Running",
+                "waiting": "Waiting",
+                "ready": "Ready to start",
+            }.get(state, active_run["status_label"])
+            if state == "running":
+                status_detail = active_run["stage_detail"] or active_run["stage"]
+            else:
+                status_detail = active_run["status_detail"]
+            latest_run_id = active_run["id"]
+            latest_at = active_run["started_at"] or active_run["requested_at"]
+            rows_touched = active_run["rows_touched"]
+            error = active_run["error"]
+        elif latest:
+            state = "failed" if latest["status"] == "stalled" else latest["status"]
+            status_label = {
+                "completed": "Completed",
+                "failed": "Failed",
+                "cancelled": "Cancelled",
+            }.get(state, state.title())
+            rows_touched = latest["rows_touched"]
+            error = latest["error"]
+            status_detail = (
+                f"{rows_touched} updated."
+                if state == "completed" and rows_touched is not None
+                else error
+                if state == "failed" and error
+                else ""
             )
-            root_entries = {str(row[0]): row[1] for row in cur.fetchall()}
-            tracked_roots = [
-                root_id for root_id, job_key in root_entries.items()
-                if job_key in _OPERATION_ENTRY_BY_JOB
-            ]
-            for run in active_queue:
-                root_id = str(run["technical"].get("root_run_id") or run["id"])
-                if root_id not in tracked_roots:
-                    continue
-                current = active_sequence_run.get(root_id)
-                if (
-                    current is None
-                    or (run["status"] == "running" and current["status"] != "running")
-                    or (
-                        run["status"] == current["status"]
-                        and run["requested_at"] > current["requested_at"]
-                    )
-                ):
-                    active_sequence_run[root_id] = run
-            if tracked_roots:
-                cur.execute(
-                    """SELECT id, root_run_id, job_key, status, requested_at
-                         FROM operations.operator_job_runs
-                        WHERE tenant_id = 1
-                          AND (id = ANY(%s::uuid[]) OR root_run_id = ANY(%s::uuid[]))
-                        ORDER BY requested_at DESC, id DESC""",
-                    (tracked_roots, tracked_roots),
-                )
-                for run_id, root_run_id, job_key, status, _requested_at in cur.fetchall():
-                    root_id = str(root_run_id or run_id)
-                    active_sequence_by_entry[root_entries[root_id]] = root_id
-                    sequence_steps.setdefault(root_id, {}).setdefault(
-                        job_key,
-                        {
-                            "id": job_key,
-                            "name": definition(job_key).display_name,
-                            "state": status,
-                        },
-                    )
-    for job in jobs:
-        job["active_run"] = active_by_job.get(job["id"])
-        if job["active_run"]:
-            job["state"] = job["active_run"]["lifecycle"]
-        sequence_id = active_sequence_by_entry.get(job["id"])
-        if sequence_id:
-            sequence_state = sequence_steps.get(sequence_id, {})
-            job["steps"] = [
-                sequence_state.get(
-                    step_key,
-                    {"id": step_key, "name": definition(step_key).display_name, "state": "not_started"},
-                )
-                for step_key in _OPERATION_ENTRY_BY_JOB[job["id"]]["step_keys"]
-            ]
-            job["active_run"] = active_sequence_run[sequence_id]
-            job["state"] = job["active_run"]["lifecycle"]
+            latest_run_id = latest["id"]
+            latest_at = latest["completed_at"] or latest["started_at"] or latest["requested_at"]
+        else:
+            state = "not_run"
+            status_label = "Not run yet"
+            status_detail = ""
+            latest_run_id = None
+            latest_at = None
+            rows_touched = None
+            error = ""
 
-    if category_filter:
-        jobs = [j for j in jobs if j["category"].lower() == category_filter]
-    if status_filter in {"ready", "waiting", "running", "never_run"}:
-        jobs = [j for j in jobs if j["state"] == status_filter]
-    elif status_filter == "failed":
-        jobs = [j for j in jobs if j["state"] not in ("ok", "never_run", "ready", "waiting", "running")]
-    elif status_filter == "stale":
-        jobs = [j for j in jobs if j["is_stale"] and j["state"] != "never_run"]
-    elif status_filter == "ok":
-        jobs = [j for j in jobs if j["state"] == "ok" and not j["is_stale"]]
+        schedules = [schedule_status[key] for key in execution_keys if key in schedule_status]
+        primary_definition = definition(entry["primary_execution_key"])
+        available, availability_label = capability_state(
+            primary_definition.key, enabled_capabilities
+        )
+        enabled_schedules = [schedule for schedule in schedules if schedule["enabled"]]
+        next_due_at = min(
+            (schedule["next_due_at"] for schedule in enabled_schedules if schedule["next_due_at"]),
+            default=None,
+        )
+        configuration_label = (
+            "Disabled" if not available else "Automatic" if enabled_schedules else "Manual"
+        )
+        needs_attention = state == "failed"
+        jobs.append(
+            {
+                "id": entry["id"],
+                "name": entry["name"],
+                "description": entry["description"],
+                "state": state,
+                "status_label": status_label,
+                "status_detail": status_detail,
+                "latest_at": latest_at,
+                "latest_run_id": latest_run_id,
+                "rows_touched": rows_touched,
+                "error": error,
+                "active_run": active_run,
+                "needs_attention": needs_attention,
+                "configuration_label": configuration_label,
+                "configuration_reason": "" if available else availability_label,
+                "next_due_at": next_due_at,
+                "run_key": entry["primary_execution_key"],
+            }
+        )
 
-    # Group only after the active sequence has updated its entry operation.
-    jobs_by_category: dict[str, list[dict]] = {}
-    for job in jobs:
-        jobs_by_category.setdefault(job["category"], []).append(job)
-    operation_summary = {
-        "running": sum(job["state"] == "running" for job in jobs),
-        "ready": sum(job["state"] == "ready" for job in jobs),
-        "waiting": sum(job["state"] == "waiting" for job in jobs),
-        "attention": sum(job["state"] in {"failed", "stalled"} for job in jobs),
+    summary = {
+        "running": sum(item["state"] == "running" for item in jobs),
+        "waiting": sum(item["state"] == "waiting" for item in jobs),
+        "ready": sum(item["state"] == "ready" for item in jobs),
+        "attention": sum(item["needs_attention"] for item in jobs),
     }
+    if search_filter:
+        jobs = [
+            item
+            for item in jobs
+            if search_filter in item["name"].lower() or search_filter in item["description"].lower()
+        ]
+    if status_filter:
+        jobs = [
+            item
+            for item in jobs
+            if item["state"] == status_filter
+            or status_filter == "attention"
+            and item["needs_attention"]
+        ]
+    state_order = {"failed": 0, "running": 1, "waiting": 2, "ready": 3}
+    jobs.sort(key=lambda item: (state_order.get(item["state"], 4), item["name"].lower()))
 
     return render(
         request,
@@ -8873,14 +8848,101 @@ def admin_jobs(request: HttpRequest) -> HttpResponse:
             "admin_group": "integrations",
             "admin_tab": "jobs",
             "jobs": jobs,
-            "jobs_by_category": jobs_by_category,
-            "categories": sorted(categories),
-            "active_category": category_filter,
+            "job_count": len(_OPERATOR_JOB_CATALOG),
             "active_status": status_filter,
-            "operation_summary": operation_summary,
-            "recent_runs": recent_runs,
-            "ingest_public_url": ingest_public_url,
-            "active_job_count": len(active_by_job),
+            "active_search": search_filter,
+            "job_summary": summary,
+            "refreshed_at": timezone.now(),
+        },
+    )
+
+
+@login_required
+@require_admin
+def admin_job_detail(request: HttpRequest, job_id: str) -> HttpResponse:
+    """Show Latest Run and bounded history for one administrator Job."""
+    try:
+        job = operator_job_definition(job_id)
+    except Exception as exc:
+        raise Http404("Unknown Job") from exc
+    try:
+        page = max(1, min(20001, int(request.GET.get("page") or "1")))
+    except ValueError:
+        page = 1
+    page_size = 25
+    run_total, runs = _operator_job_runs(
+        limit=page_size,
+        offset=(page - 1) * page_size,
+        filters={"job_keys": job.execution_keys},
+    )
+    _active_total, active_runs = _operator_job_runs(
+        limit=max(10, len(job.execution_keys) * 2),
+        filters={
+            "job_keys": job.execution_keys,
+            "statuses": ("queued", "running"),
+        },
+    )
+    active_runs.sort(
+        key=lambda run: (
+            0 if run["status"] == "running" else 1,
+            -run["requested_at"].timestamp(),
+        )
+    )
+    latest_run = active_runs[0] if active_runs else (runs[0] if runs else None)
+
+    selected_run = None
+    selected_run_id = (request.GET.get("run") or "").strip()
+    if selected_run_id:
+        _selected_total, selected_runs = _operator_job_runs(
+            limit=1,
+            run_id=selected_run_id,
+            filters={"job_keys": job.execution_keys},
+        )
+        selected_run = selected_runs[0] if selected_runs else None
+
+    schedules = []
+    try:
+        with transaction.atomic(), connection.cursor() as cur:
+            cur.execute("SET LOCAL operations.tenant_id = 1")
+            cur.execute(
+                """SELECT definition_key, enabled, cadence, next_due_at,
+                          capability_reason, last_outcome
+                     FROM operations.job_schedules
+                    WHERE tenant_id = 1 AND definition_key = ANY(%s::text[])
+                    ORDER BY definition_key, scope_identity""",
+                (list(job.execution_keys),),
+            )
+            schedules = [
+                {
+                    "job_key": row[0],
+                    "enabled": row[1],
+                    "cadence": row[2],
+                    "next_due_at": row[3],
+                    "reason": row[4] or "",
+                    "last_outcome": row[5] or "",
+                }
+                for row in cur.fetchall()
+            ]
+    except DatabaseError:
+        log.exception("Job schedule query failed: job=%s", job.key)
+
+    return render(
+        request,
+        "admin_job_detail.html",
+        {
+            "admin_group": "integrations",
+            "admin_tab": "jobs",
+            "job": job,
+            "latest_run": latest_run,
+            "selected_run": selected_run,
+            "runs": runs,
+            "run_total": run_total,
+            "page": page,
+            "has_previous": page > 1,
+            "previous_page": page - 1,
+            "has_next": page * page_size < run_total,
+            "next_page": page + 1,
+            "schedules": schedules,
         },
     )
 
@@ -8889,49 +8951,26 @@ def admin_jobs(request: HttpRequest) -> HttpResponse:
 @require_admin
 @require_POST
 def admin_jobs_run(request: HttpRequest, job_id: str) -> HttpResponse:
-    entry = _JOB_INDEX.get(job_id)
-    if not entry:
+    try:
+        job = operator_job_definition(job_id)
+    except Exception:
         messages.error(request, f"Unknown job '{job_id}'.")
         return redirect("admin_jobs")
-    run_id, created = _enqueue_operator_job(job_id, request.user.id)
-    operation_name = _OPERATION_ENTRY_BY_JOB.get(job_id, entry)["name"]
+    run_id, created = _enqueue_operator_job(job.primary_execution_key, request.user.id)
     if created:
-        messages.success(request, f"{operation_name} is queued. Follow its progress in Job activity.")
+        messages.success(request, f"{job.name} was requested.")
     else:
-        messages.info(request, f"{operation_name} is already queued or running.")
-    return redirect(reverse("admin_job_status") + f"?run={run_id}")
+        messages.info(request, f"{job.name} already has an active Run.")
+    return redirect("admin_job_detail", job_id=job.key)
 
 
 @login_required
 @require_admin
 @require_POST
 def admin_jobs_run_all(request: HttpRequest) -> HttpResponse:
-    """Queue the selected Operations entry points through the governed API."""
-    category = (request.POST.get("category") or "").strip().lower()
-    targets = [
-        j for j in _OPERATION_CATALOG
-        if j.get("run_all", True) and (
-            not category or j["category"].lower() == category
-        )
-    ]
-    if not targets:
-        messages.warning(request, f"No jobs matched category '{category or 'all'}'.")
-        return redirect(request.META.get("HTTP_REFERER") or reverse("admin_jobs"))
-    batch_id = uuid.uuid4()
-    queued = 0
-    already_active = 0
-    for entry in targets:
-        _run_id, created = _enqueue_operator_job(entry["id"], request.user.id, batch_id=batch_id)
-        if created:
-            queued += 1
-        else:
-            already_active += 1
-    scope = category or "all"
-    note = f"Queued {queued} operation{'s' if queued != 1 else ''} for {scope}."
-    if already_active:
-        note += f" {already_active} already active operation{'s' if already_active != 1 else ''} were kept."
-    messages.success(request, note)
-    return redirect(reverse("admin_job_status") + f"?batch={batch_id}")
+    """The former broad Run-all action is intentionally no longer exposed."""
+    messages.warning(request, "Run all is unavailable. Start only the Jobs you intend to run.")
+    return redirect("admin_jobs")
 
 
 def _dispatch_job(entry: dict) -> tuple[bool, str]:
@@ -9023,8 +9062,15 @@ def _admit_operator_workflow(cur, root_key: str, root_run_id: uuid.UUID) -> None
         cur.execute(
             f"SELECT {request_api}(%s, %s, %s, %s, %s, %s, NULL, %s::jsonb, %s::jsonb, %s)",
             (
-                1, dependent.key, dependent.snapshot_digest(), "tenant:1",
-                request_identity, "dependency", "{}", "{}", root_run_id,
+                1,
+                dependent.key,
+                dependent.snapshot_digest(),
+                "tenant:1",
+                request_identity,
+                "dependency",
+                "{}",
+                "{}",
+                root_run_id,
             ),
         )
         dependent_id = cur.fetchone()[0]
@@ -9047,6 +9093,7 @@ def _admit_operator_workflow(cur, root_key: str, root_run_id: uuid.UUID) -> None
 
 def _queue_software_rebuild_after_commit(user_id: int) -> None:
     """Queue one full rebuild after a software decision is durable."""
+
     def enqueue() -> None:
         try:
             _enqueue_operator_job("software-classify-full", user_id)
@@ -9056,6 +9103,40 @@ def _queue_software_rebuild_after_commit(user_id: int) -> None:
             log.exception("Could not queue software full rebuild after decision")
 
     transaction.on_commit(enqueue)
+
+
+def _operator_job_name(execution_key: str) -> str:
+    """Return the administrator-facing Job name for one execution key."""
+    job_key = operator_job_key_for_execution(execution_key)
+    if job_key is None:
+        return definition(execution_key).display_name
+    return operator_job_definition(job_key).name
+
+
+def _operator_run_wait_explanation(run: dict) -> str:
+    """Explain one waiting cause without exposing execution internals."""
+    wait_category = run.get("wait_category")
+    if wait_category in {"dependency", "workflow"}:
+        relations = (
+            run.get("prerequisites", [])
+            if wait_category == "dependency"
+            else run.get("dependents", [])
+        )
+        names = list(
+            dict.fromkeys(
+                _operator_job_name(str(relation["job_key"]))
+                for relation in relations
+                if str(relation.get("job_key") or "") in definition_keys()
+            )
+        )
+        if names:
+            return "Waiting for: " + ", ".join(names) + "."
+        return "Waiting for a required Job."
+    if wait_category == "resource":
+        return "Another Job is updating the same data."
+    if wait_category == "capacity":
+        return "The system is busy with this type of task."
+    return "Ready to start."
 
 
 def _operator_job_runs(
@@ -9085,6 +9166,9 @@ def _operator_job_runs(
         if active_filters.get(key):
             clauses.append(sql)
             params.append(active_filters[key])
+    if active_filters.get("job_keys"):
+        clauses.append("job.job_key = ANY(%s::text[])")
+        params.append(list(active_filters["job_keys"]))
     if active_filters.get("status"):
         status = str(active_filters["status"])
         if status == "ready":
@@ -9098,13 +9182,9 @@ def _operator_job_runs(
         clauses.append("job.status = ANY(%s::text[])")
         params.append(list(active_filters["statuses"]))
     if active_filters.get("current_only"):
-        clauses.append(
-            "job.id IN (SELECT run_id FROM operations.jobs_activity_current_v1(1))"
-        )
+        clauses.append("job.id IN (SELECT run_id FROM operations.jobs_activity_current_v1(1))")
     if active_filters.get("history_only"):
-        clauses.append(
-            "job.id NOT IN (SELECT run_id FROM operations.jobs_activity_current_v1(1))"
-        )
+        clauses.append("job.id NOT IN (SELECT run_id FROM operations.jobs_activity_current_v1(1))")
     if active_filters.get("scope"):
         pattern = f"%{active_filters['scope']}%"
         clauses.append(
@@ -9215,15 +9295,21 @@ def _operator_job_runs(
             )
             for detail in cur.fetchall():
                 technical_by_job[detail[0]] = {
-                    "definition_digest": detail[1], "scope_identity": detail[2],
-                    "input_revisions": detail[3] or {}, "output_revisions": detail[4] or {},
+                    "definition_digest": detail[1],
+                    "scope_identity": detail[2],
+                    "input_revisions": detail[3] or {},
+                    "output_revisions": detail[4] or {},
                     "request_payload": detail[5] or {},
-                    "parent_run_id": detail[6], "root_run_id": detail[7],
+                    "parent_run_id": detail[6],
+                    "root_run_id": detail[7],
                 }
     labels = {entry["id"]: entry["name"] for entry in _JOB_CATALOG}
     status_labels = {
-        "running": "Running", "completed": "Completed",
-        "failed": "Failed", "stalled": "Needs attention", "cancelled": "Cancelled",
+        "running": "Running",
+        "completed": "Completed",
+        "failed": "Failed",
+        "stalled": "Failed",
+        "cancelled": "Cancelled",
     }
     now = timezone.now()
 
@@ -9251,40 +9337,58 @@ def _operator_job_runs(
         return f"{seconds // 3600}h {(seconds % 3600) // 60}m"
 
     def lifecycle(status: str, wait_category: str | None) -> tuple[str, str]:
+        if status == "stalled":
+            return "failed", "Failed"
         if status != "queued":
             return status, status_labels.get(status, status)
-        if wait_category == "workflow":
-            return "waiting", "Waiting for required work"
-        if wait_category == "dependency":
-            return "waiting", "Waiting for data"
-        if wait_category == "resource":
-            return "waiting", "Waiting for protected work"
-        if wait_category == "capacity":
-            return "waiting", "Waiting for capacity"
+        if wait_category:
+            return "waiting", "Waiting"
         return "ready", "Ready"
 
     runs = [
         {
-            "id": row[0], "job_key": row[1], "name": labels.get(row[1], row[1]),
+            "id": row[0],
+            "job_key": row[1],
+            "name": labels.get(row[1], row[1]),
             "batch_id": row[2],
             "origin": {
-                "automatic": "Automatic", "operator": "Operator",
-                "dependency": "Dependency", "recovery": "Recovery",
+                "automatic": "Automatic",
+                "operator": "Operator",
+                "dependency": "Dependency",
+                "recovery": "Recovery",
             }.get(row[19], "Automatic" if row[3] is None else "Operator"),
-            "requested_at": row[4], "started_at": row[5], "completed_at": row[6],
+            "requested_at": row[4],
+            "started_at": row[5],
+            "completed_at": row[6],
             "status": row[7],
             "recovery": recovery_by_job.get(row[0]),
-            "status_class": "completed" if row[0] in recovery_by_job else lifecycle(row[7], row[20])[0],
-            "status_label": "Recovered automatically" if row[0] in recovery_by_job else lifecycle(row[7], row[20])[1],
+            "status_class": "completed"
+            if row[0] in recovery_by_job
+            else lifecycle(row[7], row[20])[0],
+            "status_label": "Recovered automatically"
+            if row[0] in recovery_by_job
+            else lifecycle(row[7], row[20])[1],
             "lifecycle": lifecycle(row[7], row[20])[0],
-            "attempts": row[8], "rows_touched": row[9], "error": row[10],
-            "stage": row[11], "stage_detail": row[12], "stage_updated_at": row[13],
-            "lane": row[14], "heartbeat_at": row[15], "queue_position": row[16],
-            "queue_reason": row[21] or row[17], "wait_category": row[20],
-            "contract_version": row[18], "cancellation_requested_at": row[22],
-            "cancellation_reason": row[23], "deadline_at": row[24],
-            "correlation_id": row[25], "retry_of_run_id": row[26],
-            "result": row[27] or {}, "terminal_reason": row[28],
+            "attempts": row[8],
+            "rows_touched": row[9],
+            "error": row[10],
+            "stage": row[11],
+            "stage_detail": row[12],
+            "stage_updated_at": row[13],
+            "lane": row[14],
+            "heartbeat_at": row[15],
+            "queue_position": row[16],
+            "queue_reason": row[21] or row[17],
+            "wait_category": row[20],
+            "contract_version": row[18],
+            "cancellation_requested_at": row[22],
+            "cancellation_reason": row[23],
+            "deadline_at": row[24],
+            "correlation_id": row[25],
+            "retry_of_run_id": row[26],
+            "result": row[27] or {},
+            "terminal_reason": row[28],
+            "needs_attention": row[7] in {"failed", "stalled"},
             "owner": definition(row[1]).owner if row[1] in definition_keys() else "",
             "result_label": result_label(row[7], row[9], row[10]),
             "elapsed": elapsed_label(row[5], row[6]),
@@ -9297,208 +9401,60 @@ def _operator_job_runs(
         }
         for row in rows
     ]
+    for run in runs:
+        visible_key = operator_job_key_for_execution(run["job_key"])
+        if visible_key:
+            visible_job = operator_job_definition(visible_key)
+            run["operator_job_key"] = visible_key
+            run["name"] = visible_job.name
+        else:
+            run["operator_job_key"] = ""
+        if run["status"] == "queued":
+            run["status_detail"] = _operator_run_wait_explanation(run)
+        elif run["status"] == "running":
+            run["status_detail"] = run["stage_detail"] or run["stage"]
+        elif run["status"] in {"failed", "stalled"}:
+            run["status_detail"] = run["error"] or "The Run did not complete."
+        elif run["rows_touched"] is not None:
+            run["status_detail"] = f"{run['rows_touched']} updated."
+        else:
+            run["status_detail"] = run["result_label"]
+        for relationship in (*run["prerequisites"], *run["dependents"]):
+            related_key = operator_job_key_for_execution(relationship["job_key"])
+            relationship["operator_job_key"] = related_key or ""
+            relationship["name"] = (
+                operator_job_definition(related_key).name
+                if related_key
+                else _operator_job_name(relationship["job_key"])
+            )
     return total, runs
-
-
-_HISTORY_RETRYABLE_KINDS = {
-    "software_classifier": "software-classify-only",
-    "patch_findings": "patch-classify",
-    "platform_evaluator": "platform-evaluate",
-    "identity_resolver": "resolver",
-    "parity_check": "parity-check",
-    "notifications_dispatch": "notifications-dispatch",
-    "notifications_digest": "notifications-digest",
-}
-
-
-def _recent_job_history(*, limit: int = 25, offset: int = 0) -> tuple[int, list[dict]]:
-    """Show observed system work not represented by a durable queue row."""
-    with transaction.atomic(), connection.cursor() as cur:
-        cur.execute("SET LOCAL operations.tenant_id = 1")
-        cur.execute("SELECT count(*) FROM operations.run_log WHERE tenant_id = 1")
-        total = int(cur.fetchone()[0])
-        cur.execute(
-            """SELECT kind, ok, started_at, ended_at, rows, COALESCE(error, '')
-                 FROM operations.run_log
-                WHERE tenant_id = 1
-                ORDER BY started_at DESC, id DESC
-                LIMIT %s OFFSET %s""",
-            (limit, offset),
-        )
-        rows = [
-            {
-                "name": row[0].replace("_", " ").replace(".", " · ").title(),
-                "origin": "Automatic", "started_at": row[2], "completed_at": row[3],
-                "rows_touched": row[4], "ok": row[1], "error": row[5],
-                "retry_job_key": _HISTORY_RETRYABLE_KINDS.get(row[0]) if not row[1] else "",
-            }
-            for row in cur.fetchall()
-        ]
-    return total, rows
-
-
-def _jobs_activity_date(value: str, *, end: bool = False) -> datetime | None:
-    """Parse one inclusive activity date into a UTC query boundary."""
-    try:
-        boundary = datetime.strptime(value, "%Y-%m-%d").replace(tzinfo=dt_timezone.utc)
-    except ValueError:
-        return None
-    return boundary + timedelta(days=1) if end else boundary
-
-
-def _jobs_activity_query(request: HttpRequest, *excluded: str) -> str:
-    """Retain all active filters while changing one pagination dimension."""
-    omitted = set(excluded)
-    pairs = [
-        (key, value)
-        for key in request.GET
-        if key not in omitted
-        for value in request.GET.getlist(key)
-    ]
-    return urlencode(pairs)
 
 
 @login_required
 @require_admin
 def admin_job_status(request: HttpRequest) -> HttpResponse:
+    """Preserve old Activity links while Jobs history moves to Job detail."""
     run_id = (request.GET.get("run") or "").strip()
-    activity_view = (request.GET.get("view") or "current").strip()
-    if activity_view not in {"current", "attention", "history"}:
-        activity_view = "current"
-    raw_filters = {
-        "job_key": (request.GET.get("job") or "").strip(),
-        "scope": (request.GET.get("scope") or "").strip(),
-        "origin": (request.GET.get("origin") or "").strip(),
-        "status": (request.GET.get("status") or "").strip(),
-        "owner": (request.GET.get("owner") or "").strip(),
-        "correlation": (request.GET.get("correlation") or "").strip(),
-        "batch": (request.GET.get("batch") or "").strip(),
-        "from": (request.GET.get("from") or "").strip(),
-        "to": (request.GET.get("to") or "").strip(),
-        "technical": (request.GET.get("technical") or "").strip(),
-    }
-    allowed_origins = {"automatic", "operator", "dependency", "recovery"}
-    allowed_statuses = {
-        "ready", "waiting", "running", "completed", "failed", "stalled", "cancelled",
-    }
-    filters: dict[str, object] = {
-        key: value
-        for key, value in raw_filters.items()
-        if value and key not in {"from", "to"}
-    }
-    if filters.get("job_key") not in definition_keys():
-        filters.pop("job_key", None)
-    if filters.get("origin") not in allowed_origins:
-        filters.pop("origin", None)
-    if filters.get("status") not in allowed_statuses:
-        filters.pop("status", None)
-    from_at = _jobs_activity_date(raw_filters["from"])
-    to_at = _jobs_activity_date(raw_filters["to"], end=True)
-    if from_at is not None:
-        filters["from_at"] = from_at
-    if to_at is not None:
-        filters["to_at"] = to_at
-    if not run_id:
-        if activity_view == "current":
-            filters["current_only"] = True
-        elif activity_view == "attention":
-            filters["current_only"] = True
-            filters["statuses"] = ["failed", "stalled"]
-        else:
-            filters["history_only"] = True
-            if "status" not in filters:
-                filters["statuses"] = ["completed", "failed", "stalled", "cancelled"]
-    try:
-        page = max(1, min(20001, int(request.GET.get("page") or "1")))
-    except ValueError:
-        page = 1
-    try:
-        history_page = max(1, min(20001, int(request.GET.get("history_page") or "1")))
-    except ValueError:
-        history_page = 1
-    page_size = 50
-    history_page_size = 25
+    requested_key = (request.GET.get("job") or "").strip()
+    execution_key = requested_key
     if run_id:
-        page = 1
-        filters = {}
-    run_total, runs = _operator_job_runs(
-        limit=page_size,
-        offset=(page - 1) * page_size,
-        run_id=run_id,
-        filters=filters,
-    )
-    if activity_view == "current" and not run_id:
-        # Current work answers the operator question "what is this Job doing
-        # now?" One latest active attempt per definition is enough here; the
-        # History view remains the complete immutable run ledger.
-        latest_by_job: dict[str, dict] = {}
-        queued_by_job: dict[str, int] = {}
-        status_priority = {"stalled": 0, "failed": 0, "running": 1, "queued": 2}
-        for run in runs:
-            if run["status"] == "queued":
-                queued_by_job[run["job_key"]] = queued_by_job.get(run["job_key"], 0) + 1
-            current = latest_by_job.get(run["job_key"])
-            if current is None or status_priority.get(run["status"], 3) < status_priority.get(current["status"], 3):
-                latest_by_job[run["job_key"]] = run
-        runs = list(latest_by_job.values())
-        for run in runs:
-            run["queued_follow_up_count"] = queued_by_job.get(run["job_key"], 0)
-    with transaction.atomic(), connection.cursor() as cur:
-        cur.execute("SET LOCAL operations.tenant_id = 1")
-        cur.execute(
-            """SELECT CASE
-                         WHEN status = 'queued' AND wait_category IS NULL THEN 'ready'
-                         WHEN status = 'queued' THEN 'waiting'
-                         ELSE status
-                       END AS lifecycle,
-                       count(*) FROM operations.operator_job_runs
-                 WHERE tenant_id = 1 AND id IN (
-                     SELECT run_id FROM operations.jobs_activity_current_v1(1)
-                 ) GROUP BY lifecycle"""
-        )
-        current_summary = dict(cur.fetchall())
-    history_total, history = _recent_job_history(
-        limit=history_page_size,
-        offset=(history_page - 1) * history_page_size,
-    )
-    return render(
-        request,
-        "admin_job_status.html",
-        {
-            "admin_group": "integrations", "admin_tab": "jobs",
-            "runs": runs,
-            "displayed_run_total": len(runs),
-            "current_summary": {
-                "running": current_summary.get("running", 0),
-                "ready": current_summary.get("ready", 0),
-                "waiting": current_summary.get("waiting", 0),
-                "attention": current_summary.get("failed", 0) + current_summary.get("stalled", 0),
-            },
-            "run_total": run_total,
-            "run_page": page,
-            "run_has_previous": page > 1,
-            "run_previous_page": page - 1,
-            "run_has_next": page * page_size < run_total,
-            "run_next_page": page + 1,
-            "activity_query": _jobs_activity_query(request, "page", "run"),
-            "activity_view_query": _jobs_activity_query(request, "view", "page", "run"),
-            "activity_view": activity_view,
-            "history": history,
-            "history_total": history_total,
-            "history_page": history_page,
-            "history_has_previous": history_page > 1,
-            "history_previous_page": history_page - 1,
-            "history_has_next": history_page * history_page_size < history_total,
-            "history_next_page": history_page + 1,
-            "history_query": _jobs_activity_query(request, "history_page", "run"),
-            "active_filters": raw_filters,
-            "selected_run": run_id,
-            "job_choices": [
-                (item.key, item.display_name) for item in definitions()
-            ],
-            "owner_choices": sorted({item.owner for item in definitions()}),
-        },
-    )
+        try:
+            with transaction.atomic(), connection.cursor() as cur:
+                cur.execute("SET LOCAL operations.tenant_id = 1")
+                cur.execute(
+                    """SELECT job_key FROM operations.operator_job_runs
+                         WHERE tenant_id = 1 AND id::text = %s""",
+                    (run_id,),
+                )
+                row = cur.fetchone()
+                execution_key = row[0] if row else ""
+        except DatabaseError:
+            execution_key = ""
+    visible_key = operator_job_key_for_execution(execution_key) if execution_key else None
+    if visible_key:
+        target = reverse("admin_job_detail", kwargs={"job_id": visible_key})
+        return redirect(target + (f"?run={run_id}" if run_id else ""))
+    return redirect("admin_jobs")
 
 
 @login_required
@@ -9516,10 +9472,12 @@ def admin_job_cancel(request: HttpRequest, run_id: uuid.UUID) -> HttpResponse:
     if outcome == "cancelled":
         messages.success(request, "Queued run cancelled.")
     elif outcome == "requested":
-        messages.success(request, "Cancellation requested; the worker will stop only at a safe checkpoint.")
+        messages.success(
+            request, "Cancellation requested; the worker will stop only at a safe checkpoint."
+        )
     else:
         messages.info(request, "This run has already finished or cannot be cancelled.")
-    return redirect(request.META.get("HTTP_REFERER") or reverse("admin_job_status"))
+    return redirect(request.META.get("HTTP_REFERER") or reverse("admin_jobs"))
 
 
 @login_required
@@ -9537,7 +9495,7 @@ def admin_job_bulk_cancel(request: HttpRequest) -> HttpResponse:
             run_ids.append(run_id)
     if not run_ids:
         messages.info(request, "Select queued or running Jobs before applying a bulk action.")
-        return redirect(reverse("admin_job_status"))
+        return redirect(request.META.get("HTTP_REFERER") or reverse("admin_jobs"))
 
     outcomes = {"cancelled": 0, "requested": 0, "unchanged": 0}
     with transaction.atomic(), connection.cursor() as cur:
@@ -9557,7 +9515,7 @@ def admin_job_bulk_cancel(request: HttpRequest) -> HttpResponse:
     if outcomes["unchanged"]:
         detail.append(f"{outcomes['unchanged']} already finished or unavailable")
     messages.success(request, "Bulk Job action: " + "; ".join(detail) + ".")
-    return redirect(reverse("admin_job_status"))
+    return redirect(request.META.get("HTTP_REFERER") or reverse("admin_jobs"))
 
 
 @login_required
@@ -9576,30 +9534,17 @@ def admin_job_retry(request: HttpRequest, run_id: uuid.UUID) -> HttpResponse:
         row = cur.fetchone()
     if row is None:
         messages.info(request, "Only failed or stalled runs can be retried.")
-        return redirect(request.META.get("HTTP_REFERER") or reverse("admin_job_status"))
-    new_id, created = _enqueue_operator_job(
-        row[0], request.user.id, retry_of=run_id
-    )
+        return redirect(request.META.get("HTTP_REFERER") or reverse("admin_jobs"))
+    new_id, created = _enqueue_operator_job(row[0], request.user.id, retry_of=run_id)
     if created:
-        messages.success(request, "Retry queued. Follow the new run in Job status.")
+        messages.success(request, "Retry requested.")
     else:
         messages.info(request, "An equivalent run is already queued or running.")
-    return redirect(reverse("admin_job_status") + f"?run={new_id}")
-
-
-@login_required
-@require_admin
-@require_POST
-def admin_job_history_retry(request: HttpRequest, job_key: str) -> HttpResponse:
-    """Retry a failed historical run only through an explicit safe mapping."""
-    if job_key not in _HISTORY_RETRYABLE_KINDS.values():
-        raise PermissionDenied("This historical job cannot be retried from Job activity.")
-    run_id, created = _enqueue_operator_job(job_key, request.user.id)
-    if created:
-        messages.success(request, "Retry queued. Follow its progress here.")
-    else:
-        messages.info(request, "An equivalent run is already queued or running.")
-    return redirect(reverse("admin_job_status") + f"?run={run_id}")
+    visible_key = operator_job_key_for_execution(row[0])
+    if visible_key:
+        target = reverse("admin_job_detail", kwargs={"job_id": visible_key})
+        return redirect(target + f"?run={new_id}")
+    return redirect("admin_jobs_control_plane")
 
 
 # ─────────────────────────────────────────────────────────────────────
@@ -9684,14 +9629,19 @@ def software_title_lookup(request: HttpRequest, name: str, source: str) -> HttpR
                 result, result_summary
             ) VALUES (1, %s, %s, %s, %s, %s::jsonb, %s)
             """,
-            (canonical_name, source, now, request.user.id,
-             json.dumps(result), summary[:1000]),
+            (canonical_name, source, now, request.user.id, json.dumps(result), summary[:1000]),
         )
-    _audit(request, "software.lookup", uuid.uuid4(), {}, {
-        "canonical_name": canonical_name,
-        "source": source,
-        "summary": summary[:400],
-    })
+    _audit(
+        request,
+        "software.lookup",
+        uuid.uuid4(),
+        {},
+        {
+            "canonical_name": canonical_name,
+            "source": source,
+            "summary": summary[:400],
+        },
+    )
     messages.success(request, f"{source.title()} lookup complete: {summary}")
     return redirect("software_detail", name=canonical_name)
 
@@ -9881,9 +9831,18 @@ def software_tech_checklist(request: HttpRequest) -> HttpResponse:
     per_device: dict = {}
     for row in list(finding_rows) + list(decision_rows):
         (
-            client_id, slug, client_name, device_id, hostname,
-            device_role, os_group, canonical, publisher, reason,
-            finding_type, severity,
+            client_id,
+            slug,
+            client_name,
+            device_id,
+            hostname,
+            device_role,
+            os_group,
+            canonical,
+            publisher,
+            reason,
+            finding_type,
+            severity,
         ) = row
         entry = per_device.setdefault(
             device_id,
@@ -9918,30 +9877,25 @@ def software_tech_checklist(request: HttpRequest) -> HttpResponse:
         entry["item_count"] = len(entry["items"])
         entry["items"].sort(key=lambda i: (i["finding_type"], i["canonical_name"]))
         devices.append(entry)
-    devices.sort(
-        key=lambda e: (-e["item_count"], e["client_name"], e["hostname"] or "")
-    )
+    devices.sort(key=lambda e: (-e["item_count"], e["client_name"], e["hostname"] or ""))
 
     # Enrich items with category from SoftwareCatalog (canonical lookup).
     all_canonicals = {
-        i["canonical_name"].lower()
-        for e in devices
-        for i in e["items"]
-        if i["canonical_name"]
+        i["canonical_name"].lower() for e in devices for i in e["items"] if i["canonical_name"]
     }
-    catalog_cats = {
-        c.canonical_name.lower(): ", ".join(c.categories or [])
-        for c in SoftwareCatalog.objects.filter(
-            canonical_name__in=list(all_canonicals)
-        )
-    } if all_canonicals else {}
+    catalog_cats = (
+        {
+            c.canonical_name.lower(): ", ".join(c.categories or [])
+            for c in SoftwareCatalog.objects.filter(canonical_name__in=list(all_canonicals))
+        }
+        if all_canonicals
+        else {}
+    )
     for entry in devices:
         for item in entry["items"]:
             item["category"] = catalog_cats.get((item["canonical_name"] or "").lower(), "")
 
-    clients = Client.objects.filter(
-        tenant_id=1, deleted_at__isnull=True
-    ).order_by("display_name")
+    clients = Client.objects.filter(tenant_id=1, deleted_at__isnull=True).order_by("display_name")
 
     if wants_csv(request):
         flat_rows: list[dict] = []
@@ -9977,7 +9931,10 @@ def software_tech_checklist(request: HttpRequest) -> HttpResponse:
     def _match_row(entry: dict) -> bool:
         if q_filter:
             needle = q_filter.lower()
-            if needle not in (entry["hostname"] or "").lower() and needle not in (entry["client_name"] or "").lower():
+            if (
+                needle not in (entry["hostname"] or "").lower()
+                and needle not in (entry["client_name"] or "").lower()
+            ):
                 if not any(
                     needle in (i.get("canonical_name") or "").lower()
                     or needle in (i.get("publisher") or "").lower()
@@ -9988,6 +9945,7 @@ def software_tech_checklist(request: HttpRequest) -> HttpResponse:
             if not any(kind_filter in (i.get("finding_type") or "") for i in entry["items"]):
                 return False
         return True
+
     if q_filter or kind_filter:
         devices = [d for d in devices if _match_row(d)]
 
@@ -10332,7 +10290,9 @@ def software_clients(request: HttpRequest) -> HttpResponse:
     with transaction.atomic(), connection.cursor() as cur:
         cur.execute("SET LOCAL operations.tenant_id = 1")
         where = [
-            "sic.tenant_id = 1", "sic.deleted_at IS NULL", "sic.stale_since IS NULL",
+            "sic.tenant_id = 1",
+            "sic.deleted_at IS NULL",
+            "sic.stale_since IS NULL",
         ]
         params: list = []
         if software_filter:
@@ -10919,8 +10879,16 @@ def patching_queue(request: HttpRequest) -> HttpResponse:
             "value": population["in_scope"],
             "href": _scope_href("Included"),
         },
-        {"label": "Excluded — do not patch", "value": population["excluded"], "href": _scope_href("Excluded")},
-        {"label": "Not managed — no patch service", "value": population["unmanaged"], "href": _scope_href("Unmanaged")},
+        {
+            "label": "Excluded — do not patch",
+            "value": population["excluded"],
+            "href": _scope_href("Excluded"),
+        },
+        {
+            "label": "Not managed — no patch service",
+            "value": population["unmanaged"],
+            "href": _scope_href("Unmanaged"),
+        },
     ]
 
     return render(
@@ -11005,22 +10973,43 @@ def client_source_reference_detail(request: HttpRequest, source_link_id: str) ->
             [source_link_id],
         )
         history = [
-            {"state": state, "provenance": provenance, "reason": reason,
-             "decided_at": decided_at, "superseded_at": superseded_at}
+            {
+                "state": state,
+                "provenance": provenance,
+                "reason": reason,
+                "decided_at": decided_at,
+                "superseded_at": superseded_at,
+            }
             for state, provenance, reason, decided_at, superseded_at in cur.fetchall()
         ]
     fields = (
-        "source_link_id", "client_slug", "client_name", "source_name", "external_id",
-        "external_namespace", "observed_name", "observed_at", "first_seen_at",
-        "last_seen_at", "missing_since", "state", "provenance", "reason", "decided_at",
+        "source_link_id",
+        "client_slug",
+        "client_name",
+        "source_name",
+        "external_id",
+        "external_namespace",
+        "observed_name",
+        "observed_at",
+        "first_seen_at",
+        "last_seen_at",
+        "missing_since",
+        "state",
+        "provenance",
+        "reason",
+        "decided_at",
     )
     reference = dict(zip(fields, row, strict=True))
-    return render(request, "client_source_reference_detail.html", {
-        "reference": reference,
-        "history": history,
-        "admin_group": "integrations" if request.user.is_staff else "",
-        "admin_tab": "client-mappings" if request.user.is_staff else "",
-    })
+    return render(
+        request,
+        "client_source_reference_detail.html",
+        {
+            "reference": reference,
+            "history": history,
+            "admin_group": "integrations" if request.user.is_staff else "",
+            "admin_tab": "client-mappings" if request.user.is_staff else "",
+        },
+    )
 
 
 @login_required
@@ -11039,7 +11028,16 @@ def client_mappings(request: HttpRequest) -> HttpResponse:
     source_filter = (request.GET.get("source") or "").strip()
     state_filter = (request.GET.get("state") or "all").strip()
     query = (request.GET.get("q") or "").strip()
-    valid_states = {"all", "mapped", "review", "explicit", "automatic", "ignored", "unattached", "ambiguous"}
+    valid_states = {
+        "all",
+        "mapped",
+        "review",
+        "explicit",
+        "automatic",
+        "ignored",
+        "unattached",
+        "ambiguous",
+    }
     if state_filter not in valid_states:
         state_filter = "all"
 
@@ -11055,7 +11053,9 @@ def client_mappings(request: HttpRequest) -> HttpResponse:
         where.append("source.name = %s")
         params.append(source_filter)
     if query:
-        where.append("(client.display_name ILIKE %s OR mapping.observed_name ILIKE %s OR mapping.external_id ILIKE %s)")
+        where.append(
+            "(client.display_name ILIKE %s OR mapping.observed_name ILIKE %s OR mapping.external_id ILIKE %s)"
+        )
         params.extend([f"%{query}%"] * 3)
     if state_filter in {"review", "explicit", "automatic", "ignored"}:
         where.append("mapping.mapping_state = %s")
@@ -11079,10 +11079,18 @@ def client_mappings(request: HttpRequest) -> HttpResponse:
         )
         mapped_rows = [
             {
-                "source_link_id": row[0], "client_id": row[1], "client_slug": row[2], "client_name": row[3],
-                "source_name": row[4], "external_id": row[5], "observed_name": row[6],
-                "observed_at": row[7], "state": row[8], "provenance": row[9],
-                "reason": row[10], "decided_at": row[11],
+                "source_link_id": row[0],
+                "client_id": row[1],
+                "client_slug": row[2],
+                "client_name": row[3],
+                "source_name": row[4],
+                "external_id": row[5],
+                "observed_name": row[6],
+                "observed_at": row[7],
+                "state": row[8],
+                "provenance": row[9],
+                "reason": row[10],
+                "decided_at": row[11],
             }
             for row in cur.fetchall()
         ]
@@ -11100,14 +11108,21 @@ def client_mappings(request: HttpRequest) -> HttpResponse:
             )
             for link_id, state, provenance, reason, decided_at, superseded_at in cur.fetchall():
                 history_by_link.setdefault(str(link_id), []).append(
-                    {"state": state, "provenance": provenance, "reason": reason,
-                     "decided_at": decided_at, "superseded_at": superseded_at}
+                    {
+                        "state": state,
+                        "provenance": provenance,
+                        "reason": reason,
+                        "decided_at": decided_at,
+                        "superseded_at": superseded_at,
+                    }
                 )
 
     names_by_client_id: dict[str, set[str]] = {}
     for reference in client_source_references():
         if reference["observed_name"]:
-            names_by_client_id.setdefault(str(reference["client_id"]), set()).add(reference["observed_name"])
+            names_by_client_id.setdefault(str(reference["client_id"]), set()).add(
+                reference["observed_name"]
+            )
     for row in mapped_rows:
         names = sorted(names_by_client_id.get(str(row["client_id"]), set()))
         row["other_names"] = [name for name in names if name != row["observed_name"]]
@@ -11121,32 +11136,66 @@ def client_mappings(request: HttpRequest) -> HttpResponse:
         if state_filter == "unattached":
             candidate_qs = candidate_qs.filter(status=ClientCandidate.Status.OPEN)
         if query:
-            candidate_qs = candidate_qs.filter(Q(display_name__icontains=query) | Q(normalized_name__icontains=query))
+            candidate_qs = candidate_qs.filter(
+                Q(display_name__icontains=query) | Q(normalized_name__icontains=query)
+            )
         source_names = {source.id: source.name for source in Source.objects.all()}
         for candidate in candidate_qs.order_by("display_name"):
             refs = candidate.source_refs or []
-            candidate_sources = sorted({source_names.get(ref.get("source_id"), "Unknown source") for ref in refs})
+            candidate_sources = sorted(
+                {source_names.get(ref.get("source_id"), "Unknown source") for ref in refs}
+            )
             if source_filter and source_filter not in candidate_sources:
                 continue
             candidates.append({"candidate": candidate, "sources": candidate_sources, "refs": refs})
 
-    ambiguity_types = ("client_link_collision", "client_source_group_merge", "client_unattached_group", "unnamed_source_group", "unmatched_source_group")
+    ambiguity_types = (
+        "client_link_collision",
+        "client_source_group_merge",
+        "client_unattached_group",
+        "unnamed_source_group",
+        "unmatched_source_group",
+    )
     ambiguities = []
     if state_filter in {"all", "ambiguous"}:
-        ambiguity_qs = AdminFinding.objects.filter(
-            tenant_id=1, status__in=("open", "acknowledged"), finding_type__name__in=ambiguity_types
-        ).select_related("finding_type").order_by("-last_detected_at")
+        ambiguity_qs = (
+            AdminFinding.objects.filter(
+                tenant_id=1,
+                status__in=("open", "acknowledged"),
+                finding_type__name__in=ambiguity_types,
+            )
+            .select_related("finding_type")
+            .order_by("-last_detected_at")
+        )
         for finding in ambiguity_qs:
             subject = finding.subject_ref or {}
             details = finding.details or {}
             source_id = subject.get("source_id") or details.get("source_id")
             source = Source.objects.filter(id=source_id).first() if source_id else None
-            evidence = subject.get("observed_name") or subject.get("external_name_stored") or details.get("observed_name") or details.get("external_id") or "No source name recorded"
-            if query and query.lower() not in str(evidence).lower() and query.lower() not in finding.finding_type.name.lower():
+            evidence = (
+                subject.get("observed_name")
+                or subject.get("external_name_stored")
+                or details.get("observed_name")
+                or details.get("external_id")
+                or "No source name recorded"
+            )
+            if (
+                query
+                and query.lower() not in str(evidence).lower()
+                and query.lower() not in finding.finding_type.name.lower()
+            ):
                 continue
             if source_filter and (source is None or source.name != source_filter):
                 continue
-            ambiguities.append({"finding": finding, "source_name": source.name if source else "Unknown source", "evidence": evidence, "details": details, "subject": subject})
+            ambiguities.append(
+                {
+                    "finding": finding,
+                    "source_name": source.name if source else "Unknown source",
+                    "evidence": evidence,
+                    "details": details,
+                    "subject": subject,
+                }
+            )
 
     if state_filter == "mapped":
         mapped_rows = [row for row in mapped_rows if row["state"] != "review"]
@@ -11182,7 +11231,13 @@ def inventory_clients(request: HttpRequest) -> HttpResponse:
         clients = clients.filter(display_name__icontains=query)
 
     rows_by_client: dict[str, dict] = {
-        str(client.id): {"client": client, "source_count": 0, "sources": [], "review_count": 0, "name_difference_count": 0}
+        str(client.id): {
+            "client": client,
+            "source_count": 0,
+            "sources": [],
+            "review_count": 0,
+            "name_difference_count": 0,
+        }
         for client in clients
     }
     for reference in client_source_references():
@@ -11202,11 +11257,19 @@ def inventory_clients(request: HttpRequest) -> HttpResponse:
         if client_id in rows_by_client:
             rows_by_client[client_id]["name_difference_count"] += 1
 
-    open_candidates = ClientCandidate.objects.filter(tenant_id=1, status=ClientCandidate.Status.OPEN).count()
-    return render(request, "inventory_clients.html", {
-        "active_section": "inventory", "rows": list(rows_by_client.values()), "query": query,
-        "open_candidates": open_candidates,
-    })
+    open_candidates = ClientCandidate.objects.filter(
+        tenant_id=1, status=ClientCandidate.Status.OPEN
+    ).count()
+    return render(
+        request,
+        "inventory_clients.html",
+        {
+            "active_section": "inventory",
+            "rows": list(rows_by_client.values()),
+            "query": query,
+            "open_candidates": open_candidates,
+        },
+    )
 
 
 @login_required
@@ -11251,9 +11314,7 @@ def findings_admin_health(request: HttpRequest) -> HttpResponse:
     }
     source_names = {
         str(source_id): name
-        for source_id, name in Source.objects.filter(
-            id__in=source_ids
-        ).values_list("id", "name")
+        for source_id, name in Source.objects.filter(id__in=source_ids).values_list("id", "name")
     }
     assessments = _condition_assessment_display("admin", (finding.id for finding in findings))
     for finding in findings:
@@ -11266,21 +11327,23 @@ def findings_admin_health(request: HttpRequest) -> HttpResponse:
         finding.source_name = source_names.get(str(ref.get("source_id")), "")
         finding.source_url = reverse("sources_status") if finding.source_name else ""
         if details.get("job_run_id") or details.get("dependent_job_run_id"):
-            finding.job_status_url = reverse("admin_job_status") + "?" + urlencode(
-                {"run": details.get("job_run_id") or details["dependent_job_run_id"]}
+            finding.job_status_url = (
+                reverse("admin_job_status")
+                + "?"
+                + urlencode({"run": details.get("job_run_id") or details["dependent_job_run_id"]})
             )
         elif details.get("job_key"):
-            finding.job_status_url = reverse("admin_job_status") + "?" + urlencode(
-                {"job": details["job_key"]}
+            finding.job_status_url = (
+                reverse("admin_job_status") + "?" + urlencode({"job": details["job_key"]})
             )
         elif details.get("queue_key") == "operator.jobs":
             finding.job_status_url = reverse("admin_job_status")
         else:
             finding.job_status_url = ""
         finding.control_plane_url = (
-            reverse("admin_jobs_control_plane") + "?" + urlencode(
-                {"section": details["control_section"]}
-            )
+            reverse("admin_jobs_control_plane")
+            + "?"
+            + urlencode({"section": details["control_section"]})
             if details.get("control_section")
             else ""
         )
@@ -11340,9 +11403,13 @@ def _condition_coverage_summary(profile) -> list[dict]:
                 {
                     "name": name,
                     "label": definitions[name].get("label", name),
-                    "category": taxonomy_by_condition.get(name, {}).get("category_label", definitions[name].get("category", "")),
+                    "category": taxonomy_by_condition.get(name, {}).get(
+                        "category_label", definitions[name].get("category", "")
+                    ),
                     "category_key": taxonomy_by_condition.get(name, {}).get("category", ""),
-                    "type": taxonomy_by_condition.get(name, {}).get("type_label", definitions[name].get("type", "")),
+                    "type": taxonomy_by_condition.get(name, {}).get(
+                        "type_label", definitions[name].get("type", "")
+                    ),
                     "type_key": taxonomy_by_condition.get(name, {}).get("type", ""),
                     "retained": 0,
                     "assessed": 0,
@@ -11411,16 +11478,19 @@ def _condition_coverage_summary(profile) -> list[dict]:
             names + names,
         )
         counts = {
-            name: (int(retained), int(assessed))
-            for name, retained, assessed in cur.fetchall()
+            name: (int(retained), int(assessed)) for name, retained, assessed in cur.fetchall()
         }
     return [
         {
             "name": name,
             "label": definitions[name].get("label", name),
-            "category": taxonomy_by_condition.get(name, {}).get("category_label", definitions[name].get("category", "")),
+            "category": taxonomy_by_condition.get(name, {}).get(
+                "category_label", definitions[name].get("category", "")
+            ),
             "category_key": taxonomy_by_condition.get(name, {}).get("category", ""),
-            "type": taxonomy_by_condition.get(name, {}).get("type_label", definitions[name].get("type", "")),
+            "type": taxonomy_by_condition.get(name, {}).get(
+                "type_label", definitions[name].get("type", "")
+            ),
             "type_key": taxonomy_by_condition.get(name, {}).get("type", ""),
             "retained": counts.get(name, (0, 0))[0],
             "assessed": counts.get(name, (0, 0))[1],
@@ -11477,8 +11547,7 @@ def admin_finding_apply_client_rename(request: HttpRequest, finding_id: str) -> 
     if not observed_name or not client_id:
         messages.error(
             request,
-            "This finding is missing the observed name or client reference; "
-            "cannot apply.",
+            "This finding is missing the observed name or client reference; " "cannot apply.",
         )
         return redirect("findings_admin_health")
 
@@ -11587,9 +11656,7 @@ def patch_evidence_page(request: HttpRequest) -> HttpResponse:
         role_filter = ""
     if severity_filter not in _PATCH_SEVERITY_VALUES:
         severity_filter = ""
-    if win11_filter not in {
-        value for value, _label in _WINDOWS_11_COMPATIBILITY_CHOICES
-    }:
+    if win11_filter not in {value for value, _label in _WINDOWS_11_COMPATIBILITY_CHOICES}:
         win11_filter = ""
 
     source_names = list(Source.objects.order_by("name").values_list("name", flat=True))
@@ -12539,50 +12606,64 @@ def _coverage_filter_url(**filters: str) -> str:
 @login_required
 def fleet_coverage(request: HttpRequest) -> HttpResponse:
     """Show every known Computer with its product records and required state."""
-    client_filters = list(dict.fromkeys(
-        value for value in request.GET.getlist("client") if value
-    ))
+    client_filters = list(dict.fromkeys(value for value in request.GET.getlist("client") if value))
     device_query = (request.GET.get("device") or "").strip().lower()
     agents_query = (request.GET.get("agents") or "").strip().lower()
     # ``platform``, ``state``, and ``online_in`` are retained as legacy query
     # parameters for existing drill-through URLs.  New controls express a
     # condition as one source plus that source's selected statuses.
-    platform_filters = list(dict.fromkeys(
-        value for value in request.GET.getlist("platform") if value
-    ))
-    online_filters = list(dict.fromkeys(
-        value for value in request.GET.getlist("online_in") if value
-    ))
+    platform_filters = list(
+        dict.fromkeys(value for value in request.GET.getlist("platform") if value)
+    )
+    online_filters = list(
+        dict.fromkeys(value for value in request.GET.getlist("online_in") if value)
+    )
     requested_coverage_sources = request.GET.getlist("coverage_source")
     requested_coverage_statuses = request.GET.getlist("coverage_status")
     any_platform_filters = [
-        value for value in request.GET.getlist("any_platform_status")
-        if value in _COVERAGE_STATES
+        value for value in request.GET.getlist("any_platform_status") if value in _COVERAGE_STATES
     ]
     any_platform_selected = request.GET.get("any_platform") == "1"
     no_platform_selected = request.GET.get("no_platform") == "1"
-    computer_scope_filters = list(dict.fromkeys(
-        value for value in request.GET.getlist("computer_scope")
-        if value in {
-            "has_product_record", "any_online", "any_offline",
-            "no_product_records", "no_current_records",
-            "missing_required", "stale_required",
-        }
-    ))
+    computer_scope_filters = list(
+        dict.fromkeys(
+            value
+            for value in request.GET.getlist("computer_scope")
+            if value
+            in {
+                "has_product_record",
+                "any_online",
+                "any_offline",
+                "no_product_records",
+                "no_current_records",
+                "missing_required",
+                "stale_required",
+            }
+        )
+    )
     requested_record_status_filters = request.GET.getlist("record_status")
     requested_rule_status_filters = request.GET.getlist("rule_status")
-    hudu_filters = list(dict.fromkeys(
-        value for value in request.GET.getlist("hudu")
-        if value in {"in_hudu", "not_in_hudu"}
-    ))
+    hudu_filters = list(
+        dict.fromkeys(
+            value for value in request.GET.getlist("hudu") if value in {"in_hudu", "not_in_hudu"}
+        )
+    )
     hudu_record_filter_active = "in_hudu" in hudu_filters
-    hudu_link_filters = list(dict.fromkeys(
-        value for value in request.GET.getlist("hudu_links")
-        if value in {"has_links", "no_links"}
-    ))
+    hudu_link_filters = list(
+        dict.fromkeys(
+            value
+            for value in request.GET.getlist("hudu_links")
+            if value in {"has_links", "no_links"}
+        )
+    )
     hudu_record_filter = request.GET.get("hudu_record_filter")
     if hudu_record_filter not in {
-        "any", "has_current", "has_archived", "current_only", "archived_only", "both",
+        "any",
+        "has_current",
+        "has_archived",
+        "current_only",
+        "archived_only",
+        "both",
     }:
         legacy_mode = request.GET.get("hudu_archive")
         if legacy_mode == "archived":
@@ -12591,22 +12672,23 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
             hudu_record_filter = "any"
         else:
             hudu_record_filter = "any"
-    s1_exemption_filters = list(dict.fromkeys(
-        value for value in request.GET.getlist("s1_exemption")
-        if value in {"exempt", "not_exempt"}
-    ))
-    os_family_filters = list(dict.fromkeys(
-        value for value in request.GET.getlist("os_family") if value
-    ))
-    device_type_filters = list(dict.fromkeys(
-        value for value in request.GET.getlist("device_type") if value
-    ))
-    device_role_filters = list(dict.fromkeys(
-        value for value in request.GET.getlist("device_role") if value
-    ))
-    state_filters = [
-        value for value in request.GET.getlist("state") if value in _COVERAGE_STATES
-    ]
+    s1_exemption_filters = list(
+        dict.fromkeys(
+            value
+            for value in request.GET.getlist("s1_exemption")
+            if value in {"exempt", "not_exempt"}
+        )
+    )
+    os_family_filters = list(
+        dict.fromkeys(value for value in request.GET.getlist("os_family") if value)
+    )
+    device_type_filters = list(
+        dict.fromkeys(value for value in request.GET.getlist("device_type") if value)
+    )
+    device_role_filters = list(
+        dict.fromkeys(value for value in request.GET.getlist("device_role") if value)
+    )
+    state_filters = [value for value in request.GET.getlist("state") if value in _COVERAGE_STATES]
     requested_platform_status_filters = request.GET.getlist("platform_status")
 
     with transaction.atomic():  # noqa: SIM117 -- tenant GUC must remain local
@@ -12906,10 +12988,16 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
 
     devices_by_id = {
         row[0]: {
-            "device_id": row[0], "client_id": row[1], "client_slug": row[2],
-            "client_name": row[3], "hostname": row[4], "os_family": row[5],
-            "device_type": row[6], "device_role": row[7],
-            "lifecycle_status": row[8], "s1_exempt": bool(row[9]),
+            "device_id": row[0],
+            "client_id": row[1],
+            "client_slug": row[2],
+            "client_name": row[3],
+            "hostname": row[4],
+            "os_family": row[5],
+            "device_type": row[6],
+            "device_role": row[7],
+            "lifecycle_status": row[8],
+            "s1_exempt": bool(row[9]),
         }
         for row in computer_rows
     }
@@ -12924,7 +13012,13 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
             "Online" if online is True else "Offline" if online is False else "Current"
         )
     source_observations_by_device: dict = {}
-    for device_id, platform, has_current_record, current_seen_at, withdrawn_at in source_observation_rows:
+    for (
+        device_id,
+        platform,
+        has_current_record,
+        current_seen_at,
+        withdrawn_at,
+    ) in source_observation_rows:
         source_observations_by_device.setdefault(device_id, {})[platform] = {
             "state": "Current" if has_current_record else "Withdrawn",
             "current_seen_at": current_seen_at,
@@ -12933,9 +13027,19 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
 
     hudu_by_observation: dict = {}
     for (
-        observation_id, device_id, client_id, hostname, layout, hudu_url,
-        serial_number, link_verdict, card_source, card_id, resolved_device_id,
-        is_archived, canonical,
+        observation_id,
+        device_id,
+        client_id,
+        hostname,
+        layout,
+        hudu_url,
+        serial_number,
+        link_verdict,
+        card_source,
+        card_id,
+        resolved_device_id,
+        is_archived,
+        canonical,
     ) in hudu_rows:
         is_archived = bool(is_archived)
         hudu = hudu_by_observation.setdefault(
@@ -13004,9 +13108,15 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
 
     coverage_rows = [
         {
-            "client_slug": row[0], "client_name": row[1], "device_id": row[2],
-            "hostname": row[3], "os_family": row[4], "device_type": row[5],
-            "platform": row[6], "s1_exempt": row[7], "status": row[8],
+            "client_slug": row[0],
+            "client_name": row[1],
+            "device_id": row[2],
+            "hostname": row[3],
+            "os_family": row[4],
+            "device_type": row[5],
+            "platform": row[6],
+            "s1_exempt": row[7],
+            "status": row[8],
         }
         for row in rows
     ]
@@ -13037,8 +13147,12 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
     record_status_filters: dict[str, list[str]] = {}
     rule_status_filters: dict[str, list[str]] = {}
     allowed_record_statuses = {
-        "Online", "Offline", "Withdrawn", "No record",
-        "No status reported", "Possible match",
+        "Online",
+        "Offline",
+        "Withdrawn",
+        "No record",
+        "No status reported",
+        "Possible match",
     }
     allowed_rule_statuses = {"Required", "Missing", "Stale", "N/A", "Exempt"}
     for value in requested_record_status_filters:
@@ -13092,21 +13206,25 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
     for index in range(12):
         agent = request.GET.get(f"agent_{index}")
         states = [
-            value for value in request.GET.getlist(f"agent_state_{index}")
+            value
+            for value in request.GET.getlist(f"agent_state_{index}")
             if value in allowed_record_statuses
         ]
         requirements = [
-            value for value in request.GET.getlist(f"agent_requirement_{index}")
+            value
+            for value in request.GET.getlist(f"agent_requirement_{index}")
             if value in allowed_rule_statuses
         ]
         if agent not in platforms or not (states or requirements):
             continue
-        agent_filter_conditions.append({
-            "index": index,
-            "agent": agent,
-            "states": list(dict.fromkeys(states)),
-            "requirements": list(dict.fromkeys(requirements)),
-        })
+        agent_filter_conditions.append(
+            {
+                "index": index,
+                "agent": agent,
+                "states": list(dict.fromkeys(states)),
+                "requirements": list(dict.fromkeys(requirements)),
+            }
+        )
     # Existing links remain valid.  Treat their former per-column selections
     # as builder conditions so old bookmarks retain the same AND semantics.
     legacy_agent_conditions = {
@@ -13118,9 +13236,14 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
         for platform in set(record_status_filters) | set(rule_status_filters)
     }
     all_agent_conditions = agent_filter_conditions + list(legacy_agent_conditions.values())
-    agent_filter_forms = agent_filter_conditions or [{
-        "index": 0, "agent": "", "states": [], "requirements": [],
-    }]
+    agent_filter_forms = agent_filter_conditions or [
+        {
+            "index": 0,
+            "agent": "",
+            "states": [],
+            "requirements": [],
+        }
+    ]
     coverage_filter_sources = [
         {
             "name": platform,
@@ -13129,9 +13252,7 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
         }
         for platform in platforms
     ]
-    os_families = sorted(
-        {row["os_family"] for row in devices_by_id.values() if row["os_family"]}
-    )
+    os_families = sorted({row["os_family"] for row in devices_by_id.values() if row["os_family"]})
     device_types = sorted(
         {row["device_type"] for row in devices_by_id.values() if row["device_type"]}
     )
@@ -13154,16 +13275,22 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
             "archived_only": has_archived and not has_current,
             "both": has_current and has_archived,
         }[hudu_record_filter]
-        matching_records = records if not hudu_record_filter_active else [
-            record for record in records
-            if (
-                hudu_record_filter in {"any", "has_current", "current_only", "both"}
-                and not record["is_archived"]
-            ) or (
-                hudu_record_filter in {"any", "has_archived", "archived_only", "both"}
-                and record["is_archived"]
-            )
-        ]
+        matching_records = (
+            records
+            if not hudu_record_filter_active
+            else [
+                record
+                for record in records
+                if (
+                    hudu_record_filter in {"any", "has_current", "current_only", "both"}
+                    and not record["is_archived"]
+                )
+                or (
+                    hudu_record_filter in {"any", "has_archived", "archived_only", "both"}
+                    and record["is_archived"]
+                )
+            ]
+        )
         hudu = {
             "hudu_present": bool(records),
             "hudu_archived": bool(records) and all(record["is_archived"] for record in records),
@@ -13189,73 +13316,84 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
                 if link not in hudu["hudu_links"]:
                     hudu["hudu_links"].append(link)
             linked_device = devices_by_id.get(record["device_id"])
-            hudu["hudu_records"].append({
-                "layout": record["layout"] or "Asset",
-                "is_archived": record["is_archived"],
-                "url": _safe_external_http_url(record["hudu_url"]),
-                "links": record["hudu_links"],
-                "device_id": linked_device["device_id"] if linked_device else None,
-                "device_client_slug": (
-                    linked_device["client_slug"] if linked_device else ""
-                ),
-            })
+            hudu["hudu_records"].append(
+                {
+                    "layout": record["layout"] or "Asset",
+                    "is_archived": record["is_archived"],
+                    "url": _safe_external_http_url(record["hudu_url"]),
+                    "links": record["hudu_links"],
+                    "device_id": linked_device["device_id"] if linked_device else None,
+                    "device_client_slug": (linked_device["client_slug"] if linked_device else ""),
+                }
+            )
         hudu["hudu_url"] = _safe_external_http_url(hudu["hudu_url"])
-        hudu["hudu_current_count"] = sum(
-            not record["is_archived"] for record in records
-        )
-        hudu["hudu_archived_count"] = sum(
-            record["is_archived"] for record in records
-        )
+        hudu["hudu_current_count"] = sum(not record["is_archived"] for record in records)
+        hudu["hudu_archived_count"] = sum(record["is_archived"] for record in records)
         hudu["hudu_card_count"] = len(hudu["hudu_links"])
         for record in matching_records:
             for link in record["hudu_links"]:
                 if link not in hudu["hudu_matching_links"]:
                     hudu["hudu_matching_links"].append(link)
         hudu["hudu_status"] = (
-            "Archived in Hudu" if hudu["hudu_archived"]
-            else "In Hudu (also archived)" if hudu["hudu_has_archived"]
-            else "In Hudu"
-        ) if hudu["hudu_present"] else "Not in Hudu"
+            (
+                "Archived in Hudu"
+                if hudu["hudu_archived"]
+                else "In Hudu (also archived)"
+                if hudu["hudu_has_archived"]
+                else "In Hudu"
+            )
+            if hudu["hudu_present"]
+            else "Not in Hudu"
+        )
         return hudu
 
     inventory_rows = []
     for device_id, computer in devices_by_id.items():
         coverage_states = coverage_by_device.get(device_id, {})
-        inventory_rows.append({
-            **computer,
-            "inventory_key": f"device:{device_id}",
-            "hudu_records": hudu_by_device.get(device_id, []),
-            "source_states": source_states_by_device.get(device_id, {}),
-            "source_observations": source_observations_by_device.get(device_id, {}),
-            "platform_states": coverage_states,
-            "possible_match": None,
-        })
+        inventory_rows.append(
+            {
+                **computer,
+                "inventory_key": f"device:{device_id}",
+                "hudu_records": hudu_by_device.get(device_id, []),
+                "source_states": source_states_by_device.get(device_id, {}),
+                "source_observations": source_observations_by_device.get(device_id, {}),
+                "platform_states": coverage_states,
+                "possible_match": None,
+            }
+        )
 
     for (
-        observation_id, client_id, client_slug, client_name, hostname,
-        platform, reported_online,
+        observation_id,
+        client_id,
+        client_slug,
+        client_name,
+        hostname,
+        platform,
+        reported_online,
     ) in source_only_rows:
         # A source-only record is deliberately not name-grouped.  A matching
         # name is useful evidence, but is not proof that it is the same
         # Computer as an existing row.
-        inventory_rows.append({
-            "inventory_key": f"source:{observation_id}",
-            "device_id": None,
-            "client_id": client_id,
-            "client_slug": client_slug or "",
-            "client_name": client_name or "Unassigned",
-            "hostname": hostname or "",
-            "os_family": "",
-            "device_type": "",
-            "device_role": "",
-            "lifecycle_status": "",
-            "hudu_records": [],
-            "source_states": {platform: "Online" if reported_online else "Offline"},
-            "source_observations": {},
-            "platform_states": {},
-            "s1_exempt": False,
-            "possible_match": None,
-        })
+        inventory_rows.append(
+            {
+                "inventory_key": f"source:{observation_id}",
+                "device_id": None,
+                "client_id": client_id,
+                "client_slug": client_slug or "",
+                "client_name": client_name or "Unassigned",
+                "hostname": hostname or "",
+                "os_family": "",
+                "device_type": "",
+                "device_role": "",
+                "lifecycle_status": "",
+                "hudu_records": [],
+                "source_states": {platform: "Online" if reported_online else "Offline"},
+                "source_observations": {},
+                "platform_states": {},
+                "s1_exempt": False,
+                "possible_match": None,
+            }
+        )
 
     for hudu in hudu_by_observation.values():
         if hudu["observation_id"] in grouped_hudu_observation_ids:
@@ -13263,27 +13401,29 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
         if hudu["device_id"] is not None and hudu["device_id"] in devices_by_id:
             continue
         client = clients_by_id.get(hudu["client_id"], {"slug": "", "name": "Unassigned"})
-        inventory_rows.append({
-            "inventory_key": f"hudu:{hudu['observation_id']}",
-            # A linked-but-retired/deleted device is not an active inventory
-            # computer. Keep this source record separate rather than linking
-            # a user to a stale device-detail route.
-            "device_id": None,
-            "client_id": hudu["client_id"],
-            "client_slug": client["slug"],
-            "client_name": client["name"],
-            "hostname": hudu["hostname"],
-            "os_family": "",
-            "device_type": "",
-            "device_role": "",
-            "lifecycle_status": "",
-            "hudu_records": [hudu],
-            "source_states": {},
-            "source_observations": {},
-            "platform_states": {},
-            "s1_exempt": False,
-            "possible_match": None,
-        })
+        inventory_rows.append(
+            {
+                "inventory_key": f"hudu:{hudu['observation_id']}",
+                # A linked-but-retired/deleted device is not an active inventory
+                # computer. Keep this source record separate rather than linking
+                # a user to a stale device-detail route.
+                "device_id": None,
+                "client_id": hudu["client_id"],
+                "client_slug": client["slug"],
+                "client_name": client["name"],
+                "hostname": hudu["hostname"],
+                "os_family": "",
+                "device_type": "",
+                "device_role": "",
+                "lifecycle_status": "",
+                "hudu_records": [hudu],
+                "source_states": {},
+                "source_observations": {},
+                "platform_states": {},
+                "s1_exempt": False,
+                "possible_match": None,
+            }
+        )
 
     devices_by_client_hostname: dict = {}
     for row in inventory_rows:
@@ -13422,11 +13562,7 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
                     cell["record_age"],
                     cell["rule_label"],
                     "Possible match" if cell["possible_match"] else "",
-                    (
-                        cell["possible_match"].get("hostname", "")
-                        if cell["possible_match"]
-                        else ""
-                    ),
+                    (cell["possible_match"].get("hostname", "") if cell["possible_match"] else ""),
                 )
                 if value
             )
@@ -13444,12 +13580,8 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
         requirements = condition["requirements"]
         if not requirements:
             return True
-        return (
-            cell["rule_status"] in requirements
-            or (
-                "Required" in requirements
-                and cell["rule_status"] in {"Required", "Missing", "Stale"}
-            )
+        return cell["rule_status"] in requirements or (
+            "Required" in requirements and cell["rule_status"] in {"Required", "Missing", "Stale"}
         )
 
     def matches(row: dict) -> bool:
@@ -13486,24 +13618,20 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
                     cell["record_status"] == "Offline" for cell in named_products.values()
                 ),
                 "no_product_records": not has_named_record,
-                "no_current_records": (
-                    not has_current_record and row["hudu_current_count"] == 0
-                ),
+                "no_current_records": (not has_current_record and row["hudu_current_count"] == 0),
                 "missing_required": any(
-                    item.get("status") == "Missing"
-                    for item in row["platform_states"].values()
+                    item.get("status") == "Missing" for item in row["platform_states"].values()
                 ),
                 "stale_required": any(
-                    item.get("status") == "Stale"
-                    for item in row["platform_states"].values()
+                    item.get("status") == "Stale" for item in row["platform_states"].values()
                 ),
             }
             if not any(scope_matches[value] for value in computer_scope_filters):
                 return False
         if any_platform_selected or any_platform_filters:
-            row_states = {
-                item["status"] for item in row["platform_states"].values()
-            } | set(row["source_states"].values())
+            row_states = {item["status"] for item in row["platform_states"].values()} | set(
+                row["source_states"].values()
+            )
             if not row_states or (
                 any_platform_filters and not row_states.intersection(any_platform_filters)
             ):
@@ -13554,7 +13682,11 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
 
     device_rows = [row for row in inventory_rows if matches(row)]
     record_status_order = (
-        "Online", "Offline", "No status reported", "Withdrawn", "No record",
+        "Online",
+        "Offline",
+        "No status reported",
+        "Withdrawn",
+        "No record",
     )
     present_record_statuses = tuple(
         status for status in record_status_order if status != "No record"
@@ -13571,32 +13703,37 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
                 requirement_total += 1
             if cell["rule_status"] in requirement_counts:
                 requirement_counts[cell["rule_status"]] += 1
-        platform_cards.append({
-            "platform": platform,
-            "counts": [
-                {
-                    "name": status,
-                    "count": record_counts[status],
-                    "url": agent_filter_url(platform, state=status),
-                }
-                for status in record_status_order
-            ] + [{
-                "name": "Total",
-                "count": sum(record_counts[status] for status in present_record_statuses),
-                "url": agent_filter_url(platform, states=present_record_statuses),
-            }],
-            "requirement_total": requirement_total,
-            "requirement_total_url": agent_filter_url(platform, requirement="Required"),
-            "requirement_exceptions": [
-                {
-                    "name": status,
-                    "count": requirement_counts[status],
-                    "url": agent_filter_url(platform, requirement=status),
-                }
-                for status in ("Missing", "Stale", "Exempt")
-                if requirement_counts[status]
-            ],
-        })
+        platform_cards.append(
+            {
+                "platform": platform,
+                "counts": [
+                    {
+                        "name": status,
+                        "count": record_counts[status],
+                        "url": agent_filter_url(platform, state=status),
+                    }
+                    for status in record_status_order
+                ]
+                + [
+                    {
+                        "name": "Total",
+                        "count": sum(record_counts[status] for status in present_record_statuses),
+                        "url": agent_filter_url(platform, states=present_record_statuses),
+                    }
+                ],
+                "requirement_total": requirement_total,
+                "requirement_total_url": agent_filter_url(platform, requirement="Required"),
+                "requirement_exceptions": [
+                    {
+                        "name": status,
+                        "count": requirement_counts[status],
+                        "url": agent_filter_url(platform, requirement=status),
+                    }
+                    for status in ("Missing", "Stale", "Exempt")
+                    if requirement_counts[status]
+                ],
+            }
+        )
 
     hudu_counts = {
         "Current only": sum(
@@ -13604,8 +13741,7 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
             for row in inventory_rows
         ),
         "Current + archived": sum(
-            bool(row["hudu_current_count"] and row["hudu_archived_count"])
-            for row in inventory_rows
+            bool(row["hudu_current_count"] and row["hudu_archived_count"]) for row in inventory_rows
         ),
         "Archived only": sum(
             bool(not row["hudu_current_count"] and row["hudu_archived_count"])
@@ -13615,13 +13751,16 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
     }
     hudu_urls = {
         "Current only": _coverage_filter_url(
-            hudu="in_hudu", hudu_record_filter="current_only",
+            hudu="in_hudu",
+            hudu_record_filter="current_only",
         ),
         "Current + archived": _coverage_filter_url(
-            hudu="in_hudu", hudu_record_filter="both",
+            hudu="in_hudu",
+            hudu_record_filter="both",
         ),
         "Archived only": _coverage_filter_url(
-            hudu="in_hudu", hudu_record_filter="archived_only",
+            hudu="in_hudu",
+            hudu_record_filter="archived_only",
         ),
         "No record": _coverage_filter_url(hudu="not_in_hudu"),
         "Total": _coverage_filter_url(hudu="in_hudu"),
@@ -13638,8 +13777,7 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
     filter_summary_parts = []
     if client_filters:
         selected_client_names = [
-            client["name"] for client in filter_clients
-            if client["slug"] in client_filters
+            client["name"] for client in filter_clients if client["slug"] in client_filters
         ]
         filter_logic_parts.append(
             "(" + " OR ".join(f"Client is {name}" for name in selected_client_names) + ")"
@@ -13664,13 +13802,15 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
         filter_logic_parts.append(
             "(" + " OR ".join(scope_labels[value] for value in computer_scope_filters) + ")"
         )
-        filter_summary_parts.append(" or ".join(scope_labels[value] for value in computer_scope_filters))
+        filter_summary_parts.append(
+            " or ".join(scope_labels[value] for value in computer_scope_filters)
+        )
+
     def condition_logic(condition: dict) -> str:
         parts = []
         if condition["states"]:
             states = " OR ".join(
-                f"{condition['agent']} state is {state}"
-                for state in condition["states"]
+                f"{condition['agent']} state is {state}" for state in condition["states"]
             )
             parts.append(f"({states})" if len(condition["states"]) > 1 else states)
         if condition["requirements"]:
@@ -13693,9 +13833,7 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
             }.get(requirement, requirement)
             for requirement in condition["requirements"]
         )
-        filter_summary_parts.append(
-            f"{condition['agent']} — {', '.join(selected)}"
-        )
+        filter_summary_parts.append(f"{condition['agent']} — {', '.join(selected)}")
     if hudu_filters:
         labels = {"in_hudu": "In Hudu", "not_in_hudu": "Not in Hudu"}
         filter_logic_parts.append(
@@ -13710,22 +13848,26 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
             "archived_only": "archived records only",
             "both": "has current and archived records",
         }
-        filter_logic_parts.append(
-            f"(Hudu {hudu_record_labels[hudu_record_filter]})"
-        )
+        filter_logic_parts.append(f"(Hudu {hudu_record_labels[hudu_record_filter]})")
         filter_summary_parts.append("Hudu: " + hudu_record_labels[hudu_record_filter])
     if hudu_link_filters:
         labels = {"has_links": "Has links", "no_links": "No links"}
         filter_logic_parts.append(
             "(" + " OR ".join(f"Hudu links: {labels[value]}" for value in hudu_link_filters) + ")"
         )
-        filter_summary_parts.append("Hudu links: " + " or ".join(labels[value] for value in hudu_link_filters))
+        filter_summary_parts.append(
+            "Hudu links: " + " or ".join(labels[value] for value in hudu_link_filters)
+        )
     if s1_exemption_filters:
         labels = {"exempt": "Exempt", "not_exempt": "Not exempt"}
         filter_logic_parts.append(
-            "(" + " OR ".join(f"SentinelOne is {labels[value]}" for value in s1_exemption_filters) + ")"
+            "("
+            + " OR ".join(f"SentinelOne is {labels[value]}" for value in s1_exemption_filters)
+            + ")"
         )
-        filter_summary_parts.append("SentinelOne: " + " or ".join(labels[value] for value in s1_exemption_filters))
+        filter_summary_parts.append(
+            "SentinelOne: " + " or ".join(labels[value] for value in s1_exemption_filters)
+        )
     if os_family_filters:
         filter_logic_parts.append(
             "(" + " OR ".join(f"OS is {family}" for family in os_family_filters) + ")"
@@ -13746,16 +13888,31 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
     filter_logic = " AND ".join(filter_logic_parts)
     filter_summary = "; ".join(filter_summary_parts) if filter_summary_parts else "None"
     filters_active = bool(
-        client_filters or device_query or agents_query or computer_scope_filters
-        or agent_filter_conditions or record_status_filters or rule_status_filters
-        or any_platform_selected or no_platform_selected or any_platform_filters
-        or coverage_source_filters or hudu_filters or hudu_link_filters
-        or hudu_record_filter != "any" or s1_exemption_filters
-        or platform_filters or state_filters or platform_status_filters
-        or os_family_filters or device_type_filters or device_role_filters
+        client_filters
+        or device_query
+        or agents_query
+        or computer_scope_filters
+        or agent_filter_conditions
+        or record_status_filters
+        or rule_status_filters
+        or any_platform_selected
+        or no_platform_selected
+        or any_platform_filters
+        or coverage_source_filters
+        or hudu_filters
+        or hudu_link_filters
+        or hudu_record_filter != "any"
+        or s1_exemption_filters
+        or platform_filters
+        or state_filters
+        or platform_status_filters
+        or os_family_filters
+        or device_type_filters
+        or device_role_filters
     )
 
     if wants_csv(request):
+
         def inventory_agent_value(row: dict, platform: str) -> str:
             cell = row["platform_cells_by_name"][platform]
             record = cell["record_status"]
@@ -13768,8 +13925,10 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
         return csv_response(
             [
                 {
-                    "client_name": row["client_name"], "hostname": row["hostname"],
-                    "os_family": row["os_family"], "device_type": row["device_type"],
+                    "client_name": row["client_name"],
+                    "hostname": row["hostname"],
+                    "os_family": row["os_family"],
+                    "device_type": row["device_type"],
                     "device_role": row["device_role"],
                     "lifecycle_status": row["lifecycle_status"],
                     "hudu": row["hudu_status"],
@@ -13806,9 +13965,7 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
     device_rows = list(page_obj.object_list)
 
     for row in device_rows:
-        row["agent_cells"] = [
-            row["platform_cells_by_name"][platform] for platform in platforms
-        ]
+        row["agent_cells"] = [row["platform_cells_by_name"][platform] for platform in platforms]
 
     return render(
         request,
@@ -13824,11 +13981,14 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
                 "counts": [
                     {"name": name, "count": count, "url": hudu_urls[name]}
                     for name, count in hudu_counts.items()
-                ] + [{
-                    "name": "Total",
-                    "count": sum(row["hudu_present"] for row in inventory_rows),
-                    "url": hudu_urls["Total"],
-                }],
+                ]
+                + [
+                    {
+                        "name": "Total",
+                        "count": sum(row["hudu_present"] for row in inventory_rows),
+                        "url": hudu_urls["Total"],
+                    }
+                ],
             },
             "filtered_summary": filtered_summary,
             "filter_logic": filter_logic,
@@ -13839,7 +13999,11 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
             "agent_filter_agents": platforms,
             "agent_filter_states": (*record_status_order, "Possible match"),
             "agent_filter_requirements": (
-                "Required", "Missing", "Stale", "N/A", "Exempt",
+                "Required",
+                "Missing",
+                "Stale",
+                "N/A",
+                "Exempt",
             ),
             "coverage_filter_sources": coverage_filter_sources,
             "os_families": os_families,
@@ -13928,19 +14092,21 @@ def sources_status(request: HttpRequest) -> HttpResponse:
                 SELECT df, status, queued_at, started_at, job_run_id
                   FROM operations.source_run_queue
                  WHERE tenant_id = %s AND status IN ('pending', 'processing')
-                """
-                ,
+                """,
                 (tenant_id,),
             )
             active = {r[0]: r for r in cur.fetchall()}
 
             # Recent run history — every recorded source run
-            cur.execute("""
+            cur.execute(
+                """
                 SELECT substring(kind FROM 8), ok, started_at, ended_at, rows, error
                 FROM operations.run_log
                 WHERE tenant_id = %s AND kind LIKE 'source.%%'
                 ORDER BY started_at DESC LIMIT 30
-            """, (tenant_id,))
+            """,
+                (tenant_id,),
+            )
             recent_runs = [
                 {
                     "source": r[0],
@@ -14268,7 +14434,9 @@ def client_candidate_detail(request: HttpRequest, candidate_id) -> HttpResponse:
 # ── Candidate actions (Track C.4) — all audited ─────────────────────────────
 
 
-def _audit(request, action: str, entity_id, before, after, *, entity_type: str = "client_candidate") -> None:
+def _audit(
+    request, action: str, entity_id, before, after, *, entity_type: str = "client_candidate"
+) -> None:
     AuditLog.objects.create(
         tenant_id=1,
         actor=request.user if request.user.is_authenticated else None,
@@ -14721,15 +14889,19 @@ def software_decisions_queue(request: HttpRequest) -> HttpResponse:
     title_dec_map = {
         d.canonical_name.lower(): d
         for d in SoftwareDecision.objects.filter(
-            tenant_id=1, canonical_name__in=canonical_names,
-            client__isnull=True, device__isnull=True,
+            tenant_id=1,
+            canonical_name__in=canonical_names,
+            client__isnull=True,
+            device__isnull=True,
         ).exclude(canonical_name="")
     }
     pub_dec_map = {
         d.publisher.lower(): d
         for d in SoftwareDecision.objects.filter(
-            tenant_id=1, publisher__in=publisher_names,
-            client__isnull=True, device__isnull=True,
+            tenant_id=1,
+            publisher__in=publisher_names,
+            client__isnull=True,
+            device__isnull=True,
         ).exclude(publisher="")
     }
     display_rows = []
@@ -14752,15 +14924,19 @@ def software_decisions_queue(request: HttpRequest) -> HttpResponse:
         display_rows = [r for r in display_rows if category_filter in (r["category"] or "")]
     if q_filter:
         display_rows = [
-            r for r in display_rows
+            r
+            for r in display_rows
             if q_filter in (r["canonical"] or "").lower()
             or q_filter in (r["publisher"] or "").lower()
         ]
     if decision_filter == "pending":
-        display_rows = [r for r in display_rows if not r["global_decision"] and not r["publisher_decision"]]
+        display_rows = [
+            r for r in display_rows if not r["global_decision"] and not r["publisher_decision"]
+        ]
     elif decision_filter in ("approve", "reject", "investigate", "approve_publisher"):
         display_rows = [
-            r for r in display_rows
+            r
+            for r in display_rows
             if r["global_decision"] == decision_filter or r["publisher_decision"] == decision_filter
         ]
 
@@ -14836,14 +15012,9 @@ def software_decision_log(request: HttpRequest) -> HttpResponse:
             "decision": d.decision,
             "canonical_name": d.canonical_name,
             "publisher": d.publisher,
-            "scope_label": (
-                "device" if d.device_id
-                else "client" if d.client_id
-                else "global"
-            ),
+            "scope_label": ("device" if d.device_id else "client" if d.client_id else "global"),
             "target_label": (
-                d.canonical_name
-                or (f"publisher: {d.publisher}" if d.publisher else "?")
+                d.canonical_name or (f"publisher: {d.publisher}" if d.publisher else "?")
             ),
             "client": d.client.display_name if d.client else None,
             "device_id": d.device_id,
@@ -14925,7 +15096,7 @@ def software_decision_bulk(request: HttpRequest) -> HttpResponse:
         return redirect(_safe_next(request, "software_decisions_queue"))
 
     canonical_names = [n for n in request.POST.getlist("canonical_name") if n.strip()]
-    publishers      = [p for p in request.POST.getlist("publisher")      if p.strip()]
+    publishers = [p for p in request.POST.getlist("publisher") if p.strip()]
     if not canonical_names and not publishers:
         messages.error(request, "Select at least one product or publisher.")
         return redirect(_safe_next(request, "software_decisions_queue"))
@@ -14933,28 +15104,48 @@ def software_decision_bulk(request: HttpRequest) -> HttpResponse:
     created, updated = 0, 0
     for name in canonical_names:
         obj, was_created = SoftwareDecision.objects.update_or_create(
-            tenant_id=1, canonical_name=name.strip(), publisher="",
-            client=None, device=None,
+            tenant_id=1,
+            canonical_name=name.strip(),
+            publisher="",
+            client=None,
+            device=None,
             defaults={
-                "decision": decision, "reason": "",
-                "decided_by": request.user, "decided_at": timezone.now(),
+                "decision": decision,
+                "reason": "",
+                "decided_by": request.user,
+                "decided_at": timezone.now(),
             },
         )
-        _audit(request, "software_decision.bulk_set", obj.id, {},
-               {"canonical_name": name.strip(), "scope": "global", "decision": decision})
+        _audit(
+            request,
+            "software_decision.bulk_set",
+            obj.id,
+            {},
+            {"canonical_name": name.strip(), "scope": "global", "decision": decision},
+        )
         created += int(was_created)
         updated += int(not was_created)
     for pub in publishers:
         obj, was_created = SoftwareDecision.objects.update_or_create(
-            tenant_id=1, canonical_name="", publisher=pub.strip(),
-            client=None, device=None,
+            tenant_id=1,
+            canonical_name="",
+            publisher=pub.strip(),
+            client=None,
+            device=None,
             defaults={
-                "decision": decision, "reason": "",
-                "decided_by": request.user, "decided_at": timezone.now(),
+                "decision": decision,
+                "reason": "",
+                "decided_by": request.user,
+                "decided_at": timezone.now(),
             },
         )
-        _audit(request, "software_decision.bulk_set", obj.id, {},
-               {"publisher": pub.strip(), "scope": "global", "decision": decision})
+        _audit(
+            request,
+            "software_decision.bulk_set",
+            obj.id,
+            {},
+            {"publisher": pub.strip(), "scope": "global", "decision": decision},
+        )
         created += int(was_created)
         updated += int(not was_created)
     messages.success(
@@ -14999,7 +15190,9 @@ def _decision_scope_targets(install_rows: list[dict]) -> tuple[list[dict], list[
             )
     return (
         sorted(clients.values(), key=lambda row: (row["name"].lower(), row["slug"])),
-        sorted(devices.values(), key=lambda row: (row["client_name"].lower(), row["hostname"].lower())),
+        sorted(
+            devices.values(), key=lambda row: (row["client_name"].lower(), row["hostname"].lower())
+        ),
     )
 
 
@@ -15023,9 +15216,7 @@ def software_decision_create(request: HttpRequest) -> HttpResponse:
         messages.error(request, "A valid decision is required.")
         return redirect("software_decisions_queue")
     if bool(canonical_name) == bool(publisher):
-        messages.error(
-            request, "Provide exactly one of canonical_name or publisher."
-        )
+        messages.error(request, "Provide exactly one of canonical_name or publisher.")
         return redirect("software_decisions_queue")
 
     if scope not in {"global", "client", "device"}:
@@ -15355,7 +15546,9 @@ def merge_candidate_group_review(request: HttpRequest, candidate_id) -> HttpResp
             {"candidate_id": str(candidate.id), "member_count": len(devices)},
             {"survivor_id": str(survivor.id), "counts": total_counts},
         )
-        messages.success(request, f"Combined {len(devices)} records into {survivor.canonical_hostname}.")
+        messages.success(
+            request, f"Combined {len(devices)} records into {survivor.canonical_hostname}."
+        )
         return redirect("device_detail", org_slug=survivor.client.slug, device_id=survivor.id)
 
     for device in devices:
@@ -15370,7 +15563,9 @@ def merge_candidate_group_review(request: HttpRequest, candidate_id) -> HttpResp
             device.source_records.append(
                 {"name": link.source.name, "external_id": link.external_id, "url": url}
             )
-    return render(request, "merge_candidate_group.html", {"candidate": candidate, "devices": devices})
+    return render(
+        request, "merge_candidate_group.html", {"candidate": candidate, "devices": devices}
+    )
 
 
 # ── Device merge (generic entity operation) ─────────────────────────────────
@@ -15390,18 +15585,14 @@ def device_merge(
     tie), moves both evidence sets to it, and redirects to the computer.
     """
     device_a = get_object_or_404(
-        Device.objects.select_related("client").prefetch_related(
-            "source_links__source"
-        ),
+        Device.objects.select_related("client").prefetch_related("source_links__source"),
         tenant_id=1,
         id=device_id,
         client__slug=org_slug,
         deleted_at__isnull=True,
     )
     device_b = get_object_or_404(
-        Device.objects.select_related("client").prefetch_related(
-            "source_links__source"
-        ),
+        Device.objects.select_related("client").prefetch_related("source_links__source"),
         tenant_id=1,
         id=target_id,
         deleted_at__isnull=True,
@@ -15538,9 +15729,7 @@ def operations_admin_overview(request: HttpRequest) -> HttpResponse:
     try:
         with transaction.atomic(), connection.cursor() as cur:
             cur.execute("SET LOCAL operations.tenant_id = 1")
-            cur.execute(
-                "SELECT last_status FROM operations.intel_ingest_status"
-            )
+            cur.execute("SELECT last_status FROM operations.intel_ingest_status")
             for (status,) in cur.fetchall():
                 if status == "ok":
                     intel_ok += 1
@@ -15574,6 +15763,7 @@ def operations_admin_overview(request: HttpRequest) -> HttpResponse:
     classifier_rule_count = 0
     try:
         from .models import SoftwareClassifierRule
+
         classifier_rule_count = SoftwareClassifierRule.objects.filter(enabled=True).count()
     except Exception:
         classifier_rule_count = 0
@@ -15588,9 +15778,7 @@ def operations_admin_overview(request: HttpRequest) -> HttpResponse:
                 tenant_id=1, status="open"
             ).count(),
             "nav_pending_entity_candidates": generic_pending_candidates,
-            "nav_pending_merges": MergeCandidate.objects.filter(
-                tenant_id=1, status="open"
-            ).count(),
+            "nav_pending_merges": MergeCandidate.objects.filter(tenant_id=1, status="open").count(),
             # Was a separate, byte-for-byte duplicate of software_findings_open
             # below: same tenant, same status filter, same category filter,
             # queried twice.
@@ -15620,8 +15808,11 @@ def operations_admin_overview(request: HttpRequest) -> HttpResponse:
                 tenant_id=1,
                 status__in=("open", "acknowledged"),
                 finding_type__name__in=(
-                    "client_link_collision", "client_source_group_merge",
-                    "client_unattached_group", "unnamed_source_group", "unmatched_source_group",
+                    "client_link_collision",
+                    "client_source_group_merge",
+                    "client_unattached_group",
+                    "unnamed_source_group",
+                    "unmatched_source_group",
                 ),
             ).count(),
             "admin_finding_count": AdminFinding.objects.filter(
@@ -16035,9 +16226,7 @@ def attribute_visibility_config(request: HttpRequest) -> HttpResponse:
         messages.success(request, f"Visibility saved for {definition.display_name}.")
         return redirect("attribute_visibility_config")
 
-    definitions = AttributeDefinition.objects.filter(enabled=True).select_related(
-        "entity_class"
-    )
+    definitions = AttributeDefinition.objects.filter(enabled=True).select_related("entity_class")
     return render(
         request,
         "attribute_visibility_config.html",

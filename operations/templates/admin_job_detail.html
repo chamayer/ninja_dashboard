@@ -1,0 +1,109 @@
+{% extends "base.html" %}
+
+{% block title %}{{ job.name }}{% endblock %}
+
+{% block content %}
+<style>
+  .job-detail-head { display:flex; justify-content:space-between; gap:1rem; align-items:flex-start; flex-wrap:wrap; margin-bottom:1rem; }
+  .job-detail-head h1 { margin:0; font-size:1.35rem; }
+  .job-detail-actions { display:flex; gap:.5rem; align-items:center; flex-wrap:wrap; }
+  .job-detail-actions a,.job-detail-actions button { padding:.4rem .65rem; border:1px solid var(--border); border-radius:4px; background:#fff; color:inherit; text-decoration:none; cursor:pointer; font-size:.82rem; }
+  .job-latest { padding:1rem; border:1px solid var(--border); border-radius:6px; background:var(--surface); margin-bottom:1rem; }
+  .job-latest h2,.job-section h2 { margin:0 0 .65rem; font-size:1rem; }
+  .job-state { font-weight:700; }
+  .job-state.running { color:#7c3aed; } .job-state.waiting { color:#a16207; }
+  .job-state.ready { color:#1d4ed8; } .job-state.completed { color:#15803d; }
+  .job-state.failed,.job-state.stalled { color:#b91c1c; } .job-state.cancelled { color:#64748b; }
+  .job-facts { display:grid; grid-template-columns:repeat(auto-fit,minmax(12rem,1fr)); gap:.7rem; margin:.8rem 0 0; }
+  .job-fact span { display:block; color:var(--muted); font-size:.72rem; text-transform:uppercase; letter-spacing:.04em; }
+  .job-links { display:grid; grid-template-columns:repeat(auto-fit,minmax(16rem,1fr)); gap:.7rem; margin-top:.8rem; }
+  .job-links > div { border-top:1px solid var(--border); padding-top:.65rem; }
+  .job-links h3 { margin:0 0 .35rem; font-size:.82rem; }
+  .job-links ul { margin:.2rem 0; padding-left:1.1rem; }
+  .job-section { margin-top:1.3rem; }
+  .job-table { width:100%; border-collapse:collapse; background:var(--surface); border:1px solid var(--border); font-size:.84rem; }
+  .job-table th,.job-table td { padding:.6rem .7rem; border-bottom:1px solid var(--border); text-align:left; vertical-align:top; }
+  .job-table th { color:var(--muted); font-size:.72rem; text-transform:uppercase; letter-spacing:.05em; }
+  .job-note { display:block; color:var(--muted); font-size:.78rem; margin-top:.2rem; }
+  .job-error { color:#991b1b; max-width:38rem; white-space:normal; }
+  .job-pages { display:flex; justify-content:space-between; margin-top:.75rem; }
+  .job-technical { margin-top:.7rem; }
+  .job-technical pre { white-space:pre-wrap; overflow-wrap:anywhere; font-size:.75rem; }
+  @media (max-width:800px) { .job-table { display:block; overflow-x:auto; } }
+</style>
+
+<div class="job-detail-head">
+  <div><h1>{{ job.name }}</h1><div class="muted">{{ job.description }}</div></div>
+  <div class="job-detail-actions"><a href="{% url 'admin_jobs' %}">Back to Jobs</a><a href="{% url 'admin_jobs_control_plane' %}">Job configuration</a></div>
+</div>
+
+<section class="job-latest">
+  <h2>Latest Run</h2>
+  {% if latest_run %}
+    <div><span class="job-state {{ latest_run.status_class }}">{{ latest_run.status_label }}{% if latest_run.needs_attention %} — needs attention{% endif %}</span>{% if latest_run.status_detail %} — {{ latest_run.status_detail }}{% endif %}</div>
+    <div class="job-facts">
+      <div class="job-fact"><span>Requested</span>{{ latest_run.requested_at|date:"Y-m-d H:i:s" }}</div>
+      <div class="job-fact"><span>Started</span>{% if latest_run.started_at %}{{ latest_run.started_at|date:"Y-m-d H:i:s" }}{% else %}Not started{% endif %}</div>
+      <div class="job-fact"><span>Finished</span>{% if latest_run.completed_at %}{{ latest_run.completed_at|date:"Y-m-d H:i:s" }}{% else %}Not finished{% endif %}</div>
+      {% if latest_run.status == 'running' %}<div class="job-fact"><span>Current stage</span>{{ latest_run.stage }}</div>{% endif %}
+    </div>
+    <div class="job-links">
+      {% if latest_run.prerequisites %}<div><h3>Waiting for</h3><ul>{% for relation in latest_run.prerequisites %}<li>{% if relation.operator_job_key %}<a href="{% url 'admin_job_detail' job_id=relation.operator_job_key %}?run={{ relation.id }}">{{ relation.name }}</a>{% else %}{{ relation.name }}{% endif %} — {{ relation.status }}</li>{% endfor %}</ul></div>{% endif %}
+      {% if latest_run.dependents %}<div><h3>Starts after this</h3><ul>{% for relation in latest_run.dependents %}<li>{% if relation.operator_job_key %}<a href="{% url 'admin_job_detail' job_id=relation.operator_job_key %}?run={{ relation.id }}">{{ relation.name }}</a>{% else %}{{ relation.name }}{% endif %} — {{ relation.status }}</li>{% endfor %}</ul></div>{% endif %}
+    </div>
+    <div class="job-detail-actions" style="margin-top:.8rem">
+      {% if latest_run.status == 'queued' or latest_run.status == 'running' %}
+        <form method="post" action="{% url 'admin_job_cancel' latest_run.id %}">{% csrf_token %}<button type="submit">{% if latest_run.status == 'running' %}Request stop{% else %}Cancel{% endif %}</button></form>
+      {% elif latest_run.status == 'failed' or latest_run.status == 'stalled' %}
+        <form method="post" action="{% url 'admin_job_retry' latest_run.id %}">{% csrf_token %}<button type="submit">Retry</button></form>
+      {% else %}
+        <form method="post" action="{% url 'admin_jobs_run' job_id=job.key %}">{% csrf_token %}<button type="submit">Run now</button></form>
+      {% endif %}
+    </div>
+    <details class="job-technical"><summary>Technical details</summary><pre>Run ID: {{ latest_run.id }}
+Execution key: {{ latest_run.job_key }}
+Scope: {{ latest_run.technical.scope_identity }}
+Definition: {{ latest_run.technical.definition_digest }}
+Input revisions: {{ latest_run.technical.input_revisions }}
+Output revisions: {{ latest_run.technical.output_revisions }}</pre></details>
+  {% else %}
+    <p class="muted">Not run yet.</p>
+    <form class="job-detail-actions" method="post" action="{% url 'admin_jobs_run' job_id=job.key %}">{% csrf_token %}<button type="submit">Run now</button></form>
+  {% endif %}
+</section>
+
+{% if selected_run %}
+<section class="job-latest">
+  <h2>Selected Run</h2>
+  <div><span class="job-state {{ selected_run.status_class }}">{{ selected_run.status_label }}{% if selected_run.needs_attention %} — needs attention{% endif %}</span>{% if selected_run.status_detail %} — {{ selected_run.status_detail }}{% endif %}</div>
+  <div class="job-facts"><div class="job-fact"><span>Requested</span>{{ selected_run.requested_at|date:"Y-m-d H:i:s" }}</div><div class="job-fact"><span>Started</span>{{ selected_run.started_at|date:"Y-m-d H:i:s"|default:"Not started" }}</div><div class="job-fact"><span>Finished</span>{{ selected_run.completed_at|date:"Y-m-d H:i:s"|default:"Not finished" }}</div></div>
+  {% if selected_run.error %}<details class="job-error"><summary>Error details</summary><pre>{{ selected_run.error }}</pre></details>{% endif %}
+  <details class="job-technical"><summary>Technical details</summary><pre>Run ID: {{ selected_run.id }}
+Execution key: {{ selected_run.job_key }}
+Scope: {{ selected_run.technical.scope_identity }}
+Definition: {{ selected_run.technical.definition_digest }}
+Result: {{ selected_run.result }}</pre></details>
+</section>
+{% endif %}
+
+<section class="job-section">
+  <h2>Schedule</h2>
+  {% for schedule in schedules %}<div>{% if schedule.enabled %}<strong>Automatic</strong>{% else %}<strong>Manual</strong>{% endif %}{% if schedule.cadence %} · {{ schedule.cadence }}{% endif %}{% if schedule.next_due_at %}<span class="job-note">Next {{ schedule.next_due_at|date:"Y-m-d H:i:s" }}</span>{% elif schedule.reason %}<span class="job-note">{{ schedule.reason }}</span>{% endif %}</div>{% empty %}<p class="muted">Run manually or when requested by another Job.</p>{% endfor %}
+</section>
+
+<section class="job-section">
+  <h2>Run history</h2>
+  <p class="muted">{{ run_total }} Run{{ run_total|pluralize }} · page {{ page }}.</p>
+  {% if runs %}<table class="job-table"><thead><tr><th>Status</th><th>Requested</th><th>Started</th><th>Finished</th><th>Result</th><th></th></tr></thead><tbody>
+  {% for run in runs %}<tr>
+    <td><span class="job-state {{ run.status_class }}">{{ run.status_label }}{% if run.needs_attention %} — needs attention{% endif %}</span></td>
+    <td>{{ run.requested_at|date:"Y-m-d H:i:s" }}</td>
+    <td>{% if run.started_at %}{{ run.started_at|date:"Y-m-d H:i:s" }}{% else %}—{% endif %}</td>
+    <td>{% if run.completed_at %}{{ run.completed_at|date:"Y-m-d H:i:s" }}{% else %}—{% endif %}</td>
+    <td>{{ run.status_detail }}</td>
+    <td><a href="?run={{ run.id }}&amp;page={{ page }}">Details</a></td>
+  </tr>{% endfor %}
+  </tbody></table>{% else %}<p class="muted">No Runs recorded.</p>{% endif %}
+  <nav class="job-pages"><span>{% if has_previous %}<a href="?page={{ previous_page }}">← Previous</a>{% endif %}</span><span>{% if has_next %}<a href="?page={{ next_page }}">Next →</a>{% endif %}</span></nav>
+</section>
+{% endblock %}

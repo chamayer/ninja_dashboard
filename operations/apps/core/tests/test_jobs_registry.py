@@ -15,10 +15,12 @@ from shared.jobs_registry import (
     definition,
     definition_keys,
     definitions,
-    operation_definitions,
-    operation_steps,
+    legacy_job_definition_keys,
+    operator_job_definitions,
+    operator_job_key_for_execution,
     schedule_definitions,
     scheduled_definition_keys,
+    system_service_definition_keys,
     validate_registry,
     workflow_edges,
 )
@@ -75,13 +77,17 @@ def test_scheduler_parity_constant_exactly_matches_registered_schedules():
 
     assert isinstance(assigned, ast.Call)
     assert isinstance(assigned.args[0], ast.Set)
-    assert {ast.literal_eval(element) for element in assigned.args[0].elts} == scheduled_definition_keys()
+    assert {
+        ast.literal_eval(element) for element in assigned.args[0].elts
+    } == scheduled_definition_keys()
 
 
 def test_every_declared_automatic_schedule_has_one_cadence_contract():
     schedules = schedule_definitions()
 
-    dependent_keys = {successor.successor for item in definitions() for successor in item.successors}
+    dependent_keys = {
+        successor.successor for item in definitions() for successor in item.successors
+    }
     assert {schedule.job_key for schedule in schedules}.isdisjoint(dependent_keys)
     assert {schedule.schedule_id for schedule in schedules} < {
         schedule_id for item in definitions() for schedule_id in item.schedule_ids
@@ -90,14 +96,20 @@ def test_every_declared_automatic_schedule_has_one_cadence_contract():
     assert all(schedule.cadence_setting for schedule in schedules)
 
 
-def test_operations_are_meaningful_scheduled_entry_points_with_visible_steps():
-    operations = operation_definitions()
+def test_operator_jobs_have_one_visible_boundary_and_services_stay_outside():
+    jobs = operator_job_definitions()
+    visible_execution_keys = {execution_key for job in jobs for execution_key in job.execution_keys}
 
-    assert {operation.entry_job_key for operation in operations} == scheduled_definition_keys()
-    assert all(operation.category in {"Data updates", "Software and security", "Reports", "Maintenance"}
-               for operation in operations)
-    assert operation_steps("patches") == (
-        "patches", "patch-classify", "platform-evaluate", "resolver",
+    assert "patches" in {job.key for job in jobs}
+    assert operator_job_key_for_execution("patches") == "patches"
+    assert operator_job_key_for_execution("software-classify") == "software-classify-only"
+    assert set(system_service_definition_keys()).isdisjoint(visible_execution_keys)
+    assert set(legacy_job_definition_keys()).isdisjoint(visible_execution_keys)
+    assert (
+        visible_execution_keys
+        | set(system_service_definition_keys())
+        | set(legacy_job_definition_keys())
+        == definition_keys()
     )
 
 
@@ -127,7 +139,12 @@ def test_initial_workflow_edges_are_registered_and_acyclic():
         ("resolver", "platform-evaluate", "identity.current", "always"),
     )
     assert shape("source-demand", frozenset({"documentation_source"})) == (
-        ("source-demand", "cmdb-evaluate", "source.documentation-observations", "documentation_source"),
+        (
+            "source-demand",
+            "cmdb-evaluate",
+            "source.documentation-observations",
+            "documentation_source",
+        ),
     )
     assert shape("intel-nvd") == ()
     assert shape("intel-nvd", frozenset({"material_change"})) == (
@@ -207,8 +224,18 @@ def test_registry_exposes_the_approved_pool_and_resource_policy():
     assert READY_WINDOW_CAPACITY == 2
     assert EMERGENCY_CHILD_CAPACITY == 4
     assert dict(EXECUTION_POOL_POLICIES) == {
-        "capacity:external-io": {"label": "Data retrieval", "capacity": 2, "minimum": 1, "maximum": 3},
-        "capacity:processing": {"label": "Data processing", "capacity": 1, "minimum": 1, "maximum": 2},
+        "capacity:external-io": {
+            "label": "Data retrieval",
+            "capacity": 2,
+            "minimum": 1,
+            "maximum": 3,
+        },
+        "capacity:processing": {
+            "label": "Data processing",
+            "capacity": 1,
+            "minimum": 1,
+            "maximum": 2,
+        },
         "capacity:control": {"label": "Control work", "capacity": 1, "minimum": 1, "maximum": 2},
     }
     assert definition("patches").resource_keys == ("tenant:{tenant_id}:ninja-source",)
@@ -223,7 +250,8 @@ def test_registry_exposes_the_approved_pool_and_resource_policy():
     assert definition("patches").capacity_keys == ("capacity:external-io",)
     assert definition("patch-classify").capacity_keys == ("capacity:processing",)
     assert definition("software-classify").capacity_keys == (
-        "capacity:external-io", "capacity:processing",
+        "capacity:external-io",
+        "capacity:processing",
     )
     assert all(definition(key).capacity_keys for key in definition_keys())
     assert all(
@@ -237,7 +265,9 @@ def test_registry_exposes_the_approved_pool_and_resource_policy():
     assert all(definition(key).concurrency_scope == "resource_keys" for key in definition_keys())
     assert all(definition(key).progress_contract == "stage" for key in definition_keys())
     assert all(definition(key).result_contract == "rows_or_outcome" for key in definition_keys())
-    assert all(definition(key).permission in {"administrator", "system"} for key in definition_keys())
+    assert all(
+        definition(key).permission in {"administrator", "system"} for key in definition_keys()
+    )
 
 
 def test_registry_snapshot_is_deterministic_and_credential_free():
@@ -245,9 +275,10 @@ def test_registry_snapshot_is_deterministic_and_credential_free():
 
     assert snapshot["key"] == "software-classify"
     assert snapshot["supersession_family"] == "software-classifier"
-    assert definition("software-classify").snapshot_digest() == definition(
-        "software-classify"
-    ).snapshot_digest()
+    assert (
+        definition("software-classify").snapshot_digest()
+        == definition("software-classify").snapshot_digest()
+    )
     assert len(definition("software-classify").snapshot_digest()) == 64
     assert "token" not in json.dumps(snapshot).lower()
     assert snapshot["timeout_minutes"] == 90

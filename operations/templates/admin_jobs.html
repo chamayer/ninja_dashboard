@@ -1,293 +1,129 @@
 {% extends "base.html" %}
-{% load human_labels %}
 
 {% block title %}Jobs{% endblock %}
 
 {% block content %}
 {% if request.GET.live != 'off' %}
-{# Auto-refresh via JS so status updates after Run-now. Pause with ?live=off. #}
 <script>
   (function () {
-    var s = 20;
-    setTimeout(function () { location.reload(); }, s * 1000);
+    setTimeout(function () {
+      if (!document.querySelector('input[name="run_id"]:checked')) location.reload();
+    }, 15000);
   })();
 </script>
 {% endif %}
 <style>
-  .jobs-hero { display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; margin: 0 0 1rem; flex-wrap: wrap; }
-  .jobs-hero h1 { margin: 0; font-size: 1.35rem; }
-  .jobs-hero .sub { color: var(--muted); font-size: 0.9rem; }
-
-  .jobs-filterbar {
-    display: flex; flex-wrap: wrap; gap: 0.55rem; align-items: center; margin-bottom: 0.85rem;
-    padding: 0.6rem 0.85rem; background: var(--surface); border: 1px solid var(--border); border-radius: 6px;
-  }
-  .jobs-filterbar label { font-size: 0.72rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; margin-right: 0.3rem; }
-  .jobs-filterbar select, .jobs-filterbar input {
-    padding: 0.35rem 0.65rem; border: 1px solid var(--border); border-radius: 4px; font-size: 0.85rem;
-  }
-
-  .jobs-section-label {
-    font-size: 0.7rem; font-weight: 700; letter-spacing: 0.08em;
-    text-transform: uppercase; color: var(--muted);
-    margin: 1.15rem 0 0.5rem;
-    display: flex; align-items: center; gap: 0.75rem;
-  }
-  .jobs-section-label form { margin: 0; }
-  .jobs-section-label form button {
-    padding: 0.25rem 0.7rem; font-size: 0.78rem; border: 1px solid var(--border);
-    background: #fff; border-radius: 4px; cursor: pointer; text-transform: none;
-    letter-spacing: 0; color: #1a1a2e;
-  }
-  .jobs-section-label form button:hover { background: #eef2ff; border-color: #4338ca; color: #312e81; }
-
-  .jobs-list { display: grid; gap: 0.5rem; }
-  .operation-table { width:100%; border-collapse:collapse; background:var(--surface); border:1px solid var(--border); border-radius:6px; overflow:hidden; font-size:.85rem; }
-  .operation-table th,.operation-table td { padding:.65rem .75rem; border-bottom:1px solid var(--border); text-align:left; vertical-align:top; }
-  .operation-table th { color:var(--muted); font-size:.72rem; text-transform:uppercase; letter-spacing:.05em; }
-  .operation-table .status-note { display:block; font-size:.78rem; color:var(--muted); margin-top:.2rem; max-width:30rem; }
-  .operation-table .job-state { font-weight:700; }
-  .operation-table .job-state.running { color:#7c3aed; }
-  .operation-table .job-state.ready { color:#1d4ed8; }
-  .operation-table .job-state.waiting { color:#a16207; }
-  .operation-table .job-state.ok { color:#15803d; }
-  .operation-table .job-state.failed,.operation-table .job-state.stalled { color:#b91c1c; }
-  .operation-table .job-state.never_run,.operation-table .job-state.disabled { color:#64748b; }
-  .job-summary { display:grid; grid-template-columns:repeat(4,minmax(9rem,1fr)); gap:.65rem; margin:0 0 1rem; }
-  .job-summary a { display:block; padding:.7rem .8rem; border:1px solid var(--border); border-radius:6px; background:var(--surface); color:inherit; text-decoration:none; }
-  .job-summary strong { display:block; font-size:1.35rem; } .job-summary span { color:var(--muted); font-size:.78rem; }
-  .job-row {
-    display: grid; grid-template-columns: 1fr auto auto; gap: 0.9rem; align-items: center;
-    padding: 0.75rem 1rem; background: var(--surface); border: 1px solid var(--border); border-radius: 6px;
-  }
-  .job-row .name { font-weight: 600; font-size: 0.95rem; }
-  .job-row .desc { color: var(--muted); font-size: 0.83rem; margin-top: 0.2rem; }
-  .job-row .meta { font-size: 0.8rem; color: var(--muted); text-align: right; white-space: nowrap; }
-  .job-row .meta strong { color: #1a1a2e; }
-
-  .state-pill { display: inline-block; padding: 0.15rem 0.6rem; border-radius: 999px; font-size: 0.72rem; font-weight: 600; margin-left: 0.4rem; }
-  .state-pill.ok        { background: #dcfce7; color: #14532d; }
-  .state-pill.failed    { background: #fee2e2; color: #991b1b; }
-  .state-pill.never_run { background: #f3f4f6; color: #6b7280; }
-  .state-pill.stale     { background: #fef3c7; color: #92400e; }
-  .state-pill.running   { background: #dbeafe; color: #1e40af; }
-  .state-pill.ready     { background: #e0e7ff; color: #3730a3; }
-  .state-pill.waiting   { background: #fef3c7; color: #92400e; }
-  .state-pill.cancelled, .state-pill.disabled { background: #f3f4f6; color: #4b5563; }
-
-  .job-row form { margin: 0; }
-  .job-row button {
-    padding: 0.4rem 0.85rem; border-radius: 4px; border: 1px solid var(--border);
-    background: #fff; cursor: pointer; font-size: 0.85rem; font-weight: 600;
-  }
-  .job-row button:hover { background: #eef2ff; border-color: #4338ca; color: #312e81; }
-
-  .err-preview { font-size: 0.75rem; color: #991b1b; margin-top: 0.2rem; }
-  .operation-steps { display: grid; gap: 0.2rem; margin-top: 0.45rem; max-width: 52rem; }
-  .operation-step { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 0.45rem; align-items: center; color: var(--muted); font-size: 0.76rem; }
-  .operation-step .step-state { font-weight: 600; }
-  .step-control { position: relative; }
-  .step-control summary { cursor: pointer; list-style: none; padding: 0 0.3rem; color: var(--muted); font-weight: 700; }
-  .step-control summary::-webkit-details-marker { display: none; }
-  .step-control form { position: absolute; z-index: 2; right: 0; top: 1.25rem; margin: 0; padding: 0.3rem; border: 1px solid var(--border); border-radius: 4px; background: #fff; box-shadow: 0 2px 8px rgba(0,0,0,.12); }
-  .step-control button { padding: 0.25rem 0.5rem; white-space: nowrap; font-size: 0.75rem; }
-
-  .run-all-primary {
-    padding: 0.5rem 1rem; font-weight: 700; background: #1e40af; color: #fff;
-    border: none; border-radius: 6px; cursor: pointer; font-size: 0.9rem;
-  }
-  .run-all-primary:hover { background: #1e3a8a; }
-
-  .recent-panel {
-    margin-top: 1.5rem; padding: 0.85rem 1rem;
-    background: var(--surface); border: 1px solid var(--border); border-radius: 6px;
-  }
-  .recent-panel h3 { margin: 0 0 0.5rem; font-size: 0.95rem; }
-  .recent-runs { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
-  .recent-runs th, .recent-runs td { padding: 0.35rem 0.5rem; text-align: left; border-bottom: 1px solid var(--border); }
-  .recent-runs th { color: var(--muted); font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 700; }
-  .recent-runs .ok  { color: #14532d; }
-  .recent-runs .bad { color: #991b1b; font-weight: 600; }
-
-  .live-hint {
-    font-size: 0.72rem; color: var(--muted);
-    padding: 0.35rem 0.6rem; background: #f8fafc; border: 1px dashed var(--border);
-    border-radius: 4px;
-  }
+  .jobs-head { display:flex; justify-content:space-between; align-items:flex-start; gap:1rem; flex-wrap:wrap; margin-bottom:1rem; }
+  .jobs-head h1 { margin:0; font-size:1.35rem; }
+  .jobs-tools { display:flex; gap:.6rem; align-items:center; flex-wrap:wrap; }
+  .jobs-tools a,.jobs-tools button,.jobs-action { padding:.4rem .65rem; border:1px solid var(--border); border-radius:4px; background:#fff; color:inherit; text-decoration:none; cursor:pointer; font-size:.82rem; }
+  .jobs-summary { display:grid; grid-template-columns:repeat(4,minmax(9rem,1fr)); gap:.65rem; margin-bottom:1rem; }
+  .jobs-summary a { display:block; padding:.7rem .8rem; border:1px solid var(--border); border-radius:6px; background:var(--surface); color:inherit; text-decoration:none; }
+  .jobs-summary strong { display:block; font-size:1.35rem; }
+  .jobs-summary span { color:var(--muted); font-size:.78rem; }
+  .jobs-filters { display:flex; gap:.6rem; flex-wrap:wrap; align-items:end; padding:.7rem; border:1px solid var(--border); border-radius:6px; background:var(--surface); margin-bottom:.8rem; }
+  .jobs-filters label { display:flex; flex-direction:column; gap:.2rem; color:var(--muted); font-size:.72rem; text-transform:uppercase; letter-spacing:.04em; }
+  .jobs-filters input,.jobs-filters select { padding:.4rem .5rem; border:1px solid var(--border); border-radius:4px; background:#fff; min-width:11rem; }
+  .jobs-table { width:100%; border-collapse:collapse; background:var(--surface); border:1px solid var(--border); font-size:.86rem; }
+  .jobs-table th,.jobs-table td { padding:.65rem .75rem; border-bottom:1px solid var(--border); text-align:left; vertical-align:top; }
+  .jobs-table th { color:var(--muted); font-size:.72rem; text-transform:uppercase; letter-spacing:.05em; }
+  .jobs-name { font-weight:700; }
+  .jobs-description,.jobs-detail { display:block; color:var(--muted); font-size:.78rem; margin-top:.2rem; max-width:42rem; }
+  .jobs-state { font-weight:700; }
+  .jobs-state.running { color:#7c3aed; } .jobs-state.waiting { color:#a16207; }
+  .jobs-state.ready { color:#1d4ed8; } .jobs-state.completed { color:#15803d; }
+  .jobs-state.failed { color:#b91c1c; } .jobs-state.cancelled,.jobs-state.not_run { color:#64748b; }
+  .jobs-bulk { display:none; gap:.6rem; align-items:center; margin:.7rem 0; }
+  .jobs-bulk.visible { display:flex; }
+  .jobs-bulk button { padding:.4rem .65rem; border:1px solid var(--border); border-radius:4px; background:#fff; cursor:pointer; }
+  @media (max-width:800px) { .jobs-summary { grid-template-columns:repeat(2,1fr); } .jobs-table { display:block; overflow-x:auto; } }
 </style>
 
-<div class="jobs-hero">
-    <div>
-        <h1>Jobs</h1>
-        <div class="sub">
-            {{ jobs|length }} operation{{ jobs|length|pluralize }} across {{ jobs_by_category|length }} area{{ jobs_by_category|length|pluralize }}.
-            {% if request.GET.live != 'off' %}
-                <span class="live-hint">Auto-refreshing every 20 s — <a href="?live=off{% if active_category %}&amp;category={{ active_category }}{% endif %}">pause</a></span>
-            {% else %}
-                <span class="live-hint">Paused — <a href="?{% if active_category %}category={{ active_category }}{% endif %}">resume auto-refresh</a></span>
-            {% endif %}
-        </div>
-    </div>
-    <a href="{% url 'admin_job_status' %}" class="run-all-primary" style="background:#334155; text-decoration:none;">Job activity{% if active_job_count %} ({{ active_job_count }}){% endif %}</a>
-    <a href="{% url 'admin_jobs_control_plane' %}" class="run-all-primary" style="background:#475569; text-decoration:none;">Control plane</a>
-    <a href="{% url 'targeted_refresh' %}" class="run-all-primary" style="background:#0f766e; text-decoration:none;">Targeted refresh</a>
+<div class="jobs-head">
+  <div>
+    <h1>Jobs</h1>
+    <div class="muted">{{ job_count }} configured Job{{ job_count|pluralize }} · updated {{ refreshed_at|date:"Y-m-d H:i:s" }}</div>
+  </div>
+  <div class="jobs-tools">
+    <button type="button" onclick="location.reload()">Refresh now</button>
+    <a href="{% url 'targeted_refresh' %}">Refresh data</a>
+    {% if request.GET.live == 'off' %}
+      <a href="?{% if active_status %}status={{ active_status }}&amp;{% endif %}{% if active_search %}q={{ active_search|urlencode }}&amp;{% endif %}live=on">Auto-refresh: Off</a>
+    {% else %}
+      <a href="?{% if active_status %}status={{ active_status }}&amp;{% endif %}{% if active_search %}q={{ active_search|urlencode }}&amp;{% endif %}live=off">Auto-refresh: On</a>
+    {% endif %}
+    <a href="{% url 'admin_jobs_control_plane' %}">Job configuration</a>
+  </div>
 </div>
 
-<form action="" method="get" class="jobs-filterbar">
-    <label>Area</label>
-    <select name="category" onchange="this.form.submit()">
-        <option value="">All operations</option>
-        {% for c in categories %}
-            <option value="{{ c|lower }}" {% if active_category == c|lower %}selected{% endif %}>{{ c }}</option>
-        {% endfor %}
-    </select>
-    <label>Status</label>
-    <select name="status" onchange="this.form.submit()">
-        <option value="">All statuses</option>
-        <option value="running"   {% if active_status == 'running'   %}selected{% endif %}>Running</option>
-        <option value="ready"     {% if active_status == 'ready'     %}selected{% endif %}>Ready</option>
-        <option value="waiting"   {% if active_status == 'waiting'   %}selected{% endif %}>Waiting</option>
-        <option value="ok"        {% if active_status == 'ok'        %}selected{% endif %}>Ok, recent</option>
-        <option value="stale"     {% if active_status == 'stale'     %}selected{% endif %}>Stale (>2 days)</option>
-        <option value="failed"    {% if active_status == 'failed'    %}selected{% endif %}>Failed</option>
-        <option value="never_run" {% if active_status == 'never_run' %}selected{% endif %}>Never run</option>
-    </select>
-    {% if active_category or active_status %}
-        <a href="?" style="font-size:0.82rem;">Clear</a>
-    {% endif %}
+<div class="jobs-summary" aria-label="Latest Job summary">
+  <a href="?status=attention"><strong>{{ job_summary.attention }}</strong><span>Needs attention</span></a>
+  <a href="?status=running"><strong>{{ job_summary.running }}</strong><span>Running</span></a>
+  <a href="?status=waiting"><strong>{{ job_summary.waiting }}</strong><span>Waiting</span></a>
+  <a href="?status=ready"><strong>{{ job_summary.ready }}</strong><span>Ready to start</span></a>
+</div>
+
+<form method="get" class="jobs-filters">
+  {% if request.GET.live == 'off' %}<input type="hidden" name="live" value="off">{% endif %}
+  <label>Search<input name="q" value="{{ active_search }}" placeholder="Job name"></label>
+  <label>Status<select name="status">
+    <option value="">All statuses</option>
+    <option value="attention"{% if active_status == 'attention' %} selected{% endif %}>Needs attention</option>
+    <option value="running"{% if active_status == 'running' %} selected{% endif %}>Running</option>
+    <option value="waiting"{% if active_status == 'waiting' %} selected{% endif %}>Waiting</option>
+    <option value="ready"{% if active_status == 'ready' %} selected{% endif %}>Ready to start</option>
+    <option value="completed"{% if active_status == 'completed' %} selected{% endif %}>Completed</option>
+    <option value="failed"{% if active_status == 'failed' %} selected{% endif %}>Failed</option>
+    <option value="cancelled"{% if active_status == 'cancelled' %} selected{% endif %}>Cancelled</option>
+    <option value="not_run"{% if active_status == 'not_run' %} selected{% endif %}>Not run yet</option>
+  </select></label>
+  <div class="jobs-tools"><button type="submit">Apply</button><a href="{% url 'admin_jobs' %}">Clear</a></div>
 </form>
 
-<div class="job-summary" aria-label="Current operation summary">
-    <a href="?status=running"><strong>{{ operation_summary.running }}</strong><span>Running operations</span></a>
-    <a href="?status=ready"><strong>{{ operation_summary.ready }}</strong><span>Ready operations</span></a>
-    <a href="?status=waiting"><strong>{{ operation_summary.waiting }}</strong><span>Waiting operations</span></a>
-    <a href="?status=failed"><strong>{{ operation_summary.attention }}</strong><span>Needs attention</span></a>
-</div>
+<form id="job-bulk-action" method="post" action="{% url 'admin_job_bulk_cancel' %}" onsubmit="return confirm('Cancel selected waiting Runs and request stop for selected running Runs?');">
+  {% csrf_token %}
+  <div id="jobs-bulk" class="jobs-bulk">
+    <button type="submit">Cancel selected / request stop</button>
+    <span class="muted">Only selected active Runs are affected.</span>
+  </div>
+</form>
 
-{% for category, group in jobs_by_category.items %}
-<div class="jobs-section-label">
-    <span>{{ category }}</span>
-</div>
-<table class="operation-table"><thead><tr><th>Operation</th><th>Current status</th><th>Latest result</th><th>Automatic</th><th>Action</th></tr></thead><tbody>
-    {% for j in group %}<tr>
-        <td><strong>{{ j.name }}</strong><div class="desc">{{ j.description }}</div>
-            {% if j.steps %}
-                <div class="operation-steps" aria-label="Steps">
-                    {% for step in j.steps %}
-                        <div class="operation-step">
-                            <span>{{ step.name }}</span>
-                            <span class="step-state">{{ step.state|title }}</span>
-                            <details class="step-control">
-                                <summary title="Technical step controls">⋯</summary>
-                                <form method="post" action="{% url 'admin_jobs_run' job_id=step.id %}">
-                                    {% csrf_token %}
-                                    <button type="submit">Run step</button>
-                                </form>
-                            </details>
-                        </div>
-                    {% endfor %}
-                </div>
-            {% endif %}
-        </td>
-        <td>{% if j.active_run %}<span class="job-state {{ j.active_run.status_class }}">{{ j.active_run.status_label }}</span><strong class="status-note">{{ j.active_run.stage }}</strong><span class="status-note">{% if j.active_run.status == 'queued' %}{{ j.active_run.queue_reason }}{% else %}{{ j.active_run.stage_detail }}{% endif %}</span><span class="status-note">{% if j.active_run.elapsed %}Elapsed {{ j.active_run.elapsed }} · {% endif %}<a href="{% url 'admin_job_status' %}?run={{ j.active_run.id }}">view progress</a></span>{% else %}<span class="job-state {{ j.state }}"{% if j.state == 'never_run' %} title="No recorded run yet"{% endif %}>{% if j.state == 'ok' and j.is_stale %}Stale{% else %}{{ j.state|title }}{% endif %}</span>{% if j.disabled_reason %}<span class="status-note">{{ j.disabled_reason }}</span>{% endif %}{% endif %}</td>
-        <td class="meta">
-            {% if j.last_run_at %}
-                {{ j.activity_label }}<br><strong>{{ j.last_run_at|date:"Y-m-d H:i" }}</strong>
-                {% if j.rows_touched %}<br>{{ j.rows_touched }} rows{% endif %}
-                {% if j.last_error %}<div class="err-preview">Last error: {{ j.last_error }}</div>{% endif %}
-            {% else %}
-                <em>{% if j.disabled_reason %}not enabled{% else %}no runs recorded{% endif %}</em>
-            {% endif %}
-        </div>
-        <td>{% if j.scheduled %}{% if j.schedule_enabled and j.next_due_at %}next due {{ j.next_due_at|date:"Y-m-d H:i" }} UTC{% else %}{{ j.schedule_reason }}{% endif %}{% if j.last_schedule_outcome %}<span class="status-note">Last: {{ j.last_schedule_outcome }}</span>{% endif %}{% else %}<span class="muted">Manual only</span>{% endif %}</td>
-        <td>
-            {% if j.disabled_reason %}
-                <span class="muted" style="font-size:0.82rem;">No run available</span>
-            {% elif j.no_run_now %}
-                <a href="{{ ingest_public_url }}/run/software/enqueue" target="_blank" rel="noopener"
-                   style="display:inline-block; padding:0.4rem 0.85rem; border-radius:4px; border:1px solid var(--border); background:#fff; text-decoration:none; font-size:0.85rem; font-weight:600; color:#1a1a2e;">
-                   Scoped run…
-                </a>
-            {% else %}
-            <form method="post" action="{% url 'admin_jobs_run' job_id=j.id %}">
-                {% csrf_token %}
-                <button type="submit">{% if j.active_run %}View run{% else %}Run now{% endif %}</button>
-            </form>
-            {% endif %}
-        </td></tr>{% endfor %}
-</tbody></table>
-{% empty %}
-<p class="muted">No jobs match the current filter.</p>
-{% endfor %}
+{% if jobs %}
+<table class="jobs-table">
+  <thead><tr><th></th><th>Job</th><th>Latest status</th><th>Schedule</th><th>Action</th></tr></thead>
+  <tbody>
+  {% for job in jobs %}
+    <tr>
+      <td>{% if job.active_run %}<input form="job-bulk-action" type="checkbox" name="run_id" value="{{ job.active_run.id }}" aria-label="Select {{ job.name }}">{% endif %}</td>
+      <td><a class="jobs-name" href="{% url 'admin_job_detail' job_id=job.id %}">{{ job.name }}</a><span class="jobs-description">{{ job.description }}</span></td>
+      <td>
+        <span class="jobs-state {{ job.state }}">{{ job.status_label }}{% if job.needs_attention %} — needs attention{% endif %}</span>
+        {% if job.status_detail %}<span class="jobs-detail">{{ job.status_detail }}</span>{% endif %}
+        {% if job.latest_at %}<span class="jobs-detail">{{ job.latest_at|date:"Y-m-d H:i:s" }}</span>{% endif %}
+      </td>
+      <td>{{ job.configuration_label }}{% if job.next_due_at %}<span class="jobs-detail">Next {{ job.next_due_at|date:"Y-m-d H:i:s" }}</span>{% elif job.configuration_reason %}<span class="jobs-detail">{{ job.configuration_reason }}</span>{% endif %}</td>
+      <td>
+        {% if job.active_run %}
+          <form method="post" action="{% url 'admin_job_cancel' job.active_run.id %}">{% csrf_token %}<button class="jobs-action" type="submit">{% if job.state == 'running' %}Request stop{% else %}Cancel{% endif %}</button></form>
+        {% elif job.needs_attention and job.latest_run_id %}
+          <form method="post" action="{% url 'admin_job_retry' job.latest_run_id %}">{% csrf_token %}<button class="jobs-action" type="submit">Retry</button></form>
+        {% elif job.configuration_label != 'Disabled' %}
+          <form method="post" action="{% url 'admin_jobs_run' job_id=job.id %}">{% csrf_token %}<button class="jobs-action" type="submit">Run now</button></form>
+        {% else %}<span class="muted">Unavailable</span>{% endif %}
+      </td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}<p class="muted">No Jobs match these filters.</p>{% endif %}
 
-{# ─── On-demand scoped runs ────────────────────────────── #}
-<div class="jobs-section-label">On-demand scoped runs — pick org / device</div>
-<div class="jobs-list">
-    <div class="job-row">
-        <div>
-            <div><span class="name">Software inventory (by client or device)</span></div>
-            <div class="desc">
-                Queue a Ninja software-inventory run for one or more clients or specific
-                devices. Opens the ingest container's form in a new tab with the org /
-                device selector.
-            </div>
-        </div>
-        <div class="meta">served by <code>ingest:8090</code></div>
-        <div>
-            <a href="{{ ingest_public_url }}/run/software/enqueue" target="_blank" rel="noopener"
-               style="display:inline-block; padding:0.4rem 0.85rem; border-radius:4px; border:1px solid var(--border); background:#fff; text-decoration:none; font-size:0.85rem; font-weight:600; color:#1a1a2e;">
-                Open selector →
-            </a>
-        </div>
-    </div>
-    <div class="job-row">
-        <div>
-            <div><span class="name">Source ingest (single source or client)</span></div>
-            <div class="desc">
-                Trigger a specific source's ingest run for a single client or every
-                client. Opens the ingest container's <code>/run/sources/enqueue</code>
-                form.
-            </div>
-        </div>
-        <div class="meta">served by <code>ingest:8090</code></div>
-        <div>
-            <a href="{{ ingest_public_url }}/run/sources/enqueue" target="_blank" rel="noopener"
-               style="display:inline-block; padding:0.4rem 0.85rem; border-radius:4px; border:1px solid var(--border); background:#fff; text-decoration:none; font-size:0.85rem; font-weight:600; color:#1a1a2e;">
-                Open selector →
-            </a>
-        </div>
-    </div>
-</div>
-
-<div class="recent-panel">
-    <h3>Recent activity <span class="muted" style="font-weight:400; font-size:0.8rem;">(last 25 across every source)</span></h3>
-    {% if recent_runs %}
-    <table class="recent-runs">
-        <thead>
-            <tr>
-                <th>Kind / connector</th>
-                <th>Started</th>
-                <th>Ended</th>
-                <th>Rows</th>
-                <th>Status</th>
-                <th>Error</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for r in recent_runs %}
-            <tr>
-                <td><code>{{ r.kind }}</code> <span class="muted" style="font-size:0.7rem;">({{ r.source }})</span></td>
-                <td>{{ r.started_at|date:"Y-m-d H:i:s" }}</td>
-                <td>{{ r.ended_at|date:"H:i:s"|default:"—" }}</td>
-                <td>{{ r.rows }}</td>
-                <td>{% if r.ok %}<span class="ok">ok</span>{% else %}<span class="bad">failed</span>{% endif %}</td>
-                <td class="muted" style="max-width:32ch; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="{{ r.error }}">{{ r.error|default:"" }}</td>
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
-    {% else %}
-    <p class="muted">No recent runs recorded.</p>
-    {% endif %}
-</div>
+<script>
+  (function () {
+    var checks = Array.prototype.slice.call(document.querySelectorAll('input[name="run_id"]'));
+    var bar = document.getElementById('jobs-bulk');
+    function update() { bar.classList.toggle('visible', checks.some(function (item) { return item.checked; })); }
+    checks.forEach(function (item) { item.addEventListener('change', update); });
+    update();
+  })();
+</script>
 {% endblock %}

@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% block title %}Jobs control plane{% endblock %}
+{% block title %}Job configuration{% endblock %}
 
 {% block content %}
 <style>
@@ -22,14 +22,14 @@
 </style>
 
 <div class="jobs-control-head">
-  <div><h1>Jobs control plane</h1><div class="muted">Persisted definitions, policy, requests, execution evidence, and runtime health.</div></div>
-  <div><a href="{% url 'admin_jobs' %}">Jobs</a> · <a href="{% url 'admin_job_status' %}">Job activity</a></div>
+  <div><h1>Job configuration</h1><div class="muted">Schedules, execution limits, complete coverage, and diagnostic evidence.</div></div>
+  <div><a href="{% url 'admin_jobs' %}">Jobs</a> · <a href="{% url 'findings_admin_health' %}">Admin Health</a></div>
 </div>
 
 {% if jobs_health.ok %}
-<div class="jobs-control-health ok"><strong>Control plane healthy.</strong> Registry, schedules, policy, and runtime heartbeats agree.</div>
+<div class="jobs-control-health ok"><strong>Jobs are healthy.</strong> Registry, schedules, policy, and runtime heartbeats agree.</div>
 {% else %}
-<div class="jobs-control-health bad"><strong>Control plane needs review.</strong><ul>{% for issue in jobs_health.issues %}<li>{{ issue }}</li>{% empty %}<li>Health evidence is unavailable.</li>{% endfor %}</ul></div>
+<div class="jobs-control-health bad"><strong>Jobs need review.</strong><ul>{% for issue in jobs_health.issues %}<li>{{ issue }}</li>{% empty %}<li>Health evidence is unavailable.</li>{% endfor %}</ul></div>
 {% endif %}
 
 <nav class="jobs-control-tabs" aria-label="Jobs diagnostics sections">
@@ -39,10 +39,10 @@
 {% if unavailable %}<div class="notice notice-warning">{{ unavailable }}</div>{% endif %}
 {% if active_section == "resource_limits" %}
 <form method="post" action="{% url 'admin_jobs_capacity_update' %}" class="jobs-control-row" style="padding:.75rem">
-  {% csrf_token %}<strong>Change execution capacity</strong><p class="muted">This controls platform workload, not which data may be updated together. Protected data policies are read-only.</p>
+  {% csrf_token %}<strong>Change execution limit</strong><p class="muted">This controls how much of each kind of Job can run at once. Data-safety rules are read-only.</p>
   <input type="hidden" name="kind" value="pool">
-  <label>Capacity area <select id="jobs-capacity-key" name="key" required>{% for row in rows %}{% if row.policy_kind == 'execution_pool' %}<option value="{{ row.resource_template }}" data-maximum="{% if row.resource_template == 'capacity:external-io' %}3{% else %}2{% endif %}">{{ row.capacity_label }} (current {{ row.capacity }})</option>{% endif %}{% endfor %}</select></label>
-  <label>Capacity <select id="jobs-capacity-value" name="capacity"><option value="1">1</option><option value="2">2</option><option value="3">3</option></select></label>
+  <label>Job type <select id="jobs-capacity-key" name="key" required>{% for row in rows %}{% if row.policy_kind == 'execution_pool' %}<option value="{{ row.resource_template }}" data-maximum="{% if row.resource_template == 'capacity:external-io' %}3{% else %}2{% endif %}">{{ row.capacity_label }} (current {{ row.capacity }})</option>{% endif %}{% endfor %}</select></label>
+  <label>At once <select id="jobs-capacity-value" name="capacity"><option value="1">1</option><option value="2">2</option><option value="3">3</option></select></label>
   <label>Reason <input name="reason" required maxlength="240"></label>
   <button type="submit">Apply capacity</button>
 </form>
@@ -66,7 +66,7 @@
 
 {% for row in rows %}
 <details class="jobs-control-row"{% if forloop.first %} open{% endif %}>
-  <summary>{% if row.definition_key %}{{ row.definition_key }}{% elif row.job_key %}{{ row.job_key }}{% elif row.runtime_kind %}{{ row.runtime_kind }} · {{ row.runtime_identity }}{% elif row.resource_identity %}{{ row.resource_identity }}{% elif row.resource_template %}{{ row.resource_template }}{% elif row.lane %}{{ row.lane }}{% elif row.event_type %}{{ row.event_type }} · {{ row.job_id }}{% elif row.domain_kind %}{{ row.domain_kind }} · {{ row.domain_record_id }}{% else %}{{ row.id|default:"Persisted record" }}{% endif %}</summary>
+  <summary>{% if row.name %}{{ row.name }}{% elif row.definition_key %}{{ row.definition_key }}{% elif row.job_key %}{{ row.job_key }}{% elif row.runtime_kind %}{{ row.runtime_kind }} · {{ row.runtime_identity }}{% elif row.resource_identity %}{{ row.resource_identity }}{% elif row.resource_template %}{{ row.resource_template }}{% elif row.lane %}{{ row.lane }}{% elif row.event_type %}{{ row.event_type }} · {{ row.job_id }}{% elif row.domain_kind %}{{ row.domain_kind }} · {{ row.domain_record_id }}{% else %}{{ row.id|default:"Persisted record" }}{% endif %}</summary>
   <dl class="jobs-control-data">{% for key, value in row.items %}<dt>{{ key }}</dt><dd>{{ value }}</dd>{% endfor %}</dl>
 </details>
 {% empty %}
