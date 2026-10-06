@@ -755,13 +755,13 @@ _SCHEDULE_DEFINITIONS = (
 # Initial limits preserve the only capacity behavior the current process proves:
 # two durable handlers in total and one poller per lane.  They are a ceiling,
 # not a worker-service replica count or a claim that narrower scopes are unsafe.
-INITIAL_EXECUTION_CAPACITY = 2
+INITIAL_EXECUTION_CAPACITY = 3
 INITIAL_LANE_CAPACITIES = MappingProxyType({
-    "collection": 2,
-    "evaluation": 2,
-    "software": 2,
-    "intelligence": 2,
-    "service": 2,
+    "collection": 3,
+    "evaluation": 3,
+    "software": 3,
+    "intelligence": 3,
+    "service": 3,
 })
 
 _GLOBAL_ONLY = frozenset({

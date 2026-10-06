@@ -1891,6 +1891,12 @@ last successful full patch evaluation atomically with its durable device state.
 Weekly cadence now uses this marker rather than optional run history. Next:
 commit/push and verify the automatic rollout.
 
+Jobs capacity controls (2026-10-06): authorized extension. Raise governed
+global execution capacity to three, prevent the legacy agent-compliance bridge
+from crowding native Operations work, and add an audited admin surface for
+editing reviewed lane and resource capacity policy. Next: migration, admin
+write API/view, validation, commit/push, and rollout verification.
+
 Software target implementation (2026-10-05): migration 0250 creates a
 tenant-scoped durable target queue. The CVE matcher compares its old and new
 match sets and records only changed version identities or product-level names;

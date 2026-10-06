@@ -8448,6 +8448,35 @@ def admin_jobs_control_plane(request: HttpRequest) -> HttpResponse:
     )
 
 
+@login_required
+@require_admin
+@require_POST
+def admin_jobs_capacity_update(request: HttpRequest) -> HttpResponse:
+    """Apply one reviewed Jobs capacity policy change and audit it."""
+    kind = (request.POST.get("kind") or "").strip()
+    key = (request.POST.get("key") or "").strip()
+    reason = (request.POST.get("reason") or "").strip()
+    try:
+        capacity = int(request.POST.get("capacity") or "")
+    except ValueError:
+        capacity = 0
+    if kind not in {"lane", "resource"} or not key or not reason or not 1 <= capacity <= 3:
+        messages.error(request, "Choose a policy, capacity (1–3), and reason.")
+        return redirect("admin_jobs_control_plane")
+    try:
+        with transaction.atomic(), connection.cursor() as cur:
+            cur.execute("SET LOCAL operations.tenant_id = 1")
+            cur.execute("SELECT operations.jobs_set_capacity_v1(%s,%s,%s,%s)", (1, kind, key, capacity))
+        AuditLog.objects.create(tenant_id=1, actor=request.user, actor_kind=AuditLog.ActorKind.USER,
+            source=AuditLog.Source.UI, action="jobs.capacity.update", entity_type=f"jobs.{kind}_capacity",
+            before_state={}, after_state={"key": key, "capacity": capacity, "reason": reason})
+        messages.success(request, f"Updated {key} capacity to {capacity}.")
+    except DatabaseError:
+        log.exception("Jobs capacity update failed")
+        messages.error(request, "Capacity policy update failed.")
+    return redirect("admin_jobs_control_plane")
+
+
 def _job_lane(job_key: str) -> str:
     return definition(job_key).lane
 
