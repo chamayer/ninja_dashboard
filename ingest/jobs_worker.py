@@ -18,6 +18,8 @@ import uuid
 from dataclasses import dataclass
 from pathlib import Path
 
+from shared.jobs_registry import EMERGENCY_CHILD_CAPACITY
+
 from ingest import db, operator_job_queue
 from ingest.config import settings
 from ingest.logging_utils import install_log_safety
@@ -49,8 +51,8 @@ def healthcheck() -> int:
     return 0 if _READY_PATH.is_file() else 1
 
 
-def _start_child(lane: str, incarnation: uuid.UUID) -> _Child | None:
-    row = operator_job_queue._claim_next_v1(lane, incarnation)
+def _start_child(incarnation: uuid.UUID) -> _Child | None:
+    row = operator_job_queue._claim_next_v6(incarnation)
     if row is None:
         return None
     process = subprocess.Popen(
@@ -84,7 +86,7 @@ def _finish_child(child: _Child) -> None:
         operator_job_queue._finish_v1(child.run_id, child.claim_token, "failed", error=str(result.get("error", "Jobs child failed."))[:2000])
 
 
-def _shutdown_children(children: dict[str, _Child]) -> None:
+def _shutdown_children(children: dict[uuid.UUID, _Child]) -> None:
     """Reconcile exited children and fence all still-running work before exit.
 
     No handler is certified kill-safe. The supervisor therefore does not send
@@ -114,7 +116,7 @@ def _shutdown_children(children: dict[str, _Child]) -> None:
 
 
 def run() -> int:
-    """Supervise one isolated child per lane without blocking other lanes."""
+    """Supervise local children; database dispatch owns global capacity."""
     global _stopping
     logging.basicConfig(
         level=settings.INGEST_LOG_LEVEL,
@@ -130,7 +132,7 @@ def run() -> int:
     operator_job_queue.register_recovery_policies()
     operator_job_queue.reconcile_replay_safe_containment()
     worker_incarnation = uuid.uuid4()
-    children: dict[str, _Child] = {}
+    children: dict[uuid.UUID, _Child] = {}
     _READY_PATH.touch()
     log.info("Jobs worker ready: incarnation=%s", worker_incarnation)
     next_runtime_heartbeat = 0.0
@@ -148,43 +150,38 @@ def run() -> int:
                     "worker",
                     worker_incarnation,
                     {
-                        "lanes": list(operator_job_queue.WORKER_LANES),
                         "active_children": len(children),
+                        "child_ceiling": EMERGENCY_CHILD_CAPACITY,
                         "poll_seconds": _POLL_SECONDS,
                     },
                 )
                 next_runtime_heartbeat = now + _HEARTBEAT_SECONDS
-            for lane in operator_job_queue.WORKER_LANES:
-                child = children.get(lane)
-                if child is not None:
+            for run_id, child in tuple(children.items()):
+                try:
+                    child.progress.heartbeat()
+                except Exception:
+                    log.exception("Jobs child heartbeat failed: run=%s", child.run_id)
+                if child.process.poll() is not None:
                     try:
-                        child.progress.heartbeat()
+                        _finish_child(child)
                     except Exception:
-                        # The control plane reaper will contain an expired
-                        # claim; do not abandon every other lane on one
-                        # transient heartbeat failure.
-                        log.exception("Jobs child heartbeat failed: run=%s", child.run_id)
-                    if child.process.poll() is not None:
+                        log.exception("Jobs child finish transition failed: run=%s", child.run_id)
                         try:
-                            _finish_child(child)
-                            del children[lane]
+                            operator_job_queue._interrupt_v1(
+                                child.run_id,
+                                child.claim_token,
+                                "Jobs worker could not record the exited child result; verify effects before retrying.",
+                            )
                         except Exception:
-                            log.exception("Jobs child finish transition failed: run=%s", child.run_id)
-                            try:
-                                operator_job_queue._interrupt_v1(
-                                    child.run_id,
-                                    child.claim_token,
-                                    "Jobs worker could not record the exited child result; verify effects before retrying.",
-                                )
-                            except Exception:
-                                log.exception("Jobs child containment failed: run=%s", child.run_id)
-                            del children[lane]
-                    continue
-                child = _start_child(lane, worker_incarnation)
-                if child is not None:
-                    children[lane] = child
-                if _stopping:
+                            log.exception("Jobs child containment failed: run=%s", child.run_id)
+                    del children[run_id]
+            if not _stopping:
+                operator_job_queue.dispatch_ready_v1()
+            while not _stopping and len(children) < EMERGENCY_CHILD_CAPACITY:
+                child = _start_child(worker_incarnation)
+                if child is None:
                     break
+                children[child.run_id] = child
             time.sleep(_POLL_SECONDS)
     finally:
         _READY_PATH.unlink(missing_ok=True)

@@ -11,12 +11,12 @@ def test_operator_jobs_use_a_durable_queue_and_separate_stall_watchdog():
     workflow_migration = Path("apps/core/migrations/0180_operator_job_workflow_controls.py").read_text(encoding="utf-8")
     software_lane_migration = Path("apps/core/migrations/0182_software_job_lane_and_operations_controls.py").read_text(encoding="utf-8")
 
-    assert "operations.jobs_claim_next_v5" in queue
+    assert "operations.jobs_claim_next_v6" in queue
     assert "operations.jobs_finish_v1" in queue
     assert "operations.jobs_record_v1_progress" in queue
     assert "class V1JobProgress" in queue
     assert "_software_classify_with_intel" in queue
-    assert "WORKER_LANES" in queue
+    assert "jobs_dispatch_ready_v1" in queue
     assert "except PoolTimeout:" in queue
     assert "contract_version = 0" not in queue
     assert "def enqueue_automatic" not in queue
@@ -29,7 +29,7 @@ def test_operator_jobs_use_a_durable_queue_and_separate_stall_watchdog():
     assert "heartbeat_at" in workflow_migration
     assert '"software-classify-full"' in queue
     assert "incremental=True" in queue
-    assert '"software"' in queue
+    assert "jobs_claim_next_v6" in queue
     assert "software-classify-full" in Path("apps/core/views.py").read_text(encoding="utf-8")
     assert "_queue_software_rebuild_after_commit" in Path("apps/core/views.py").read_text(encoding="utf-8")
     assert "GRANT SELECT, INSERT, UPDATE ON operations.operator_job_runs TO operations_app" in software_lane_migration
@@ -43,19 +43,19 @@ def test_jobs_status_uses_operator_language_and_safe_controls():
     jobs_template = Path("templates/admin_jobs.html").read_text(encoding="utf-8")
     urls = Path("config/urls.py").read_text(encoding="utf-8")
 
-    assert '"queued": "Queued"' in views
+    assert '"ready", "waiting", "running", "completed"' in views
     assert '"stalled": "Needs attention"' in views
     assert "def admin_job_cancel" in views
     assert "jobs_cancel_v1" in views
     assert "Request cancellation" in template
     assert "Cancellation pending" in template
     assert "Job activity" in template
-    assert "Queue position" in template
+    assert "Waiting for capacity" in views
     assert "Current work" in template
     assert "Updated" in template
     assert "Worker active" in template
     assert "Not started" in template
-    assert "Waiting for work already running in this lane" in views
+    assert "Waiting for protected work" in views
     assert "System activity" in template
     assert '"automatic": "Automatic"' in views
     assert '"dependency": "Dependency"' in views
@@ -141,7 +141,7 @@ def test_job_activity_has_complete_filtered_pagination_and_compiles():
     assert "def _jobs_activity_date" in views
     assert "def _jobs_activity_query" in views
     for field in (
-        "job", "scope", "lane", "origin", "status", "owner", "correlation",
+        "job", "scope", "origin", "status", "owner", "correlation",
         "batch", "from", "to", "technical",
     ):
         assert f'name="{field}"' in template

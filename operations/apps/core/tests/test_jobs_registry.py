@@ -6,8 +6,9 @@ from pathlib import Path
 
 import pytest
 from shared.jobs_registry import (
-    INITIAL_EXECUTION_CAPACITY,
-    INITIAL_LANE_CAPACITIES,
+    EMERGENCY_CHILD_CAPACITY,
+    EXECUTION_POOL_POLICIES,
+    READY_WINDOW_CAPACITY,
     RegistryValidationError,
     capability_state,
     catalog_entries,
@@ -18,8 +19,8 @@ from shared.jobs_registry import (
     operation_steps,
     schedule_definitions,
     scheduled_definition_keys,
-    workflow_edges,
     validate_registry,
+    workflow_edges,
 )
 
 ROOT = Path(__file__).resolve().parents[4]
@@ -202,14 +203,13 @@ def test_capability_labels_do_not_make_unreviewed_execution_safe():
     assert not definition("agent-compliance").kill_safe
 
 
-def test_registry_exposes_the_approved_conservative_resource_policy():
-    assert INITIAL_EXECUTION_CAPACITY == 2
-    assert dict(INITIAL_LANE_CAPACITIES) == {
-        "collection": 2,
-        "evaluation": 2,
-        "software": 2,
-        "intelligence": 2,
-        "service": 2,
+def test_registry_exposes_the_approved_pool_and_resource_policy():
+    assert READY_WINDOW_CAPACITY == 2
+    assert EMERGENCY_CHILD_CAPACITY == 4
+    assert dict(EXECUTION_POOL_POLICIES) == {
+        "capacity:external-io": {"label": "Data retrieval", "capacity": 2, "minimum": 1, "maximum": 3},
+        "capacity:processing": {"label": "Data processing", "capacity": 1, "minimum": 1, "maximum": 2},
+        "capacity:control": {"label": "Control work", "capacity": 1, "minimum": 1, "maximum": 2},
     }
     assert definition("patches").resource_keys == ("tenant:{tenant_id}:ninja-source",)
     assert definition("agent-observations").resource_keys == ("tenant:{tenant_id}:agent-sources",)
@@ -220,6 +220,16 @@ def test_registry_exposes_the_approved_conservative_resource_policy():
     assert definition("software-classify-full").supersession_rank == 2
     assert definition("software-classify").supersession_rank == 3
     assert definition("software-classify").supersession_family == "software-classifier"
+    assert definition("patches").capacity_keys == ("capacity:external-io",)
+    assert definition("patch-classify").capacity_keys == ("capacity:processing",)
+    assert definition("software-classify").capacity_keys == (
+        "capacity:external-io", "capacity:processing",
+    )
+    assert all(definition(key).capacity_keys for key in definition_keys())
+    assert all(
+        set(definition(key).capacity_keys) <= set(EXECUTION_POOL_POLICIES)
+        for key in definition_keys()
+    )
     assert all(definition(key).resource_keys for key in definition_keys())
     assert all(definition(key).timeout_minutes == 90 for key in definition_keys())
     assert all(definition(key).priority == 50 for key in definition_keys())

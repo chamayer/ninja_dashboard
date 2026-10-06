@@ -37,15 +37,30 @@
 </nav>
 
 {% if unavailable %}<div class="notice notice-warning">{{ unavailable }}</div>{% endif %}
-{% if active_section == "lane_limits" or active_section == "resource_limits" %}
+{% if active_section == "resource_limits" %}
 <form method="post" action="{% url 'admin_jobs_capacity_update' %}" class="jobs-control-row" style="padding:.75rem">
-  {% csrf_token %}<strong>Change capacity</strong><p class="muted">Applies immediately to new claims. Legacy agent compliance has its own resource limit; global execution capacity is shared.</p>
-  <input type="hidden" name="kind" value="{% if active_section == 'lane_limits' %}lane{% else %}resource{% endif %}">
-  <label>Policy <select name="key" required>{% for row in rows %}<option value="{% if active_section == 'lane_limits' %}{{ row.lane }}{% else %}{{ row.resource_template }}{% endif %}">{% if active_section == 'lane_limits' %}{{ row.lane }}{% else %}{{ row.resource_template }}{% endif %} (current {{ row.capacity }})</option>{% endfor %}</select></label>
-  <label>Capacity <select name="capacity"><option value="1">1</option><option value="2">2</option><option value="3">3</option></select></label>
+  {% csrf_token %}<strong>Change execution capacity</strong><p class="muted">This controls platform workload, not which data may be updated together. Protected data policies are read-only.</p>
+  <input type="hidden" name="kind" value="pool">
+  <label>Capacity area <select id="jobs-capacity-key" name="key" required>{% for row in rows %}{% if row.policy_kind == 'execution_pool' %}<option value="{{ row.resource_template }}" data-maximum="{% if row.resource_template == 'capacity:external-io' %}3{% else %}2{% endif %}">{{ row.capacity_label }} (current {{ row.capacity }})</option>{% endif %}{% endfor %}</select></label>
+  <label>Capacity <select id="jobs-capacity-value" name="capacity"><option value="1">1</option><option value="2">2</option><option value="3">3</option></select></label>
   <label>Reason <input name="reason" required maxlength="240"></label>
   <button type="submit">Apply capacity</button>
 </form>
+<script>
+  (function () {
+    var key = document.getElementById('jobs-capacity-key');
+    var value = document.getElementById('jobs-capacity-value');
+    if (!key || !value) return;
+    function sync() {
+      var maximum = Number(key.options[key.selectedIndex].dataset.maximum);
+      Array.prototype.forEach.call(value.options, function (option) {
+        option.disabled = Number(option.value) > maximum;
+      });
+      if (Number(value.value) > maximum) value.value = String(maximum);
+    }
+    key.addEventListener('change', sync); sync();
+  }());
+</script>
 {% endif %}
 <p class="muted">{{ total }} persisted record{{ total|pluralize }}. Page {{ page }}.</p>
 

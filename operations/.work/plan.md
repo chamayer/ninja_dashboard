@@ -1891,11 +1891,32 @@ last successful full patch evaluation atomically with its durable device state.
 Weekly cadence now uses this marker rather than optional run history. Next:
 commit/push and verify the automatic rollout.
 
+Patch-classification rollout verified (2026-10-06): commits `db44dc3` and
+`dc1383d` are deployed. Production has migrations 0251 and 0253, 2,809 durable
+per-device state rows, and a live patch classifier. The one failed run was a
+safe startup-order race before 0253 created its table; a later run is healthy.
+With no full marker, the classifier deliberately performs the first full
+reconciliation and writes the marker only after that transaction succeeds;
+subsequent routine runs are scoped to changed patch, reboot, or boot state.
+Focused Jobs checks pass (8), Python compilation passes, and the diff check
+passes. The patch-classification performance objective is complete. The
+separate capacity-controls rollout remains pending automatic GitOps application
+of migration 0254; do not deploy it manually.
+
 Jobs capacity controls (2026-10-06): authorized extension. Raise governed
 global execution capacity to three, prevent the legacy agent-compliance bridge
 from crowding native Operations work, and add an audited admin surface for
 editing reviewed lane and resource capacity policy. Next: migration, admin
 write API/view, validation, commit/push, and rollout verification.
+
+Capacity-controls validation (2026-10-06): commit `185892a` contains the
+migration, capacity API, and admin surface, but its registry test still asserts
+the former execution capacity of two. Focused Jobs checks therefore report 21
+passing and one failure (`test_registry_exposes_the_approved_conservative_resource_policy`).
+Production has migrations 0251--0253 only and remains at global capacity two;
+0254 has not yet been applied by automatic GitOps. Correct the stale assertion,
+run the focused checks, commit/push the correction, then verify 0254 and the
+capacity-three policy live. No direct deployment.
 
 Software target implementation (2026-10-05): migration 0250 creates a
 tenant-scoped durable target queue. The CVE matcher compares its old and new
@@ -1906,3 +1927,364 @@ intelligence dependencies now request incremental classification, while the
 full classifier is restored as an independent weekly schedule. Patch scoping
 is the next implementation slice and must preserve device and client finding
 resolution semantics.
+
+---
+
+# Jobs dispatch and capacity rework
+
+## Status
+
+**Implementation in progress.** This plan supersedes the
+earlier capacity-three implementation direction. Commit `185892a` and migration
+0254 remain immutable history, but their lane/global-capacity policy is not the
+target design. Production was last verified with migrations 0251--0253 and a
+global execution capacity of two. Do not invoke Portainer; rollout remains the
+automatic GitOps consequence of a separately approved push.
+
+## Implementable goal
+
+Replace arbitrary lane and global-count scheduling with truthful, pool-aware
+Jobs dispatch while preserving every Job run, schedule, dependency, resource
+claim, recovery record, and operation/step relationship.
+
+The completed system must keep four concerns separate:
+
+| Concern | Mechanism |
+|---|---|
+| Operator organization | An Operation and its visible steps |
+| Lifecycle | Waiting, Ready, Running, Completed, Needs attention, Cancelled |
+| Platform capacity | Execution-resource pools claimed atomically by each Job |
+| Data safety | Fixed domain resource locks for overlapping writers |
+
+At most two runs may be Ready. Work that cannot start must remain visible with
+one factual reason: waiting for data, protected work, or capacity. Capacity is
+not a single global job count and is not inferred from an operator-facing
+category.
+
+## Confirmed problem
+
+- The worker stores one child per hard-coded lane and therefore enforces a
+  physical one-child lane boundary regardless of the configured lane limit.
+- The deployment-wide `execution:deployment` capacity of two then overrides
+  otherwise independent work. Raising lane and global rows to three does not
+  make the worker honor three children in one lane.
+- `queued` currently includes dependency waits and resource waits, so queue
+  depth is not the number of runs that are ready to execute.
+- Existing domain claims correctly protect shared writers, but capacity claims
+  and correctness locks are represented and administered as though they were
+  the same policy.
+- Every isolated child can open a Postgres pool of up to four connections.
+  Production reported 20 of 100 connections in use during review, so child
+  count and database headroom require an explicit rollout check.
+- PostgreSQL transactions already let readers use committed state while a
+  writer prepares a new transaction. A new dataset-versioning framework is not
+  required.
+
+## Decisions and invariants
+
+### 1. Preserve Operations and steps
+
+Operations remain the operator-facing scheduled/manual units. Their existing
+steps, root/parent lineage, schedules, controls, and immutable run history are
+unchanged. Pool names, claims, definition digests, and raw wait metadata stay
+in administrator detail, not the normal operator layout.
+
+### 2. Use truthful lifecycle presentation without rewriting history
+
+Keep the physical v1 run statuses required by ADR-0024. Derive lifecycle as:
+
+- `queued` with dependency/workflow wait metadata: **Waiting for data**;
+- `queued` with a conflicting domain claim: **Waiting for protected work**;
+- `queued` with an unavailable execution pool: **Waiting for capacity**;
+- `queued` with no wait reason and admitted to the bounded ready window:
+  **Ready**;
+- existing running and terminal statuses retain their established meanings.
+
+All admission, dependency-release, claim, cancellation, and recovery APIs must
+maintain this invariant. No page or API may count Waiting runs as Ready.
+
+The Ready window is a fixed contract of two runs. Promotion is serialized in
+the database and must look past blocked candidates. Additional eligible work
+remains Waiting for capacity; it is not hidden or discarded.
+
+More than two Waiting runs may legitimately exist because prerequisites,
+protected data, or available capacity cannot be discarded. They must never be
+reported as queued. The operator queue count is exactly the Ready count and can
+therefore never exceed two.
+
+### 3. Replace lanes/global count with execution-resource pools
+
+Definitions declare `capacity_keys` independently of `resource_keys`. A Job
+may require more than one capacity pool. Initial reviewed pools are:
+
+| Pool | Purpose | Initial capacity |
+|---|---|---:|
+| `capacity:external-io` | External source and intelligence retrieval | 2 |
+| `capacity:processing` | Classification, matching, resolution, and evaluation | 1 |
+| `capacity:control` | Short recovery, health, cleanup, and reporting work | 1 |
+
+The initial emergency child-process ceiling is four, equal to the sum of the
+reviewed pool capacities. It is a deployment-wide database-enforced safety
+fuse, not an in-process counter or alternative scheduling policy. Before
+rollout, the handler inventory must confirm each definition's actual pool
+requirements; names or old lanes are not evidence.
+
+Pool claims are acquired atomically with domain claims in stable key order.
+A job that needs two pools starts only when both are available. A failed claim
+leaves no partial ownership.
+
+### 4. Keep domain locks fixed and specific
+
+`resource_keys` continue to describe data-safety boundaries. Their capacity is
+one and is not operator-editable. Same-scope source application, identity
+promotion, shared derived-state writers, notification delivery, and the same
+materialized-view refresh remain serialized where their handlers require it.
+
+Different source scopes and unrelated derived domains may overlap. Broad
+`global:software-catalog` and `global:intel-cve-corpus` declarations require a
+handler-by-handler read/write audit. Narrow a lock only when transaction and
+follow-on revision behavior prove that a reader can safely consume the prior
+committed state; do not weaken it based on naming alone.
+
+### 5. Use database-coordinated dispatch with stateless supervisors
+
+Postgres remains the only dispatch authority. A supervisor owns no durable
+queue truth, ordering, or capacity in memory; it supervises only its local
+children. Deploy one supervisor initially, while making the contract safe for
+multiple supervisors without redesign. Atomic claims, `SKIP LOCKED`, claim
+tokens, generations, pool limits, the Ready bound, and the emergency process
+ceiling are deployment-wide database rules.
+
+Replace the `children[lane]` worker map and lane-specific claim call with a
+local child map keyed by run ID. Each stateless supervisor repeatedly:
+
+1. reconciles exited children and heartbeats live children;
+2. promotes eligible Waiting work into the two-position Ready window;
+3. claims the oldest eligible Ready run using bounded priority aging;
+4. atomically acquires every required capacity and domain claim;
+5. starts children until no further compatible work fits;
+6. contains interrupted work under the existing recovery contract.
+
+Control capacity remains available to control jobs and is not borrowed by
+processing work. Parent Operations that are only coordinating steps consume no
+child or pool claim. Existing definition/scope coalescing remains authoritative.
+Supervisor heartbeats are independent; loss of one supervisor prevents only
+its local children from reporting and invokes the existing containment rules.
+Another supervisor may continue claiming disjoint work. No supervisor leader
+election is introduced.
+
+### 6. Make only capacity policy editable
+
+The Admin control plane shows each execution pool's capacity, active use,
+waiting count, and recent duration/throughput. User-facing labels are **Data
+retrieval**, **Data processing**, and **Control work**; technical keys remain in
+administrator detail. An administrator may change a pool only within its
+reviewed minimum/maximum, with a required reason and audit record. The Ready
+limit, domain locks, dependency rules, and recovery policy are not capacity
+knobs.
+
+The Jobs and Activity pages use the same lifecycle labels and counts. Normal
+operator surfaces never show lanes. Administrator detail may show capacity
+pools, protected domains, wait evidence, definition revision, and claim owner.
+
+### 7. Preserve compatibility and tenant boundaries
+
+Create a forward migration after 0254; do not edit a committed migration.
+The migration supersedes the capacity-three policy, distinguishes execution
+pools from domain locks, installs the central dispatch APIs, and preserves all
+historical rows. Old immutable queued definitions remain executable through a
+bounded compatibility branch that honors their old lane/global claims until
+they drain; no history is rewritten and no successful work is invented.
+
+Retain ADR-0024's accepted tenant-1 execution boundary for this change, enforce
+RLS throughout, and introduce no new hard-coded tenant assumptions. Global
+pool coordination must disclose no tenant-specific run details. Enabling a
+second tenant remains a separately validated rollout.
+
+## Non-goals
+
+- No dataset-versioning framework, event-store rewrite, or duplicate current
+  data model.
+- No merge of Job runs with source demand, source actions, findings, or audit
+  records.
+- No operator editing of correctness locks, retries, deadlines, or recovery
+  authority through the capacity form.
+- No claim that every materialized view is safe to refresh concurrently; each
+  changed path requires its own index and behavior evidence.
+- No direct Portainer deployment, manual migration, queue deletion, or run
+  history rewrite.
+
+## Affected artifacts
+
+- `operations/docs/decisions/0026-jobs-dispatch-and-capacity.md`: supersede
+  ADR-0024's lane-capacity and queued-presentation clauses while retaining its
+  admission, fencing, dependency, isolation, and recovery contracts.
+- `shared/jobs_registry.py`: separate `capacity_keys` from domain
+  `resource_keys`; retain legacy lane metadata only for immutable compatibility.
+- `ingest/operator_job_queue.py`: database-coordinated promotion/claim adapter
+  and truthful wait transitions.
+- `ingest/jobs_worker.py`: stateless, run-keyed local child supervision rather
+  than one child per lane.
+- A forward Operations migration after 0254: resource kinds, pool policies,
+  restricted dispatch/capacity APIs, compatibility behavior, grants, RLS, and
+  stable lock order.
+- `operations/apps/core/views.py`, `operations/config/urls.py`, Jobs/Activity
+  templates, and the Jobs control-plane template: shared lifecycle and pool
+  presentation plus audited pool controls.
+- Focused registry, worker, migration, tenant/RLS, view, and template tests.
+
+## Implementation slices
+
+### Slice 1 — Decision and complete definition audit
+
+1. Write ADR-0026 with the four-concern model, lock order, lifecycle mapping,
+   Ready bound, execution pools, compatibility behavior, and failure modes.
+2. Inventory every executable definition's external I/O, processing, control,
+   domain writes, materialized-view refreshes, connection behavior, and output
+   revisions.
+3. Assign capacity keys from inspected handler behavior. Keep uncertain broad
+   domain locks until evidence supports narrowing them.
+4. Add registry validation: known pool keys, at least one pool where required,
+   fixed domain-lock policy, and no pool key in `resource_keys`.
+
+Gate: every executable key has reviewed capacity and domain ownership, and the
+registry remains standard-library-only and deterministically digested.
+
+### Slice 2 — Durable policy and dispatch APIs
+
+1. Add a resource kind that distinguishes `execution_pool`, `domain_lock`, and
+   legacy compatibility rows, or an equivalent normalized relation that keeps
+   those authorities separate.
+2. Seed the three pool policies and reviewed bounds; supersede the 0254
+   capacity-three API without deleting its history.
+3. Add restricted, tenant/RLS-safe promotion and central claim functions.
+4. Acquire capacity and domain claims atomically in stable order, recheck
+   dependency freshness, scan past blocked candidates, and maintain exact wait
+   category/reason evidence.
+5. Enforce at most two Ready runs under one database coordinator lock.
+6. Retain a compatibility claim path for old immutable queued definitions.
+
+Gate: database contention tests prove the Ready bound, no partial claims,
+same-domain exclusion, disjoint-domain concurrency, multi-pool atomicity,
+cross-tenant non-disclosure, and fair scan past blocked work.
+
+### Slice 3 — Stateless isolated worker supervision
+
+1. Replace lane iteration and the lane-keyed child map with database claims and
+   a run-keyed map of local children.
+2. Enforce the deployment-wide emergency child ceiling in the database while
+   relying on pool claims for normal admission.
+3. Preserve claim token/generation fencing, heartbeats, deadlines,
+   cancellation checkpoints, shutdown containment, and replay-safe recovery.
+4. Give each supervisor its own runtime identity and heartbeat; do not require
+   worker leader election.
+5. Report active pool use, deployment-wide child count, and local child count
+   in runtime diagnostics.
+
+Gate: focused process tests prove independent jobs overlap, conflicting jobs
+do not, control work remains responsive, two supervisors cannot over-claim,
+and shutdown contains every live local child without orphaning claims.
+
+### Slice 4 — Operator and administrator surfaces
+
+1. Centralize lifecycle mapping so Jobs, Activity, Health, and APIs produce the
+   same Ready/Waiting/Running/terminal result.
+2. Count only Ready runs as queued; group Waiting by factual reason.
+3. Keep Operations and visible steps as the normal organization.
+4. Replace lane/global forms with audited execution-pool controls and usage.
+5. Show domain claims read-only in administrator detail.
+6. Ensure current status and immutable history remain separate.
+
+Gate: focused request/template checks cover empty, Waiting, Ready, Running,
+attention, mixed-operation, and pagination/filter states without a 500.
+
+### Slice 5 — Compatibility, rollout, and proof
+
+1. Run focused Python, registry, Django, SQL/migration, template, and
+   `git diff --check` validation; keep testing proportional but include the
+   concurrency invariants.
+2. Review the migration plan from 0253 through the new forward migration and
+   prove both cases: an environment where 0254 is already applied and one where
+   it is applied immediately before the corrective migration.
+3. Before push, calculate worst-case child connection demand against live
+   Postgres headroom and verify no blocking materialized-view path defeats the
+   proposed overlap.
+4. Obtain separate commit and push approvals. Push origin first and the mirror
+   second. Do not invoke Portainer.
+5. Verify automatic rollout: migration applied, registry/worker healthy,
+   Ready never above two, pool use truthful, unrelated work overlaps, same
+   domain remains serialized, old queued definitions drain, and Jobs/Admin
+   pages render.
+
+## Acceptance criteria
+
+1. Operators see Operations and steps, never scheduler lanes.
+2. `Queued` means Ready and its count never exceeds two; Waiting is displayed
+   separately and may exceed two without being mislabeled as queue depth.
+3. Every non-running active run has one truthful wait/ready reason.
+4. No global job-count claim controls ordinary admission; the deployment-wide
+   process ceiling is only an emergency safety fuse.
+5. Jobs acquire all declared capacity pools and domain locks atomically.
+6. Same-domain writers cannot overlap; unrelated work can overlap when pool
+   capacity exists.
+7. Support/control work cannot be crowded out by long processing work.
+8. Pool capacities and use are visible and audited; domain locks are not
+   operator-editable.
+9. Existing schedules, requests, dependencies, history, recovery evidence,
+   operation lineage, and old definition snapshots remain readable.
+10. No data-versioning layer or broad data-model rewrite is introduced.
+11. Tenant/RLS and global-resource privacy behavior pass focused tests.
+12. Automatic rollout and live behavior are verified without direct Portainer
+    action.
+
+## Validation plan
+
+- Registry contract and digest tests for separate capacity/domain metadata.
+- PostgreSQL contention tests for Ready promotion, pool capacity, stable claim
+  order, same-domain exclusion, disjoint concurrency, and compatibility runs.
+- Worker process tests for multiple children and supervisors, fencing,
+  heartbeat, completion, cancellation, no over-claim, and shutdown containment.
+- Existing Jobs dependency, coalescing, supersession, recovery, and schedule
+  suites to catch contract regressions.
+- Focused Django views/templates and Admin audit tests.
+- `python manage.py check`, changed-module compilation, migration review, and
+  `git diff --check`.
+- One read-only live rollout audit of migrations, capacities, active/waiting
+  state, claims, runtime heartbeat, and Jobs/Admin HTTP behavior.
+
+## Current checkpoint and next action
+
+The four-concern design, truthful Ready/Waiting contract, execution pools,
+fixed domain locks, and database-coordinated stateless-supervisor model are the
+final implementation plan. Implementation was authorized on 2026-10-06.
+Completed in the working tree: ADR-0026; reviewed pool/domain declarations for
+every executable definition; migration 0255 with durable pool policy,
+Ready-window promotion, atomic multi-pool/domain claims, and compatibility for
+immutable historical definitions; a stateless worker supervisor; pool-only
+administrator controls; and matching Ready/Waiting/Running language on Jobs
+and Job activity. Migration 0254 was corrected before application because its
+policy revision values violated the already-existing 64-character revision
+constraint.
+
+Validation completed: changed Python modules compile; registry validation and
+the focused pool-dispatch migration contract pass; `git diff --check` passes;
+Compose configuration validates. Focused Django and pytest suites remain unavailable because the local virtual
+environment lacks Django and pytest. PostgreSQL contention and rollout checks
+also remain pending until a reviewed deployed environment is available.
+
+Production checkpoint (2026-10-06): a read-only Operations startup-log review
+confirmed that the previously pushed 0254 migration is failing before it can
+be recorded, because its `capacity-3` policy revision violates the existing
+64-character revision constraint. Operations is restarting at this checkpoint.
+The working-tree correction replaces every invalid 0254 revision literal with
+a valid immutable digest; 0255 then supplies the approved pool-dispatch
+design. Local development dependencies were installed only in the ignored
+workspace virtual environment. `manage.py check` passed, 25 focused Jobs
+tests passed, focused F/I Ruff passed, and the migration graph lists 0254 then
+0255. Docker Desktop is unavailable, so PostgreSQL contention tests cannot
+run locally.
+
+Next action: commit and push the approved Jobs recovery/rework to `origin`
+then `a-m-rose`; do not invoke Portainer. Verify automatic migration recovery,
+container health, Ready/Waiting behavior, and pool diagnostics through
+read-only checks afterward.

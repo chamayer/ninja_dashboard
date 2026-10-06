@@ -16,9 +16,6 @@ from typing import Any
 
 from psycopg.errors import UndefinedFunction
 from psycopg_pool import PoolTimeout
-
-from ingest import db
-from ingest.config import settings
 from shared.jobs_registry import (
     REPLAY_SAFE_RECOVERY_EVIDENCE,
     definition,
@@ -28,6 +25,9 @@ from shared.jobs_registry import (
     validate_registry,
     workflow_edges,
 )
+
+from ingest import db
+from ingest.config import settings
 
 log = logging.getLogger(__name__)
 SCHEDULER_RUNTIME_ID = uuid.uuid4()
@@ -300,9 +300,9 @@ def admit_result_workflow(
 
 
 def _run_source_demand(job_run_id: object) -> JobExecutionResult:
+    from ingest import source_run_queue
     from ingest.source_observations import is_identity_source
     from ingest.sources import load_sources
-    from ingest import source_run_queue
 
     with db.transaction() as cur:
         cur.execute("SET LOCAL operations.tenant_id = 1")
@@ -406,9 +406,6 @@ def lane_for(job_key: str) -> str:
     return definition(job_key).lane
 
 
-WORKER_LANES = ("collection", "evaluation", "software", "intelligence", "service")
-
-
 class V1JobProgress:
     """Record v1 progress exclusively through the fenced Jobs API."""
 
@@ -476,14 +473,29 @@ def contain_expired_v1() -> int:
         return cur.fetchone()[0]
 
 
-def _claim_next_v1(lane: str, worker_incarnation: uuid.UUID) -> dict[str, Any] | None:
-    with db.transaction() as cur:
-        cur.execute("SET LOCAL operations.tenant_id = 1")
-        cur.execute(
-            "SELECT run_id, claim_token, job_key FROM operations.jobs_claim_next_v5(%s, %s, %s)",
-            (1, lane, worker_incarnation),
-        )
-        row = cur.fetchone()
+def dispatch_ready_v1() -> int:
+    """Promote at most the durable Ready window before workers claim it."""
+    try:
+        with db.transaction() as cur:
+            cur.execute("SET LOCAL operations.tenant_id = 1")
+            cur.execute("SELECT operations.jobs_dispatch_ready_v1(%s)", (1,))
+            return int(cur.fetchone()[0])
+    except UndefinedFunction:
+        return 0
+
+
+def _claim_next_v6(worker_incarnation: uuid.UUID) -> dict[str, Any] | None:
+    """Claim one Ready run through the pool-aware dispatcher."""
+    try:
+        with db.transaction() as cur:
+            cur.execute("SET LOCAL operations.tenant_id = 1")
+            cur.execute(
+                "SELECT run_id, claim_token, job_key FROM operations.jobs_claim_next_v6(%s, %s)",
+                (1, worker_incarnation),
+            )
+            row = cur.fetchone()
+    except UndefinedFunction:
+        return None
     if row is None:
         return None
     return {"id": row[0], "claim_token": row[1], "job_key": row[2]}
@@ -531,7 +543,7 @@ def _execute(job_key: str, progress: V1JobProgress) -> int | JobExecutionResult 
     Importing main here avoids its startup import cycle. The direct lower-level
     functions intentionally raise, allowing the durable record to show failure.
     """
-    from ingest import main
+    from ingest import cmdb_findings, main, platform_findings, runlog, source_run_queue
     from ingest.intel import (
         abusech,
         capability_match,
@@ -547,9 +559,6 @@ def _execute(job_key: str, progress: V1JobProgress) -> int | JobExecutionResult 
         winget,
     )
     from ingest.software_findings import incremental_pending_count
-    from ingest import source_run_queue
-    from ingest import platform_findings, runlog
-    from ingest import cmdb_findings
 
     jobs = {
         "patch-classify": ("Classifying changed patch state", lambda: main.patch_classify(tenant_id=1, incremental=True)),

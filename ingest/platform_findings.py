@@ -33,6 +33,14 @@ from datetime import UTC, datetime
 from typing import Any
 
 from psycopg import sql
+from shared.conditions.contracts import Condition, EvaluationCoverage, Participant
+from shared.jobs_registry import (
+    EXECUTION_POOL_POLICIES,
+    definition,
+    definitions,
+    registry_digest,
+    schedule_definitions,
+)
 
 from ingest import db
 from ingest.cmdb_findings import (
@@ -41,15 +49,6 @@ from ingest.cmdb_findings import (
 )
 from ingest.condition_evidence import preserve_operator_episode
 from ingest.conditions import record_assessment
-from shared.conditions.contracts import Condition, EvaluationCoverage, Participant
-from shared.jobs_registry import (
-    INITIAL_EXECUTION_CAPACITY,
-    INITIAL_LANE_CAPACITIES,
-    definition,
-    definitions,
-    registry_digest,
-    schedule_definitions,
-)
 
 log = logging.getLogger(__name__)
 
@@ -739,17 +738,9 @@ def _eval_jobs_registry_mismatch(
         if key in {item.key for item in definitions()}
         and row.get("definition_digest") != definition(key).snapshot_digest()
     )
-    expected_lanes = dict(INITIAL_LANE_CAPACITIES)
-    actual_lanes = {
-        row.get("lane"): row.get("capacity") for row in snapshot.get("lane_limits", [])
-    }
-    expected_resources = {"execution:deployment": INITIAL_EXECUTION_CAPACITY}
-    for item in definitions():
-        for resource in item.resource_keys:
-            expected_resources.setdefault(resource, 1)
-    actual_resources = {
-        row.get("resource_template"): row.get("capacity")
-        for row in snapshot.get("resource_limits", [])
+    pool_rows = {
+        row.get("resource_template"): row for row in snapshot.get("resource_limits", [])
+        if row.get("policy_kind") == "execution_pool"
     }
     expected_digest = registry_digest()
     live = [
@@ -773,10 +764,13 @@ def _eval_jobs_registry_mismatch(
         issues["missing_schedules"] = missing_schedules
     if stale_schedules:
         issues["stale_schedules"] = stale_schedules
-    if actual_lanes != expected_lanes:
-        issues["lane_policy_mismatch"] = True
-    if actual_resources != expected_resources:
-        issues["resource_policy_mismatch"] = True
+    if set(pool_rows) != set(EXECUTION_POOL_POLICIES):
+        issues["execution_pool_policy_mismatch"] = True
+    if any(
+        not policy["minimum"] <= pool_rows[key].get("capacity", 0) <= policy["maximum"]
+        for key, policy in EXECUTION_POOL_POLICIES.items() if key in pool_rows
+    ):
+        issues["execution_pool_capacity_out_of_range"] = True
     if runtime_mismatch:
         issues["runtime_digest_mismatch"] = runtime_mismatch
     if missing_runtimes:

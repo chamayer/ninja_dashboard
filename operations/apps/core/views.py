@@ -39,8 +39,7 @@ from django.utils.dateparse import parse_datetime
 from django.utils.text import slugify
 from django.views.decorators.http import require_GET, require_POST
 from shared.jobs_registry import (
-    INITIAL_EXECUTION_CAPACITY,
-    INITIAL_LANE_CAPACITIES,
+    EXECUTION_POOL_POLICIES,
     capability_state,
     catalog_entries,
     definition,
@@ -8267,8 +8266,7 @@ _JOBS_DIAGNOSTIC_SECTIONS = (
     ("events", "Run events"),
     ("dependencies", "Dependencies"),
     ("domain_attempts", "Domain attempts"),
-    ("lane_limits", "Lane policy"),
-    ("resource_limits", "Resource policy"),
+    ("resource_limits", "Execution capacity and protected data"),
     ("resource_claims", "Resource claims"),
     ("recovery_authorities", "Recovery authority"),
     ("recovery_policies", "Recovery policy"),
@@ -8291,11 +8289,12 @@ def _jobs_diagnostic_query(
             return _jobs_diagnostic_query(
                 section, limit=limit, offset=offset, cursor=cur
             )
-    diagnostic_function = (
-        "operations.jobs_recovery_diagnostics_v1"
-        if section in _JOBS_RECOVERY_DIAGNOSTIC_KEYS
-        else "operations.jobs_admin_diagnostics_v1"
-    )
+    if section == "resource_limits":
+        diagnostic_function = "operations.jobs_resource_policy_diagnostics_v1"
+    elif section in _JOBS_RECOVERY_DIAGNOSTIC_KEYS:
+        diagnostic_function = "operations.jobs_recovery_diagnostics_v1"
+    else:
+        diagnostic_function = "operations.jobs_admin_diagnostics_v1"
     cursor.execute(
         f"SELECT total_count, item FROM {diagnostic_function}(%s, %s, %s, %s)",
         (1, section, limit, offset),
@@ -8333,7 +8332,6 @@ def _jobs_control_health() -> dict:
             _count, health_rows = _jobs_diagnostic_query("health", cursor=cur)
             version_rows = _jobs_diagnostic_all("definition_versions", cur)
             schedule_rows = _jobs_diagnostic_all("schedules", cur)
-            lane_rows = _jobs_diagnostic_all("lane_limits", cur)
             resource_rows = _jobs_diagnostic_all("resource_limits", cur)
             _count, runtime_rows = _jobs_diagnostic_query("runtimes", cursor=cur)
     except DatabaseError:
@@ -8369,18 +8367,19 @@ def _jobs_control_health() -> dict:
     if stale_schedules:
         issues.append("Schedules use old definitions: " + ", ".join(stale_schedules))
 
-    actual_lanes = {row.get("lane"): row.get("capacity") for row in lane_rows}
-    if actual_lanes != dict(INITIAL_LANE_CAPACITIES):
-        issues.append("Lane capacity policy differs from the reviewed registry policy.")
-    expected_resources = {"execution:deployment": INITIAL_EXECUTION_CAPACITY}
-    for item in definitions():
-        for resource in item.resource_keys:
-            expected_resources.setdefault(resource, 1)
-    actual_resources = {
-        row.get("resource_template"): row.get("capacity") for row in resource_rows
+    pool_rows = {
+        row.get("resource_template"): row for row in resource_rows
+        if row.get("policy_kind") == "execution_pool"
     }
-    if actual_resources != expected_resources:
-        issues.append("Resource capacity policy differs from the reviewed registry policy.")
+    missing_pools = sorted(set(EXECUTION_POOL_POLICIES) - set(pool_rows))
+    if missing_pools:
+        issues.append("Missing execution capacity policy: " + ", ".join(missing_pools))
+    for key, policy in EXECUTION_POOL_POLICIES.items():
+        actual = pool_rows.get(key, {}).get("capacity")
+        if actual is not None and not policy["minimum"] <= actual <= policy["maximum"]:
+            issues.append(f"Execution capacity for {key} is outside its reviewed range.")
+    if any(row.get("capacity") != 1 for row in resource_rows if row.get("policy_kind") == "domain_lock"):
+        issues.append("A protected data policy is not exclusive.")
 
     expected_registry = registry_digest()
     now = timezone.now()
@@ -8427,6 +8426,11 @@ def admin_jobs_control_plane(request: HttpRequest) -> HttpResponse:
         log.exception("Jobs control-plane diagnostics query failed: section=%s", section)
         total, rows = 0, []
         unavailable = "Jobs diagnostics are unavailable or failed."
+    if section == "resource_limits":
+        for row in rows:
+            policy = EXECUTION_POOL_POLICIES.get(str(row.get("resource_template") or ""))
+            if policy:
+                row["capacity_label"] = policy["label"]
     return render(
         request,
         "admin_jobs_control_plane.html",
@@ -8460,25 +8464,22 @@ def admin_jobs_capacity_update(request: HttpRequest) -> HttpResponse:
         capacity = int(request.POST.get("capacity") or "")
     except ValueError:
         capacity = 0
-    if kind not in {"lane", "resource"} or not key or not reason or not 1 <= capacity <= 3:
-        messages.error(request, "Choose a policy, capacity (1–3), and reason.")
+    policy = EXECUTION_POOL_POLICIES.get(key)
+    if kind != "pool" or policy is None or not reason or not policy["minimum"] <= capacity <= policy["maximum"]:
+        messages.error(request, "Choose an execution capacity and reason within its reviewed range.")
         return redirect("admin_jobs_control_plane")
     try:
         with transaction.atomic(), connection.cursor() as cur:
             cur.execute("SET LOCAL operations.tenant_id = 1")
-            cur.execute("SELECT operations.jobs_set_capacity_v1(%s,%s,%s,%s)", (1, kind, key, capacity))
+            cur.execute("SELECT operations.jobs_set_execution_pool_capacity_v1(%s,%s,%s)", (1, key, capacity))
         AuditLog.objects.create(tenant_id=1, actor=request.user, actor_kind=AuditLog.ActorKind.USER,
-            source=AuditLog.Source.UI, action="jobs.capacity.update", entity_type=f"jobs.{kind}_capacity",
+            source=AuditLog.Source.UI, action="jobs.capacity.update", entity_type="jobs.execution_capacity",
             before_state={}, after_state={"key": key, "capacity": capacity, "reason": reason})
-        messages.success(request, f"Updated {key} capacity to {capacity}.")
+        messages.success(request, f"Updated {policy['label']} capacity to {capacity}.")
     except DatabaseError:
         log.exception("Jobs capacity update failed")
         messages.error(request, "Capacity policy update failed.")
     return redirect("admin_jobs_control_plane")
-
-
-def _job_lane(job_key: str) -> str:
-    return definition(job_key).lane
 
 
 @login_required
@@ -8548,7 +8549,7 @@ def admin_jobs(request: HttpRequest) -> HttpResponse:
                 """
                 SELECT DISTINCT ON (job_key)
                        job_key, status, requested_at, started_at, completed_at,
-                       rows_touched, error
+                       rows_touched, error, wait_category
                   FROM operations.operator_job_runs
                  WHERE tenant_id = 1
                  ORDER BY job_key, requested_at DESC, id DESC
@@ -8559,7 +8560,7 @@ def admin_jobs(request: HttpRequest) -> HttpResponse:
                     "completed": "ok",
                     "failed": "failed",
                     "stalled": "stalled",
-                    "queued": "queued",
+                    "queued": "ready" if r[7] is None else "waiting",
                     "running": "running",
                     "cancelled": "cancelled",
                 }.get(r[1], r[1])
@@ -8829,7 +8830,7 @@ def admin_jobs(request: HttpRequest) -> HttpResponse:
     for job in jobs:
         job["active_run"] = active_by_job.get(job["id"])
         if job["active_run"]:
-            job["state"] = job["active_run"]["status"]
+            job["state"] = job["active_run"]["lifecycle"]
         sequence_id = active_sequence_by_entry.get(job["id"])
         if sequence_id:
             sequence_state = sequence_steps.get(sequence_id, {})
@@ -8841,14 +8842,14 @@ def admin_jobs(request: HttpRequest) -> HttpResponse:
                 for step_key in _OPERATION_ENTRY_BY_JOB[job["id"]]["step_keys"]
             ]
             job["active_run"] = active_sequence_run[sequence_id]
-            job["state"] = job["active_run"]["status"]
+            job["state"] = job["active_run"]["lifecycle"]
 
     if category_filter:
         jobs = [j for j in jobs if j["category"].lower() == category_filter]
-    if status_filter in {"queued", "running", "never_run"}:
+    if status_filter in {"ready", "waiting", "running", "never_run"}:
         jobs = [j for j in jobs if j["state"] == status_filter]
     elif status_filter == "failed":
-        jobs = [j for j in jobs if j["state"] not in ("ok", "never_run", "queued", "running")]
+        jobs = [j for j in jobs if j["state"] not in ("ok", "never_run", "ready", "waiting", "running")]
     elif status_filter == "stale":
         jobs = [j for j in jobs if j["is_stale"] and j["state"] != "never_run"]
     elif status_filter == "ok":
@@ -8860,7 +8861,8 @@ def admin_jobs(request: HttpRequest) -> HttpResponse:
         jobs_by_category.setdefault(job["category"], []).append(job)
     operation_summary = {
         "running": sum(job["state"] == "running" for job in jobs),
-        "queued": sum(job["state"] == "queued" for job in jobs),
+        "ready": sum(job["state"] == "ready" for job in jobs),
+        "waiting": sum(job["state"] == "waiting" for job in jobs),
         "attention": sum(job["state"] in {"failed", "stalled"} for job in jobs),
     }
 
@@ -9075,9 +9077,7 @@ def _operator_job_runs(
     active_filters = filters or {}
     simple_filters = {
         "job_key": "job.job_key = %s",
-        "lane": "job.lane = %s",
         "origin": "job.trigger_kind = %s",
-        "status": "job.status = %s",
         "correlation": "job.correlation_id::text = %s",
         "batch": "job.batch_id::text = %s",
     }
@@ -9085,6 +9085,15 @@ def _operator_job_runs(
         if active_filters.get(key):
             clauses.append(sql)
             params.append(active_filters[key])
+    if active_filters.get("status"):
+        status = str(active_filters["status"])
+        if status == "ready":
+            clauses.append("job.status = 'queued' AND job.wait_category IS NULL")
+        elif status == "waiting":
+            clauses.append("job.status = 'queued' AND job.wait_category IS NOT NULL")
+        else:
+            clauses.append("job.status = %s")
+            params.append(status)
     if active_filters.get("statuses"):
         clauses.append("job.status = ANY(%s::text[])")
         params.append(list(active_filters["statuses"]))
@@ -9141,18 +9150,10 @@ def _operator_job_runs(
             f"""SELECT id, job_key, batch_id, requested_by_id, requested_at, started_at, completed_at,
                         status, attempts, rows_touched, error, stage, stage_detail, stage_updated_at,
                         lane, heartbeat_at,
-                        CASE WHEN status = 'queued' THEN (
-                            SELECT COUNT(*) + 1 FROM operations.operator_job_runs earlier
-                             WHERE earlier.tenant_id = 1 AND earlier.status = 'queued'
-                               AND earlier.lane = job.lane
-                               AND (earlier.requested_at, earlier.id) < (job.requested_at, job.id)
-                        ) END AS queue_position,
-                        CASE WHEN status = 'queued' THEN CASE WHEN EXISTS (
-                            SELECT 1 FROM operations.operator_job_runs running
-                             WHERE running.tenant_id = 1 AND running.lane = job.lane
-                               AND running.status = 'running'
-                        ) THEN 'Waiting for work already running in this lane.'
-                        ELSE 'Waiting for earlier queued work in this lane.' END END AS queue_reason,
+                        NULL::integer AS queue_position,
+                        CASE WHEN status = 'queued' THEN COALESCE(
+                            wait_reason, 'Ready to start when a worker is available.'
+                        ) END AS queue_reason,
                         contract_version, trigger_kind, wait_category, wait_reason,
                         cancellation_requested_at, cancellation_reason, deadline_at,
                         correlation_id, retry_of_run_id, result, terminal_reason
@@ -9221,7 +9222,7 @@ def _operator_job_runs(
                 }
     labels = {entry["id"]: entry["name"] for entry in _JOB_CATALOG}
     status_labels = {
-        "queued": "Queued", "running": "Running", "completed": "Completed",
+        "running": "Running", "completed": "Completed",
         "failed": "Failed", "stalled": "Needs attention", "cancelled": "Cancelled",
     }
     now = timezone.now()
@@ -9249,6 +9250,19 @@ def _operator_job_runs(
             return f"{seconds // 60}m"
         return f"{seconds // 3600}h {(seconds % 3600) // 60}m"
 
+    def lifecycle(status: str, wait_category: str | None) -> tuple[str, str]:
+        if status != "queued":
+            return status, status_labels.get(status, status)
+        if wait_category == "workflow":
+            return "waiting", "Waiting for required work"
+        if wait_category == "dependency":
+            return "waiting", "Waiting for data"
+        if wait_category == "resource":
+            return "waiting", "Waiting for protected work"
+        if wait_category == "capacity":
+            return "waiting", "Waiting for capacity"
+        return "ready", "Ready"
+
     runs = [
         {
             "id": row[0], "job_key": row[1], "name": labels.get(row[1], row[1]),
@@ -9260,14 +9274,9 @@ def _operator_job_runs(
             "requested_at": row[4], "started_at": row[5], "completed_at": row[6],
             "status": row[7],
             "recovery": recovery_by_job.get(row[0]),
-            "status_class": "completed" if row[0] in recovery_by_job else row[7],
-            "status_label": (
-                "Recovered automatically"
-                if row[0] in recovery_by_job
-                else "Waiting for required work"
-                if row[20] == "workflow"
-                else status_labels.get(row[7], row[7])
-            ),
+            "status_class": "completed" if row[0] in recovery_by_job else lifecycle(row[7], row[20])[0],
+            "status_label": "Recovered automatically" if row[0] in recovery_by_job else lifecycle(row[7], row[20])[1],
+            "lifecycle": lifecycle(row[7], row[20])[0],
             "attempts": row[8], "rows_touched": row[9], "error": row[10],
             "stage": row[11], "stage_detail": row[12], "stage_updated_at": row[13],
             "lane": row[14], "heartbeat_at": row[15], "queue_position": row[16],
@@ -9359,7 +9368,6 @@ def admin_job_status(request: HttpRequest) -> HttpResponse:
     raw_filters = {
         "job_key": (request.GET.get("job") or "").strip(),
         "scope": (request.GET.get("scope") or "").strip(),
-        "lane": (request.GET.get("lane") or "").strip(),
         "origin": (request.GET.get("origin") or "").strip(),
         "status": (request.GET.get("status") or "").strip(),
         "owner": (request.GET.get("owner") or "").strip(),
@@ -9369,10 +9377,9 @@ def admin_job_status(request: HttpRequest) -> HttpResponse:
         "to": (request.GET.get("to") or "").strip(),
         "technical": (request.GET.get("technical") or "").strip(),
     }
-    allowed_lanes = {item.lane for item in definitions()}
     allowed_origins = {"automatic", "operator", "dependency", "recovery"}
     allowed_statuses = {
-        "queued", "running", "completed", "failed", "stalled", "cancelled",
+        "ready", "waiting", "running", "completed", "failed", "stalled", "cancelled",
     }
     filters: dict[str, object] = {
         key: value
@@ -9381,8 +9388,6 @@ def admin_job_status(request: HttpRequest) -> HttpResponse:
     }
     if filters.get("job_key") not in definition_keys():
         filters.pop("job_key", None)
-    if filters.get("lane") not in allowed_lanes:
-        filters.pop("lane", None)
     if filters.get("origin") not in allowed_origins:
         filters.pop("origin", None)
     if filters.get("status") not in allowed_statuses:
@@ -9441,10 +9446,15 @@ def admin_job_status(request: HttpRequest) -> HttpResponse:
     with transaction.atomic(), connection.cursor() as cur:
         cur.execute("SET LOCAL operations.tenant_id = 1")
         cur.execute(
-            """SELECT status, count(*) FROM operations.operator_job_runs
+            """SELECT CASE
+                         WHEN status = 'queued' AND wait_category IS NULL THEN 'ready'
+                         WHEN status = 'queued' THEN 'waiting'
+                         ELSE status
+                       END AS lifecycle,
+                       count(*) FROM operations.operator_job_runs
                  WHERE tenant_id = 1 AND id IN (
                      SELECT run_id FROM operations.jobs_activity_current_v1(1)
-                 ) GROUP BY status"""
+                 ) GROUP BY lifecycle"""
         )
         current_summary = dict(cur.fetchall())
     history_total, history = _recent_job_history(
@@ -9460,7 +9470,8 @@ def admin_job_status(request: HttpRequest) -> HttpResponse:
             "displayed_run_total": len(runs),
             "current_summary": {
                 "running": current_summary.get("running", 0),
-                "queued": current_summary.get("queued", 0),
+                "ready": current_summary.get("ready", 0),
+                "waiting": current_summary.get("waiting", 0),
                 "attention": current_summary.get("failed", 0) + current_summary.get("stalled", 0),
             },
             "run_total": run_total,
@@ -9485,7 +9496,6 @@ def admin_job_status(request: HttpRequest) -> HttpResponse:
             "job_choices": [
                 (item.key, item.display_name) for item in definitions()
             ],
-            "lane_choices": sorted(allowed_lanes),
             "owner_choices": sorted({item.owner for item in definitions()}),
         },
     )

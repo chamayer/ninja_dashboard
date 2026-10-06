@@ -48,11 +48,12 @@
   .operation-table .status-note { display:block; font-size:.78rem; color:var(--muted); margin-top:.2rem; max-width:30rem; }
   .operation-table .job-state { font-weight:700; }
   .operation-table .job-state.running { color:#7c3aed; }
-  .operation-table .job-state.queued { color:#1d4ed8; }
+  .operation-table .job-state.ready { color:#1d4ed8; }
+  .operation-table .job-state.waiting { color:#a16207; }
   .operation-table .job-state.ok { color:#15803d; }
   .operation-table .job-state.failed,.operation-table .job-state.stalled { color:#b91c1c; }
   .operation-table .job-state.never_run,.operation-table .job-state.disabled { color:#64748b; }
-  .job-summary { display:grid; grid-template-columns:repeat(3,minmax(9rem,1fr)); gap:.65rem; margin:0 0 1rem; }
+  .job-summary { display:grid; grid-template-columns:repeat(4,minmax(9rem,1fr)); gap:.65rem; margin:0 0 1rem; }
   .job-summary a { display:block; padding:.7rem .8rem; border:1px solid var(--border); border-radius:6px; background:var(--surface); color:inherit; text-decoration:none; }
   .job-summary strong { display:block; font-size:1.35rem; } .job-summary span { color:var(--muted); font-size:.78rem; }
   .job-row {
@@ -70,7 +71,8 @@
   .state-pill.never_run { background: #f3f4f6; color: #6b7280; }
   .state-pill.stale     { background: #fef3c7; color: #92400e; }
   .state-pill.running   { background: #dbeafe; color: #1e40af; }
-  .state-pill.queued    { background: #e0e7ff; color: #3730a3; }
+  .state-pill.ready     { background: #e0e7ff; color: #3730a3; }
+  .state-pill.waiting   { background: #fef3c7; color: #92400e; }
   .state-pill.cancelled, .state-pill.disabled { background: #f3f4f6; color: #4b5563; }
 
   .job-row form { margin: 0; }
@@ -143,7 +145,8 @@
     <select name="status" onchange="this.form.submit()">
         <option value="">All statuses</option>
         <option value="running"   {% if active_status == 'running'   %}selected{% endif %}>Running</option>
-        <option value="queued"    {% if active_status == 'queued'    %}selected{% endif %}>Queued</option>
+        <option value="ready"     {% if active_status == 'ready'     %}selected{% endif %}>Ready</option>
+        <option value="waiting"   {% if active_status == 'waiting'   %}selected{% endif %}>Waiting</option>
         <option value="ok"        {% if active_status == 'ok'        %}selected{% endif %}>Ok, recent</option>
         <option value="stale"     {% if active_status == 'stale'     %}selected{% endif %}>Stale (>2 days)</option>
         <option value="failed"    {% if active_status == 'failed'    %}selected{% endif %}>Failed</option>
@@ -156,7 +159,8 @@
 
 <div class="job-summary" aria-label="Current operation summary">
     <a href="?status=running"><strong>{{ operation_summary.running }}</strong><span>Running operations</span></a>
-    <a href="?status=queued"><strong>{{ operation_summary.queued }}</strong><span>Queued operations</span></a>
+    <a href="?status=ready"><strong>{{ operation_summary.ready }}</strong><span>Ready operations</span></a>
+    <a href="?status=waiting"><strong>{{ operation_summary.waiting }}</strong><span>Waiting operations</span></a>
     <a href="?status=failed"><strong>{{ operation_summary.attention }}</strong><span>Needs attention</span></a>
 </div>
 
@@ -185,7 +189,7 @@
                 </div>
             {% endif %}
         </td>
-        <td>{% if j.active_run %}<span class="job-state {{ j.active_run.status }}">{{ j.active_run.status_label }}</span><strong class="status-note">{{ j.active_run.stage }}</strong><span class="status-note">{% if j.active_run.status == 'queued' %}{{ j.active_run.queue_reason }}{% else %}{{ j.active_run.stage_detail }}{% endif %}</span><span class="status-note">{% if j.active_run.elapsed %}Elapsed {{ j.active_run.elapsed }} · {% endif %}<a href="{% url 'admin_job_status' %}?run={{ j.active_run.id }}">view progress</a></span>{% else %}<span class="job-state {{ j.state }}"{% if j.state == 'never_run' %} title="No recorded run yet"{% endif %}>{% if j.state == 'ok' and j.is_stale %}Stale{% else %}{{ j.state|title }}{% endif %}</span>{% if j.disabled_reason %}<span class="status-note">{{ j.disabled_reason }}</span>{% endif %}{% endif %}</td>
+        <td>{% if j.active_run %}<span class="job-state {{ j.active_run.status_class }}">{{ j.active_run.status_label }}</span><strong class="status-note">{{ j.active_run.stage }}</strong><span class="status-note">{% if j.active_run.status == 'queued' %}{{ j.active_run.queue_reason }}{% else %}{{ j.active_run.stage_detail }}{% endif %}</span><span class="status-note">{% if j.active_run.elapsed %}Elapsed {{ j.active_run.elapsed }} · {% endif %}<a href="{% url 'admin_job_status' %}?run={{ j.active_run.id }}">view progress</a></span>{% else %}<span class="job-state {{ j.state }}"{% if j.state == 'never_run' %} title="No recorded run yet"{% endif %}>{% if j.state == 'ok' and j.is_stale %}Stale{% else %}{{ j.state|title }}{% endif %}</span>{% if j.disabled_reason %}<span class="status-note">{{ j.disabled_reason }}</span>{% endif %}{% endif %}</td>
         <td class="meta">
             {% if j.last_run_at %}
                 {{ j.activity_label }}<br><strong>{{ j.last_run_at|date:"Y-m-d H:i" }}</strong>

@@ -21,8 +21,9 @@ def test_worker_uses_only_fenced_v1_queue_apis():
     queue = (ROOT / "ingest" / "operator_job_queue.py").read_text(encoding="utf-8")
 
     assert '"-m", "ingest.jobs_child"' in worker
-    assert "_claim_next_v1(lane, incarnation)" in worker
-    assert "jobs_claim_next_v5" in queue
+    assert "_claim_next_v6(incarnation)" in worker
+    assert "jobs_claim_next_v6" in queue
+    assert "jobs_dispatch_ready_v1" in queue
     assert "jobs_record_v1_progress" in queue
     assert "jobs_finish_v1" in queue
     assert "jobs_should_cancel_v1" in queue

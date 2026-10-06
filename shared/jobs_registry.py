@@ -102,6 +102,7 @@ class JobDefinition:
     run_all: bool = True
     legacy_bridge: bool = False
     schedule_ids: tuple[str, ...] = ()
+    capacity_keys: tuple[str, ...] = ()
     resource_keys: tuple[str, ...] = ()
     supersession_family: str = ""
     supersession_rank: int = 0
@@ -141,6 +142,7 @@ class JobDefinition:
             "lane": self.lane,
             "owner": self.owner,
             "capability": self.capability,
+            "capacity_keys": list(self.capacity_keys),
             "resource_keys": list(self.resource_keys),
             "supersession_family": self.supersession_family,
             "supersession_rank": self.supersession_rank,
@@ -752,17 +754,13 @@ _SCHEDULE_DEFINITIONS = (
     ScheduleDefinition("intel_lolrmm_cycle", "intel-lolrmm", "INTEL_CATALOG_SCHEDULE_HOURS"),
 )
 
-# Initial limits preserve the only capacity behavior the current process proves:
-# two durable handlers in total and one poller per lane.  They are a ceiling,
-# not a worker-service replica count or a claim that narrower scopes are unsafe.
-INITIAL_EXECUTION_CAPACITY = 3
-INITIAL_LANE_CAPACITIES = MappingProxyType({
-    "collection": 3,
-    "evaluation": 3,
-    "software": 3,
-    "intelligence": 3,
-    "service": 3,
+EXECUTION_POOL_POLICIES = MappingProxyType({
+    "capacity:external-io": {"label": "Data retrieval", "capacity": 2, "minimum": 1, "maximum": 3},
+    "capacity:processing": {"label": "Data processing", "capacity": 1, "minimum": 1, "maximum": 2},
+    "capacity:control": {"label": "Control work", "capacity": 1, "minimum": 1, "maximum": 2},
 })
+READY_WINDOW_CAPACITY = 2
+EMERGENCY_CHILD_CAPACITY = sum(policy["capacity"] for policy in EXECUTION_POOL_POLICIES.values())
 
 _GLOBAL_ONLY = frozenset({
     "intel-nvd", "intel-cpe-dict", "intel-kev", "intel-epss",
@@ -817,6 +815,41 @@ for _key in (
     "software-classify-only", "software-classify-full",
 ):
     _RESOURCE_KEYS_BY_DEFINITION[_key] += ("tenant:{tenant_id}:software-inventory",)
+
+_CAPACITY_KEYS_BY_DEFINITION: dict[str, tuple[str, ...]] = {
+    "patches": ("capacity:external-io",),
+    "agent-observations": ("capacity:external-io",),
+    "documentation-observations": ("capacity:external-io",),
+    "software-classify": ("capacity:external-io", "capacity:processing"),
+    "software-classify-only": ("capacity:processing",),
+    "software-classify-full": ("capacity:processing",),
+    "patch-classify": ("capacity:processing",),
+    "platform-evaluate": ("capacity:processing",),
+    "cmdb-evaluate": ("capacity:processing",),
+    "resolver": ("capacity:processing",),
+    "parity-check": ("capacity:processing",),
+    "agent-compliance": ("capacity:external-io", "capacity:processing"),
+    "agent-compliance-evaluate": ("capacity:processing",),
+    "agent-compliance-review-digest": ("capacity:external-io", "capacity:control"),
+    "intel-kev": ("capacity:external-io",), "intel-nvd": ("capacity:external-io",),
+    "intel-cpe-dict": ("capacity:external-io",), "intel-epss": ("capacity:external-io",),
+    "intel-matcher": ("capacity:processing",), "intel-winget": ("capacity:external-io",),
+    "intel-chocolatey": ("capacity:external-io",), "intel-capability": ("capacity:processing",),
+    "intel-lolrmm": ("capacity:external-io",), "intel-otx": ("capacity:external-io",),
+    "intel-abusech": ("capacity:external-io",), "intel-endoflife": ("capacity:external-io",),
+    "intel-category": ("capacity:processing",),
+    "notifications-dispatch": ("capacity:external-io", "capacity:control"),
+    "notifications-digest": ("capacity:external-io", "capacity:control"),
+    "retention-history": ("capacity:control",),
+    "software-enqueue-orgs": ("capacity:control",),
+    "software-queue-drain": ("capacity:external-io",),
+    "source-actions": ("capacity:external-io",),
+    "source-demand": ("capacity:external-io",),
+    "source-demand-recovery": ("capacity:control",),
+    "run-log-recovery": ("capacity:control",),
+    "platform-health-evaluate": ("capacity:processing", "capacity:control"),
+    "metabase-bootstrap": ("capacity:control",),
+}
 
 _SUPERSESSION_RANKS = MappingProxyType({
     "software-classify-only": 1,
@@ -876,10 +909,13 @@ _WORKFLOW_SUCCESSORS = MappingProxyType({
 })
 if set(_RESOURCE_KEYS_BY_DEFINITION) != {item.key for item in _RAW_DEFINITIONS}:
     raise RegistryValidationError("Missing Jobs resource policy")
+if set(_CAPACITY_KEYS_BY_DEFINITION) != {item.key for item in _RAW_DEFINITIONS}:
+    raise RegistryValidationError("Missing Jobs capacity policy")
 
 _DEFINITIONS = tuple(
     replace(
         item,
+        capacity_keys=_CAPACITY_KEYS_BY_DEFINITION[item.key],
         resource_keys=_RESOURCE_KEYS_BY_DEFINITION[item.key],
         supersession_family=_SUPERSESSION_FAMILIES.get(item.key, ""),
         supersession_rank=_SUPERSESSION_RANKS.get(item.key, 0),
@@ -1059,6 +1095,10 @@ def _validate_dependency_contracts() -> None:
             errors.append(f"{job.key} has an unsupported coalescing scope")
         if job.concurrency_scope != "resource_keys":
             errors.append(f"{job.key} has an unsupported concurrency scope")
+        if not job.capacity_keys or any(key not in EXECUTION_POOL_POLICIES for key in job.capacity_keys):
+            errors.append(f"{job.key} has an invalid capacity policy")
+        if any(key.startswith("capacity:") for key in job.resource_keys):
+            errors.append(f"{job.key} mixes capacity and domain resources")
         if job.progress_contract != "stage":
             errors.append(f"{job.key} has an unsupported progress contract")
         if job.result_contract != "rows_or_outcome":
