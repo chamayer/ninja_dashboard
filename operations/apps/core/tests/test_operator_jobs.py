@@ -33,7 +33,7 @@ def test_jobs_present_one_list_detail_and_configuration_surface():
     assert "admin_job_detail" in urls
     assert "<th>Status</th>" in jobs_template
     assert "Status: {{ job.status_label }}" in jobs_template
-    assert "as of {{ job.latest_at|timesince }} ago" in jobs_template
+    assert 'as of {{ job.latest_at|date:"M j, Y, g:i A" }} ({{ job.latest_at|timesince }} ago)' in jobs_template
     assert "Last completed:" in views
     assert "Runs when input data changes" in views
     assert "Job configuration" in jobs_template
