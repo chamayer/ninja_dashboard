@@ -1886,6 +1886,11 @@ to a full reconciliation every 168 hours (`PATCH_CLASSIFY_FULL_REBUILD_HOURS`)
 and records the mode in run history. Next action: commit/push, verify the
 automatic migration, then inspect a live incremental run and its scoped state.
 
+Patch full-reconciliation marker (2026-10-06): migration 0253 records the
+last successful full patch evaluation atomically with its durable device state.
+Weekly cadence now uses this marker rather than optional run history. Next:
+commit/push and verify the automatic rollout.
+
 Software target implementation (2026-10-05): migration 0250 creates a
 tenant-scoped durable target queue. The CVE matcher compares its old and new
 match sets and records only changed version identities or product-level names;

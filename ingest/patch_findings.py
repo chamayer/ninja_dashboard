@@ -107,7 +107,7 @@ def classify(tenant_id: int = _TENANT_ID, *, incremental: bool = True) -> int:
             affected += _emit_approval_backlog(cur, tenant_id, ft_ids, now, emitted_keys, policy)
 
             _auto_resolve(cur, tenant_id, emitted_keys, now, policy)
-            _mark_evaluation_scope(cur, tenant_id)
+            _mark_evaluation_scope(cur, tenant_id, full=not incremental)
     except Exception as exc:
         error = str(exc)[:2000]
         raise
@@ -170,17 +170,16 @@ def _prepare_evaluation_scope(cur, tenant_id: int, *, incremental: bool) -> bool
 
 def _full_reconciliation_due(cur, tenant_id: int, now: datetime) -> bool:
     cur.execute(
-        """SELECT ended_at FROM operations.run_log
-             WHERE tenant_id=%s AND kind='patch_findings' AND ok
-               AND subject_ref->>'mode'='full'
-             ORDER BY ended_at DESC LIMIT 1""",
+        """SELECT last_full_evaluated_at
+             FROM operations.patch_evaluation_reconciliation
+             WHERE tenant_id=%s""",
         (tenant_id,),
     )
     row = cur.fetchone()
     return row is None or row[0] is None or (now - row[0]).total_seconds() >= settings.PATCH_CLASSIFY_FULL_REBUILD_HOURS * 3600
 
 
-def _mark_evaluation_scope(cur, tenant_id: int) -> None:
+def _mark_evaluation_scope(cur, tenant_id: int, *, full: bool) -> None:
     if not _table_exists(cur, "operations.patch_evaluation_state"):
         return
     cur.execute(
@@ -190,6 +189,15 @@ def _mark_evaluation_scope(cur, tenant_id: int) -> None:
              SET state_digest=EXCLUDED.state_digest, evaluated_at=EXCLUDED.evaluated_at""",
         (tenant_id,),
     )
+    if full:
+        cur.execute(
+            """INSERT INTO operations.patch_evaluation_reconciliation
+                    (tenant_id, last_full_evaluated_at)
+                VALUES (%s, now())
+                ON CONFLICT (tenant_id) DO UPDATE
+                    SET last_full_evaluated_at=EXCLUDED.last_full_evaluated_at""",
+            (tenant_id,),
+        )
 
 
 def _table_exists(cur, qualified_name: str) -> bool:
