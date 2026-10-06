@@ -1,5 +1,39 @@
 # Jobs ecosystem final-design reset
 
+## Legacy Agent compliance shutdown (2026-10-06)
+
+## Status
+
+In progress — production diagnostics confirmed that the retired Agent
+compliance schedules remained enabled through an obsolete environment gate.
+They continued admitting runs and a timed-out historical run retained contained
+capacity claims. The approved correction permanently disables automatic
+admission for every legacy definition and cancels its queued runs. Contained
+claims are deliberately not released in this change because doing so is a
+separate safety recovery decision.
+
+## Scope, decision, and validation
+
+- Treat every definition classified by `legacy_job_definition_keys()` as
+  retired for automatic scheduling, regardless of the legacy environment
+  setting. Definitions and historical evidence remain available for audit.
+- Disable the live legacy schedules and cancel only queued legacy runs; do not
+  alter running work (none was present) or contained claims.
+- Validate the schedule gate with focused tests, then verify live schedules and
+  queued legacy runs after the approved GitOps push. No direct Portainer action.
+
+## Checkpoint and next action
+
+Live state at 2026-10-06: `agent-compliance` and
+`agent-compliance-evaluate` were enabled and had scheduled runs; no legacy run
+was active. Four timeout-contained claims from the historical
+`agent-compliance` run still occupy protected resources and explain the wider
+capacity wait. The permanent registry-based gate and focused regression check
+are complete. The first live transaction was rolled back on a schema mismatch;
+the corrected request could not reach the host, so it made no change. Next:
+commit and push the safeguard, then retry the approved live schedule and queue
+shutdown when the host is reachable.
+
 ## Status
 
 Implementation in progress — ADR-0027 is accepted as the implementation-

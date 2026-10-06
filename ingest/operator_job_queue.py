@@ -20,6 +20,7 @@ from shared.jobs_registry import (
     REPLAY_SAFE_RECOVERY_EVIDENCE,
     definition,
     definitions,
+    legacy_job_definition_keys,
     registry_digest,
     schedule_definitions,
     validate_registry,
@@ -185,6 +186,8 @@ def _schedule_cadence(schedule: Any) -> dict[str, int | str]:
 def _schedule_enabled(job_key: str) -> tuple[bool, str]:
     """Apply the existing capability gates before automatic admission."""
     job = definition(job_key)
+    if job_key in legacy_job_definition_keys():
+        return False, "Disabled — retired legacy bridge."
     if job_key in {"source-demand", "source-actions"}:
         table = (
             "operations.source_run_queue"
@@ -203,7 +206,6 @@ def _schedule_enabled(job_key: str) -> tuple[bool, str]:
         "notifications": settings.NOTIFY_ENABLED,
         "notification_digest": settings.NOTIFY_DIGEST_ENABLED,
         "software_queue": settings.SOFTWARE_QUEUE_ENABLED,
-        "legacy_agent_compliance": settings.AGENT_COMPLIANCE_ENABLED,
     }.get(job.capability, False)
     return enabled, "Available" if enabled else f"Disabled — {job.capability} is not enabled."
 

@@ -220,6 +220,14 @@ def test_capability_labels_do_not_make_unreviewed_execution_safe():
     assert not definition("agent-compliance").kill_safe
 
 
+def test_legacy_definitions_cannot_be_automatically_scheduled():
+    queue = (ROOT / "ingest" / "operator_job_queue.py").read_text(encoding="utf-8")
+
+    assert "if job_key in legacy_job_definition_keys():" in queue
+    assert 'return False, "Disabled — retired legacy bridge."' in queue
+    assert "settings.AGENT_COMPLIANCE_ENABLED" not in queue
+
+
 def test_registry_exposes_the_approved_pool_and_resource_policy():
     assert READY_WINDOW_CAPACITY == 2
     assert EMERGENCY_CHILD_CAPACITY == 4
