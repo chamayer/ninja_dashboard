@@ -2288,3 +2288,10 @@ Next action: commit and push the approved Jobs recovery/rework to `origin`
 then `a-m-rose`; do not invoke Portainer. Verify automatic migration recovery,
 container health, Ready/Waiting behavior, and pool diagnostics through
 read-only checks afterward.
+
+Rollout correction (2026-10-06): after 0254/0255 applied and the stack became
+healthy, a read-only queue audit found one queued dependency run whose durable
+wait category was correct but whose persisted stage still said `Waiting for
+capacity`. Migration 0256 makes the existing queued-write trigger derive every
+queued stage/detail from its durable wait category and repairs existing queued
+rows. This keeps the operator-visible lifecycle and stored state truthful.

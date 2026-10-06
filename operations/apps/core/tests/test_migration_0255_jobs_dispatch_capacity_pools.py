@@ -20,3 +20,12 @@ def test_pool_dispatch_keeps_ready_bounded_and_domain_locks_fixed():
     assert "execution:emergency-child" in sql
     assert "jobs_resource_policy_diagnostics_v1" in sql
     assert "jobs_set_execution_pool_capacity_v1" in sql
+
+
+def test_queued_wait_stages_are_derived_from_the_wait_category():
+    sql = Path("apps/core/migrations/0256_jobs_waiting_stage_truth.py").read_text(encoding="utf-8")
+
+    assert "WHEN 'dependency' THEN 'Waiting for data'" in sql
+    assert "WHEN 'resource' THEN 'Waiting for protected work'" in sql
+    assert "WHEN 'capacity' THEN 'Waiting for capacity'" in sql
+    assert "UPDATE operations.operator_job_runs" in sql
