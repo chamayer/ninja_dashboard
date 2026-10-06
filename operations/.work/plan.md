@@ -21,8 +21,11 @@ and disabled starts without exposing internal scheduler language.
 
 The registry confirms that the current documentation collector is exclusively
 Hudu. The Jobs list now shows `Status: …`, a status timestamp, current
-activity, and—while work is active—the last completed outcome. It suppresses
-the non-actionable measurable-total message. Focused registry/Jobs tests (18),
+activity, and—while work is active—the last completed outcome. Its schedule
+column states the concrete trigger (for example, every hour, after Ninja
+refresh, after Hudu refresh, or after vulnerability data refresh) rather than
+generic scheduler language. It suppresses the non-actionable measurable-total
+message. Focused registry/Jobs tests (18),
 `manage.py check`, targeted Ruff import checks, and `git diff --check` passed.
 Next: commit and push the reviewed operator-language correction.
 

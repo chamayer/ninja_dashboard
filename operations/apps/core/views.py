@@ -8343,6 +8343,7 @@ _OPERATOR_JOB_CATALOG: list[dict] = [
         "id": job.key,
         "name": job.name,
         "description": job.description,
+        "start_description": job.start_description,
         "execution_keys": job.execution_keys,
         "primary_execution_key": job.primary_execution_key,
     }
@@ -8411,6 +8412,7 @@ def _job_schedule_presentation(
     execution_keys: tuple[str, ...],
     schedules: list[dict],
     *,
+    start_description: str,
     available: bool,
     availability_label: str,
 ) -> dict:
@@ -8424,11 +8426,16 @@ def _job_schedule_presentation(
     ) or _job_has_upstream_trigger(execution_keys)
     if enabled:
         cadence = _schedule_cadence_label(enabled[0]["cadence"])
-        detail = "When input data changes" if data_triggered else cadence
-        if data_triggered and cadence:
-            detail += f"; {cadence.lower()}"
+        if data_triggered:
+            detail = start_description or "After related data changes"
+            if cadence:
+                detail += f"; full update {cadence.lower()}"
+            label = "Runs automatically"
+        else:
+            detail = ""
+            label = cadence or "Runs automatically"
         return {
-            "label": "Runs automatically",
+            "label": label,
             "detail": detail,
             "next_due_at": min(
                 (schedule["next_due_at"] for schedule in enabled if schedule["next_due_at"]),
@@ -8436,7 +8443,11 @@ def _job_schedule_presentation(
             ),
         }
     if data_triggered:
-        return {"label": "Runs when input data changes", "detail": "", "next_due_at": None}
+        return {
+            "label": start_description or "After related data changes",
+            "detail": "",
+            "next_due_at": None,
+        }
     if schedules:
         reason = next((schedule["reason"] for schedule in schedules if schedule["reason"]), "")
         if reason.startswith("Waiting for source"):
@@ -8910,6 +8921,7 @@ def admin_jobs(request: HttpRequest) -> HttpResponse:
         schedule_presentation = _job_schedule_presentation(
             execution_keys,
             schedules,
+            start_description=entry["start_description"],
             available=available,
             availability_label=availability_label,
         )
@@ -9065,6 +9077,7 @@ def admin_job_detail(request: HttpRequest, job_id: str) -> HttpResponse:
     schedule_presentation = _job_schedule_presentation(
         job.execution_keys,
         schedules,
+        start_description=job.start_description,
         available=available,
         availability_label=availability_label,
     )

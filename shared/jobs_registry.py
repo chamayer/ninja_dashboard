@@ -75,6 +75,7 @@ class OperatorJobDefinition:
     key: str
     name: str
     description: str
+    start_description: str
     primary_execution_key: str
     execution_keys: tuple[str, ...]
 
@@ -1178,6 +1179,17 @@ _JOB_PRESENTATION = MappingProxyType(
     }
 )
 
+_JOB_START_PRESENTATION = MappingProxyType(
+    {
+        "patch-classify": "After Ninja refresh",
+        "platform-evaluate": "After source data refresh",
+        "cmdb-evaluate": "After Hudu refresh",
+        "resolver": "After source data refresh",
+        "software-classify-only": "After software inventory or vulnerability data changes",
+        "intel-matcher": "After vulnerability data refresh",
+    }
+)
+
 
 def operator_job_definitions() -> tuple[OperatorJobDefinition, ...]:
     """Return the Jobs catalog; System services and legacy bridges stay out."""
@@ -1196,6 +1208,7 @@ def operator_job_definitions() -> tuple[OperatorJobDefinition, ...]:
                 key=key,
                 name=name,
                 description=description,
+                start_description=_JOB_START_PRESENTATION.get(key, ""),
                 primary_execution_key=key,
                 execution_keys=tuple(execution_keys),
             )
