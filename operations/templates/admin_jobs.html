@@ -3,12 +3,12 @@
 {% block title %}Jobs{% endblock %}
 
 {% block content %}
-{% if request.GET.live != 'off' %}
+{% if refresh_seconds %}
 <script>
   (function () {
     setTimeout(function () {
       if (!document.querySelector('input[name="run_id"]:checked')) location.reload();
-    }, 15000);
+    }, {{ refresh_seconds }}000);
   })();
 </script>
 {% endif %}
@@ -16,7 +16,7 @@
   .jobs-head { display:flex; justify-content:space-between; align-items:flex-start; gap:1rem; flex-wrap:wrap; margin-bottom:1rem; }
   .jobs-head h1 { margin:0; font-size:1.35rem; }
   .jobs-tools { display:flex; gap:.6rem; align-items:center; flex-wrap:wrap; }
-  .jobs-tools a,.jobs-tools button,.jobs-action { padding:.4rem .65rem; border:1px solid var(--border); border-radius:4px; background:#fff; color:inherit; text-decoration:none; cursor:pointer; font-size:.82rem; }
+  .jobs-tools a,.jobs-tools button,.jobs-action { padding:.4rem .65rem; border:1px solid var(--border); border-radius:4px; background:#fff; color:inherit; text-decoration:none; cursor:pointer; font-size:.82rem; line-height:1.25; }
   .jobs-summary { display:grid; grid-template-columns:repeat(4,minmax(9rem,1fr)); gap:.65rem; margin-bottom:1rem; }
   .jobs-summary a { display:block; padding:.7rem .8rem; border:1px solid var(--border); border-radius:6px; background:var(--surface); color:inherit; text-decoration:none; }
   .jobs-summary strong { display:block; font-size:1.35rem; }
@@ -24,6 +24,7 @@
   .jobs-filters { display:flex; gap:.6rem; flex-wrap:wrap; align-items:end; padding:.7rem; border:1px solid var(--border); border-radius:6px; background:var(--surface); margin-bottom:.8rem; }
   .jobs-filters label { display:flex; flex-direction:column; gap:.2rem; color:var(--muted); font-size:.72rem; text-transform:uppercase; letter-spacing:.04em; }
   .jobs-filters input,.jobs-filters select { padding:.4rem .5rem; border:1px solid var(--border); border-radius:4px; background:#fff; min-width:11rem; }
+  .jobs-filter-title { font-weight:700; padding:.35rem .15rem; }
   .jobs-table { width:100%; border-collapse:collapse; background:var(--surface); border:1px solid var(--border); font-size:.86rem; }
   .jobs-table th,.jobs-table td { padding:.65rem .75rem; border-bottom:1px solid var(--border); text-align:left; vertical-align:top; }
   .jobs-table th { color:var(--muted); font-size:.72rem; text-transform:uppercase; letter-spacing:.05em; }
@@ -45,13 +46,8 @@
     <div class="muted">{{ job_count }} configured Job{{ job_count|pluralize }} · updated {{ refreshed_at|date:"Y-m-d H:i:s" }}</div>
   </div>
   <div class="jobs-tools">
-    <button type="button" onclick="location.reload()">Refresh now</button>
-    <a href="{% url 'targeted_refresh' %}">Refresh data</a>
-    {% if request.GET.live == 'off' %}
-      <a href="?{% if active_status %}status={{ active_status }}&amp;{% endif %}{% if active_search %}q={{ active_search|urlencode }}&amp;{% endif %}live=on">Auto-refresh: Off</a>
-    {% else %}
-      <a href="?{% if active_status %}status={{ active_status }}&amp;{% endif %}{% if active_search %}q={{ active_search|urlencode }}&amp;{% endif %}live=off">Auto-refresh: On</a>
-    {% endif %}
+    <button type="button" title="Reload this Jobs page now." onclick="location.reload()">Refresh page</button>
+    <a title="Choose which client or data source to refresh." href="{% url 'targeted_refresh' %}">Choose data to refresh</a>
     <a href="{% url 'admin_jobs_control_plane' %}">Job configuration</a>
   </div>
 </div>
@@ -63,8 +59,8 @@
   <a href="?status=ready"><strong>{{ job_summary.ready }}</strong><span>Ready to start</span></a>
 </div>
 
-<form method="get" class="jobs-filters">
-  {% if request.GET.live == 'off' %}<input type="hidden" name="live" value="off">{% endif %}
+<form id="jobs-filters" method="get" class="jobs-filters">
+  <div class="jobs-filter-title">Find Jobs</div>
   <label>Search<input name="q" value="{{ active_search }}" placeholder="Job name"></label>
   <label>Status<select name="status">
     <option value="">All statuses</option>
@@ -76,6 +72,12 @@
     <option value="failed"{% if active_status == 'failed' %} selected{% endif %}>Failed</option>
     <option value="cancelled"{% if active_status == 'cancelled' %} selected{% endif %}>Cancelled</option>
     <option value="not_run"{% if active_status == 'not_run' %} selected{% endif %}>Not run yet</option>
+  </select></label>
+  <label>Page refresh<select name="refresh" onchange="this.form.submit()">
+    <option value="off"{% if active_refresh == 'off' %} selected{% endif %}>Off</option>
+    <option value="15"{% if active_refresh == '15' %} selected{% endif %}>Every 15 seconds</option>
+    <option value="30"{% if active_refresh == '30' %} selected{% endif %}>Every 30 seconds</option>
+    <option value="60"{% if active_refresh == '60' %} selected{% endif %}>Every minute</option>
   </select></label>
   <div class="jobs-tools"><button type="submit">Apply</button><a href="{% url 'admin_jobs' %}">Clear</a></div>
 </form>

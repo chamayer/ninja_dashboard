@@ -90,6 +90,11 @@ import/undefined-name and format checks passed; `git diff --check` passed.
 Next action: commit and push the reviewed implementation only under the
 user's separate release authorization; do not invoke Portainer directly.
 
+Follow-up (2026-10-06): clarified the Jobs toolbar after operator review.
+`Refresh page` reloads only the displayed list, while `Choose data to refresh`
+opens the scoped data-refresh action. Search, status, and the selectable page
+refresh rate are grouped under `Find Jobs`.
+
 ---
 
 # Admin navigation consistency

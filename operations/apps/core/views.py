@@ -8633,6 +8633,12 @@ def admin_jobs(request: HttpRequest) -> HttpResponse:
     """Show one truthful latest status for every administrator Job."""
     status_filter = (request.GET.get("status") or "").strip().lower()
     search_filter = (request.GET.get("q") or "").strip().lower()
+    refresh_setting = (request.GET.get("refresh") or "30").strip()
+    refresh_seconds = {"off": 0, "15": 15, "30": 30, "60": 60}.get(
+        refresh_setting, 30
+    )
+    if refresh_setting not in {"off", "15", "30", "60"}:
+        refresh_setting = "30"
     enabled_capabilities = {
         "always": True,
         "legacy_agent_compliance": os.environ.get("AGENT_COMPLIANCE_ENABLED", "false")
@@ -8851,6 +8857,8 @@ def admin_jobs(request: HttpRequest) -> HttpResponse:
             "job_count": len(_OPERATOR_JOB_CATALOG),
             "active_status": status_filter,
             "active_search": search_filter,
+            "active_refresh": refresh_setting,
+            "refresh_seconds": refresh_seconds,
             "job_summary": summary,
             "refreshed_at": timezone.now(),
         },
