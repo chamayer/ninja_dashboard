@@ -14802,16 +14802,16 @@ def _attach_group_to_client(
             """
             UPDATE operations.admin_findings af
             SET status = 'resolved', resolved_at = NOW()
-            FROM operations.finding_types ft
-            JOIN operations.condition_assessments assessment
-              ON assessment.tenant_id = af.tenant_id
-             AND assessment.row_kind = 'admin'
-             AND assessment.finding_id = af.id
-             AND (assessment.response->>'may_clear')::boolean IS TRUE
-            JOIN operations.condition_policy_versions policy
-              ON policy.version = assessment.policy_version
-             AND policy.active
-            WHERE af.finding_type_id = ft.id
+            FROM operations.finding_types ft,
+                 operations.condition_assessments assessment,
+                 operations.condition_policy_versions policy
+            WHERE assessment.tenant_id = af.tenant_id
+              AND assessment.row_kind = 'admin'
+              AND assessment.finding_id = af.id
+              AND (assessment.response->>'may_clear')::boolean IS TRUE
+              AND policy.version = assessment.policy_version
+              AND policy.active
+              AND af.finding_type_id = ft.id
               AND ft.name = 'client_unattached_group'
               AND af.tenant_id = 1
               AND af.condition_key = %s
@@ -14833,16 +14833,16 @@ def _resolve_finding_for_group(cur, source_binding_id, external_id: str) -> None
         """
         UPDATE operations.admin_findings af
         SET status = 'resolved', resolved_at = NOW()
-        FROM operations.finding_types ft
-        JOIN operations.condition_assessments assessment
-          ON assessment.tenant_id = af.tenant_id
-         AND assessment.row_kind = 'admin'
-         AND assessment.finding_id = af.id
-         AND (assessment.response->>'may_clear')::boolean IS TRUE
-        JOIN operations.condition_policy_versions policy
-          ON policy.version = assessment.policy_version
-         AND policy.active
-        WHERE af.finding_type_id = ft.id
+        FROM operations.finding_types ft,
+             operations.condition_assessments assessment,
+             operations.condition_policy_versions policy
+        WHERE assessment.tenant_id = af.tenant_id
+          AND assessment.row_kind = 'admin'
+          AND assessment.finding_id = af.id
+          AND (assessment.response->>'may_clear')::boolean IS TRUE
+          AND policy.version = assessment.policy_version
+          AND policy.active
+          AND af.finding_type_id = ft.id
           AND ft.name = 'client_unattached_group'
           AND af.tenant_id = 1
           AND af.condition_key = %s
