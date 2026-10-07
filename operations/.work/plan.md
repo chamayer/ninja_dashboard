@@ -4,10 +4,9 @@
 
 ## Status
 
-Complete in the working tree — both Admin overview and Admin Health now use
-one health snapshot: a total state and total condition count, split once into
-Jobs, Sources, Services, and System checks. Jobs, Sources, and Services remain
-the authoritative operational detail pages.
+Complete in the working tree — System checks now includes only the dedicated
+`platform_health` category. Identity/matching rows stay in Issues and cannot
+make Operations appear unhealthy.
 
 ## Scope and decisions
 
@@ -41,16 +40,16 @@ the authoritative operational detail pages.
 Implemented `_admin_health_snapshot()` as the shared source of the total
 health state, count, domain split, and bounded root-cause list. Jobs owns its
 diagnostic conditions, Sources owns stale/failed source conditions, Services
-owns missing scheduler/worker check-ins, and System checks owns remaining
-Admin Finding conditions. The total is the sum of those domains; it does not
-double-count Jobs under System checks. The overview visibly links any
-additional root causes beyond its five-row action list. Admin Health now starts
-with the total and the same four-domain split before its full condition table.
-Focused Admin/Jobs tests pass (18), Django checks pass, focused F/I Ruff
-passes, both templates load through the project configuration, and
-`git diff --check` passes. No migration, deployment action, commit, or push
-has occurred. Next: review the page in the deployed environment after a
-separately approved commit and push.
+owns missing scheduler/worker check-ins, and System checks owns only dedicated
+`platform_health` findings not already owned by Jobs. Identity/matching
+`AdminFinding` rows remain in Issues and are deliberately excluded from health.
+The overview visibly links any additional root causes beyond its five-row
+action list. Admin Health starts with the total and the same four-domain split
+before its full condition table. Focused Admin/Jobs tests pass (18), Django
+checks pass, focused F/I Ruff passes, and `git diff --check` passes. No
+migration or direct production data change is required. Next: push the
+validated correction and confirm that the live health total excludes identity
+and matching work.
 
 ## Admin navigation and surfaces (2026-10-07)
 

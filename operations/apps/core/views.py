@@ -16091,11 +16091,12 @@ def _admin_overview_recent_activity() -> list[dict]:
 
 
 def _admin_health_system_findings() -> tuple[bool, int, list[AdminFinding]]:
-    """Return non-Jobs platform conditions; Jobs owns its own health evidence."""
+    """Return non-Jobs platform conditions; operator issues do not affect health."""
     try:
         findings = AdminFinding.objects.filter(
             tenant_id=1,
             status__in=("open", "acknowledged"),
+            finding_type__category__name="platform_health",
         ).exclude(finding_type__name__startswith="jobs_")
         return True, findings.count(), list(
             findings.select_related("finding_type").order_by("-severity", "-last_detected_at")[:2]

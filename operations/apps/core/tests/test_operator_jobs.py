@@ -91,6 +91,7 @@ def test_admin_navigation_separates_jobs_services_health_and_settings():
     assert "Health by area" in health_template
     assert "def _admin_health_snapshot" in views
     assert views.count("health = _admin_health_snapshot()") == 2
+    assert 'finding_type__category__name="platform_health"' in views
     assert "Deployment owns their lifecycle" in services_template
     assert "Django Admin" in settings_template
     get_template("admin_services.html")
