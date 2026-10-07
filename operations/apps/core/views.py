@@ -8475,7 +8475,10 @@ def _jobs_diagnostic_query(
         (1, section, limit, offset),
     )
     rows = cursor.fetchall()
-    return (int(rows[0][0]) if rows else 0, [row[1] or {} for row in rows])
+    return (
+        int(rows[0][0]) if rows else 0,
+        [json.loads(row[1]) if isinstance(row[1], str) else row[1] or {} for row in rows],
+    )
 
 
 def _jobs_diagnostic_all(section: str, cursor) -> list[dict]:
