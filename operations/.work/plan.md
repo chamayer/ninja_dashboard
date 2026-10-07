@@ -81,6 +81,59 @@ and service health explanations, and a single handoff to Issues. Focused Jobs,
 Issues, and coverage tests pass (77); Django checks, targeted Ruff, template
 loading, and `git diff --check` pass.
 
+## Jobs queue stabilization (2026-10-07)
+
+## Status
+
+In progress — production diagnosis found 17 queued Jobs, no running Jobs, and
+six contained resource claims from two interrupted source collectors. The
+worker and scheduler have current heartbeats, but the idle worker cannot make
+progress because capacity admission is not selecting runnable work.
+
+## Verified cause and decisions
+
+- `agent-observations` and `documentation-observations` were interrupted on
+  2026-10-06 during a worker shutdown. Their external-data, emergency-child,
+  and source-domain claims were safely contained. Their definition digests do
+  not have reviewed replay-safe recovery policies, so automatic release is
+  correctly refused.
+- `jobs_dispatch_ready_v1` is called by the worker, but it promotes the
+  highest-priority dependency-free waiting row without checking whether every
+  declared pool and domain resource is available. Claiming immediately marks
+  that row waiting again; the same old blocked rows then win promotion, which
+  starves runnable control work.
+- Correct the dispatcher in the database so Ready promotion uses the same
+  atomic resource-availability test as claim admission and skips blocked rows.
+  Keep contained claims protected until replay safety is proved and recorded.
+- Review both source collectors before adding replay-safe policy. They read
+  external sources and write convergent local observations, but the evidence
+  must cover the full collector/projector path before it can release live
+  contained claims automatically.
+
+## Validation and next action
+
+- Add a forward migration and focused database-contract tests proving blocked
+  external work cannot starve runnable control work, plus replay-policy tests
+  for each collector if certified.
+- Verify automatic deployment and queue drain through read-only diagnostics;
+  do not manually deploy or directly alter production claims.
+
+## Implementation checkpoint
+
+Implemented migration 0257, which replaces Ready-window promotion with a
+resource-aware scan: it examines each eligible queued run at most once per
+dispatch, checks every required capacity pool and domain lock under the same
+advisory locks used by claim admission, and promotes only runnable work.
+Migration 0258 adds reviewed replay-safe authorities for agent and
+documentation observation collection. The registry now snapshots an explicit
+recovery posture for all 38 definitions; only reviewed replay-safe definitions
+are registered for automatic release. Focused migration/Jobs tests (8), Django
+checks, `makemigrations --check`, registry validation, targeted Ruff, and
+`git diff --check` pass. Pending rollout review: 0257 only replaces a
+security-definer dispatch function; 0258 is idempotent authority data and does
+not release claims itself. Worker startup performs the existing audited
+recovery after both migrations are present.
+
 ## Single Issues inbox and object context (2026-10-07)
 
 ## Status

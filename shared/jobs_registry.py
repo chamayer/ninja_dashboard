@@ -152,6 +152,7 @@ class JobDefinition:
             "coalescing_scope": self.coalescing_scope,
             "concurrency_scope": self.concurrency_scope,
             "retry_policy": self.retry_policy,
+            "recovery_mode": _RECOVERY_MODE_BY_DEFINITION[self.key],
             "progress_contract": self.progress_contract,
             "result_contract": self.result_contract,
             "permission": self.permission,
@@ -718,6 +719,28 @@ REPLAY_SAFE_RECOVERY_EVIDENCE = MappingProxyType(
             "source projections from the current response. A later replay converges to "
             "current source state and has no vendor-side mutation."
         ),
+        "agent-observations": (
+            "Agent observation collection only reads connected source APIs and writes "
+            "current local observations and derived projections. A later replay "
+            "converges to current source state and has no source-side mutation."
+        ),
+        "documentation-observations": (
+            "Documentation observation collection only reads CMDB source APIs and writes "
+            "current local observations and derived projections. A later replay "
+            "converges to current source state and has no source-side mutation."
+        ),
+    }
+)
+
+# Every definition has an explicit recovery posture. Only definitions with
+# reviewed evidence may be replayed automatically; all others remain safely
+# contained for administrator review after interruption.
+_RECOVERY_MODE_BY_DEFINITION = MappingProxyType(
+    {
+        definition.key: (
+            "replay_safe" if definition.key in REPLAY_SAFE_RECOVERY_EVIDENCE else "manual_review"
+        )
+        for definition in _RAW_DEFINITIONS
     }
 )
 

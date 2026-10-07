@@ -29,3 +29,27 @@ def test_queued_wait_stages_are_derived_from_the_wait_category():
     assert "WHEN 'resource' THEN 'Waiting for protected work'" in sql
     assert "WHEN 'capacity' THEN 'Waiting for capacity'" in sql
     assert "UPDATE operations.operator_job_runs" in sql
+
+
+def test_ready_dispatch_skips_capacity_blocked_work_for_runnable_work():
+    sql = Path("apps/core/migrations/0257_jobs_dispatch_runnable_ready.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert "NOT run.id = ANY(v_examined)" in sql
+    assert "v_available := TRUE" in sql
+    assert "state IN ('held', 'contained')" in sql
+    assert "IF NOT v_available THEN" in sql
+    assert "CONTINUE;" in sql
+
+
+def test_every_definition_declares_recovery_posture():
+    registry = Path("../shared/jobs_registry.py").read_text(encoding="utf-8")
+    recovery = Path("apps/core/migrations/0258_jobs_recovery_contract.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert '"recovery_mode": _RECOVERY_MODE_BY_DEFINITION[self.key]' in registry
+    assert '"manual_review"' in registry
+    assert "agent-observations" in recovery
+    assert "documentation-observations" in recovery
