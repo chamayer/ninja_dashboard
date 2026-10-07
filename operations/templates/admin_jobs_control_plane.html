@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% block title %}Job configuration{% endblock %}
+{% block title %}Job settings{% endblock %}
 
 {% block content %}
 <style>
@@ -19,11 +19,13 @@
   .jobs-control-health.ok { background:#dcfce7; color:#14532d; }
   .jobs-control-health.bad { background:#fef3c7; color:#78350f; }
   .jobs-control-pages { display:flex; justify-content:space-between; margin-top:1rem; }
+  .jobs-control-diagnostics { margin:1rem 0; }
+  .jobs-control-diagnostics summary { cursor:pointer; color:var(--muted); }
 </style>
 
 <div class="jobs-control-head">
-  <div><h1>Job configuration</h1><div class="muted">Schedules, execution limits, complete coverage, and diagnostic evidence.</div></div>
-  <div><a href="{% url 'admin_jobs' %}">Jobs</a> · <a href="{% url 'findings_admin_health' %}">Admin Health</a></div>
+  <div><h1>Job settings</h1><div class="muted">Review Job coverage, schedules, and capacity. Detailed technical records are available when needed.</div></div>
+  <div><a href="{% url 'admin_jobs' %}">Jobs</a> · <a href="{% url 'admin_services' %}">Services</a> · <a href="{% url 'findings_admin_health' %}">Health</a></div>
 </div>
 
 {% if jobs_health.ok %}
@@ -32,9 +34,17 @@
 <div class="jobs-control-health bad"><strong>Jobs need review.</strong><ul>{% for issue in jobs_health.issues %}<li>{{ issue }}</li>{% empty %}<li>Health evidence is unavailable.</li>{% endfor %}</ul></div>
 {% endif %}
 
-<nav class="jobs-control-tabs" aria-label="Jobs diagnostics sections">
-{% for key, label in sections %}<a href="?section={{ key }}"{% if active_section == key %} class="active"{% endif %}>{{ label }}</a>{% endfor %}
+<nav class="jobs-control-tabs" aria-label="Job settings sections">
+  <a href="?section=coverage"{% if active_section == "coverage" %} class="active"{% endif %}>Job catalog</a>
+  <a href="?section=schedules"{% if active_section == "schedules" %} class="active"{% endif %}>Schedules</a>
+  <a href="?section=resource_limits"{% if active_section == "resource_limits" %} class="active"{% endif %}>Capacity</a>
 </nav>
+<details class="jobs-control-diagnostics"{% if active_section != "coverage" and active_section != "schedules" and active_section != "resource_limits" %} open{% endif %}>
+  <summary>Diagnostics</summary>
+  <nav class="jobs-control-tabs" aria-label="Job diagnostics sections">
+  {% for key, label in sections %}{% if key != "coverage" and key != "schedules" and key != "resource_limits" %}<a href="?section={{ key }}"{% if active_section == key %} class="active"{% endif %}>{{ label }}</a>{% endif %}{% endfor %}
+  </nav>
+</details>
 
 {% if unavailable %}<div class="notice notice-warning">{{ unavailable }}</div>{% endif %}
 {% if active_section == "resource_limits" %}
@@ -62,7 +72,7 @@
   }());
 </script>
 {% endif %}
-<p class="muted">{{ total }} persisted record{{ total|pluralize }}. Page {{ page }}.</p>
+<p class="muted">{{ total }} record{{ total|pluralize }}. Page {{ page }}.</p>
 
 {% for row in rows %}
 <details class="jobs-control-row"{% if forloop.first %} open{% endif %}>

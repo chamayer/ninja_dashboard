@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+
+{% block title %}Services{% endblock %}
+
+{% block content %}
+<style>
+  .service-head { display:flex; justify-content:space-between; gap:1rem; flex-wrap:wrap; align-items:baseline; }
+  .service-head h1 { margin:0; font-size:1.35rem; }
+  .service-card { margin-top:.8rem; padding:.85rem 1rem; border:1px solid var(--border); border-radius:6px; background:var(--surface); }
+  .service-card h2 { margin:0 0 .3rem; font-size:1rem; }
+  .service-state { font-weight:700; } .service-state.ok { color:#15803d; } .service-state.bad { color:#b91c1c; }
+  .service-table { width:100%; border-collapse:collapse; margin-top:.6rem; font-size:.88rem; }
+  .service-table th,.service-table td { border-top:1px solid var(--border); padding:.55rem .25rem; text-align:left; vertical-align:top; }
+  .service-table th { color:var(--muted); font-size:.74rem; text-transform:uppercase; letter-spacing:.04em; }
+</style>
+
+<div class="service-head">
+  <div><h1>Services</h1><p class="muted">The scheduler and workers run Jobs. Deployment owns their lifecycle, not this page.</p></div>
+  <div><a href="{% url 'admin_jobs' %}">Jobs</a> · <a href="{% url 'admin_jobs_control_plane' %}">Diagnostics</a></div>
+</div>
+
+<section class="service-card">
+  <h2>Service health</h2>
+  {% if jobs_health.ok %}<p class="service-state ok">Healthy</p>{% else %}<p class="service-state bad">Needs review</p><ul>{% for issue in jobs_health.issues %}<li>{{ issue }}</li>{% empty %}<li>Service health evidence is unavailable.</li>{% endfor %}</ul>{% endif %}
+</section>
+
+<section class="service-card">
+  <h2>Scheduler and workers</h2>
+  {% if services %}
+  <table class="service-table"><thead><tr><th>Service</th><th>Status</th><th>Last check-in</th><th>Revision</th></tr></thead><tbody>
+    {% for service in services %}<tr>
+      <td><strong>{{ service.name }}</strong>{% if service.identity %}<span class="muted"> · {{ service.identity }}</span>{% endif %}</td>
+      <td>{% if service.current %}<span class="service-state ok">Running</span>{% elif service.stopped_at %}<span class="service-state bad">Stopped</span>{% else %}<span class="service-state bad">Not checking in</span>{% endif %}</td>
+      <td>{% if service.heartbeat_at %}{{ service.heartbeat_at|date:"M j, Y, g:i A" }} ({{ service.heartbeat_at|timesince }} ago){% else %}No check-in recorded{% endif %}</td>
+      <td>{% if service.current_revision %}Current{% else %}Needs deployment review{% endif %}</td>
+    </tr>{% endfor %}
+  </tbody></table>
+  {% else %}<p class="muted">No scheduler or worker check-ins have been recorded.</p>{% endif %}
+</section>
+
+{% if jobs_health.summary %}<section class="service-card"><h2>Job load</h2><p class="muted">Ready {{ jobs_health.summary.queued_runs|default:0 }} · Running {{ jobs_health.summary.running_runs|default:0 }} · Waiting {{ jobs_health.summary.waiting_dependencies|default:0 }} · Contained claims {{ jobs_health.summary.contained_claims|default:0 }}</p><p><a href="{% url 'admin_jobs' %}">Open Jobs</a></p></section>{% endif %}
+{% endblock %}

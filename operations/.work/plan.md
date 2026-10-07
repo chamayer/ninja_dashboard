@@ -1,5 +1,57 @@
 # Jobs ecosystem final-design reset
 
+## Admin navigation and surfaces (2026-10-07)
+
+## Status
+
+Complete — the Admin bar now has six clear administration
+areas: Overview, Sources, Jobs, Services, Health, and Settings. Outstanding
+operator action stays in Issues; Admin contains configuration, service health,
+and focused technical administration only.
+
+## Scope and decisions
+
+- Keep the main navigation unchanged. The Admin context bar is the sole
+  top-level administration map and contains only Overview, Sources, Jobs,
+  Services, Health, and Settings.
+- Jobs remains the operational catalogue and run-control page. Its existing
+  configuration route becomes a focused configuration/diagnostics child page,
+  not a peer in the global Admin bar.
+- Add Services as a read-only service-health surface for the scheduler and
+  workers. Service lifecycle remains deployment-owned; no start/stop controls
+  are added. Link to Jobs diagnostics only for technical investigation.
+- Sources is the connection/evidence-health page. Issues is the only queue for
+  actionable matching or data-quality work; Sources must not recreate it.
+- Health is platform health, not a duplicate Issues inbox. Settings groups
+  existing policies and configuration pages; Django Admin remains an advanced
+  escape hatch there rather than a global peer.
+- Counts appear only for actionable operational work. No badge represents
+  inventory volume, historical decisions, or a duplicate queue.
+- Preserve existing routes as compatibility deep links, tenant/RLS enforcement,
+  and audit-backed mutations. Do not introduce schema changes merely for
+  navigation.
+
+## Affected areas and validation
+
+- `templates/base.html`, Admin overview and new Services/Settings templates,
+  URL routes, and administrator views/tests.
+- Run focused Admin/Jobs template and view tests, Django checks, targeted Ruff,
+  template loading, and `git diff --check`. Review all changed routes for
+  `require_admin` and existing tenant-aware data access.
+
+## Completion evidence
+
+Implemented the six-area Admin bar and a concise Admin overview. Added
+administrator-only Services and Settings pages; Services reports scheduler and
+worker check-ins without deployment lifecycle controls, while Settings groups
+the existing policy, notification, presentation, and advanced pages. Jobs now
+links to Job settings, where catalog, schedules, and capacity are primary and
+raw records sit under Diagnostics. Health has a clear name. Removed the
+obsolete duplicate Admin strips from focused deep-link pages and retained the
+routes themselves. Focused Jobs, Issues, and coverage tests pass (77); Django
+checks, targeted Ruff, template loading, and `git diff --check` pass. The
+pending commit will contain no migration or production-operation change.
+
 ## Single Issues inbox and object context (2026-10-07)
 
 ## Status

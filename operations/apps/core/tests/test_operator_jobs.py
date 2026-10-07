@@ -39,11 +39,11 @@ def test_jobs_present_one_list_detail_and_configuration_surface():
     assert "_jobs_diagnostic_all(\"schedules\", cur)" in views
     assert "FROM operations.job_schedules" not in views[views.index("def admin_jobs("):views.index("def admin_jobs_run(")]
     assert "json.loads(row[1]) if isinstance(row[1], str)" in views
-    assert "Job configuration" in jobs_template
+    assert "Job settings" in jobs_template
     assert "Run history" in detail_template
     assert "Waiting for" in detail_template
     assert "Starts after this" in detail_template
-    assert "Job configuration" in configuration_template
+    assert "Job settings" in configuration_template
     assert "Jobs control plane" not in configuration_template
     get_template("admin_jobs.html")
     get_template("admin_job_detail.html")
@@ -63,3 +63,24 @@ def test_jobs_use_safe_existing_controls():
     assert "Request stop" in jobs_template
     assert "Run now" in detail_template
     assert "Retry" in detail_template
+
+
+def test_admin_navigation_separates_jobs_services_health_and_settings():
+    base_template = Path("templates/base.html").read_text(encoding="utf-8")
+    overview_template = Path("templates/operations_admin_overview.html").read_text(
+        encoding="utf-8"
+    )
+    services_template = Path("templates/admin_services.html").read_text(encoding="utf-8")
+    settings_template = Path("templates/admin_settings.html").read_text(encoding="utf-8")
+    urls = Path("config/urls.py").read_text(encoding="utf-8")
+
+    for label in ("Overview", "Sources", "Jobs", "Services", "Health", "Settings"):
+        assert f">{label}</a>" in base_template
+    assert "Software decisions" not in base_template
+    assert "admin_services" in urls
+    assert "admin_settings" in urls
+    assert "Deployment owns their lifecycle" in overview_template
+    assert "Deployment owns their lifecycle" in services_template
+    assert "Django Admin" in settings_template
+    get_template("admin_services.html")
+    get_template("admin_settings.html")

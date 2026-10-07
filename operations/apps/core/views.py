@@ -11590,8 +11590,8 @@ def findings_admin_health(request: HttpRequest) -> HttpResponse:
         request,
         "findings_admin_health.html",
         {
-            "admin_group": "integrations",
-            "admin_tab": "ingest",
+            "admin_group": "health",
+            "admin_tab": "health",
             "condition_policy_available": condition_policy_available,
             "findings": findings,
             "finding_types": finding_types,
@@ -15910,6 +15910,56 @@ def device_merge(
 
 
 @login_required
+@require_admin
+def admin_services(request: HttpRequest) -> HttpResponse:
+    """Show deployment-owned Jobs services without exposing lifecycle controls."""
+    jobs_health = _jobs_control_health()
+    now = timezone.now()
+    services = []
+    for runtime in jobs_health["runtimes"]:
+        heartbeat = parse_datetime(str(runtime.get("heartbeat_at") or ""))
+        current = bool(
+            heartbeat
+            and not runtime.get("stopped_at")
+            and now - heartbeat <= timedelta(minutes=3)
+        )
+        kind = str(runtime.get("runtime_kind") or "service")
+        services.append(
+            {
+                "name": "Scheduler" if kind == "scheduler" else "Worker" if kind == "worker" else kind.replace("_", " ").title(),
+                "identity": runtime.get("runtime_identity") or "",
+                "heartbeat_at": heartbeat,
+                "current": current,
+                "stopped_at": runtime.get("stopped_at"),
+                "current_revision": runtime.get("registry_digest") == registry_digest(),
+            }
+        )
+    services.sort(key=lambda service: (service["name"], service["identity"]))
+    return render(
+        request,
+        "admin_services.html",
+        {
+            "admin_group": "services",
+            "admin_tab": "services",
+            "jobs_health": jobs_health,
+            "services": services,
+        },
+    )
+
+
+@login_required
+@require_admin
+def admin_settings(request: HttpRequest) -> HttpResponse:
+    """Group administrator configuration without mixing it into the main nav."""
+    return render(
+        request,
+        "admin_settings.html",
+        {"admin_group": "settings", "admin_tab": "settings"},
+    )
+
+
+@login_required
+@require_admin
 def operations_admin_overview(request: HttpRequest) -> HttpResponse:
     """Operations Admin landing — one hub with every admin/operator
     surface grouped by workflow area. Counts are cheap; each tile is
