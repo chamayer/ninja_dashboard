@@ -241,7 +241,7 @@ def test_registry_exposes_the_approved_pool_and_resource_policy():
         },
         "capacity:processing": {
             "label": "Data processing",
-            "capacity": 1,
+            "capacity": 2,
             "minimum": 1,
             "maximum": 2,
         },
@@ -251,7 +251,10 @@ def test_registry_exposes_the_approved_pool_and_resource_policy():
     assert definition("agent-observations").resource_keys == ("tenant:{tenant_id}:agent-sources",)
     assert definition("patch-classify").resource_keys == ("tenant:{tenant_id}:patch-state",)
     assert "global:intel-cve-corpus" in definition("intel-nvd").resource_keys
-    assert "global:software-catalog" in definition("software-classify").resource_keys
+    assert definition("software-classify").resource_keys == (
+        "tenant:{tenant_id}:software-state",
+        "tenant:{tenant_id}:software-findings",
+    )
     assert definition("software-classify-only").supersession_rank == 1
     assert definition("software-classify-full").supersession_rank == 2
     assert definition("software-classify").supersession_rank == 3
