@@ -28,9 +28,7 @@ BEGIN
         WHEN run.status = 'queued' AND run.wait_category IN ('dependency', 'workflow') THEN 'waiting_for_data'
         WHEN run.status = 'queued' AND run.wait_category = 'resource' THEN 'waiting_for_protected_update'
         WHEN run.status = 'queued' AND run.wait_category = 'capacity' THEN 'waiting_for_capacity'
-        WHEN run.status = 'queued' THEN 'waiting'
-        WHEN run.status IN ('failed', 'stalled') THEN 'needs_attention'
-        ELSE run.status
+        ELSE 'waiting'
     END, count(*), min(run.requested_at)
     FROM operations.operator_job_runs run
     WHERE run.tenant_id = p_tenant_id AND run.status IN ('queued', 'running')
