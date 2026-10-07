@@ -16080,10 +16080,10 @@ def _admin_health_attention_items(
 
 
 def _admin_overview_recent_activity() -> list[dict]:
-    """Return a small, readable administrator activity sample."""
+    """Return recent user-initiated administrator activity, not runtime noise."""
     try:
         recent_activity = list(
-            AuditLog.objects.filter(tenant_id=1)
+            AuditLog.objects.filter(tenant_id=1, actor_kind=AuditLog.ActorKind.USER)
             .order_by("-occurred_at")
             .values("action", "occurred_at")[:5]
         )
@@ -16096,13 +16096,15 @@ def _admin_overview_recent_activity() -> list[dict]:
 
 
 def _admin_health_system_findings() -> tuple[bool, int, list[AdminFinding]]:
-    """Return non-Jobs platform conditions; operator issues do not affect health."""
+    """Return platform conditions not already owned by Jobs, Sources, or Services."""
     try:
         findings = AdminFinding.objects.filter(
             tenant_id=1,
             status__in=("open", "acknowledged"),
             finding_type__category__name="platform_health",
-        ).exclude(finding_type__name__startswith="jobs_")
+        ).exclude(finding_type__name__startswith="jobs_").exclude(
+            finding_type__name="source_failure"
+        )
         return True, findings.count(), list(
             findings.select_related("finding_type").order_by("-severity", "-last_detected_at")[:2]
         )
@@ -16111,9 +16113,9 @@ def _admin_health_system_findings() -> tuple[bool, int, list[AdminFinding]]:
         return False, 0, []
 
 
-def _admin_health_snapshot() -> dict:
+def _admin_health_snapshot(now=None) -> dict:
     """Build the single cross-domain health summary used by Admin surfaces."""
-    now = timezone.now()
+    now = now or timezone.now()
     sources, sources_available = _admin_health_sources(now)
     source_attention_count = sum(source["needs_attention"] for source in sources)
     jobs_health = _jobs_control_health()
@@ -16178,8 +16180,8 @@ def _admin_health_snapshot() -> dict:
             "count": len(jobs_issues),
             "available": jobs_health["available"],
             "detail": (
-                f"Running {jobs_summary.get('running') or 0} · "
-                f"Ready {jobs_summary.get('ready') or 0} · Waiting {waiting_runs}"
+                f"Running {jobs_summary.get('running_runs') or 0} · "
+                f"Ready {jobs_summary.get('ready_runs') or 0} · Waiting {waiting_runs}"
             ),
             "url_name": "admin_jobs",
             "url_label": "Review Jobs",
@@ -16235,23 +16237,36 @@ def _admin_health_snapshot() -> dict:
     }
 
 
+def _operations_admin_overview_snapshot() -> dict:
+    """Read every Admin-overview value from one tenant-scoped database moment."""
+    now = timezone.now()
+    with transaction.atomic(), connection.cursor() as cur:
+        cur.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ")
+        cur.execute("SET LOCAL operations.tenant_id = 1")
+        health = _admin_health_snapshot(now)
+        active_issue_count = Finding.objects.filter(
+            tenant_id=1, status__in=_FINDING_ACTIVE_STATUSES
+        ).count()
+        recent_activity = _admin_overview_recent_activity()
+    return {
+        "health": health,
+        "active_issue_count": active_issue_count,
+        "recent_activity": recent_activity,
+    }
+
+
 @login_required
 @require_admin
 def operations_admin_overview(request: HttpRequest) -> HttpResponse:
     """Show the current administration posture and direct links to its evidence."""
-    health = _admin_health_snapshot()
-    active_issue_count = Finding.objects.filter(
-        tenant_id=1, status__in=_FINDING_ACTIVE_STATUSES
-    ).count()
+    overview = _operations_admin_overview_snapshot()
 
     return render(
         request,
         "operations_admin_overview.html",
         {
             "admin_group": "overview",
-            "health": health,
-            "active_issue_count": active_issue_count,
-            "recent_activity": _admin_overview_recent_activity(),
+            **overview,
         },
     )
 

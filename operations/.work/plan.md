@@ -1,12 +1,54 @@
 # Jobs ecosystem final-design reset
 
+## Admin overview ownership and snapshot (2026-10-07)
+
+## Status
+
+Implemented locally — the overview now reads from one repeatable-read health
+snapshot with one owner per condition. This corrects presentation and
+ownership only; it does not alter Jobs execution, health policy, or source
+state.
+
+## Scope and decisions
+
+- Build the page context inside one tenant-scoped repeatable-read transaction
+  so its status cards, attention list, summary, Issue count, and recent
+  administrator activity cannot mix database moments.
+- Sources owns `source_failure`: it is evidence that a source collection is
+  failed or overdue, including the resulting coverage skip. It must not also
+  count as an independent System check.
+- Jobs owns Jobs diagnostics; Services owns scheduler/worker liveness; System
+  checks contains only remaining platform-health conditions.
+- "Recent administrator activity" means user-initiated audit activity. Omit
+  automatic lifecycle transitions that carry no operator decision or useful
+  summary.
+
+## Affected files and validation
+
+- `apps/core/views.py`, the Admin overview template and focused Jobs/Admin
+  tests, plus this continuity plan. No migration or production data change.
+- Run focused Jobs/Admin tests, Django checks, focused Ruff, template loading,
+  `git diff --check`, then use a read-only rollout check to prove the rendered
+  overview returns one coherent Jobs count and no duplicate source-failure
+  System conditions.
+
+## Current checkpoint
+
+Live evidence showed one overview with conflicting Jobs counts and four
+`source_failure` platform findings duplicated beside stale-source conditions.
+The current active state is three running Jobs, eight capacity waits, and six
+prerequisite waits. Focused Jobs/Admin tests (20), Django checks, focused
+Ruff, template loading, and `git diff --check` pass. Next: commit, push, and
+read-only verify the overview renders one Jobs count and assigns source
+collection failures to Sources only.
+
 ## Unified Jobs contract (2026-10-07)
 
 ## Status
 
-In progress — replace conflicting Jobs interpretations with one contract over
-existing durable records. The uncommitted parallel lifecycle-summary migration
-was discarded; no second Job, health, queue, or workflow model will be added.
+Complete — one lifecycle contract over existing durable records now drives
+operator presentation, diagnostics, and health. No second Job, health, queue,
+or workflow model was added.
 
 ## Goal and fixed design
 
@@ -73,6 +115,22 @@ replay-safe authority; the existing worker then performs the audited release.
 It does not release unreviewed work or alter run history. Next: validate and
 deploy 0260, then prove those claims release and compatible waiting work can
 start.
+
+## Completion evidence
+
+- Pushed `113c546` (shared lifecycle contract), `012a2af` (active-lifecycle
+  clarification), and `af94b64` (approved interrupted-revision recovery) to
+  `origin` and the required `a-m-rose` mirror.
+- Local validation: 68 focused Jobs, migration, worker, registry, and
+  condition-contract tests pass; `manage.py check`, migration discovery,
+  focused Ruff, and `git diff --check` pass.
+- Read-only rollout validation: Operations migration 0259 and 0260 are
+  applied; Operations, ingest, and Jobs worker are healthy; the scheduler is
+  producing due schedules; the two approved contained source runs released;
+  three Jobs are running under ordinary capacity claims; the remaining active
+  runs report Waiting for capacity or prerequisite data; the latest
+  platform-health evaluation completed; and `/admin/jobs/` returns an
+  authentication redirect, not a server error.
 
 ## Parameter-safe tenant context (2026-10-07)
 
