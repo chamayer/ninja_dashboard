@@ -1,5 +1,57 @@
 # Jobs ecosystem final-design reset
 
+## Admin overview health hierarchy (2026-10-07)
+
+## Status
+
+Complete in the working tree — both Admin overview and Admin Health now use
+one health snapshot: a total state and total condition count, split once into
+Jobs, Sources, Services, and System checks. Jobs, Sources, and Services remain
+the authoritative operational detail pages.
+
+## Scope and decisions
+
+- Calculate one overall Admin state from existing tenant-scoped source health,
+  Jobs diagnostics, service check-ins, and platform-health findings:
+  **Healthy**, **Needs attention**, or **Unavailable**.
+- Start the overview with that state and four compact KPIs: Jobs needing
+  attention, Sources needing attention, Services, and Admin Health. Each KPI
+  links to its existing authoritative detail page; no second status model or
+  duplicate work queue is introduced.
+- Put a prioritized, bounded "Needs attention" list below the KPIs, followed
+  by a concise platform summary and recent administrator activity. The page
+  is a starting point for action, not a history feed or technical diagnostics.
+- Keep "stale" and other Job lifecycle evidence on Jobs. The overview only
+  reports an affected Jobs area and links to it.
+- Do not count Jobs-specific platform findings again under Admin Health.
+  Jobs owns those conditions; Admin Health shows only remaining system
+  conditions. Open Issues remain contextual workload, not a platform-health
+  KPI.
+
+## Affected areas and validation
+
+- `apps/core/views.py`, `templates/operations_admin_overview.html`, focused
+  Admin overview tests, and this continuity plan. No schema change or runtime
+  control is required.
+- Run focused Admin/Jobs template tests, Django checks, targeted Ruff, and
+  `git diff --check`.
+
+## Completion evidence and next action
+
+Implemented `_admin_health_snapshot()` as the shared source of the total
+health state, count, domain split, and bounded root-cause list. Jobs owns its
+diagnostic conditions, Sources owns stale/failed source conditions, Services
+owns missing scheduler/worker check-ins, and System checks owns remaining
+Admin Finding conditions. The total is the sum of those domains; it does not
+double-count Jobs under System checks. The overview visibly links any
+additional root causes beyond its five-row action list. Admin Health now starts
+with the total and the same four-domain split before its full condition table.
+Focused Admin/Jobs tests pass (18), Django checks pass, focused F/I Ruff
+passes, both templates load through the project configuration, and
+`git diff --check` passes. No migration, deployment action, commit, or push
+has occurred. Next: review the page in the deployed environment after a
+separately approved commit and push.
+
 ## Admin navigation and surfaces (2026-10-07)
 
 ## Status

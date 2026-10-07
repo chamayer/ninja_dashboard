@@ -11584,7 +11584,7 @@ def findings_admin_health(request: HttpRequest) -> HttpResponse:
         condition_policy_available = False
 
     condition_coverage = _condition_coverage_summary(condition_profile)
-    jobs_health = _jobs_control_health()
+    health = _admin_health_snapshot()
 
     return render(
         request,
@@ -11600,7 +11600,7 @@ def findings_admin_health(request: HttpRequest) -> HttpResponse:
             "active_severity": severity_filter,
             "active_type": type_filter,
             "condition_coverage": condition_coverage,
-            "jobs_health": jobs_health,
+            "health": health,
         },
     )
 
@@ -15958,12 +15958,10 @@ def admin_settings(request: HttpRequest) -> HttpResponse:
     )
 
 
-@login_required
-@require_admin
-def operations_admin_overview(request: HttpRequest) -> HttpResponse:
-    """Show concise, current administration health without duplicating detail pages."""
-    now = timezone.now()
+def _admin_health_sources(now: datetime) -> tuple[list[dict], bool]:
+    """Return source health evidence without making health unavailable."""
     sources = []
+    sources_available = True
     try:
         with transaction.atomic(), connection.cursor() as cur:
             cur.execute("SET LOCAL operations.tenant_id = 1")
@@ -15990,7 +15988,128 @@ def operations_admin_overview(request: HttpRequest) -> HttpResponse:
                 )
     except DatabaseError:
         log.exception("Admin overview source-health query failed")
+        sources_available = False
+    return sources, sources_available
 
+
+def _admin_health_attention_items(
+    *,
+    sources: list[dict],
+    sources_available: bool,
+    jobs_available: bool,
+    jobs_issues: list[str],
+    services_current: bool,
+    system_health_available: bool,
+    system_findings: list[AdminFinding],
+) -> list[dict]:
+    """Summarize only actionable cross-area conditions for the overview."""
+    attention_items = []
+    if not jobs_available:
+        attention_items.append(
+            {
+                "area": "Jobs",
+                "detail": "Jobs health cannot be checked.",
+                "url_name": "admin_jobs",
+                "url_label": "Review Jobs",
+            }
+        )
+    else:
+        for issue in jobs_issues[:2]:
+            attention_items.append(
+                {
+                    "area": "Jobs",
+                    "detail": issue,
+                    "url_name": "admin_jobs",
+                    "url_label": "Review Jobs",
+                }
+            )
+    if not sources_available:
+        attention_items.append(
+            {
+                "area": "Sources",
+                "detail": "Source health is unavailable.",
+                "url_name": "sources_status",
+                "url_label": "Review sources",
+            }
+        )
+    else:
+        for source in [source for source in sources if source["needs_attention"]][:2]:
+            attention_items.append(
+                {
+                    "area": "Sources",
+                    "detail": source["name"],
+                    "observed_at": source["observed_at"],
+                    "url_name": "sources_status",
+                    "url_label": "Review sources",
+                }
+            )
+    if not services_current:
+        attention_items.append(
+            {
+                "area": "Services",
+                "detail": "Scheduler or worker check-ins need review.",
+                "url_name": "admin_services",
+                "url_label": "Review services",
+            }
+        )
+    if not system_health_available:
+        attention_items.append(
+            {
+                "area": "Admin Health",
+                "detail": "System health cannot be checked.",
+                "url_name": "findings_admin_health",
+                "url_label": "Review Admin Health",
+            }
+        )
+    else:
+        for finding in system_findings[:2]:
+            attention_items.append(
+                {
+                    "area": "Admin Health",
+                    "detail": finding.finding_type.description or finding.finding_type.name,
+                    "url_name": "findings_admin_health",
+                    "url_label": "Review Admin Health",
+                }
+            )
+    return attention_items
+
+
+def _admin_overview_recent_activity() -> list[dict]:
+    """Return a small, readable administrator activity sample."""
+    try:
+        recent_activity = list(
+            AuditLog.objects.filter(tenant_id=1)
+            .order_by("-occurred_at")
+            .values("action", "occurred_at")[:5]
+        )
+    except DatabaseError:
+        log.exception("Admin overview recent-activity query failed")
+        return []
+    for activity in recent_activity:
+        activity["label"] = str(activity["action"]).replace("_", " ").replace(".", " ").capitalize()
+    return recent_activity
+
+
+def _admin_health_system_findings() -> tuple[bool, int, list[AdminFinding]]:
+    """Return non-Jobs platform conditions; Jobs owns its own health evidence."""
+    try:
+        findings = AdminFinding.objects.filter(
+            tenant_id=1,
+            status__in=("open", "acknowledged"),
+        ).exclude(finding_type__name__startswith="jobs_")
+        return True, findings.count(), list(
+            findings.select_related("finding_type").order_by("-severity", "-last_detected_at")[:2]
+        )
+    except DatabaseError:
+        log.exception("Admin overview system-health query failed")
+        return False, 0, []
+
+
+def _admin_health_snapshot() -> dict:
+    """Build the single cross-domain health summary used by Admin surfaces."""
+    now = timezone.now()
+    sources, sources_available = _admin_health_sources(now)
+    source_attention_count = sum(source["needs_attention"] for source in sources)
     jobs_health = _jobs_control_health()
     live_runtime_kinds = set()
     latest_service_checkin = None
@@ -15998,18 +16117,123 @@ def operations_admin_overview(request: HttpRequest) -> HttpResponse:
         heartbeat = parse_datetime(str(runtime.get("heartbeat_at") or ""))
         if heartbeat and (latest_service_checkin is None or heartbeat > latest_service_checkin):
             latest_service_checkin = heartbeat
-        if (
-            heartbeat
-            and not runtime.get("stopped_at")
-            and now - heartbeat <= timedelta(minutes=3)
-        ):
+        if heartbeat and not runtime.get("stopped_at") and now - heartbeat <= timedelta(minutes=3):
             live_runtime_kinds.add(str(runtime.get("runtime_kind")))
     services_current = {"scheduler", "worker"}.issubset(live_runtime_kinds)
+    jobs_issues = [
+        issue
+        for issue in jobs_health["issues"]
+        if not issue.startswith("No current Jobs ")
+    ]
+    system_health_available, system_health_count, system_findings = (
+        _admin_health_system_findings()
+    )
+    raw_attention_items = _admin_health_attention_items(
+        sources=sources,
+        sources_available=sources_available,
+        jobs_available=jobs_health["available"],
+        jobs_issues=jobs_issues,
+        services_current=services_current,
+        system_health_available=system_health_available,
+        system_findings=system_findings,
+    )
+    unavailable = (
+        not sources_available or not jobs_health["available"] or not system_health_available
+    )
+    domain_counts = (
+        source_attention_count,
+        len(jobs_issues),
+        0 if services_current else 1,
+        system_health_count,
+    )
+    condition_count = sum(domain_counts)
+    affected_domain_count = sum(count > 0 for count in domain_counts)
+    if unavailable:
+        overall_state = "unavailable"
+        overall_label = "Unavailable"
+        overall_detail = "Some health evidence cannot be checked."
+    elif condition_count:
+        overall_state = "warn"
+        overall_label = "Needs attention"
+        overall_detail = (
+            f"{condition_count} active health condition"
+            f"{'s' if condition_count != 1 else ''} across "
+            f"{affected_domain_count} area{'s' if affected_domain_count != 1 else ''}."
+        )
+    else:
+        overall_state = "ok"
+        overall_label = "Healthy"
+        overall_detail = "Current health checks are passing."
+    domains = [
+        {
+            "label": "Jobs",
+            "count": len(jobs_issues),
+            "available": jobs_health["available"],
+            "detail": (
+                f"Running {jobs_health['summary'].get('running_runs') or 0} · "
+                f"Ready {jobs_health['summary'].get('queued_runs') or 0} · "
+                f"Waiting {jobs_health['summary'].get('waiting_dependencies') or 0}"
+            ),
+            "url_name": "admin_jobs",
+            "url_label": "Review Jobs",
+        },
+        {
+            "label": "Sources",
+            "count": source_attention_count,
+            "available": sources_available,
+            "detail": f"{len(sources)} source{'s' if len(sources) != 1 else ''} reporting to Operations.",
+            "url_name": "sources_status",
+            "url_label": "Review sources",
+        },
+        {
+            "label": "Services",
+            "count": 0 if services_current else 1,
+            "available": True,
+            "detail": (
+                "Scheduler and workers checking in."
+                if services_current
+                else "Scheduler or worker check-ins need review."
+            ),
+            "url_name": "admin_services",
+            "url_label": "Review services",
+        },
+        {
+            "label": "System checks",
+            "count": system_health_count,
+            "available": system_health_available,
+            "detail": "Conditions not owned by Jobs, Sources, or Services.",
+            "url_name": "findings_admin_health",
+            "url_label": "Review Admin Health",
+        },
+    ]
+    return {
+        "at": now,
+        "sources": sources,
+        "sources_available": sources_available,
+        "source_attention_count": source_attention_count,
+        "jobs_health": jobs_health,
+        "jobs_attention_count": len(jobs_issues),
+        "services_current": services_current,
+        "latest_service_checkin": latest_service_checkin,
+        "system_health_available": system_health_available,
+        "system_health_count": system_health_count,
+        "condition_count": condition_count,
+        "domains": domains,
+        "overall_state": overall_state,
+        "overall_label": overall_label,
+        "overall_detail": overall_detail,
+        "attention_items": raw_attention_items[:5],
+        "hidden_attention_count": max(0, len(raw_attention_items) - 5),
+    }
+
+
+@login_required
+@require_admin
+def operations_admin_overview(request: HttpRequest) -> HttpResponse:
+    """Show the current administration posture and direct links to its evidence."""
+    health = _admin_health_snapshot()
     active_issue_count = Finding.objects.filter(
         tenant_id=1, status__in=_FINDING_ACTIVE_STATUSES
-    ).count()
-    platform_health_count = AdminFinding.objects.filter(
-        tenant_id=1, status__in=("open", "acknowledged")
     ).count()
 
     return render(
@@ -16017,14 +16241,9 @@ def operations_admin_overview(request: HttpRequest) -> HttpResponse:
         "operations_admin_overview.html",
         {
             "admin_group": "overview",
-            "overview_at": now,
-            "sources": sources,
-            "source_attention_count": sum(source["needs_attention"] for source in sources),
-            "jobs_health": jobs_health,
-            "services_current": services_current,
-            "latest_service_checkin": latest_service_checkin,
+            "health": health,
             "active_issue_count": active_issue_count,
-            "platform_health_count": platform_health_count,
+            "recent_activity": _admin_overview_recent_activity(),
         },
     )
 

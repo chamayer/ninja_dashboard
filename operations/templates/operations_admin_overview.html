@@ -8,7 +8,10 @@
   .admin-overview-head { display:flex; justify-content:space-between; align-items:baseline; gap:1rem; flex-wrap:wrap; margin-bottom:1rem; }
   .admin-overview-head h1 { margin:0; font-size:1.4rem; }
   .admin-overview-head p { margin:.3rem 0 0; color:var(--muted); }
-  .admin-overview-status { display:grid; grid-template-columns:repeat(auto-fit,minmax(14rem,1fr)); gap:.7rem; }
+  .admin-overview-overall { display:flex; justify-content:space-between; align-items:center; gap:1rem; padding:.9rem 1rem; border:1px solid var(--border); border-left:4px solid var(--muted); border-radius:7px; background:var(--surface); }
+  .admin-overview-overall.ok { border-left-color:#15803d; }.admin-overview-overall.warn { border-left-color:#a16207; }.admin-overview-overall.unavailable { border-left-color:#b91c1c; }
+  .admin-overview-overall h2 { margin:0; font-size:1.08rem; }.admin-overview-overall p { margin:.2rem 0 0; color:var(--muted); font-size:.87rem; }
+  .admin-overview-status { display:grid; grid-template-columns:repeat(auto-fit,minmax(14rem,1fr)); gap:.7rem; margin-top:.8rem; }
   .admin-overview-status article, .admin-overview-panel { border:1px solid var(--border); border-radius:7px; background:var(--surface); }
   .admin-overview-status article { padding:.85rem .95rem; }
   .admin-overview-status h2 { margin:0; font-size:.8rem; text-transform:uppercase; letter-spacing:.05em; color:var(--muted); }
@@ -30,56 +33,47 @@
 <section class="admin-overview">
   <header class="admin-overview-head">
     <div><h1>Admin overview</h1><p>Current Operations health and the items that need an administrator’s attention.</p></div>
-    <span class="muted">As of {{ overview_at|date:"M j, Y, g:i A" }} ({{ overview_at|timesince }} ago)</span>
+    <span class="muted">As of {{ health.at|date:"M j, Y, g:i A" }} ({{ health.at|timesince }} ago)</span>
   </header>
 
+  <section class="admin-overview-overall {{ health.overall_state }}" aria-label="Overall Operations health">
+    <div><h2>{{ health.overall_label }}</h2><p>{{ health.overall_detail }}</p></div>
+    <a href="{% url 'findings_admin_health' %}">Review Admin Health</a>
+  </section>
+
   <div class="admin-overview-status" aria-label="Administration status">
-    <article>
-      <h2>Sources</h2>
-      {% if source_attention_count %}<span class="admin-overview-state warn">{{ source_attention_count }} need attention</span>{% else %}<span class="admin-overview-state ok">Healthy</span>{% endif %}
-      <p>{{ sources|length }} source{{ sources|length|pluralize }} reporting to Operations.</p>
-      <a href="{% url 'sources_status' %}">Review sources</a>
-    </article>
-    <article>
-      <h2>Jobs</h2>
-      {% if jobs_health.ok %}<span class="admin-overview-state ok">Healthy</span>{% else %}<span class="admin-overview-state warn">Needs attention</span>{% endif %}
-      <p>Ready {{ jobs_health.summary.queued_runs|default:0 }} · Running {{ jobs_health.summary.running_runs|default:0 }} · Waiting {{ jobs_health.summary.waiting_dependencies|default:0 }}</p>
-      <a href="{% url 'admin_jobs' %}">Review Jobs</a>
-    </article>
-    <article>
-      <h2>Services</h2>
-      {% if services_current %}<span class="admin-overview-state ok">Scheduler and workers running</span>{% else %}<span class="admin-overview-state bad">Check-ins need review</span>{% endif %}
-      <p>{% if latest_service_checkin %}Last check-in {{ latest_service_checkin|date:"M j, Y, g:i A" }} ({{ latest_service_checkin|timesince }} ago){% else %}No service check-in recorded{% endif %}</p>
-      <a href="{% url 'admin_services' %}">Review services</a>
-    </article>
-    <article>
-      <h2>Platform health</h2>
-      {% if platform_health_count %}<span class="admin-overview-state warn">{{ platform_health_count }} open</span>{% else %}<span class="admin-overview-state ok">Healthy</span>{% endif %}
-      <p>Platform conditions that need administrator review.</p>
-      <a href="{% url 'findings_admin_health' %}">Review health</a>
-    </article>
+    {% for domain in health.domains %}<article>
+      <h2>{{ domain.label }}</h2>
+      {% if not domain.available %}<span class="admin-overview-state bad">Unavailable</span>{% elif domain.count %}<span class="admin-overview-state warn">{{ domain.count }} need attention</span>{% else %}<span class="admin-overview-state ok">Healthy</span>{% endif %}
+      <p>{{ domain.detail }}</p>
+      <a href="{% url domain.url_name %}">{{ domain.url_label }}</a>
+    </article>{% endfor %}
   </div>
 
   <section class="admin-overview-section">
     <h2>Needs attention</h2>
+    <article class="admin-overview-panel">
+      {% if health.attention_items %}
+        <ul class="admin-overview-list">{% for item in health.attention_items %}<li><span><strong>{{ item.area }}</strong> · {{ item.detail }}{% if item.observed_at %} — last received {{ item.observed_at|date:"M j, Y, g:i A" }} ({{ item.observed_at|timesince }} ago){% elif item.area == "Sources" %} — no data received{% endif %}</span><a href="{% url item.url_name %}">{{ item.url_label }}</a></li>{% endfor %}</ul>
+        {% if health.hidden_attention_count %}<p><a href="{% url 'findings_admin_health' %}">View {{ health.hidden_attention_count }} more health condition{{ health.hidden_attention_count|pluralize }}</a></p>{% endif %}
+      {% else %}<p>No administrator action is needed from the current health checks.</p>{% endif %}
+    </article>
+  </section>
+
+  <section class="admin-overview-section">
+    <h2>Platform summary</h2>
     <div class="admin-overview-panels">
-      <article class="admin-overview-panel">
-        <h3>Source connections</h3>
-        {% if source_attention_count %}
-          <ul class="admin-overview-list">
-          {% for source in sources %}{% if source.needs_attention %}<li><span>{{ source.name }}</span><time>{% if source.observed_at %}Last received {{ source.observed_at|date:"M j, Y, g:i A" }}{% else %}No data received{% endif %}</time></li>{% endif %}{% endfor %}
-          </ul>
-        {% else %}<p>All reported sources are current.</p>{% endif %}
-      </article>
-      <article class="admin-overview-panel">
-        <h3>Jobs and services</h3>
-        {% if jobs_health.issues %}<ul class="admin-overview-list">{% for issue in jobs_health.issues %}<li><span>{{ issue }}</span></li>{% endfor %}</ul>{% else %}<p>Schedules, capacity, and service check-ins agree.</p>{% endif %}
-      </article>
-      <article class="admin-overview-panel">
-        <h3>Operator work</h3>
-        {% if active_issue_count %}<p><strong>{{ active_issue_count }}</strong> open Issue{{ active_issue_count|pluralize }} need an operator decision or follow-up.</p><p><a href="{% url 'findings_queue' %}">Open Issues</a></p>{% else %}<p>No open Issues need operator follow-up.</p>{% endif %}
-      </article>
+      <article class="admin-overview-panel"><h3>Sources</h3><p>{% if health.sources_available %}{{ health.sources|length }} reporting · {{ health.source_attention_count }} need attention{% else %}Health data is unavailable.{% endif %}</p><p><a href="{% url 'sources_status' %}">Open Sources</a></p></article>
+      <article class="admin-overview-panel"><h3>Jobs</h3><p>Running {{ health.jobs_health.summary.running_runs|default:0 }} · Ready {{ health.jobs_health.summary.queued_runs|default:0 }} · Waiting {{ health.jobs_health.summary.waiting_dependencies|default:0 }}</p><p><a href="{% url 'admin_jobs' %}">Open Jobs</a></p></article>
+      <article class="admin-overview-panel"><h3>Issues</h3><p>{{ active_issue_count }} open Issue{{ active_issue_count|pluralize }} need operator follow-up.</p><p><a href="{% url 'findings_queue' %}">Open Issues</a></p></article>
     </div>
+  </section>
+
+  <section class="admin-overview-section">
+    <h2>Recent administrator activity</h2>
+    <article class="admin-overview-panel">
+      {% if recent_activity %}<ul class="admin-overview-list">{% for activity in recent_activity %}<li><span>{{ activity.label }}</span><time>{{ activity.occurred_at|date:"M j, Y, g:i A" }} ({{ activity.occurred_at|timesince }} ago)</time></li>{% endfor %}</ul>{% else %}<p>No recent administrator activity.</p>{% endif %}
+    </article>
   </section>
 
   <p class="admin-overview-links">Administration: <a href="{% url 'admin_settings' %}">Settings</a><a href="{% url 'admin_jobs_control_plane' %}">Job settings</a></p>

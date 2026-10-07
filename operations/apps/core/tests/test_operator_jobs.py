@@ -67,7 +67,11 @@ def test_jobs_use_safe_existing_controls():
 
 def test_admin_navigation_separates_jobs_services_health_and_settings():
     base_template = Path("templates/base.html").read_text(encoding="utf-8")
+    views = Path("apps/core/views.py").read_text(encoding="utf-8")
     overview_template = Path("templates/operations_admin_overview.html").read_text(
+        encoding="utf-8"
+    )
+    health_template = Path("templates/findings_admin_health.html").read_text(
         encoding="utf-8"
     )
     services_template = Path("templates/admin_services.html").read_text(encoding="utf-8")
@@ -80,8 +84,13 @@ def test_admin_navigation_separates_jobs_services_health_and_settings():
     assert "admin_services" in urls
     assert "admin_settings" in urls
     assert "Needs attention" in overview_template
-    assert "Source connections" in overview_template
-    assert "Operator work" in overview_template
+    assert "Overall Operations health" in overview_template
+    assert "Platform summary" in overview_template
+    assert "Recent administrator activity" in overview_template
+    assert "health.domains" in overview_template
+    assert "Health by area" in health_template
+    assert "def _admin_health_snapshot" in views
+    assert views.count("health = _admin_health_snapshot()") == 2
     assert "Deployment owns their lifecycle" in services_template
     assert "Django Admin" in settings_template
     get_template("admin_services.html")
