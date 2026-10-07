@@ -8789,30 +8789,27 @@ def admin_jobs(request: HttpRequest) -> HttpResponse:
                     "rows_touched": r[3],
                     "error": (r[4] or "")[:240],
                 }
-            cur.execute(
-                """
-                SELECT definition_key, enabled, capability_reason, cadence,
-                       next_due_at, last_consumed_due_at, last_requested_at,
-                       last_outcome, last_run_id
-                  FROM operations.job_schedules
-                 WHERE tenant_id = 1
-                 ORDER BY definition_key, scope_identity
-                """
-            )
-            for r in cur.fetchall():
-                schedule_status[r[0]] = {
-                    "enabled": r[1],
-                    "reason": r[2],
-                    "cadence": r[3],
-                    "next_due_at": r[4],
-                    "last_consumed_due_at": r[5],
-                    "last_requested_at": r[6],
-                    "last_outcome": r[7] or "",
-                    "last_run_id": r[8],
-                }
-    except Exception:
+    except DatabaseError:
+        log.exception("Jobs latest-status query failed")
         latest_by_execution = {}
         latest_terminal_by_execution = {}
+
+    try:
+        with transaction.atomic(), connection.cursor() as cur:
+            cur.execute("SET LOCAL operations.tenant_id = 1")
+            for row in _jobs_diagnostic_all("schedules", cur):
+                schedule_status[row["definition_key"]] = {
+                    "enabled": bool(row["enabled"]),
+                    "reason": row.get("capability_reason") or "",
+                    "cadence": row.get("cadence") or {},
+                    "next_due_at": row.get("next_due_at"),
+                    "last_consumed_due_at": row.get("last_consumed_due_at"),
+                    "last_requested_at": row.get("last_requested_at"),
+                    "last_outcome": row.get("last_outcome") or "",
+                    "last_run_id": row.get("last_run_id"),
+                }
+    except DatabaseError:
+        log.exception("Jobs schedule query failed")
         schedule_status = {}
 
     try:
@@ -9037,24 +9034,17 @@ def admin_job_detail(request: HttpRequest, job_id: str) -> HttpResponse:
     try:
         with transaction.atomic(), connection.cursor() as cur:
             cur.execute("SET LOCAL operations.tenant_id = 1")
-            cur.execute(
-                """SELECT definition_key, enabled, cadence, next_due_at,
-                          capability_reason, last_outcome
-                     FROM operations.job_schedules
-                    WHERE tenant_id = 1 AND definition_key = ANY(%s::text[])
-                    ORDER BY definition_key, scope_identity""",
-                (list(job.execution_keys),),
-            )
             schedules = [
                 {
-                    "job_key": row[0],
-                    "enabled": row[1],
-                    "cadence": row[2],
-                    "next_due_at": row[3],
-                    "reason": row[4] or "",
-                    "last_outcome": row[5] or "",
+                    "job_key": row["definition_key"],
+                    "enabled": bool(row["enabled"]),
+                    "cadence": row.get("cadence") or {},
+                    "next_due_at": row.get("next_due_at"),
+                    "reason": row.get("capability_reason") or "",
+                    "last_outcome": row.get("last_outcome") or "",
                 }
-                for row in cur.fetchall()
+                for row in _jobs_diagnostic_all("schedules", cur)
+                if row.get("definition_key") in job.execution_keys
             ]
     except DatabaseError:
         log.exception("Job schedule query failed: job=%s", job.key)

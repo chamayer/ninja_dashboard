@@ -1,5 +1,31 @@
 # Jobs ecosystem final-design reset
 
+## Jobs list schedule data correction (2026-10-07)
+
+## Status
+
+In progress — the Jobs list used direct reads of the protected schedule table.
+The Operations role correctly rejects those reads, but the page caught the
+error broadly and erased both schedule and historical-run summaries, producing
+false “Run manually” and “Not run yet” results. Use the existing restricted
+Jobs diagnostics API for schedule state in both list and detail views.
+
+## Scope and validation
+
+- Preserve table access restrictions; do not add direct grants.
+- Keep run and schedule failures independent so one unavailable data source
+  cannot erase unrelated truthful status.
+- Validate focused Jobs tests, Django checks, and the live operator surface
+  after automated deployment.
+
+## Checkpoint and next action
+
+The deployed Operations container reproduced `permission denied for table
+job_schedules` under the application role. The corrected views now use
+`jobs_admin_diagnostics_v1`, which already has the approved restricted grant.
+Focused tests (18), Django check, targeted Ruff, and `git diff --check` pass.
+Next: commit/push and confirm the live page receives schedules.
+
 ## Hudu terminology (2026-10-06)
 
 ## Status

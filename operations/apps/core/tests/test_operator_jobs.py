@@ -36,6 +36,8 @@ def test_jobs_present_one_list_detail_and_configuration_surface():
     assert 'as of {{ job.latest_at|date:"M j, Y, g:i A" }} ({{ job.latest_at|timesince }} ago)' in jobs_template
     assert "Last completed:" in views
     assert '"start_description": job.start_description' in views
+    assert "_jobs_diagnostic_all(\"schedules\", cur)" in views
+    assert "FROM operations.job_schedules" not in views[views.index("def admin_jobs("):views.index("def admin_jobs_run(")]
     assert "Job configuration" in jobs_template
     assert "Run history" in detail_template
     assert "Waiting for" in detail_template
