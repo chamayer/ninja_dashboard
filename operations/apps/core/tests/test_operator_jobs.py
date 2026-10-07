@@ -71,6 +71,7 @@ def test_admin_navigation_separates_jobs_services_health_and_settings():
     overview_template = Path("templates/operations_admin_overview.html").read_text(
         encoding="utf-8"
     )
+    jobs_template = Path("templates/admin_jobs.html").read_text(encoding="utf-8")
     health_template = Path("templates/findings_admin_health.html").read_text(
         encoding="utf-8"
     )
@@ -94,6 +95,9 @@ def test_admin_navigation_separates_jobs_services_health_and_settings():
     assert "SET LOCAL operations.tenant_id = 1" in views
     assert 'finding_type__name="source_failure"' in views
     assert "actor_kind=AuditLog.ActorKind.USER" in views
+    assert "occurrence_count=Count(\"id\")" in views
+    assert 'next_due_at = parse_datetime(next_due_at)' in views
+    assert "Next: {{ job.next_due_at" in jobs_template
     assert views.count("health = _admin_health_snapshot") == 2
     assert 'finding_type__category__name="platform_health"' in views
     assert "Deployment owns their lifecycle" in services_template

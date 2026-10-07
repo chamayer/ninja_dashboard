@@ -104,7 +104,7 @@
         {% if job.latest_at %}<span class="jobs-detail">as of {{ job.latest_at|date:"M j, Y, g:i A" }} ({{ job.latest_at|timesince }} ago)</span>{% endif %}
         {% if job.last_result %}<span class="jobs-detail">{{ job.last_result }}{% if job.last_result_at %} · {{ job.last_result_at|timesince }} ago{% endif %}</span>{% endif %}
       </td>
-      <td>{{ job.schedule_label }}{% if job.schedule_detail %}<span class="jobs-detail">{{ job.schedule_detail }}</span>{% endif %}{% if job.next_due_at %}<span class="jobs-detail">Next {{ job.next_due_at|date:"Y-m-d H:i:s" }}</span>{% endif %}</td>
+      <td>{{ job.schedule_label }}{% if job.schedule_detail %}<span class="jobs-detail">{{ job.schedule_detail }}</span>{% endif %}{% if job.next_due_at %}<span class="jobs-detail">Next: {{ job.next_due_at|date:"M j, Y, g:i A" }} (in {{ job.next_due_at|timeuntil }})</span>{% endif %}</td>
       <td>
         {% if job.active_run %}
           <form method="post" action="{% url 'admin_job_cancel' job.active_run.id %}">{% csrf_token %}<button class="jobs-action" type="submit">{% if job.state == 'running' %}Request stop{% else %}Cancel{% endif %}</button></form>
@@ -112,7 +112,7 @@
           <form method="post" action="{% url 'admin_job_retry' job.latest_run_id %}">{% csrf_token %}<button class="jobs-action" type="submit">Retry</button></form>
         {% elif job.schedule_label != 'Disabled' %}
           <form method="post" action="{% url 'admin_jobs_run' job_id=job.id %}">{% csrf_token %}<button class="jobs-action" type="submit">Run now</button></form>
-        {% else %}<span class="muted">Unavailable</span>{% endif %}
+        {% else %}<span class="muted">—</span>{% endif %}
       </td>
     </tr>
   {% endfor %}

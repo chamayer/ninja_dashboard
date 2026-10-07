@@ -46,6 +46,16 @@ computed context, `running_runs`/`ready_runs` consistency, source-failure
 ownership, and meaningful activity. Next: validate, push, and confirm the
 authenticated overview renders successfully.
 
+Live diagnosis then showed that all eleven waiting runs have valid blockers:
+six require upstream output revisions and five conflict with data currently
+held by the one running software-classification update. The latter retained a
+stale `capacity` category after dispatch found their domain locks unavailable.
+Forward migration 0261 will make the dispatcher record `resource` whenever a
+domain lock, rather than an execution pool, blocks promotion. The overview
+will also group identical user audit actions with a count. Next: validate the
+new dispatcher truth rule and concise activity presentation, then deploy and
+verify the five runs say another update is finishing first.
+
 ## Unified Jobs contract (2026-10-07)
 
 ## Status

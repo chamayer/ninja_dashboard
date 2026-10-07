@@ -23,6 +23,7 @@ from django.db.models import (
     Count,
     F,
     Func,
+    Max,
     OuterRef,
     Q,
     Subquery,
@@ -8879,11 +8880,14 @@ def admin_jobs(request: HttpRequest) -> HttpResponse:
         with transaction.atomic(), connection.cursor() as cur:
             cur.execute("SET LOCAL operations.tenant_id = 1")
             for row in _jobs_diagnostic_all("schedules", cur):
+                next_due_at = row.get("next_due_at")
+                if isinstance(next_due_at, str):
+                    next_due_at = parse_datetime(next_due_at)
                 schedule_status[row["definition_key"]] = {
                     "enabled": bool(row["enabled"]),
                     "reason": row.get("capability_reason") or "",
                     "cadence": row.get("cadence") or {},
-                    "next_due_at": row.get("next_due_at"),
+                    "next_due_at": next_due_at,
                     "last_consumed_due_at": row.get("last_consumed_due_at"),
                     "last_requested_at": row.get("last_requested_at"),
                     "last_outcome": row.get("last_outcome") or "",
@@ -16084,14 +16088,17 @@ def _admin_overview_recent_activity() -> list[dict]:
     try:
         recent_activity = list(
             AuditLog.objects.filter(tenant_id=1, actor_kind=AuditLog.ActorKind.USER)
-            .order_by("-occurred_at")
-            .values("action", "occurred_at")[:5]
+            .values("action")
+            .annotate(occurred_at=Max("occurred_at"), occurrence_count=Count("id"))
+            .order_by("-occurred_at", "action")[:5]
         )
     except DatabaseError:
         log.exception("Admin overview recent-activity query failed")
         return []
     for activity in recent_activity:
         activity["label"] = str(activity["action"]).replace("_", " ").replace(".", " ").capitalize()
+        if activity["occurrence_count"] > 1:
+            activity["label"] += f" — {activity['occurrence_count']} changes"
     return recent_activity
 
 
