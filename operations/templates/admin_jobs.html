@@ -100,9 +100,9 @@
       <td><a class="jobs-name" href="{% url 'admin_job_detail' job_id=job.id %}">{{ job.name }}</a><span class="jobs-description">{{ job.description }}</span></td>
       <td>
         <span class="jobs-state {{ job.state }}">Status: {{ job.status_label }}{% if job.needs_attention %} — needs attention{% endif %}</span>
-        {% if job.status_detail %}<span class="jobs-detail">{{ job.status_detail }}</span>{% endif %}
+        {% if job.capacity_blockers %}<span class="jobs-detail">Waiting for {{ job.capacity_label }}: {% for blocker in job.capacity_blockers %}<a href="{% url 'admin_job_detail' job_id=blocker.id %}">{{ blocker.name }}</a>{% if not forloop.last %}, {% endif %}{% endfor %}.</span>{% elif job.status_detail %}<span class="jobs-detail">{{ job.status_detail }}</span>{% endif %}
         {% if job.latest_at %}<span class="jobs-detail">as of {{ job.latest_at|date:"M j, Y, g:i A" }} ({{ job.latest_at|timesince }} ago)</span>{% endif %}
-        {% if job.last_result %}<span class="jobs-detail">{{ job.last_result }}{% if job.last_result_at %} · {{ job.last_result_at|timesince }} ago{% endif %}</span>{% endif %}
+        {% if job.last_result %}<details class="jobs-detail"><summary>Previous result</summary>{{ job.last_result }}{% if job.last_result_at %} · {{ job.last_result_at|date:"M j, Y, g:i A" }}{% endif %}</details>{% endif %}
       </td>
       <td>{{ job.schedule_label }}{% if job.schedule_detail %}<span class="jobs-detail">{{ job.schedule_detail }}</span>{% endif %}{% if job.next_due_at %}<span class="jobs-detail">Next: {{ job.next_due_at|date:"M j, Y, g:i A" }} (in {{ job.next_due_at|timeuntil }})</span>{% endif %}</td>
       <td>

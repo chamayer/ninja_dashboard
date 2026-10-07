@@ -7,6 +7,12 @@
 In progress — replace the conservative whole-run software catalog/inventory
 claims with a writer-only contract, while retaining durable execution safety.
 
+## Jobs current-status clarity (2026-10-07)
+
+In progress — name the occupied capacity and its running Job(s) directly on
+the waiting row, and move a previous terminal result out of current status.
+This is a presentation of the existing durable state, not a second queue.
+
 ## Goal and scope
 
 Make normal software-status updates coexist with inventory and intelligence

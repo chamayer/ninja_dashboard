@@ -8911,6 +8911,30 @@ def admin_jobs(request: HttpRequest) -> HttpResponse:
         if catalog_key:
             active_by_job.setdefault(catalog_key, []).append(active_run)
 
+    running_by_capacity: dict[str, list[dict]] = {}
+    for active_run in active_queue:
+        if active_run["status"] != "running" or active_run["job_key"] not in definition_keys():
+            continue
+        for capacity_key in definition(active_run["job_key"]).capacity_keys:
+            running_by_capacity.setdefault(capacity_key, []).append(active_run)
+
+    for active_run in active_queue:
+        if active_run.get("wait_category") != "capacity":
+            continue
+        capacity_keys = definition(active_run["job_key"]).capacity_keys
+        blockers: list[dict[str, str]] = []
+        for capacity_key in capacity_keys:
+            for running_run in running_by_capacity.get(capacity_key, []):
+                visible_key = operator_job_key_for_execution(running_run["job_key"])
+                if visible_key and not any(item["id"] == visible_key for item in blockers):
+                    blockers.append(
+                        {"id": visible_key, "name": operator_job_definition(visible_key).name}
+                    )
+        active_run["capacity_label"] = ", ".join(
+            EXECUTION_POOL_POLICIES[key]["label"] for key in capacity_keys
+        )
+        active_run["capacity_blockers"] = blockers
+
     def active_priority(run: dict) -> tuple[int, float]:
         rank = 0 if run["status"] == "running" else 1
         return rank, -run["requested_at"].timestamp()
@@ -9016,6 +9040,8 @@ def admin_jobs(request: HttpRequest) -> HttpResponse:
                 "state": state,
                 "status_label": status_label,
                 "status_detail": status_detail,
+                "capacity_label": active_run.get("capacity_label", "") if active_run else "",
+                "capacity_blockers": active_run.get("capacity_blockers", []) if active_run else [],
                 "latest_at": latest_at,
                 "last_result": last_result if active_run else "",
                 "last_result_at": last_result_at if active_run else None,
