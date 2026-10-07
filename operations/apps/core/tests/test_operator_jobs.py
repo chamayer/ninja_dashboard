@@ -98,6 +98,8 @@ def test_admin_navigation_separates_jobs_services_health_and_settings():
     assert "occurrence_count=Count(\"id\")" in views
     assert 'next_due_at = parse_datetime(next_due_at)' in views
     assert "Next: {{ job.next_due_at" in jobs_template
+    assert "Request stop for selected Jobs" in jobs_template
+    assert "job.active_run and job.state == 'running'" in jobs_template
     assert views.count("health = _admin_health_snapshot") == 2
     assert 'finding_type__category__name="platform_health"' in views
     assert "Deployment owns their lifecycle" in services_template

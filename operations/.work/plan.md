@@ -4,9 +4,9 @@
 
 ## Status
 
-In progress — the overview builds one health context with one owner per
-condition. This corrects presentation and ownership only; it does not alter
-Jobs execution, health policy, or source state.
+Complete — the overview builds one health context with one owner per
+condition, and Jobs records the actual reason active work cannot start. This
+corrects presentation and durable wait evidence without altering source data.
 
 ## Scope and decisions
 
@@ -55,6 +55,24 @@ domain lock, rather than an execution pool, blocks promotion. The overview
 will also group identical user audit actions with a count. Next: validate the
 new dispatcher truth rule and concise activity presentation, then deploy and
 verify the five runs say another update is finishing first.
+
+The normal Jobs list will not offer Cancel for automatic waiting or Ready
+work: those runs are expected to advance automatically and cancelling them
+commonly causes their scheduler or dependency request to recreate them. Its
+Action column will offer Request stop only for a running Job, Retry for a
+failed Job, and Run now only when no active automatic run exists. Cancel
+remains an intentional technical control on the individual run detail page.
+
+## Completion evidence
+
+Commit `c1b9f10` was pushed to `origin` and `a-m-rose`. Focused Jobs and
+migration tests (12), Django checks, migration discovery, focused Ruff, and
+`git diff --check` pass. Read-only rollout validation confirmed migration 0261
+is applied and reclassified the five previously stale capacity waits as
+resource waits. The live worker now has one processing Job running, five
+resource waits, five real processing-capacity waits, and two remaining
+upstream-data waits. Schedule cards render a parsed next timestamp and time
+until it is due; repeated user actions are grouped.
 
 ## Unified Jobs contract (2026-10-07)
 
