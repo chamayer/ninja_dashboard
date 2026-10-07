@@ -220,6 +220,12 @@ def test_platform_health_emits_admin_findings_not_entity_findings():
     assert "preserve_operator_episode" in section
 
 
+def test_platform_health_uses_parameter_safe_local_tenant_context():
+    source = (Path(__file__).parents[1] / "platform_findings.py").read_text()
+    assert "SELECT set_config('operations.tenant_id', %s, TRUE)" in source
+    assert "SET LOCAL operations.tenant_id = %s" not in source
+
+
 def test_platform_health_measures_all_governed_jobs_conditions_via_restricted_api():
     source = (Path(__file__).parents[1] / "platform_findings.py").read_text()
     assert "jobs_health_measurements_v1" in source

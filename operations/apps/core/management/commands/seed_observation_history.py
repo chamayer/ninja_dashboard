@@ -43,7 +43,9 @@ class Command(BaseCommand):
                )
         """
         with transaction.atomic(), connection.cursor() as cursor:
-            cursor.execute("SET LOCAL operations.tenant_id = %s", [tenant_id])
+            cursor.execute(
+                "SELECT set_config('operations.tenant_id', %s, TRUE)", [str(tenant_id)]
+            )
             cursor.execute(generic_count_sql, params)
             generic_count = cursor.fetchone()[0]
             cursor.execute(software_count_sql, params)

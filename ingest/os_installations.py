@@ -107,7 +107,7 @@ def project_all() -> dict[str, int | str]:
         "relationships_withdrawn": 0,
     }
     with db.transaction() as cur:
-        cur.execute("SET LOCAL operations.tenant_id = %s", (TENANT_ID,))
+        cur.execute("SELECT set_config('operations.tenant_id', %s, TRUE)", (str(TENANT_ID),))
         cur.execute(
             "SELECT to_regclass('operations.operating_system_installations') IS NOT NULL"
         )

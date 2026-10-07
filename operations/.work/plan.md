@@ -1,5 +1,23 @@
 # Jobs ecosystem final-design reset
 
+## Parameter-safe tenant context (2026-10-07)
+
+## Status
+
+Complete in the working tree — all discovered parameterized tenant-context
+paths now use PostgreSQL's parameter-safe `set_config(..., TRUE)` form.
+
+## Scope and validation
+
+- Correct the evaluator and all discovered Django/ingest runtime call sites;
+  preserve transaction-local RLS semantics and tenant isolation.
+- Add a regression assertion for the evaluator. Run focused condition/Jobs
+  tests, Django checks, compilation/lint, and `git diff --check`.
+- No migration or direct production queue/data manipulation. Validation:
+ 39 ingest condition tests, 4 focused Jobs tests, Django checks, focused lint,
+ compilation, and `git diff --check` pass. After push, automatic deployment
+ must prove the evaluator completes.
+
 ## Admin overview health hierarchy (2026-10-07)
 
 ## Status

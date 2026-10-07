@@ -59,7 +59,9 @@ class Command(BaseCommand):
                       o.observed_at DESC, o.observation_id DESC
         """
         with transaction.atomic(), connection.cursor() as cursor:
-            cursor.execute("SET LOCAL operations.tenant_id = %s", [tenant_id])
+            cursor.execute(
+                "SELECT set_config('operations.tenant_id', %s, TRUE)", [str(tenant_id)]
+            )
             cursor.execute(f"SELECT count(*) FROM ({latest}) latest", params)
             candidates = cursor.fetchone()[0]
         if options["dry_run"]:
@@ -67,7 +69,9 @@ class Command(BaseCommand):
             return
 
         with transaction.atomic(), connection.cursor() as cursor:
-            cursor.execute("SET LOCAL operations.tenant_id = %s", [tenant_id])
+            cursor.execute(
+                "SELECT set_config('operations.tenant_id', %s, TRUE)", [str(tenant_id)]
+            )
             cursor.execute(
                 f"""
                 INSERT INTO operations.entity_observation_current

@@ -110,7 +110,7 @@ def entity_admin_list(request: HttpRequest) -> HttpResponse:
         params.extend((f"%{search}%", search))
 
     with transaction.atomic(), connection.cursor() as cur:
-        cur.execute("SET LOCAL operations.tenant_id = %s", (tenant_id,))
+        cur.execute("SELECT set_config('operations.tenant_id', %s, TRUE)", (str(tenant_id),))
         cur.execute(
             f"""
             SELECT * FROM operations.v_entity_admin_summary
@@ -176,7 +176,7 @@ def entity_admin_detail(request: HttpRequest, entity_id: uuid.UUID) -> HttpRespo
     except ValueError:
         raise Http404("Observation evidence not found")
     with transaction.atomic(), connection.cursor() as cur:
-        cur.execute("SET LOCAL operations.tenant_id = %s", (tenant_id,))
+        cur.execute("SELECT set_config('operations.tenant_id', %s, TRUE)", (str(tenant_id),))
         cur.execute(
             "SELECT * FROM operations.v_entity_admin_summary WHERE tenant_id = %s AND id = %s",
             (tenant_id, entity_id),
@@ -280,7 +280,7 @@ def entity_observation_reveal(
     _require_restricted_evidence_permission(request)
     tenant_id = _tenant_id(request)
     with transaction.atomic(), connection.cursor() as cur:
-        cur.execute("SET LOCAL operations.tenant_id = %s", (tenant_id,))
+        cur.execute("SELECT set_config('operations.tenant_id', %s, TRUE)", (str(tenant_id),))
         cur.execute(
             "SELECT * FROM operations.v_entity_admin_summary WHERE tenant_id = %s AND id = %s",
             (tenant_id, entity_id),
@@ -352,7 +352,7 @@ def entity_attribute_reveal(
         else "operations.v_entity_attribute_claim_current"
     )
     with transaction.atomic(), connection.cursor() as cur:
-        cur.execute("SET LOCAL operations.tenant_id = %s", (tenant_id,))
+        cur.execute("SELECT set_config('operations.tenant_id', %s, TRUE)", (str(tenant_id),))
         cur.execute(
             "SELECT * FROM operations.v_entity_admin_summary WHERE tenant_id = %s AND id = %s",
             (tenant_id, entity_id),
@@ -422,7 +422,7 @@ def _entity_candidates_legacy_queue(request: HttpRequest) -> HttpResponse:
         params.append(entity_class)
 
     with transaction.atomic(), connection.cursor() as cur:
-        cur.execute("SET LOCAL operations.tenant_id = %s", (tenant_id,))
+        cur.execute("SELECT set_config('operations.tenant_id', %s, TRUE)", (str(tenant_id),))
         cur.execute(
             f"""
             SELECT * FROM operations.v_entity_candidate_admin
@@ -481,7 +481,7 @@ def entity_candidate_detail(request: HttpRequest, candidate_id: uuid.UUID) -> Ht
         clauses.append("display_label ILIKE %s")
         params.append(f"%{target_search}%")
     with transaction.atomic(), connection.cursor() as cur:
-        cur.execute("SET LOCAL operations.tenant_id = %s", (tenant_id,))
+        cur.execute("SELECT set_config('operations.tenant_id', %s, TRUE)", (str(tenant_id),))
         cur.execute(
             f"""
             SELECT id, display_label, client_display_name

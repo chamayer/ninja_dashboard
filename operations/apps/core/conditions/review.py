@@ -15,7 +15,7 @@ def record_identity_reviewed_distinct(*, actor, tenant_id: int, finding_id, reas
     if not reason or not reason.strip():
         raise ValidationError("A reviewed-distinct decision reason is required.")
     with transaction.atomic(), connection.cursor() as cursor:
-        cursor.execute("SET LOCAL operations.tenant_id = %s", (str(tenant_id),))
+        cursor.execute("SELECT set_config('operations.tenant_id', %s, TRUE)", (str(tenant_id),))
         cursor.execute(
             """
             SELECT condition_key,
@@ -55,7 +55,7 @@ def record_reviewed_distinct(
     if not reason or not reason.strip():
         raise ValidationError("A reviewed-distinct decision reason is required.")
     with transaction.atomic(), connection.cursor() as cursor:
-        cursor.execute("SET LOCAL operations.tenant_id = %s", (str(tenant_id),))
+        cursor.execute("SELECT set_config('operations.tenant_id', %s, TRUE)", (str(tenant_id),))
         cursor.execute(
             """SELECT operations.record_reviewed_distinct(%s,%s,%s,%s,%s,%s)""",
             (tenant_id, condition_identity, membership_fingerprint,

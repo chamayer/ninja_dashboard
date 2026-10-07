@@ -131,7 +131,7 @@ def evaluate(*, dry_run: bool = True) -> dict[str, int]:
     }
 
     with db.transaction() as cur:
-        cur.execute("SET LOCAL operations.tenant_id = %s", (TENANT_ID,))
+        cur.execute("SELECT set_config('operations.tenant_id', %s, TRUE)", (str(TENANT_ID),))
         ft_failure = _finding_type_id(cur, "source_failure")
         ft_queue = _finding_type_id(cur, "software_queue_stalled")
         jobs_types = {

@@ -14,7 +14,7 @@ def set_local_tenant(tenant_id: int) -> None:
         return
 
     with connection.cursor() as cursor:
-        cursor.execute("SET LOCAL operations.tenant_id = %s", [tenant_id])
+        cursor.execute("SELECT set_config('operations.tenant_id', %s, TRUE)", [str(tenant_id)])
 
 
 def current_tenant_id() -> int | None:

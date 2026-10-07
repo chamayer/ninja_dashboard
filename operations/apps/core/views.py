@@ -14281,7 +14281,9 @@ def sources_status(request: HttpRequest) -> HttpResponse:
     source_filter = (request.GET.get("source") or "").strip()
     with transaction.atomic():  # noqa: SIM117 -- matches existing transaction/GUC pattern
         with connection.cursor() as cur:
-            cur.execute("SET LOCAL operations.tenant_id = %s", (tenant_id,))
+            cur.execute(
+                "SELECT set_config('operations.tenant_id', %s, TRUE)", (str(tenant_id),)
+            )
             cur.execute(
                 """
                 SELECT id, source_name, client_display_name, enabled, run_platform,

@@ -36,7 +36,9 @@ class Command(BaseCommand):
         updated = 0
         while True:
             with transaction.atomic(), connection.cursor() as cursor:
-                cursor.execute("SET LOCAL operations.tenant_id = %s", [tenant_id])
+                cursor.execute(
+                    "SELECT set_config('operations.tenant_id', %s, TRUE)", [str(tenant_id)]
+                )
                 cursor.execute(
                     """
                     SELECT c.tenant_id, c.client_id, c.device_id, c.canonical_name,
