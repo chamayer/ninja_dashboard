@@ -105,6 +105,7 @@ from .models import (
     DevicePatchingOverride,
     DeviceSourceLink,
     Entity,
+    EntityCandidate,
     EntityType,
     EvaluatorConfig,
     Finding,
@@ -1350,7 +1351,7 @@ def home(request: HttpRequest) -> HttpResponse:  # noqa: PLR0912, PLR0915
                 },
                 {
                     "label": f"{pending_merges} possible duplicates",
-                    "href": reverse("merge_candidates_queue"),
+                    "href": f"{reverse('findings_queue')}?type=possible_duplicate_computers",
                 },
             ],
         },
@@ -5266,6 +5267,25 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
             for row in database_qs.values("finding_type__name").annotate(n=Count("id"))
         }
 
+    # Pending source identities need an explicit human decision. Include them
+    # in the same type count as the registered identity-resolution condition
+    # so the Issues navigation does not hide an active review queue merely
+    # because those records have no invented canonical Finding subject.
+    pending_entity_candidate_count = EntityCandidate.objects.filter(
+        tenant_id=1,
+        status=EntityCandidate.Status.PENDING,
+    ).count()
+    if pending_entity_candidate_count:
+        current_type_counts["identity_resolution_pending"] = (
+            current_type_counts.get("identity_resolution_pending", 0)
+            + pending_entity_candidate_count
+        )
+        candidate_state_counts = state_counts_by_type.setdefault(
+            "identity_resolution_pending",
+            {"needs_action": 0, "blocked": 0, "pending": 0},
+        )
+        candidate_state_counts["needs_action"] += pending_entity_candidate_count
+
     # Admin-owned conditions are still Issues.  They retain their separate
     # storage and admin-only controls, but must not disappear from the common
     # operator taxonomy or make a selected policy type appear empty.
@@ -5308,6 +5328,20 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
             .select_related("finding_type")
             .order_by("-last_detected_at")[:200]
         )
+        # One client candidate can collect several source groups.  Index its
+        # durable evidence keys so the Issue opens the audited match decision,
+        # not the old parallel queue.
+        client_candidates_by_source_record: dict[tuple[str, str], ClientCandidate] = {}
+        if any(finding.finding_type.name == "client_unattached_group" for finding in admin_rows):
+            for candidate in ClientCandidate.objects.filter(
+                tenant_id=1,
+                status=ClientCandidate.Status.OPEN,
+            ):
+                for source_ref in candidate.source_refs or []:
+                    source_id = source_ref.get("source_id")
+                    external_id = source_ref.get("external_id")
+                    if source_id is not None and external_id:
+                        client_candidates_by_source_record[(str(source_id), str(external_id))] = candidate
         source_ids = {
             (finding.subject_ref or {}).get("source_id")
             for finding in admin_rows
@@ -5367,6 +5401,23 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
                 and reference["observed_name"]
                 and reference["observed_name"] != reported_name
             ]
+            candidate = client_candidates_by_source_record.get(
+                (str(ref.get("source_id") or ""), str(ref.get("external_id") or ""))
+            )
+            if candidate:
+                resolution_url = reverse(
+                    "client_candidate_detail", kwargs={"candidate_id": candidate.id}
+                )
+                resolution_label = "Review match"
+            elif matching_reference:
+                resolution_url = (
+                    f"{reverse('client_mappings')}?"
+                    f"{urlencode({'source_link_id': matching_reference['source_link_id']})}"
+                )
+                resolution_label = "Review source record"
+            else:
+                resolution_url = f"{reverse('findings_admin_health')}?type={finding.finding_type.name}"
+                resolution_label = "View technical detail"
             admin_findings.append(
                 {
                     "finding": finding,
@@ -5395,13 +5446,39 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
                     "conflicting_references": conflicting_references,
                     "source_name": source_name,
                     "source_reference": source_reference,
-                    "admin_url": (
-                        f"{reverse('client_mappings')}?"
-                        f"{urlencode({'source_link_id': matching_reference['source_link_id']})}"
-                        if matching_reference
-                        else f"{reverse('findings_admin_health')}?type={finding.finding_type.name}"
-                    ),
-                    "admin_label": "Review mapping" if matching_reference else "Admin controls",
+                    "admin_url": resolution_url,
+                    "admin_label": resolution_label,
+                }
+            )
+
+    # A pending generic candidate is a human decision, whereas an
+    # ``observed_only`` candidate is simply retained source evidence.  The
+    # latter must not become a second, noisy work queue.  Pending candidates
+    # have no artificial Finding subject: a source identity is not a
+    # canonical entity.  They are nevertheless part of the operator's one
+    # Issues inbox and lead to the existing audited decision surface.
+    entity_candidate_items = []
+    if "identity_resolution_pending" in selected_admin_types:
+        candidate_qs = EntityCandidate.objects.filter(
+            tenant_id=1,
+            status=EntityCandidate.Status.PENDING,
+        )
+        if client_filter:
+            candidate_qs = candidate_qs.filter(client__slug=client_filter)
+        for candidate in (
+            candidate_qs.select_related("client", "proposed_entity_class", "source_instance__source")
+            .order_by("-last_observed_at")[:200]
+        ):
+            entity_candidate_items.append(
+                {
+                    "id": candidate.id,
+                    "source": candidate.source_instance.source.name,
+                    "record_type": candidate.external_namespace,
+                    "record_id": candidate.external_id,
+                    "entity_class": candidate.proposed_entity_class.display_name,
+                    "client": candidate.client,
+                    "last_observed_at": candidate.last_observed_at,
+                    "review_url": reverse("entity_candidate_detail", kwargs={"candidate_id": candidate.id}),
                 }
             )
 
@@ -5581,6 +5658,7 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
             "page_obj": page,
             "findings": page.object_list,
             "admin_findings": admin_findings,
+            "entity_candidate_items": entity_candidate_items,
             "finding_type_groups": finding_type_groups,
             "categories": categories,
             "clients": clients,
@@ -12411,6 +12489,11 @@ def client_policy_delete(request: HttpRequest, org_slug: str, policy_id: str) ->
 
 @login_required
 def merge_candidates_queue(request: HttpRequest) -> HttpResponse:
+    """Compatibility route for the retired duplicate-computer queue."""
+    return redirect(f"{reverse('findings_queue')}?type=possible_duplicate_computers")
+
+
+def _merge_candidates_legacy_queue(request: HttpRequest) -> HttpResponse:
     """Cross-source merge candidate review queue.
 
     The docstring here used to read "Empty until multi-source ingest lands."
@@ -14359,6 +14442,11 @@ def sources_status(request: HttpRequest) -> HttpResponse:
 
 @login_required
 def client_candidates_queue(request: HttpRequest) -> HttpResponse:
+    """Compatibility route for the retired parallel client-match queue."""
+    return redirect(f"{reverse('findings_queue')}?type=client_source_mapping")
+
+
+def _client_candidates_legacy_queue(request: HttpRequest) -> HttpResponse:
     """Every unattached source group that resolved neither by id-link nor by
     name lands here. The operator accepts, maps, excludes, or fixes.
     """

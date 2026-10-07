@@ -1,5 +1,96 @@
 # Jobs ecosystem final-design reset
 
+## Single Issues inbox and object context (2026-10-07)
+
+## Status
+
+Complete — Issues is the single operator inbox. The same standard Finding
+records remain visible on Computers, Software titles, and Clients; pending
+source-record matches are represented in the inbox without pretending that a
+source identity is a canonical entity.
+
+## Scope and decisions
+
+- An Issue is the only operator-facing actionable item. Object pages provide
+  filtered views of that same Issue, never copies with their own state.
+- Client matching conditions that concern a known client belong to the Issues
+  model and link back to that client. Unattached source groups remain in the
+  Issues inbox without inventing a client relationship.
+- The record-resolution page remains a focused action surface reached from an
+  Issue; it is not a competing navigation destination.
+- Keep Sources for connection and mapping-policy configuration. Keep Admin for
+  platform configuration and health, not outstanding data-quality work.
+- Preserve subject scope, tenant/RLS enforcement, source evidence, and
+  operator audit history. Do not convert platform-health findings to Issues.
+
+## Affected areas and validation
+
+- Findings emitter/read paths, candidate/mapping resolution routes, Client,
+  Computer, and Software title contextual panels, and navigation counts.
+- Add focused migration, queue, and page tests; run relevant pytest, Django
+  checks, Ruff, template loading, and diff checks. Verify the deployed surface
+  after the approved GitOps push without a manual Portainer deployment.
+
+## Completion evidence
+
+Existing Computer and Software title panels already read standard Findings.
+Client source-name conflicts are stored in `admin_findings`, while source
+matching has parallel candidate queues; this contradicts the single-inbox
+rule. Next: map each open mapping/candidate state to one durable Finding
+without duplicating its resolution data, then replace Admin navigation links.
+
+Verified correction: current client-name differences have already been moved
+to standard `operations.findings`; only legacy rows remain in
+`admin_findings` and are retired by the resolver. Unattached client groups and
+topology conflicts deliberately remain `admin_findings` because no single
+canonical client is their subject, but the Issues page already reads them.
+Generic `entity_candidates` uses `pending` only where an identity-authority
+policy permits establishment; `observed_only` is evidence, not operator work.
+Implemented: pending generic record matches are counted and rendered in the
+existing Issues type group; unresolved client-group issues link directly to
+their existing audited candidate-resolution page; the old Client, Entity, and
+duplicate-Computer queue routes are compatibility redirects to their
+respective Issues views. The Admin navigation no longer links to those queues;
+its shortcuts lead to Issues. Client pages show pending records scoped to that
+client; Computer and Software title contextual Finding panels already existed.
+Focused Issues tests (59), Django checks, targeted Ruff, template loading, and
+`git diff --check` pass. An unrelated generic-admin test still fails because
+`ConditionPolicyActivationForm` is absent from `apps.core.admin`.
+
+## Jobs administration (2026-10-07)
+
+## Status
+
+In progress — replace the diagnostic-first Job configuration page with an
+ administrator-facing Jobs administration page. It will show each Job's start
+ method, current schedule, next run, latest outcome, enablement, capacity, and
+ safe controls. Services is a parallel administrator surface for the scheduler
+ and workers, not a section inside Jobs. Timer schedules need durable
+ administrator overrides; triggered and manual Jobs must say why they have no
+ timer rather than appear unconfigured.
+
+## Scope and decisions
+
+- Preserve the scheduler registry as the default policy. Store an explicit
+  per-schedule administrator override for pause/resume and cadence so restarts
+  and reconciliation do not discard an approved change.
+- A disabled capability remains disabled even if its schedule is resumed.
+- Retain the restricted SQL boundary: the web application acts only through
+  security-definer APIs and records each change in the existing audit log.
+- Put read-only technical evidence behind a Diagnostics link; the default page
+  is plain-language administration, not a JSON record browser.
+- Add a parallel Services surface for Scheduler and Workers with current
+  health, heartbeat, queue/capacity impact, and a direct link to diagnostics.
+  Do not add unsafe start/stop controls: deployment owns service lifecycle;
+  schedule pause/resume remains a Job administrator control.
+
+## Validation and next action
+
+- Add migration/API tests, focused administrator view tests, Django checks,
+  and validate persisted overrides through the scheduler after deployment.
+- Next: inspect current schedule table constraints and add the durable override
+  contract before building the page.
+
 ## Jobs list schedule data correction (2026-10-07)
 
 ## Status

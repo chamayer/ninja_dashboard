@@ -383,12 +383,6 @@
                 <a class="nav-link nav-context {% if admin_group == 'overview' %}active{% endif %}"
                    href="{% url 'operations_admin_overview' %}">Overview</a>
                 <span class="nav-sep"></span>
-                <a class="nav-link nav-context {% if admin_tab == 'client-mappings' %}active{% endif %}"
-                   href="{% url 'client_mappings' %}">Client mappings</a>
-                <a class="nav-link nav-context {% if admin_tab == 'entities' %}active{% endif %}"
-                   href="{% url 'entity_candidates_queue' %}">Entity candidates{% if nav_pending_entity_candidates %} <span class="nav-badge">{{ nav_pending_entity_candidates }}</span>{% endif %}</a>
-                <a class="nav-link nav-context {% if admin_tab == 'clients' %}active{% endif %}"
-                   href="{% url 'client_candidates_queue' %}">Client candidates{% if nav_pending_client_candidates %} <span class="nav-badge">{{ nav_pending_client_candidates }}</span>{% endif %}</a>
                 <a class="nav-link nav-context {% if admin_tab == 'software' %}active{% endif %}"
                    href="{% url 'software_products' %}?flagged=1">Software decisions{% if nav_pending_software_decisions %} <span class="nav-badge">{{ nav_pending_software_decisions }}</span>{% endif %}</a>
                 <a class="nav-link nav-context {% if admin_tab == 'sources' %}active{% endif %}"

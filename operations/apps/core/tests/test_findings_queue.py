@@ -499,6 +499,23 @@ def test_findings_queue_exposes_governed_response_filter():
     assert "category_tiles" not in template
 
 
+def test_findings_queue_includes_pending_record_matches_without_promoting_evidence_to_issues():
+    source = Path("apps/core/views.py").read_text(encoding="utf-8")
+    template = Path("templates/findings_queue.html").read_text(encoding="utf-8")
+
+    assert "entity_candidate_items" in source
+    assert "EntityCandidate.Status.PENDING" in source
+    assert 'current_type_counts["identity_resolution_pending"]' in source
+    assert "client_candidates_by_source_record" in source
+    assert "observed_only" in source
+    assert "Records needing a match" in template
+    assert "Review match" in template
+    client_workspace = Path("apps/core/client_workspace.py").read_text(encoding="utf-8")
+    client_template = Path("templates/org_index.html").read_text(encoding="utf-8")
+    assert 'status=EntityCandidate.Status.PENDING' in client_workspace
+    assert "Records needing a match" in client_template
+
+
 def test_findings_queue_canonicalizes_legacy_category_urls():
     source = Path("apps/core/views.py").read_text(encoding="utf-8")
     assert "requested_category_filter = category_filter" in source

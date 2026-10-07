@@ -5,7 +5,7 @@
 {% block content %}
 <div class="card">
     <p style="margin: 0 0 0.5rem 0; font-size: 0.85rem;">
-        <a href="{% url 'client_candidates_queue' %}">← All candidates</a>
+        <a href="{% url 'findings_queue' %}?type=client_source_mapping">← Issues</a>
     </p>
     <h1 style="margin: 0;">{{ candidate.display_name|default:candidate.normalized_name }}</h1>
     <p class="muted">

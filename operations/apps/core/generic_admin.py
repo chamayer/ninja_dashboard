@@ -13,6 +13,7 @@ from django.core.paginator import Paginator
 from django.db import connection, transaction
 from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
 from django.views.decorators.cache import never_cache
 from django.views.decorators.http import require_GET, require_POST
 
@@ -400,6 +401,11 @@ def entity_attribute_reveal(
 @require_admin
 @require_GET
 def entity_candidates_queue(request: HttpRequest) -> HttpResponse:
+    """Compatibility route for the retired parallel record-match queue."""
+    return redirect(f"{reverse('findings_queue')}?type=computer_identity_matching")
+
+
+def _entity_candidates_legacy_queue(request: HttpRequest) -> HttpResponse:
     tenant_id = _tenant_id(request)
     status = (request.GET.get("status") or "pending").strip()
     entity_class = (request.GET.get("class") or "").strip()

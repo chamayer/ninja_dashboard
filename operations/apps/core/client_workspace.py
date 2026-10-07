@@ -11,7 +11,7 @@ from django.urls import reverse
 from django.utils import timezone
 
 from .device_status import get_device_status_policy
-from .models import Finding, MergeCandidate
+from .models import EntityCandidate, Finding, MergeCandidate
 from .templatetags.human_labels import humanize_label
 
 ACTIVE_FINDING_STATUSES = ("open", "acknowledged", "investigating")
@@ -415,6 +415,15 @@ def build_client_workspace(client, existing: dict, *, device_policy: dict | None
         source_delay_hours=device_policy["source_delay_hours"],
     )
     source_references = client_source_references(client_id=client.id)
+    pending_record_matches = list(
+        EntityCandidate.objects.filter(
+            tenant_id=1,
+            client=client,
+            status=EntityCandidate.Status.PENDING,
+        )
+        .select_related("proposed_entity_class", "source_instance__source")
+        .order_by("-last_observed_at")[:5]
+    )
     any_delayed = any(source["delayed"] for source in source_updates)
     latest_update = max(
         (source["updated_at"] for source in source_updates if source["updated_at"]),
@@ -598,6 +607,7 @@ def build_client_workspace(client, existing: dict, *, device_policy: dict | None
         "client_user_count": users.get(client.id, 0),
         "source_updates": source_updates,
         "source_references": source_references,
+        "pending_record_matches": pending_record_matches,
         "workspace_updated_at": latest_update,
         "attention_groups": attention_groups,
         "client_domains": domains,
