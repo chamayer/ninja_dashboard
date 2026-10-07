@@ -835,7 +835,7 @@ EXECUTION_POOL_POLICIES = MappingProxyType(
         },
         "capacity:processing": {
             "label": "Data processing",
-            "capacity": 1,
+            "capacity": 2,
             "minimum": 1,
             "maximum": 2,
         },
@@ -843,6 +843,7 @@ EXECUTION_POOL_POLICIES = MappingProxyType(
     }
 )
 READY_WINDOW_CAPACITY = 2
+# A fuse only: ordinary admission remains governed by the separate pools.
 EMERGENCY_CHILD_CAPACITY = sum(policy["capacity"] for policy in EXECUTION_POOL_POLICIES.values())
 
 _GLOBAL_ONLY = frozenset(
@@ -902,9 +903,6 @@ _RESOURCE_KEYS_BY_DEFINITION: dict[str, tuple[str, ...]] = {
 for _key in ("intel-nvd", "intel-cpe-dict", "intel-kev", "intel-epss", "intel-matcher"):
     _RESOURCE_KEYS_BY_DEFINITION[_key] += ("global:intel-cve-corpus",)
 for _key in (
-    "software-classify",
-    "software-classify-only",
-    "software-classify-full",
     "intel-winget",
     "intel-chocolatey",
     "intel-capability",
@@ -916,11 +914,10 @@ for _key in (
 for _key in (
     "software-enqueue-orgs",
     "software-queue-drain",
-    "software-classify",
-    "software-classify-only",
-    "software-classify-full",
 ):
     _RESOURCE_KEYS_BY_DEFINITION[_key] += ("tenant:{tenant_id}:software-inventory",)
+for _key in ("software-classify", "software-classify-only", "software-classify-full"):
+    _RESOURCE_KEYS_BY_DEFINITION[_key] += ("tenant:{tenant_id}:software-findings",)
 
 _CAPACITY_KEYS_BY_DEFINITION: dict[str, tuple[str, ...]] = {
     "patches": ("capacity:external-io",),

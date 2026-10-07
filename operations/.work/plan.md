@@ -1,5 +1,65 @@
 # Jobs ecosystem final-design reset
 
+## Software-update concurrency contract (2026-10-07)
+
+## Status
+
+In progress — replace the conservative whole-run software catalog/inventory
+claims with a writer-only contract, while retaining durable execution safety.
+
+## Goal and scope
+
+Make normal software-status updates coexist with inventory and intelligence
+refreshes without allowing stale derived findings or overlapping writes. Keep
+one operator-facing Job; do not turn classifier phases into separate Jobs.
+
+- Define resource claims as exclusive publishing ownership, not read access.
+  The classifier owns derived software findings and its reconciliation marker;
+  inventory and intelligence refreshes retain ownership of their respective
+  source domains.
+- Make incremental classification bounded and revision-safe: select a stable
+  input scope, publish only results still matching that scope, and leave
+  changed inputs for the existing targeted follow-up mechanism.
+- Ensure repeated schedule ticks coalesce behind an active equivalent run,
+  rather than accumulating duplicate work.
+- Raise the reviewed Data processing pool from one to two only after the
+  writer-only contract has coverage. Do not change production data or queues
+  directly; existing immutable active/queued runs drain under their recorded
+  definition.
+
+## Affected areas and validation
+
+- `shared/jobs_registry.py`, `ingest/software_findings.py`, the Jobs admission
+  contract/migration if needed, focused registry/classifier/queue tests, and
+  ADR-0026 because this refines its resource-ownership rule.
+- Validate registry snapshots, classifier stale-input and batch behavior,
+  coalescing, Django migration discovery/checks, focused Ruff, and diff
+  hygiene. Use read-only live evidence only after an approved deployment.
+
+## Current checkpoint and next action
+
+The current running incremental classifier holds `global:software-catalog` and
+`tenant:software-inventory` for its full run. It blocks five catalog/inventory
+writers and consumes the only Data processing slot. The registry and dispatcher
+correctly distinguish capacity from resource claims, but their policy does not
+distinguish read access from publishing ownership. Next: trace classifier
+publication/marker semantics and implement the revised writer-only contract
+without weakening exact-state reconciliation.
+
+Implemented in the working tree: future classifier definitions claim only
+`tenant:{tenant_id}:software-findings`; catalog and inventory writers retain
+their own locks. Migration 0262 seeds that new capacity-one domain lock and
+raises only Data processing to two. Incremental classification now takes a
+complete 250-device routine slice while consuming all explicit intelligence
+targets, so ordinary change backlogs yield between coalesced runs without
+splitting a device's findings. The exact-state marker still refuses to mark an
+input changed after selection; a later run retains and reconciles it. Focused
+static lint/import checks, compilation, Django checks, migration discovery,
+and diff hygiene pass. The focused ingest test could not collect without the
+required local Ninja/Postgres environment values. Next: add direct slice
+coverage, review the new migration against the Jobs resource constraint, then
+commit/push only with the requested deployment authorization.
+
 ## Admin overview ownership and snapshot (2026-10-07)
 
 ## Status

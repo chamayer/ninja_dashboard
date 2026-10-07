@@ -42,6 +42,7 @@ from shared.conditions.contracts import (
 log = logging.getLogger(__name__)
 
 _TENANT_ID = 1
+_INCREMENTAL_DEVICE_BATCH_SIZE = 250
 
 # Fallback defaults for the software classifier. Every knob can be
 # overridden per-tenant via operations.evaluator_config rows keyed on
@@ -115,7 +116,9 @@ def classify(tenant_id: int = _TENANT_ID, *, incremental: bool = False) -> int:
                 _reclassification_target_scope(cur, tenant_id) if incremental else ([], [])
             )
             if incremental and incremental_scope is not None:
-                incremental_scope = _merge_scopes(incremental_scope, targeted_scope)
+                incremental_scope = _merge_scopes(
+                    _bounded_incremental_scope(incremental_scope), targeted_scope
+                )
             if incremental and incremental_scope == []:
                 log.info("software_findings: no changed installations to classify")
                 return 0
@@ -580,6 +583,28 @@ def _reclassification_target_scope(cur, tenant_id: int) -> tuple[list[tuple], li
 def _merge_scopes(*scopes: list[tuple]) -> list[tuple]:
     """Deduplicate installation scopes while preserving their current snapshot."""
     return list({row[0]: row for scope in scopes for row in scope}.values())
+
+
+def _bounded_incremental_scope(scope: list[tuple]) -> list[tuple]:
+    """Return complete device slices so routine reconciliation yields promptly.
+
+    A classifier finding can depend on every installed product on one device,
+    so a slice never separates installations from the same device.  Changed
+    rows outside the slice retain their marker mismatch and are selected by the
+    next coalesced incremental run.  Intelligence-triggered targets are not
+    sliced: they are explicit follow-up work and must be consumed together.
+    """
+    selected_devices: set[uuid.UUID] = set()
+    selected: list[tuple] = []
+    for row in scope:
+        device_id = row[1]
+        if device_id not in selected_devices:
+            if len(selected_devices) >= _INCREMENTAL_DEVICE_BATCH_SIZE:
+                continue
+            selected_devices.add(device_id)
+        if device_id in selected_devices:
+            selected.append(row)
+    return selected
 
 
 def _table_exists(cur, qualified_name: str) -> bool:

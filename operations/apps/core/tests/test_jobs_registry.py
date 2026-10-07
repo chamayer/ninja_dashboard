@@ -231,7 +231,7 @@ def test_legacy_definitions_cannot_be_automatically_scheduled():
 
 def test_registry_exposes_the_approved_pool_and_resource_policy():
     assert READY_WINDOW_CAPACITY == 2
-    assert EMERGENCY_CHILD_CAPACITY == 4
+    assert EMERGENCY_CHILD_CAPACITY == 5
     assert dict(EXECUTION_POOL_POLICIES) == {
         "capacity:external-io": {
             "label": "Data retrieval",

@@ -42,9 +42,13 @@ deployment-wide emergency child ceiling of four is a safety fuse, not ordinary
 scheduling policy.
 
 Domain resource claims remain capacity one and cannot be changed through the
-capacity control surface. They serialize actual overlapping writers. Broad
-locks may be narrowed only after handler review proves that PostgreSQL's
-committed-state reads and a follow-on revision preserve correctness.
+capacity control surface. They serialize actual overlapping publishers: a
+definition claims a domain only when it publishes that domain's state. Reading
+source or intelligence data does not require a domain claim; a handler instead
+uses its selected input state and leaves inputs that change during evaluation
+for the next targeted reconciliation. Broad locks may be narrowed only after
+handler review proves that this exact-state/follow-on rule preserves
+correctness.
 
 ## Dispatch and workers
 
