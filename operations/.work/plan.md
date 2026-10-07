@@ -63,6 +63,17 @@ forward migration, then use read-only rollout evidence to verify its database
 application, current Ready/Waiting counts, scheduler/worker progress, and
 health evaluator recovery.
 
+Rollout evidence found a policy-registration gap rather than a capacity-rule
+failure: two stalled source runs hold the two external-data slots, although
+their handlers have approved replay-safe authorities. Their historical
+definition digests were not registered in `job_recovery_policies`, so the
+existing reconciler correctly refused to release them. Forward migration 0260
+registers only a stalled run that still has a contained claim and an existing
+replay-safe authority; the existing worker then performs the audited release.
+It does not release unreviewed work or alter run history. Next: validate and
+deploy 0260, then prove those claims release and compatible waiting work can
+start.
+
 ## Parameter-safe tenant context (2026-10-07)
 
 ## Status
