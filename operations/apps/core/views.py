@@ -16238,10 +16238,9 @@ def _admin_health_snapshot(now=None) -> dict:
 
 
 def _operations_admin_overview_snapshot() -> dict:
-    """Read every Admin-overview value from one tenant-scoped database moment."""
+    """Build the complete overview context once for one tenant-scoped request."""
     now = timezone.now()
     with transaction.atomic(), connection.cursor() as cur:
-        cur.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ")
         cur.execute("SET LOCAL operations.tenant_id = 1")
         health = _admin_health_snapshot(now)
         active_issue_count = Finding.objects.filter(

@@ -4,16 +4,16 @@
 
 ## Status
 
-Implemented locally — the overview now reads from one repeatable-read health
-snapshot with one owner per condition. This corrects presentation and
-ownership only; it does not alter Jobs execution, health policy, or source
-state.
+In progress — the overview builds one health context with one owner per
+condition. This corrects presentation and ownership only; it does not alter
+Jobs execution, health policy, or source state.
 
 ## Scope and decisions
 
-- Build the page context inside one tenant-scoped repeatable-read transaction
-  so its status cards, attention list, summary, Issue count, and recent
-  administrator activity cannot mix database moments.
+- Build the page context once inside the existing tenant-scoped request
+  transaction, so all rendered Jobs values come from the same computed health
+  result. Request authentication has already queried PostgreSQL, so it cannot
+  safely change transaction isolation inside the view.
 - Sources owns `source_failure`: it is evidence that a source collection is
   failed or overdue, including the resulting coverage skip. It must not also
   count as an independent System check.
@@ -38,9 +38,13 @@ Live evidence showed one overview with conflicting Jobs counts and four
 `source_failure` platform findings duplicated beside stale-source conditions.
 The current active state is three running Jobs, eight capacity waits, and six
 prerequisite waits. Focused Jobs/Admin tests (20), Django checks, focused
-Ruff, template loading, and `git diff --check` pass. Next: commit, push, and
-read-only verify the overview renders one Jobs count and assigns source
-collection failures to Sources only.
+Ruff, template loading, and `git diff --check` passed before rollout. Commit
+`aedbfe6` was pushed to `origin` and `a-m-rose`, but its isolation command
+caused a 500 because request authentication had already queried PostgreSQL.
+The forward correction removes that invalid command while retaining the shared
+computed context, `running_runs`/`ready_runs` consistency, source-failure
+ownership, and meaningful activity. Next: validate, push, and confirm the
+authenticated overview renders successfully.
 
 ## Unified Jobs contract (2026-10-07)
 

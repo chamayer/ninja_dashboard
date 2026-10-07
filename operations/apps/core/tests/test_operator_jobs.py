@@ -91,7 +91,7 @@ def test_admin_navigation_separates_jobs_services_health_and_settings():
     assert "Health by area" in health_template
     assert "def _admin_health_snapshot" in views
     assert "def _operations_admin_overview_snapshot" in views
-    assert "SET TRANSACTION ISOLATION LEVEL REPEATABLE READ" in views
+    assert "SET LOCAL operations.tenant_id = 1" in views
     assert 'finding_type__name="source_failure"' in views
     assert "actor_kind=AuditLog.ActorKind.USER" in views
     assert views.count("health = _admin_health_snapshot") == 2
