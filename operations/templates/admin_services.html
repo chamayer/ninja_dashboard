@@ -38,5 +38,5 @@
   {% else %}<p class="muted">No scheduler or worker check-ins have been recorded.</p>{% endif %}
 </section>
 
-{% if jobs_health.summary %}<section class="service-card"><h2>Job load</h2><p class="muted">Ready {{ jobs_health.summary.queued_runs|default:0 }} · Running {{ jobs_health.summary.running_runs|default:0 }} · Waiting {{ jobs_health.summary.waiting_dependencies|default:0 }} · Contained claims {{ jobs_health.summary.contained_claims|default:0 }}</p><p><a href="{% url 'admin_jobs' %}">Open Jobs</a></p></section>{% endif %}
+{% if jobs_health.summary %}<section class="service-card"><h2>Job load</h2><p class="muted">Ready {{ jobs_health.summary.ready_runs|default:0 }} · Running {{ jobs_health.summary.running_runs|default:0 }} · Waiting {{ jobs_health.summary.waiting_runs|default:0 }} · Contained claims {{ jobs_health.summary.contained_claims|default:0 }}</p><p><a href="{% url 'admin_jobs' %}">Open Jobs</a></p></section>{% endif %}
 {% endblock %}

@@ -64,7 +64,7 @@
     <h2>Platform summary</h2>
     <div class="admin-overview-panels">
       <article class="admin-overview-panel"><h3>Sources</h3><p>{% if health.sources_available %}{{ health.sources|length }} reporting · {{ health.source_attention_count }} need attention{% else %}Health data is unavailable.{% endif %}</p><p><a href="{% url 'sources_status' %}">Open Sources</a></p></article>
-      <article class="admin-overview-panel"><h3>Jobs</h3><p>Running {{ health.jobs_health.summary.running_runs|default:0 }} · Ready {{ health.jobs_health.summary.queued_runs|default:0 }} · Waiting {{ health.jobs_health.summary.waiting_dependencies|default:0 }}</p><p><a href="{% url 'admin_jobs' %}">Open Jobs</a></p></article>
+      <article class="admin-overview-panel"><h3>Jobs</h3><p>Running {{ health.jobs_health.summary.running_runs|default:0 }} · Ready {{ health.jobs_health.summary.ready_runs|default:0 }} · Waiting {{ health.waiting_runs|default:0 }}</p><p><a href="{% url 'admin_jobs' %}">Open Jobs</a></p></article>
       <article class="admin-overview-panel"><h3>Issues</h3><p>{{ active_issue_count }} open Issue{{ active_issue_count|pluralize }} need operator follow-up.</p><p><a href="{% url 'findings_queue' %}">Open Issues</a></p></article>
     </div>
   </section>

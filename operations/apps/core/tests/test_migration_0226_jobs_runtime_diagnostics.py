@@ -33,3 +33,16 @@ def test_jobs_runtime_health_and_admin_diagnostics_are_governed():
     assert "GRANT SELECT ON operations.job_runtime_heartbeats" not in sql
     assert "input_revisions, output_revisions, request_payload" in sql
     assert "input_revisions, output_revisions, requested_input" not in sql
+
+
+def test_current_jobs_lifecycle_is_derived_without_duplicate_storage():
+    migration = importlib.import_module("apps.core.migrations.0259_jobs_current_lifecycle")
+    sql = migration.FORWARD_SQL
+    assert "jobs_current_lifecycle_v1" in sql
+    assert "wait_category" in sql
+    assert "waiting_for_capacity" in sql
+    assert "waiting_for_protected_update" in sql
+    assert "ready_runs" in sql
+    assert "waiting_runs" in sql
+    assert "'queued_runs'" not in sql
+    assert "CREATE TABLE" not in sql

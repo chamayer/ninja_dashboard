@@ -9340,6 +9340,25 @@ def _operator_job_name(execution_key: str) -> str:
     return operator_job_definition(job_key).name
 
 
+def _operator_run_lifecycle(status: str, wait_category: str | None) -> tuple[str, str]:
+    """Return the one operator-facing lifecycle derived from durable run state."""
+    if status == "stalled":
+        return "failed", "Needs attention"
+    if status != "queued":
+        return (
+            status,
+            {
+                "running": "Running",
+                "completed": "Completed",
+                "failed": "Needs attention",
+                "cancelled": "Stopped",
+            }.get(status, status.replace("_", " ").title()),
+        )
+    if wait_category:
+        return "waiting", "Waiting"
+    return "ready", "Ready to start"
+
+
 def _operator_run_wait_explanation(run: dict) -> str:
     """Explain one waiting cause without exposing execution internals."""
     wait_category = run.get("wait_category")
@@ -9358,12 +9377,12 @@ def _operator_run_wait_explanation(run: dict) -> str:
         )
         if names:
             return "Waiting for: " + ", ".join(names) + "."
-        return "Waiting for a required Job."
+        return "Waiting for a related update to finish."
     if wait_category == "resource":
-        return "Another Job is updating the same data."
+        return "Another update is finishing first."
     if wait_category == "capacity":
-        return "The system is busy with this type of task."
-    return "Ready to start."
+        return "Other updates are using the available capacity."
+    return "Starts shortly."
 
 
 def _operator_job_runs(
@@ -9531,13 +9550,6 @@ def _operator_job_runs(
                     "root_run_id": detail[7],
                 }
     labels = {entry["id"]: entry["name"] for entry in _JOB_CATALOG}
-    status_labels = {
-        "running": "Running",
-        "completed": "Completed",
-        "failed": "Failed",
-        "stalled": "Failed",
-        "cancelled": "Cancelled",
-    }
     now = timezone.now()
 
     def result_label(status: str, rows_touched, error: str) -> str:
@@ -9563,15 +9575,6 @@ def _operator_job_runs(
             return f"{seconds // 60}m"
         return f"{seconds // 3600}h {(seconds % 3600) // 60}m"
 
-    def lifecycle(status: str, wait_category: str | None) -> tuple[str, str]:
-        if status == "stalled":
-            return "failed", "Failed"
-        if status != "queued":
-            return status, status_labels.get(status, status)
-        if wait_category:
-            return "waiting", "Waiting"
-        return "ready", "Ready"
-
     runs = [
         {
             "id": row[0],
@@ -9591,11 +9594,11 @@ def _operator_job_runs(
             "recovery": recovery_by_job.get(row[0]),
             "status_class": "completed"
             if row[0] in recovery_by_job
-            else lifecycle(row[7], row[20])[0],
+            else _operator_run_lifecycle(row[7], row[20])[0],
             "status_label": "Recovered automatically"
             if row[0] in recovery_by_job
-            else lifecycle(row[7], row[20])[1],
-            "lifecycle": lifecycle(row[7], row[20])[0],
+            else _operator_run_lifecycle(row[7], row[20])[1],
+            "lifecycle": _operator_run_lifecycle(row[7], row[20])[0],
             "attempts": row[8],
             "rows_touched": row[9],
             "error": row[10],
@@ -16151,6 +16154,8 @@ def _admin_health_snapshot() -> dict:
     )
     condition_count = sum(domain_counts)
     affected_domain_count = sum(count > 0 for count in domain_counts)
+    jobs_summary = jobs_health["summary"]
+    waiting_runs = int(jobs_summary.get("waiting_runs") or 0)
     if unavailable:
         overall_state = "unavailable"
         overall_label = "Unavailable"
@@ -16173,9 +16178,8 @@ def _admin_health_snapshot() -> dict:
             "count": len(jobs_issues),
             "available": jobs_health["available"],
             "detail": (
-                f"Running {jobs_health['summary'].get('running_runs') or 0} · "
-                f"Ready {jobs_health['summary'].get('queued_runs') or 0} · "
-                f"Waiting {jobs_health['summary'].get('waiting_dependencies') or 0}"
+                f"Running {jobs_summary.get('running') or 0} · "
+                f"Ready {jobs_summary.get('ready') or 0} · Waiting {waiting_runs}"
             ),
             "url_name": "admin_jobs",
             "url_label": "Review Jobs",
@@ -16215,6 +16219,7 @@ def _admin_health_snapshot() -> dict:
         "sources_available": sources_available,
         "source_attention_count": source_attention_count,
         "jobs_health": jobs_health,
+        "waiting_runs": waiting_runs,
         "jobs_attention_count": len(jobs_issues),
         "services_current": services_current,
         "latest_service_checkin": latest_service_checkin,

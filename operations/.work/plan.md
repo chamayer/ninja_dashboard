@@ -1,5 +1,68 @@
 # Jobs ecosystem final-design reset
 
+## Unified Jobs contract (2026-10-07)
+
+## Status
+
+In progress — replace conflicting Jobs interpretations with one contract over
+existing durable records. The uncommitted parallel lifecycle-summary migration
+was discarded; no second Job, health, queue, or workflow model will be added.
+
+## Goal and fixed design
+
+Five responsibilities use one durable run/schedule/claim/dependency contract:
+Data supplies revisions and fixed domain locks; Control defines schedules,
+capacity, timeouts, and recovery policy; Execution writes durable state;
+Health assesses current behavior against Control expectations; Administration
+shows plain-language status and submits audited, safe actions.
+
+- A queued run is Ready only when it has no durable wait category and is within
+  the database-enforced Ready bound. Dependency, protected-data, and capacity
+  waits remain queued physically but have separate operator lifecycle meaning.
+- Extend the existing restricted Jobs diagnostics and health-measurement APIs;
+  do not add a parallel summary API. Every consumer uses the same lifecycle
+  classification and health thresholds.
+- Human-facing status uses `Status`, a named blocking update, and the next
+  outcome. Internal terms such as claims, pools, lanes, and protected work are
+  administrator detail only.
+- Health counts current threshold breaches only. Historic terminal rows and
+  ordinary Issues never affect platform health.
+
+## Implementation order
+
+1. Audit and centralize lifecycle classification in the existing Jobs SQL
+   contract, with migration-backed compatibility for existing history.
+2. Make dispatcher transitions, recovery, diagnostics, and health measurements
+   use that contract; prove Ready cannot exceed its bound and blocked work does
+   not starve compatible work.
+3. Move Jobs, Activity, Admin Health, and the overview to the shared result;
+   render named blockers and safe next actions.
+4. Reconcile definition drift and contained claims through existing Control and
+   recovery policy, then verify live scheduler/worker progress without direct
+   queue manipulation.
+
+## Validation and checkpoint
+
+Use focused SQL/migration contention tests, registry/worker tests, Jobs and
+Health request/template tests, Django checks, and a read-only live audit of
+Ready, Waiting reasons, claims, schedules, and evaluator outcomes. Current
+live evidence: raw queued counts are mislabeled Ready; four schedules use old
+definitions; contained claims require recovery; and the evaluator failure is
+fixed in pushed commit `8861ab9` but awaits automatic rollout.
+
+Implemented in the working tree: `jobs_current_lifecycle_v1` derives current
+Ready, Waiting, and Running meanings directly from existing run status and
+wait category, with no new table. The existing restricted diagnostics and
+health-measurement APIs now call that contract; neither reports physical
+queued rows as Ready, and the evaluator no longer recalculates lifecycle data
+in Python. Jobs, Activity, Services, and the Admin overview use the same
+operator labels and plain-language wait explanations. Focused contract, Jobs,
+dispatch, registry, and worker tests (67 total), Django checks, focused lint,
+migration discovery, and `git diff --check` pass. Next: commit and push this
+forward migration, then use read-only rollout evidence to verify its database
+application, current Ready/Waiting counts, scheduler/worker progress, and
+health evaluator recovery.
+
 ## Parameter-safe tenant context (2026-10-07)
 
 ## Status

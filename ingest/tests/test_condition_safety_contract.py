@@ -240,6 +240,7 @@ def test_platform_health_measures_all_governed_jobs_conditions_via_restricted_ap
     ):
         assert condition in source
     assert '"control_section"' in source
+    assert "jobs_current_lifecycle_v1" not in source
 
 
 def test_assessment_policy_digest_is_required_and_bound_to_version():
