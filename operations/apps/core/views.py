@@ -15961,153 +15961,70 @@ def admin_settings(request: HttpRequest) -> HttpResponse:
 @login_required
 @require_admin
 def operations_admin_overview(request: HttpRequest) -> HttpResponse:
-    """Operations Admin landing — one hub with every admin/operator
-    surface grouped by workflow area. Counts are cheap; each tile is
-    also a link."""
+    """Show concise, current administration health without duplicating detail pages."""
     now = timezone.now()
-
-    with transaction.atomic(), connection.cursor() as cur:
-        cur.execute("SET LOCAL operations.tenant_id = 1")
-        cur.execute(
-            """
-            SELECT platform, last_observed_at, last_run_ok
-            FROM operations.source_health_current
-            WHERE tenant_id = 1
-            """
-        )
-        source_health = cur.fetchall()
-        cur.execute(
-            """
-            SELECT count(*)::integer, COALESCE(sum(conflict_count), 0)::integer
-              FROM operations.v_entity_admin_summary
-             WHERE tenant_id = 1 AND deleted_at IS NULL
-            """
-        )
-        generic_entity_count, generic_conflict_count = cur.fetchone()
-        cur.execute(
-            """
-            SELECT count(*) FILTER (WHERE status = 'pending')::integer,
-                   count(*) FILTER (WHERE status = 'observed_only')::integer
-              FROM operations.v_entity_candidate_admin
-             WHERE tenant_id = 1
-            """
-        )
-        generic_pending_candidates, generic_observed_candidates = cur.fetchone()
-        cur.execute(
-            "SELECT count(*)::integer FROM operations.v_source_instance_health WHERE tenant_id = 1"
-        )
-        generic_source_instance_count = cur.fetchone()[0]
-        cur.execute(
-            """
-            SELECT count(*)::integer,
-                   count(*) FILTER (WHERE mapping_state = 'review')::integer
-              FROM operations.v_client_source_mapping_effective
-             WHERE tenant_id = 1
-            """
-        )
-        client_mapping_count, client_mapping_review_count = cur.fetchone()
-    stale_sources = sum(
-        observed_at is None or not run_ok or (now - observed_at).total_seconds() > 8 * 3600
-        for _platform, observed_at, run_ok in source_health
-    )
-
-    # Intel connector status (optional — may not be present pre-migration).
-    intel_ok = intel_failed = intel_never = 0
+    sources = []
     try:
         with transaction.atomic(), connection.cursor() as cur:
             cur.execute("SET LOCAL operations.tenant_id = 1")
-            cur.execute("SELECT last_status FROM operations.intel_ingest_status")
-            for (status,) in cur.fetchall():
-                if status == "ok":
-                    intel_ok += 1
-                elif status:
-                    intel_failed += 1
-                else:
-                    intel_never += 1
-        # No backfill against a guessed total. Migration 105 seeds a
-        # placeholder row (last_status NULL) for every known connector, so
-        # "never run" is exactly the rows that are that placeholder --
-        # data, not a hardcoded count kept in sync by hand against a
-        # connector list that lives in a different service's source.
-    except Exception:
-        intel_ok = intel_failed = intel_never = 0
+            cur.execute(
+                """
+                SELECT platform, last_observed_at, last_run_ok
+                  FROM operations.source_health_current
+                 WHERE tenant_id = 1
+                 ORDER BY platform
+                """
+            )
+            for platform, observed_at, last_run_ok in cur.fetchall():
+                needs_attention = (
+                    observed_at is None
+                    or not last_run_ok
+                    or (now - observed_at).total_seconds() > 8 * 3600
+                )
+                sources.append(
+                    {
+                        "name": platform,
+                        "observed_at": observed_at,
+                        "needs_attention": needs_attention,
+                    }
+                )
+    except DatabaseError:
+        log.exception("Admin overview source-health query failed")
 
-    # One grouped query instead of three sequential .count() round trips
-    # against the same base filter. `nav_pending_software_decisions` below
-    # used to issue a fourth, byte-for-byte duplicate of the software count;
-    # it now reuses this result instead of re-querying.
-    _finding_tile_counts = Finding.objects.filter(
+    jobs_health = _jobs_control_health()
+    live_runtime_kinds = set()
+    latest_service_checkin = None
+    for runtime in jobs_health["runtimes"]:
+        heartbeat = parse_datetime(str(runtime.get("heartbeat_at") or ""))
+        if heartbeat and (latest_service_checkin is None or heartbeat > latest_service_checkin):
+            latest_service_checkin = heartbeat
+        if (
+            heartbeat
+            and not runtime.get("stopped_at")
+            and now - heartbeat <= timedelta(minutes=3)
+        ):
+            live_runtime_kinds.add(str(runtime.get("runtime_kind")))
+    services_current = {"scheduler", "worker"}.issubset(live_runtime_kinds)
+    active_issue_count = Finding.objects.filter(
         tenant_id=1, status__in=_FINDING_ACTIVE_STATUSES
-    ).aggregate(
-        total=Count("id"),
-        software=Count("id", filter=Q(finding_type__category__name="software")),
-        patching=Count("id", filter=Q(finding_type__category__name="patching")),
-    )
-    open_findings = _finding_tile_counts["total"]
-    software_findings_open = _finding_tile_counts["software"]
-    patching_findings_open = _finding_tile_counts["patching"]
-    software_decision_count = SoftwareDecision.objects.filter(tenant_id=1).count()
-    classifier_rule_count = 0
-    try:
-        from .models import SoftwareClassifierRule
-
-        classifier_rule_count = SoftwareClassifierRule.objects.filter(enabled=True).count()
-    except Exception:
-        classifier_rule_count = 0
+    ).count()
+    platform_health_count = AdminFinding.objects.filter(
+        tenant_id=1, status__in=("open", "acknowledged")
+    ).count()
 
     return render(
         request,
         "operations_admin_overview.html",
         {
             "admin_group": "overview",
-            # Review counts
-            "nav_pending_client_candidates": ClientCandidate.objects.filter(
-                tenant_id=1, status="open"
-            ).count(),
-            "nav_pending_entity_candidates": generic_pending_candidates,
-            "nav_pending_merges": MergeCandidate.objects.filter(tenant_id=1, status="open").count(),
-            # Was a separate, byte-for-byte duplicate of software_findings_open
-            # below: same tenant, same status filter, same category filter,
-            # queried twice.
-            "nav_pending_software_decisions": software_findings_open,
-            "open_findings": open_findings,
-            "software_findings_open": software_findings_open,
-            "patching_findings_open": patching_findings_open,
-            # Software surface
-            "software_decision_count": software_decision_count,
-            "classifier_rule_count": classifier_rule_count,
-            # Config counts
-            "profile_count": RequirementProfile.objects.filter(tenant_id=1).count(),
-            "profiles_without_clients": RequirementProfile.objects.filter(
-                tenant_id=1, clients__isnull=True
-            ).count(),
-            "alert_rule_count": NotificationRule.objects.filter(tenant_id=1, enabled=True).count(),
-            "suppression_count": SuppressionRule.objects.filter(tenant_id=1).count(),
-            # Integrations
-            "source_count": generic_source_instance_count,
-            "stale_sources": stale_sources,
-            "generic_entity_count": generic_entity_count,
-            "generic_conflict_count": generic_conflict_count,
-            "generic_observed_candidates": generic_observed_candidates,
-            "client_mapping_count": client_mapping_count,
-            "client_mapping_review_count": client_mapping_review_count,
-            "client_mapping_ambiguity_count": AdminFinding.objects.filter(
-                tenant_id=1,
-                status__in=("open", "acknowledged"),
-                finding_type__name__in=(
-                    "client_link_collision",
-                    "client_source_group_merge",
-                    "client_unattached_group",
-                    "unnamed_source_group",
-                    "unmatched_source_group",
-                ),
-            ).count(),
-            "admin_finding_count": AdminFinding.objects.filter(
-                tenant_id=1, status__in=("open", "acknowledged")
-            ).count(),
-            "intel_ok": intel_ok,
-            "intel_failed": intel_failed,
-            "intel_never": intel_never,
+            "overview_at": now,
+            "sources": sources,
+            "source_attention_count": sum(source["needs_attention"] for source in sources),
+            "jobs_health": jobs_health,
+            "services_current": services_current,
+            "latest_service_checkin": latest_service_checkin,
+            "active_issue_count": active_issue_count,
+            "platform_health_count": platform_health_count,
         },
     )
 

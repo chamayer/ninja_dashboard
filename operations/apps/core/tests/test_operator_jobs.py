@@ -79,7 +79,9 @@ def test_admin_navigation_separates_jobs_services_health_and_settings():
     assert "Software decisions" not in base_template
     assert "admin_services" in urls
     assert "admin_settings" in urls
-    assert "Deployment owns their lifecycle" in overview_template
+    assert "Needs attention" in overview_template
+    assert "Source connections" in overview_template
+    assert "Operator work" in overview_template
     assert "Deployment owns their lifecycle" in services_template
     assert "Django Admin" in settings_template
     get_template("admin_services.html")

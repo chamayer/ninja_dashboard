@@ -1,28 +1,87 @@
 {% extends "base.html" %}
 
-{% block title %}Admin{% endblock %}
+{% block title %}Admin overview{% endblock %}
 
 {% block content %}
 <style>
-  .admin-hub { max-width: 72rem; }
-  .admin-hub h1 { margin: 0; font-size: 1.45rem; }
-  .admin-hub > p { color: var(--muted); margin: .35rem 0 1.2rem; }
-  .admin-hub-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(17rem, 1fr)); gap: .75rem; }
-  .admin-hub-card { display: block; padding: 1rem; border: 1px solid var(--border); border-radius: 7px; background: var(--surface); color: inherit; text-decoration: none; }
-  .admin-hub-card:hover { border-color: var(--accent); box-shadow: 0 2px 8px rgba(0,0,0,.06); }
-  .admin-hub-card strong { display: block; font-size: 1rem; margin-bottom: .3rem; }
-  .admin-hub-card span { color: var(--muted); font-size: .86rem; line-height: 1.4; }
+  .admin-overview { max-width: 76rem; }
+  .admin-overview-head { display:flex; justify-content:space-between; align-items:baseline; gap:1rem; flex-wrap:wrap; margin-bottom:1rem; }
+  .admin-overview-head h1 { margin:0; font-size:1.4rem; }
+  .admin-overview-head p { margin:.3rem 0 0; color:var(--muted); }
+  .admin-overview-status { display:grid; grid-template-columns:repeat(auto-fit,minmax(14rem,1fr)); gap:.7rem; }
+  .admin-overview-status article, .admin-overview-panel { border:1px solid var(--border); border-radius:7px; background:var(--surface); }
+  .admin-overview-status article { padding:.85rem .95rem; }
+  .admin-overview-status h2 { margin:0; font-size:.8rem; text-transform:uppercase; letter-spacing:.05em; color:var(--muted); }
+  .admin-overview-state { display:block; margin:.4rem 0 .2rem; font-size:1.08rem; font-weight:700; }
+  .admin-overview-state.ok { color:#15803d; }.admin-overview-state.warn { color:#a16207; }.admin-overview-state.bad { color:#b91c1c; }
+  .admin-overview-status p, .admin-overview-panel p { margin:.2rem 0; color:var(--muted); font-size:.84rem; line-height:1.4; }
+  .admin-overview-status a { display:inline-block; margin-top:.5rem; font-size:.84rem; }
+  .admin-overview-section { margin-top:1.2rem; }
+  .admin-overview-section > h2 { margin:0 0 .5rem; font-size:1rem; }
+  .admin-overview-panels { display:grid; grid-template-columns:repeat(auto-fit,minmax(22rem,1fr)); gap:.7rem; }
+  .admin-overview-panel { padding:.85rem .95rem; }
+  .admin-overview-panel h3 { margin:0 0 .45rem; font-size:.95rem; }
+  .admin-overview-list { list-style:none; margin:.2rem 0 0; padding:0; }
+  .admin-overview-list li { display:flex; justify-content:space-between; gap:.75rem; padding:.45rem 0; border-top:1px solid var(--border); font-size:.87rem; }
+  .admin-overview-list li:first-child { border-top:0; }.admin-overview-list time { color:var(--muted); white-space:nowrap; }
+  .admin-overview-links { margin-top:1rem; color:var(--muted); font-size:.85rem; }.admin-overview-links a { margin-right:.8rem; }
 </style>
 
-<section class="admin-hub">
-  <h1>Admin</h1>
-  <p>Configure and monitor Operations. Review items that need a decision in <a href="{% url 'findings_queue' %}">Issues</a>.</p>
-  <div class="admin-hub-grid">
-    <a class="admin-hub-card" href="{% url 'sources_status' %}"><strong>Sources</strong><span>Check source connections, collection health, and incoming records.</span></a>
-    <a class="admin-hub-card" href="{% url 'admin_jobs' %}"><strong>Jobs</strong><span>See the latest status for every Job, run one when needed, and review its history.</span></a>
-    <a class="admin-hub-card" href="{% url 'admin_services' %}"><strong>Services</strong><span>Check the scheduler and workers that run Jobs. Deployment owns their lifecycle.</span></a>
-    <a class="admin-hub-card" href="{% url 'findings_admin_health' %}"><strong>Health</strong><span>Review platform health conditions that are separate from operator Issues.</span></a>
-    <a class="admin-hub-card" href="{% url 'admin_settings' %}"><strong>Settings</strong><span>Manage policies, alerts, fields, classification, and advanced administration.</span></a>
+<section class="admin-overview">
+  <header class="admin-overview-head">
+    <div><h1>Admin overview</h1><p>Current Operations health and the items that need an administrator’s attention.</p></div>
+    <span class="muted">As of {{ overview_at|date:"M j, Y, g:i A" }} ({{ overview_at|timesince }} ago)</span>
+  </header>
+
+  <div class="admin-overview-status" aria-label="Administration status">
+    <article>
+      <h2>Sources</h2>
+      {% if source_attention_count %}<span class="admin-overview-state warn">{{ source_attention_count }} need attention</span>{% else %}<span class="admin-overview-state ok">Healthy</span>{% endif %}
+      <p>{{ sources|length }} source{{ sources|length|pluralize }} reporting to Operations.</p>
+      <a href="{% url 'sources_status' %}">Review sources</a>
+    </article>
+    <article>
+      <h2>Jobs</h2>
+      {% if jobs_health.ok %}<span class="admin-overview-state ok">Healthy</span>{% else %}<span class="admin-overview-state warn">Needs attention</span>{% endif %}
+      <p>Ready {{ jobs_health.summary.queued_runs|default:0 }} · Running {{ jobs_health.summary.running_runs|default:0 }} · Waiting {{ jobs_health.summary.waiting_dependencies|default:0 }}</p>
+      <a href="{% url 'admin_jobs' %}">Review Jobs</a>
+    </article>
+    <article>
+      <h2>Services</h2>
+      {% if services_current %}<span class="admin-overview-state ok">Scheduler and workers running</span>{% else %}<span class="admin-overview-state bad">Check-ins need review</span>{% endif %}
+      <p>{% if latest_service_checkin %}Last check-in {{ latest_service_checkin|date:"M j, Y, g:i A" }} ({{ latest_service_checkin|timesince }} ago){% else %}No service check-in recorded{% endif %}</p>
+      <a href="{% url 'admin_services' %}">Review services</a>
+    </article>
+    <article>
+      <h2>Platform health</h2>
+      {% if platform_health_count %}<span class="admin-overview-state warn">{{ platform_health_count }} open</span>{% else %}<span class="admin-overview-state ok">Healthy</span>{% endif %}
+      <p>Platform conditions that need administrator review.</p>
+      <a href="{% url 'findings_admin_health' %}">Review health</a>
+    </article>
   </div>
+
+  <section class="admin-overview-section">
+    <h2>Needs attention</h2>
+    <div class="admin-overview-panels">
+      <article class="admin-overview-panel">
+        <h3>Source connections</h3>
+        {% if source_attention_count %}
+          <ul class="admin-overview-list">
+          {% for source in sources %}{% if source.needs_attention %}<li><span>{{ source.name }}</span><time>{% if source.observed_at %}Last received {{ source.observed_at|date:"M j, Y, g:i A" }}{% else %}No data received{% endif %}</time></li>{% endif %}{% endfor %}
+          </ul>
+        {% else %}<p>All reported sources are current.</p>{% endif %}
+      </article>
+      <article class="admin-overview-panel">
+        <h3>Jobs and services</h3>
+        {% if jobs_health.issues %}<ul class="admin-overview-list">{% for issue in jobs_health.issues %}<li><span>{{ issue }}</span></li>{% endfor %}</ul>{% else %}<p>Schedules, capacity, and service check-ins agree.</p>{% endif %}
+      </article>
+      <article class="admin-overview-panel">
+        <h3>Operator work</h3>
+        {% if active_issue_count %}<p><strong>{{ active_issue_count }}</strong> open Issue{{ active_issue_count|pluralize }} need an operator decision or follow-up.</p><p><a href="{% url 'findings_queue' %}">Open Issues</a></p>{% else %}<p>No open Issues need operator follow-up.</p>{% endif %}
+      </article>
+    </div>
+  </section>
+
+  <p class="admin-overview-links">Administration: <a href="{% url 'admin_settings' %}">Settings</a><a href="{% url 'admin_jobs_control_plane' %}">Job settings</a></p>
 </section>
 {% endblock %}

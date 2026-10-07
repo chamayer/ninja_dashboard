@@ -52,6 +52,35 @@ routes themselves. Focused Jobs, Issues, and coverage tests pass (77); Django
 checks, targeted Ruff, template loading, and `git diff --check` pass. The
 pending commit will contain no migration or production-operation change.
 
+## Admin overview correction (2026-10-07)
+
+## Status
+
+Complete — replaced the link-launcher Admin overview with a compact
+at-a-glance operational summary. Links remain follow-up actions, not the
+page's primary content.
+
+## Scope and decisions
+
+- Use live, tenant-scoped source health, existing Jobs health diagnostics,
+  runtime check-ins, and active platform-health findings. Do not create a
+  second queue or duplicate the Jobs and Services detail pages.
+- Put a plain-language status and timestamp beside each summary. Show the
+  few sources that need attention rather than a long inventory.
+- Keep action links contextual: Sources, Jobs, Services, Health, and Issues
+  are destinations for investigation or work after the overview identifies a
+  condition.
+
+## Completion evidence
+
+The overview now reads only the evidence it renders: tenant-scoped source
+health, existing Jobs diagnostics and runtime check-ins, active platform-health
+conditions, and the standard Issues count. It shows a timestamped four-area
+status summary and an attention section with stale/failed source names, Jobs
+and service health explanations, and a single handoff to Issues. Focused Jobs,
+Issues, and coverage tests pass (77); Django checks, targeted Ruff, template
+loading, and `git diff --check` pass.
+
 ## Single Issues inbox and object context (2026-10-07)
 
 ## Status
