@@ -87,13 +87,15 @@ def test_admin_navigation_separates_jobs_services_health_and_settings():
     )
     services_template = Path("templates/admin_services.html").read_text(encoding="utf-8")
     settings_template = Path("templates/admin_settings.html").read_text(encoding="utf-8")
+    data_template = Path("templates/admin_data.html").read_text(encoding="utf-8")
     urls = Path("config/urls.py").read_text(encoding="utf-8")
 
-    for label in ("Overview", "Sources", "Jobs", "Services", "Health", "Settings"):
+    for label in ("Overview", "Data", "Sources", "Jobs", "Services", "Health", "Settings"):
         assert f">{label}</a>" in base_template
     assert "Software decisions" not in base_template
     assert "admin_services" in urls
     assert "admin_settings" in urls
+    assert "admin_data" in urls
     assert "Needs attention" in overview_template
     assert "Overall Operations health" in overview_template
     assert "Platform summary" in overview_template
@@ -114,5 +116,9 @@ def test_admin_navigation_separates_jobs_services_health_and_settings():
     assert 'finding_type__category__name="platform_health"' in views
     assert "Deployment owns their lifecycle" in services_template
     assert "Django Admin" in settings_template
+    assert "What Operations has received" in data_template
+    assert "Inspect sources" in data_template
+    assert "Review Issues" in data_template
+    assert "def admin_data" in views
     get_template("admin_services.html")
     get_template("admin_settings.html")

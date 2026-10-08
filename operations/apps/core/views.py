@@ -1577,14 +1577,14 @@ def home(request: HttpRequest) -> HttpResponse:  # noqa: PLR0912, PLR0915
             "href": reverse("patching_queue"),
         },
         {
-            "name": "Information confidence",
+            "name": "Data status",
             "value": f"{sources_ok} of {len(registered_sources)} sources current",
             "detail": (
                 f"{source_problem_count} source problems · "
                 f"{reporting_issue_count + stale_data_count} reporting or freshness gaps · "
                 f"{record_matching_count + client_matching_count} matching reviews"
             ),
-            "href": f"{reverse('findings_queue')}?category=data_collection&type=collection_failures",
+            "href": reverse("admin_data"),
         },
     ]
     profile = load_active_profile()
@@ -16881,6 +16881,80 @@ def operations_admin_overview(request: HttpRequest) -> HttpResponse:
         {
             "admin_group": "overview",
             **overview,
+        },
+    )
+
+
+@login_required
+@require_admin
+def admin_data(request: HttpRequest) -> HttpResponse:
+    """Show administrative evidence for the data Operations is using."""
+    now = timezone.now()
+    active_issue_filter = Q(status__in=_FINDING_ACTIVE_STATUSES) & (
+        Q(snoozed_until__isnull=True) | Q(snoozed_until__lt=now)
+    )
+    sources, sources_available = _admin_health_sources(now)
+    current_source_count = sum(1 for source in sources if not source["needs_attention"])
+    source_issue_count = AdminFinding.objects.filter(
+        tenant_id=1,
+        status__in=_FINDING_ACTIVE_STATUSES,
+        finding_type__name="source_failure",
+    ).count()
+    completeness_issue_count = Finding.objects.filter(active_issue_filter).filter(
+        finding_type__name__in=(
+            "missing_required_platform",
+            "stale_required_platform",
+            "device_unenrolled",
+            "device_stale_data",
+        )
+    ).count()
+    matching_issue_count = (
+        Finding.objects.filter(active_issue_filter)
+        .filter(
+            finding_type__name__in=(
+                "identity_resolution_pending",
+                "unlinked_external_identity",
+            )
+        )
+        .count()
+        + AdminFinding.objects.filter(
+            tenant_id=1,
+            status__in=_FINDING_ACTIVE_STATUSES,
+            finding_type__name__in=(
+                "client_link_collision",
+                "client_source_group_merge",
+                "client_unattached_group",
+                "unnamed_source_group",
+                "unmatched_source_group",
+            ),
+        ).count()
+    )
+    clients_count = Client.objects.filter(tenant_id=1, deleted_at__isnull=True).count()
+    devices_count = Device.objects.filter(
+        tenant_id=1,
+        deleted_at__isnull=True,
+    ).exclude(lifecycle_status=Device.LifecycleStatus.RETIRED).count()
+
+    source_rows = sorted(
+        sources,
+        key=lambda source: (not source["needs_attention"], source["name"].lower()),
+    )
+    return render(
+        request,
+        "admin_data.html",
+        {
+            "admin_group": "data",
+            "admin_tab": "data",
+            "as_of": now,
+            "sources_available": sources_available,
+            "sources_total": len(sources),
+            "sources_current": current_source_count,
+            "source_issue_count": source_issue_count,
+            "clients_count": clients_count,
+            "devices_count": devices_count,
+            "completeness_issue_count": completeness_issue_count,
+            "matching_issue_count": matching_issue_count,
+            "source_rows": source_rows,
         },
     )
 

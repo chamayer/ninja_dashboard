@@ -382,6 +382,8 @@
                 <span class="nav-client-crumb">Admin ›</span>
                 <a class="nav-link nav-context {% if admin_group == 'overview' %}active{% endif %}"
                    href="{% url 'operations_admin_overview' %}">Overview</a>
+                <a class="nav-link nav-context {% if admin_tab == 'data' %}active{% endif %}"
+                   href="{% url 'admin_data' %}">Data</a>
                 <a class="nav-link nav-context {% if admin_tab == 'sources' %}active{% endif %}"
                    href="{% url 'sources_status' %}">Sources</a>
                 <a class="nav-link nav-context {% if admin_tab == 'jobs' %}active{% endif %}"

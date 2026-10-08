@@ -1,30 +1,42 @@
-# Jobs ecosystem final-design reset
-
-## Operator Dashboard rework (2026-10-08)
+# Admin data status surface (2026-10-08)
 
 ## Status
 
-In progress — the Dashboard is one operational briefing: estate, attention,
-change, and confidence; a production NameError in the KPI context is being
-repaired before this work is closed.
+Complete — Admin → Data is the data evidence surface; Sources, Jobs, and
+Issues retain their distinct control and action responsibilities.
 
-## Scope and decision
+## Goal and fixed decisions
 
-The Dashboard is for an operator asking what is happening across Operations,
-not for platform administration. It will have one KPI strip, a short current
-attention list, a concise recent-change list, and the existing client table.
-All action links lead to Issues or scoped operational views. Admin health,
-Jobs, and Sources remain specialist evidence/control pages.
+Data is an administrative supporting component, not Inventory and not a
+primary-navigation domain. The new Admin → Data page must answer whether data
+is arriving, what Operations currently holds, and whether coverage, freshness,
+or matching needs action. Sources retains collection schedules and manual
+refresh controls; Jobs and Services retain execution controls; Issues remains
+the only action queue.
+
+## Scope, affected areas, and validation
+
+- Add an admin-only Data route and Admin sub-navigation entry.
+- Use existing tenant-scoped projections and finding/candidate models; no new
+  health score, database schema, or duplicate lifecycle.
+- Present collection, current data footprint, data completeness, and record
+  matching as evidence panels. Every attention count must link to its existing
+  filtered Issues or review surface.
+- Update the Dashboard only to point its compact data signal at Admin → Data;
+  do not rebuild the Dashboard in this task.
+- Validate focused template/view tests, Django checks, template loading,
+  compilation, and diff hygiene.
 
 ## Current checkpoint
 
-The old fleet strip plus data cards plus domain cards created three competing
-summaries. They are now a single four-KPI strip, a short “Needs attention now”
-list, and a “Since yesterday” change list. Every action link leads to Issues
-or the relevant operational view. The live Dashboard exposed an omitted local
-KPI variable (`total_clients`); it is now defined with the other derived
-client-summary values. Validate the repaired view, push it, and confirm the
-deployed container contains the correction before closing this section.
+The prior Dashboard rework and its KPI-context repair were deployed in
+`51eb7f8` and `7aa84d7`. Admin → Data now uses existing tenant-scoped source
+health, canonical client/device counts, and governed Issue counts. It presents
+collection, data footprint, completeness, matching, and per-source receipt
+evidence; it contains no refresh, schedule, or Job controls. The Dashboard’s
+compact Data status KPI opens this page. Focused admin-navigation and
+Dashboard tests, Django checks, template loading, compilation, and diff
+hygiene pass.
 
 ## Dashboard data snapshot expansion (2026-10-08)
 

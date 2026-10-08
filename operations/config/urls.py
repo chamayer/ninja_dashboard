@@ -22,6 +22,7 @@ from apps.core.generic_admin import (
     entity_observation_reveal,
 )
 from apps.core.views import (
+    admin_data,
     admin_finding_acknowledge,
     admin_finding_apply_client_rename,
     admin_job_bulk_cancel,
@@ -111,9 +112,9 @@ from apps.core.views import (
     software_tech_checklist,
     software_title_lookup,
     software_user_risk,
-    sources_status,
     source_refresh_run,
     source_schedule_update,
+    sources_status,
     targeted_refresh,
 )
 
@@ -306,6 +307,7 @@ urlpatterns = [
         "admin/requirement-profiles/", requirement_profiles_list, name="requirement_profiles_list"
     ),
     path("admin/overview/", operations_admin_overview, name="operations_admin_overview"),
+    path("admin/data/", admin_data, name="admin_data"),
     path("admin/entities/", entity_admin_list, name="entity_admin_list"),
     path(
         "admin/entities/<uuid:entity_id>/",

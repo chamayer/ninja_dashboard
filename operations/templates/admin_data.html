@@ -1,0 +1,91 @@
+{% extends "base.html" %}
+
+{% block title %}Data{% endblock %}
+
+{% block content %}
+<style>
+  .data-page { max-width: 76rem; }
+  .data-head { display:flex; justify-content:space-between; align-items:baseline; gap:1rem; flex-wrap:wrap; margin-bottom:1rem; }
+  .data-head h1 { margin:0; font-size:1.4rem; }.data-head p { margin:.3rem 0 0; color:var(--muted); }
+  .data-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(15rem,1fr)); gap:.75rem; }
+  .data-card, .data-panel { background:var(--surface); border:1px solid var(--border); border-radius:7px; padding:.9rem 1rem; }
+  .data-card h2 { margin:0; color:var(--muted); font-size:.78rem; text-transform:uppercase; letter-spacing:.05em; }
+  .data-value { display:block; margin:.45rem 0 .2rem; font-size:1.25rem; font-weight:700; }
+  .data-card p, .data-panel p { margin:.2rem 0; color:var(--muted); font-size:.86rem; line-height:1.4; }
+  .data-card a { display:inline-block; margin-top:.55rem; font-size:.86rem; }
+  .data-section { margin-top:1.3rem; }.data-section > h2 { margin:0 0 .5rem; font-size:1rem; }
+  .data-panel { padding:0; overflow:hidden; }.data-panel table { margin:0; }
+  .data-state { font-weight:600; }.data-state.current { color:#15803d; }.data-state.attention { color:#a16207; }
+</style>
+
+<section class="data-page">
+  <header class="data-head">
+    <div>
+      <h1>Data</h1>
+      <p>What Operations has received, what it currently holds, and what needs attention.</p>
+    </div>
+    <span class="muted">As of {{ as_of|date:"M j, Y, g:i A" }} ({{ as_of|timesince }} ago)</span>
+  </header>
+
+  <section class="data-grid" aria-label="Data status summary">
+    <article class="data-card">
+      <h2>Collection</h2>
+      {% if sources_available %}
+        <span class="data-value">{{ sources_current }} of {{ sources_total }} current</span>
+        <p>{{ source_issue_count }} collection Issue{{ source_issue_count|pluralize }} need attention.</p>
+      {% else %}
+        <span class="data-value">Unavailable</span>
+        <p>Source health cannot be checked.</p>
+      {% endif %}
+      <a href="{% url 'sources_status' %}">Inspect sources</a>
+      {% if source_issue_count %}<a href="{% url 'findings_queue' %}?category=data_collection&amp;type=collection_failures">Review Issues</a>{% endif %}
+    </article>
+    <article class="data-card">
+      <h2>Current estate data</h2>
+      <span class="data-value">{{ clients_count }} clients · {{ devices_count }} devices</span>
+      <p>Current non-retired client and device records in Operations.</p>
+      <a href="{% url 'inventory_clients' %}">Inspect inventory</a>
+    </article>
+    <article class="data-card">
+      <h2>Completeness</h2>
+      <span class="data-value">{{ completeness_issue_count }} Issue{{ completeness_issue_count|pluralize }}</span>
+      <p>Missing, stale, or non-reporting operational data.</p>
+      <a href="{% url 'findings_queue' %}?category=data_collection">Review Issues</a>
+    </article>
+    <article class="data-card">
+      <h2>Matching</h2>
+      <span class="data-value">{{ matching_issue_count }} Issue{{ matching_issue_count|pluralize }}</span>
+      <p>Source records that need identity or client matching review.</p>
+      <a href="{% url 'findings_queue' %}?category=data_collection">Review Issues</a>
+    </article>
+  </section>
+
+  <section class="data-section">
+    <h2>Data collection</h2>
+    <div class="data-panel">
+      {% if sources_available %}
+      <table class="ops-table">
+        <thead><tr><th>Source</th><th>Status</th><th>Last received</th><th>Next step</th></tr></thead>
+        <tbody>
+          {% for source in source_rows %}
+          <tr>
+            <td>{{ source.name }}</td>
+            <td>{% if source.needs_attention %}<span class="data-state attention">Needs attention</span>{% else %}<span class="data-state current">Current</span>{% endif %}</td>
+            <td>{% if source.observed_at %}{{ source.observed_at|date:"M j, Y, g:i A" }} ({{ source.observed_at|timesince }} ago){% else %}No data received{% endif %}</td>
+            <td>{% if source.needs_attention %}<a href="{% url 'findings_queue' %}?category=data_collection&amp;type=collection_failures">Review Issue</a>{% else %}<a href="{% url 'sources_status' %}">Inspect source</a>{% endif %}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% else %}<p style="padding:.9rem 1rem;">Source health is unavailable. <a href="{% url 'sources_status' %}">Inspect sources</a></p>{% endif %}
+    </div>
+  </section>
+
+  <section class="data-section">
+    <h2>How to use this page</h2>
+    <div class="data-panel" style="padding:.9rem 1rem;">
+      <p>Use this page to understand the data behind Operations. Use <a href="{% url 'sources_status' %}">Sources</a> to manage collection, <a href="{% url 'admin_jobs' %}">Jobs</a> to inspect processing, and <a href="{% url 'findings_queue' %}">Issues</a> to act on a problem.</p>
+    </div>
+  </section>
+</section>
+{% endblock %}
