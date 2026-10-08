@@ -139,6 +139,13 @@ def test_cmdb_absent_closure_never_bypasses_missing_assessments():
     assert section.count("assessment_required=True") >= 4
 
 
+def test_cmdb_client_findings_require_resolved_client_evidence():
+    source = (Path(__file__).parents[1] / "cmdb_findings.py").read_text()
+    for query_name in ("_STALE_ASSETS", "_DIVERGENT", "_UNINTEGRATED"):
+        query = source.split(f'{query_name} = """', 1)[1].split('"""', 1)[0]
+        assert "client_id IS NOT NULL" in query
+
+
 def test_evaluator_lifecycle_absent_closure_requires_current_clear_assessment():
     source = (Path(__file__).parents[1] / "evaluator.py").read_text()
     signature = source[source.index("def _resolve_lifecycle_findings_absent"):]

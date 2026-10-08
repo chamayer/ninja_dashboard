@@ -1,5 +1,34 @@
 # Jobs ecosystem final-design reset
 
+## CMDB finding eligibility (2026-10-08)
+
+## Status
+
+Complete — client-level CMDB evaluation now rejects unresolved source scope
+before grouping or writing a finding.
+
+## Goal, scope, and decision
+
+Keep source evidence, client matching, and derived findings in their existing
+roles. A CMDB evaluator may create a client finding only from evidence with a
+resolved client. Evidence without one remains available to the matching path;
+it is not silently discarded, and matching is not made a hard job dependency
+because it can require an operator decision.
+
+- Scope: `ingest/cmdb_findings.py`, focused contract coverage, and this plan.
+- No schema change, Hudu-specific exception, queue change, or production data
+  intervention.
+- Enforce the invariant in each client-level query, before grouping/upsert,
+  so `findings.subject_id` is never passed a null client identifier.
+
+## Completion evidence
+
+Focused CMDB condition-safety coverage (40 tests), Python compilation, focused
+Ruff, Django checks, and `git diff --check` pass. The pre-existing import-order
+diagnostic in `ingest/cmdb_findings.py` remains outside this narrow change.
+Next: commit and push the single corrective change under the existing
+authorization; automatic GitOps will roll it out.
+
 ## Software-update concurrency contract (2026-10-07)
 
 ## Status

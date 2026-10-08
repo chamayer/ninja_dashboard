@@ -266,6 +266,9 @@ WITH div AS (
     FROM operations.entity_observation_current
    WHERE tenant_id = %s AND platform = %s
      AND entity_type = 'cmdb.asset' AND active
+     -- Findings have a client subject.  Unmatched source evidence belongs to
+     -- client matching until that scope is resolved.
+     AND client_id IS NOT NULL
      AND canonical_data->>'link_verdict' = 'divergent'
 ), x AS (
   SELECT d.*, (r->>'resolved_device_id')::uuid AS dev
