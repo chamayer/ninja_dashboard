@@ -58,8 +58,10 @@ The legacy source-demand scheduler and HTTP queue route are retired by pending
 migration 0266 without deleting its historical rows. Migration 0265 now
 repairs an old `sources` sequence before it seeds reference feeds, and the
 Sources view accepts legacy text capabilities as having no declared purpose.
-Next: finish focused validation, review the migration sequence and deployed
-compatibility, then commit/push the cohesive cutover.
+Production recorded 0265 before its original source-seeding path failed on an
+old sequence, so migration 0267 now idempotently guarantees the reference
+catalog after aligning that sequence. Next: validate and push the follow-up
+migration, then confirm its automatic rollout and the live Sources page.
 
 ## Active plan — complete conditions framework
 
