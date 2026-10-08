@@ -1499,7 +1499,9 @@ def home(request: HttpRequest) -> HttpResponse:  # noqa: PLR0912, PLR0915
     client_rows.sort(
         key=lambda row: (priority_order[row["priority"]], row["client"].display_name.lower())
     )
+    total_clients = len(clients)
     clients_connected = sum(1 for client in clients if client_sources.get(client.id))
+    attention_count = priority_counts["immediate"] + priority_counts["soon"]
 
     # Data status is an operator summary, not a second work queue.  Every
     # card deliberately opens the governed Issues inbox; Sources and
@@ -1636,14 +1638,14 @@ def home(request: HttpRequest) -> HttpResponse:  # noqa: PLR0912, PLR0915
             "active_device_days": active_device_days,
             "retired_devices": retired_devices,
             "device_mix": device_mix,
-            "total_clients": len(clients),
+            "total_clients": total_clients,
             "clients_connected": clients_connected,
             "kpis": kpis,
             "attention_items": attention_items[:5],
             "recent_changes": recent_changes,
             "client_rows": client_rows,
             "priority_counts": priority_counts,
-            "attention_count": priority_counts["immediate"] + priority_counts["soon"],
+            "attention_count": attention_count,
             "source_health": source_health,
             "sources_ok": sources_ok,
             "sources_total": len(registered_sources),

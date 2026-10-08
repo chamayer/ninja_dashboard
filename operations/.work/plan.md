@@ -4,8 +4,9 @@
 
 ## Status
 
-Complete — the Dashboard is one operational briefing: estate, attention,
-change, and confidence; the client table remains the detailed fleet map.
+In progress — the Dashboard is one operational briefing: estate, attention,
+change, and confidence; a production NameError in the KPI context is being
+repaired before this work is closed.
 
 ## Scope and decision
 
@@ -20,8 +21,10 @@ Jobs, and Sources remain specialist evidence/control pages.
 The old fleet strip plus data cards plus domain cards created three competing
 summaries. They are now a single four-KPI strip, a short “Needs attention now”
 list, and a “Since yesterday” change list. Every action link leads to Issues
-or the relevant operational view. Dashboard/Sources/Issues tests (77), Django
-checks, template loading, and diff hygiene pass.
+or the relevant operational view. The live Dashboard exposed an omitted local
+KPI variable (`total_clients`); it is now defined with the other derived
+client-summary values. Validate the repaired view, push it, and confirm the
+deployed container contains the correction before closing this section.
 
 ## Dashboard data snapshot expansion (2026-10-08)
 
