@@ -95,15 +95,28 @@ def register_recovery_policies() -> None:
         with db.transaction() as cur:
             cur.execute("SET LOCAL operations.tenant_id = 1")
             for job_key, evidence_summary in REPLAY_SAFE_RECOVERY_EVIDENCE.items():
-                try:
-                    cur.execute(
-                        "SELECT operations.jobs_register_recovery_policy_v1(%s, %s, %s, %s)",
-                        (1, job_key, definition(job_key).snapshot_digest(), evidence_summary),
-                    )
-                except Exception as exc:
-                    raise RuntimeError(
-                        f"Jobs recovery policy registration failed for {job_key}"
-                    ) from exc
+                # A definition digest also captures scheduling and resource
+                # metadata.  Those may legitimately change while a handler's
+                # replay behavior does not.  Register every stored snapshot
+                # made by this exact reviewed handler version, not just the
+                # current metadata digest; a handler-version change still
+                # deliberately requires a new recovery review.
+                cur.execute(
+                    """SELECT definition_digest
+                         FROM operations.job_definition_versions
+                        WHERE definition_key = %s AND handler_version = %s""",
+                    (job_key, definition(job_key).handler_version),
+                )
+                for (definition_digest,) in cur.fetchall():
+                    try:
+                        cur.execute(
+                            "SELECT operations.jobs_register_recovery_policy_v1(%s, %s, %s, %s)",
+                            (1, job_key, definition_digest, evidence_summary),
+                        )
+                    except Exception as exc:
+                        raise RuntimeError(
+                            f"Jobs recovery policy registration failed for {job_key}"
+                        ) from exc
     except UndefinedFunction:
         return
 

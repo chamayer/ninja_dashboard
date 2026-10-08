@@ -2,7 +2,7 @@
 
 ## Active plan — source-driven collection
 
-**Status:** in progress — post-release correction.
+**Status:** in progress — post-release execution-recovery correction.
 
 **Goal:** complete the intended source-driven collection architecture. Every
 configured source binding or shared reference source is independently
@@ -102,6 +102,38 @@ cadence, with an eight-hour floor, rather than a global eight-hour rule.
 
 The production branch deliberately retains this completed plan locally rather
 than creating a plan-only deployment commit.
+
+**Execution-recovery correction (2026-10-08):** a normal GitOps service
+restart marked live child claims `contained`. The dispatcher then counted those
+dead execution-pool claims as active capacity, leaving all three pools blocked
+even though no child was running. A definition-metadata change also prevented
+otherwise replay-safe historical runs from receiving their already-reviewed
+recovery policy. This is a contract defect, not an operator-capacity decision.
+
+Scope: preserve contained domain locks for non-replay-safe interrupted writes,
+but release/exclude execution-pool and emergency-child claims once the child is
+gone. Recovery-policy registration must cover historical snapshots whose
+handler version is the reviewed current replay-safe handler; a changed handler
+version still requires review. An interrupted source collection or patch
+classification may recover automatically under its existing reviewed policy.
+A service interruption remains immutable run history; it must not leave
+unrelated Jobs waiting indefinitely.
+
+Affected areas: durable Jobs claim/recovery migrations, recovery-policy
+registration, focused worker/registry/migration coverage, and this plan. No
+manual queue edits, claim deletion, or deployment action. Validate the
+capacity/domain distinction, historical handler-version policy registration,
+automatic claim reconciliation, Django checks, focused tests, and diff
+hygiene; after rollout, verify read-only that the queues drain and no execution
+pool remains blocked by contained work.
+
+Implementation checkpoint: migration 0271 enforces this at the claim table,
+repairs existing contained execution claims, and preserves contained domain
+claims. Worker recovery registration now registers every stored definition
+snapshot made by the exact reviewed handler version. Focused worker/registry
+tests (18), Django checks, migration discovery, compilation, and diff hygiene
+pass. Next: commit and push the corrective migration, then verify automatic
+rollout and queue progress read-only.
 
 **Post-release correction (2026-10-08):** the deployed Jobs page encountered
 an old `source-demand-recovery` Run that predates the source-bound contract.

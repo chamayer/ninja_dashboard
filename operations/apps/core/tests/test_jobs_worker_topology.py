@@ -21,8 +21,8 @@ def test_worker_uses_only_fenced_v1_queue_apis():
     queue = (ROOT / "ingest" / "operator_job_queue.py").read_text(encoding="utf-8")
 
     assert '"-m", "ingest.jobs_child"' in worker
-    assert "_claim_next_v6(incarnation)" in worker
-    assert "jobs_claim_next_v6" in queue
+    assert "_claim_next_v7(incarnation)" in worker
+    assert "jobs_claim_next_v7" in queue
     assert "jobs_dispatch_ready_v1" in queue
     assert "jobs_record_v1_progress" in queue
     assert "jobs_finish_v1" in queue
@@ -40,3 +40,21 @@ def test_worker_uses_only_fenced_v1_queue_apis():
     assert "JobProgressRejected" in worker
     assert "restarting supervisor" in worker
     assert "JobProgressRejected" in queue
+
+
+def test_contained_work_keeps_data_safety_but_not_dead_execution_capacity():
+    migration = (
+        ROOT
+        / "operations"
+        / "apps"
+        / "core"
+        / "migrations"
+        / "0271_jobs_contained_capacity_release.py"
+    ).read_text(encoding="utf-8")
+    queue = (ROOT / "ingest" / "operator_job_queue.py").read_text(encoding="utf-8")
+
+    assert "jobs_release_contained_capacity_v1" in migration
+    assert "NEW.resource_template LIKE 'capacity:%'" in migration
+    assert "NEW.resource_template LIKE 'lane:%'" in migration
+    assert "any affected data boundary remains protected" in migration
+    assert "handler_version = %s" in queue
