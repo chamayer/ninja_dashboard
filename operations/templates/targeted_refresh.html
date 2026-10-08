@@ -42,7 +42,7 @@
     <p>Queues collection for one source across its configured scope.</p>
     <form method="post">
       {% csrf_token %}<input type="hidden" name="target" value="source">
-      <label>Source<br><select name="source" required><option value="">Choose a source</option>{% for source in sources %}<option value="{{ source.name }}">{{ source.name }}</option>{% endfor %}</select></label>
+      <label>Source<br><select name="source_binding" required><option value="">Choose a source</option>{% for source in source_bindings %}<option value="{{ source.id }}">{{ source.name }}{% if source.client_name %} · {{ source.client_name }}{% endif %}</option>{% endfor %}</select></label>
       <button type="submit">Refresh</button>
     </form>
   </section>

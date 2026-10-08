@@ -668,30 +668,6 @@
       {
         "file": "operations/apps/core/views.py",
         "owner": "",
-        "id": "source-demand",
-        "name": "Source demand worker",
-        "category": "maintenance",
-        "endpoint": "",
-        "status_key": "source_run_queue",
-        "status_source": "run_log",
-        "description": "Process one queued on-demand source refresh with its retained source record.",
-        "run_all": false
-      },
-      {
-        "file": "operations/apps/core/views.py",
-        "owner": "",
-        "id": "source-demand-recovery",
-        "name": "Source demand recovery",
-        "category": "maintenance",
-        "endpoint": "",
-        "status_key": "source_run_queue",
-        "status_source": "run_log",
-        "description": "Mark source-demand work whose execution lease expired for operator review.",
-        "run_all": false
-      },
-      {
-        "file": "operations/apps/core/views.py",
-        "owner": "",
         "id": "run-log-recovery",
         "name": "Diagnostic run recovery",
         "category": "maintenance",
@@ -834,18 +810,6 @@
         "owner": "_execute",
         "key": "source-actions",
         "expression": "('Processing approved source actions', lambda: _run_source_actions(progress.job_id))"
-      },
-      {
-        "file": "ingest/operator_job_queue.py",
-        "owner": "_execute",
-        "key": "source-demand",
-        "expression": "('Processing queued source demand', lambda: _run_source_demand(progress.job_id))"
-      },
-      {
-        "file": "ingest/operator_job_queue.py",
-        "owner": "_execute",
-        "key": "source-demand-recovery",
-        "expression": "('Recovering expired source demand', source_run_queue.recover_stale)"
       },
       {
         "file": "ingest/operator_job_queue.py",
@@ -1089,21 +1053,6 @@
         "file": "ingest/main.py",
         "owner": "_Handler._handle_agent_compliance_action._respond_with_refresh",
         "expression": "schedule_agent_compliance_evaluate(reason)"
-      },
-      {
-        "file": "ingest/main.py",
-        "owner": "_Handler._handle_sources_enqueue",
-        "expression": "source_run_queue.enqueue_and_run(src, reason='on_demand')"
-      },
-      {
-        "file": "ingest/source_run_queue.py",
-        "owner": "process_entry",
-        "expression": "refresh_after_collection(f'on-demand {df} collection')"
-      },
-      {
-        "file": "ingest/source_run_queue.py",
-        "owner": "enqueue_and_run",
-        "expression": "enqueue(source, reason)"
       }
     ],
     "queues": [
@@ -1144,14 +1093,6 @@
           "ingest/operator_job_queue.py",
           "ingest/source_actions.py",
           "operations/apps/core/conditions/reader.py",
-          "operations/apps/core/views.py"
-        ]
-      },
-      {
-        "relation": "operations.source_run_queue",
-        "files": [
-          "ingest/operator_job_queue.py",
-          "ingest/source_run_queue.py",
           "operations/apps/core/views.py"
         ]
       }
@@ -1199,8 +1140,7 @@
       {
         "file": "ingest/operator_job_queue.py",
         "relations": [
-          "operations.source_action_requests",
-          "operations.source_run_queue"
+          "operations.source_action_requests"
         ]
       },
       {
@@ -1249,12 +1189,6 @@
         ]
       },
       {
-        "file": "ingest/source_run_queue.py",
-        "relations": [
-          "operations.source_run_queue"
-        ]
-      },
-      {
         "file": "operations/apps/core/conditions/reader.py",
         "relations": [
           "operations.source_action_requests"
@@ -1266,8 +1200,7 @@
           "operations.operator_job_events",
           "operations.operator_job_runs",
           "operations.run_log",
-          "operations.source_action_requests",
-          "operations.source_run_queue"
+          "operations.source_action_requests"
         ]
       }
     ],

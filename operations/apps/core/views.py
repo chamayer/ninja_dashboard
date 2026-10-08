@@ -5765,26 +5765,49 @@ def _queue_ninja_software_refresh(device_id: uuid.UUID) -> tuple[bool, str]:
     return True, ""
 
 
-def _source_name_for_refresh(finding: Finding) -> str:
-    """Resolve a registered source from the finding's authoritative evidence."""
+def _source_binding_for_refresh(finding: Finding) -> uuid.UUID | None:
+    """Resolve one configured source binding from a finding's evidence."""
     details = finding.finding_details or {}
+    raw_binding = str(details.get("source_binding_id") or "")
+    try:
+        if raw_binding:
+            return uuid.UUID(raw_binding)
+    except ValueError:
+        pass
     source_id = str(details.get("source_id") or "")
-    if source_id:
-        return Source.objects.filter(id=source_id).values_list("name", flat=True).first() or ""
-    domain = str(details.get("domain") or "")
-    if domain.startswith("source."):
-        candidate = domain.removeprefix("source.").split(".", 1)[0]
-        return (
-            Source.objects.filter(name__iexact=candidate).values_list("name", flat=True).first()
-            or ""
+    if not source_id:
+        domain = str(details.get("domain") or "")
+        if domain.startswith("source."):
+            source_id = str(
+                Source.objects.filter(
+                    name__iexact=domain.removeprefix("source.").split(".", 1)[0]
+                ).values_list("id", flat=True).first()
+                or ""
+            )
+    if not source_id:
+        return None
+    with transaction.atomic(), connection.cursor() as cur:
+        cur.execute("SET LOCAL operations.tenant_id = 1")
+        cur.execute(
+            """SELECT binding.id FROM operations.source_bindings binding
+                 JOIN operations.source_instances instance ON instance.id = binding.source_instance_id
+                WHERE binding.tenant_id = 1 AND binding.enabled AND instance.enabled
+                  AND instance.source_id::text = %s ORDER BY binding.id LIMIT 2""",
+            (source_id,),
         )
-    return ""
+        rows = cur.fetchall()
+    return rows[0][0] if len(rows) == 1 else None
 
 
-def _queue_source_refresh(source_name: str) -> tuple[bool, str]:
-    """Queue the existing on-demand collector for one named source."""
-    endpoint = "run/sources/enqueue?" + urlencode({"source": source_name, "confirm": "1"})
-    return _dispatch_job({"endpoint": endpoint})
+def _queue_source_refresh(binding_id: uuid.UUID, user_id: int) -> tuple[bool, str]:
+    """Request one configured source through the binding-scoped Jobs API."""
+    try:
+        _run_id, created = _enqueue_operator_job(
+            "source-refresh", user_id, scope_identity=f"source-binding:{binding_id}"
+        )
+    except DatabaseError:
+        return False, "Source refresh could not be requested."
+    return True, "" if created else "An equivalent source refresh is already active."
 
 
 def _queue_platform_reevaluation() -> tuple[bool, str]:
@@ -5792,7 +5815,7 @@ def _queue_platform_reevaluation() -> tuple[bool, str]:
     return _dispatch_job({"endpoint": "run/platform-evaluate"})
 
 
-def _queue_refresh_for_finding(finding: Finding) -> tuple[bool, str, str]:
+def _queue_refresh_for_finding(finding: Finding, user_id: int) -> tuple[bool, str, str]:
     """Use the narrowest registered ingest/evaluator path for an Issue."""
     if finding.subject_type == Finding.SubjectType.DEVICE:
         queued, detail = _queue_ninja_software_refresh(finding.subject_id)
@@ -5801,10 +5824,10 @@ def _queue_refresh_for_finding(finding: Finding) -> tuple[bool, str, str]:
     else:
         detail = ""
 
-    if source_name := _source_name_for_refresh(finding):
-        queued, source_detail = _queue_source_refresh(source_name)
+    if source_binding_id := _source_binding_for_refresh(finding):
+        queued, source_detail = _queue_source_refresh(source_binding_id, user_id)
         if queued:
-            return True, "source", source_name
+            return True, "source", ""
         detail = source_detail
 
     queued, evaluation_detail = _queue_platform_reevaluation()
@@ -5820,11 +5843,11 @@ def finding_refresh(request: HttpRequest, finding_id: str) -> HttpResponse:
     finding = get_object_or_404(
         Finding.objects.select_related("finding_type"), id=finding_id, tenant_id=1
     )
-    queued, target, detail = _queue_refresh_for_finding(finding)
+    queued, target, detail = _queue_refresh_for_finding(finding, request.user.id)
     if queued and target == "computer":
         messages.success(request, "Computer data refresh queued.")
     elif queued and target == "source":
-        messages.success(request, f"{detail} source refresh queued.")
+        messages.success(request, "Source refresh requested.")
     elif queued:
         messages.success(request, "Issue reevaluation queued using current information.")
     else:
@@ -5855,13 +5878,16 @@ def targeted_refresh(request: HttpRequest) -> HttpResponse:
                 else:
                     messages.warning(request, detail)
         elif target == "source":
-            source_name = (request.POST.get("source") or "").strip()
-            if not Source.objects.filter(name=source_name).exists():
-                messages.warning(request, "Choose a registered source to refresh.")
+            try:
+                binding_id = uuid.UUID(request.POST.get("source_binding") or "")
+            except ValueError:
+                binding_id = None
+            if binding_id is None:
+                messages.warning(request, "Choose a configured source to refresh.")
             else:
-                queued, detail = _queue_source_refresh(source_name)
+                queued, detail = _queue_source_refresh(binding_id, request.user.id)
                 if queued:
-                    messages.success(request, f"{source_name} source refresh queued.")
+                    messages.success(request, "Source refresh requested.")
                 else:
                     messages.warning(request, detail or "Source refresh could not be queued.")
         elif target == "reevaluate":
@@ -5884,6 +5910,20 @@ def targeted_refresh(request: HttpRequest) -> HttpResponse:
             .select_related("client")
             .order_by("canonical_hostname", "id")[:50]
         )
+    with transaction.atomic(), connection.cursor() as cur:
+        cur.execute("SET LOCAL operations.tenant_id = 1")
+        cur.execute(
+            """SELECT binding.id, source.name, client.display_name
+                 FROM operations.source_bindings binding
+                 JOIN operations.source_instances instance ON instance.id = binding.source_instance_id
+                 JOIN operations.sources source ON source.id = instance.source_id
+                 LEFT JOIN operations.clients client ON client.id = instance.client_id
+                WHERE binding.tenant_id = 1 AND binding.enabled AND instance.enabled
+                ORDER BY source.name, client.display_name NULLS FIRST, binding.id"""
+        )
+        source_bindings = [
+            {"id": row[0], "name": row[1], "client_name": row[2]} for row in cur.fetchall()
+        ]
     return render(
         request,
         "targeted_refresh.html",
@@ -5892,7 +5932,7 @@ def targeted_refresh(request: HttpRequest) -> HttpResponse:
             "admin_tab": "jobs",
             "search": search,
             "computers": computers,
-            "sources": Source.objects.order_by("name"),
+            "source_bindings": source_bindings,
         },
     )
 
@@ -9078,12 +9118,173 @@ def admin_jobs(request: HttpRequest) -> HttpResponse:
             }
         )
 
+    # Source refreshes are one Job definition scoped to individual configured
+    # sources.  Show each source here so the Jobs lifecycle agrees with the
+    # Sources controls, without copying source schedules into the Jobs catalog.
+    try:
+        with transaction.atomic(), connection.cursor() as cur:
+            cur.execute("SET LOCAL operations.tenant_id = 1")
+            cur.execute(
+                """
+                SELECT binding.id, source.name, client.display_name, binding.schedule,
+                       active.id, active.status, active.requested_at, active.started_at,
+                       active.rows_touched, active.error, active.wait_category,
+                       active.wait_reason, active.stage, active.stage_detail,
+                       active.cancellation_requested_at,
+                       terminal.id, terminal.status, terminal.requested_at,
+                       terminal.started_at, terminal.completed_at, terminal.rows_touched,
+                       terminal.error
+                  FROM operations.source_bindings binding
+                  JOIN operations.source_instances instance
+                    ON instance.id = binding.source_instance_id
+                  JOIN operations.sources source ON source.id = instance.source_id
+             LEFT JOIN operations.clients client ON client.id = instance.client_id
+             LEFT JOIN LATERAL (
+                    SELECT id, status, requested_at, started_at, rows_touched, error,
+                           wait_category, wait_reason, stage, stage_detail,
+                           cancellation_requested_at
+                      FROM operations.operator_job_runs
+                     WHERE tenant_id = binding.tenant_id AND job_key = 'source-refresh'
+                       AND scope_identity = 'source-binding:' || binding.id::text
+                       AND status IN ('queued', 'running')
+                     ORDER BY requested_at DESC, id DESC LIMIT 1
+             ) active ON TRUE
+             LEFT JOIN LATERAL (
+                    SELECT id, status, requested_at, started_at, completed_at,
+                           rows_touched, error
+                      FROM operations.operator_job_runs
+                     WHERE tenant_id = binding.tenant_id AND job_key = 'source-refresh'
+                       AND scope_identity = 'source-binding:' || binding.id::text
+                       AND status IN ('completed', 'failed', 'stalled', 'cancelled')
+                     ORDER BY completed_at DESC NULLS LAST, requested_at DESC, id DESC LIMIT 1
+             ) terminal ON TRUE
+                 WHERE binding.tenant_id = 1 AND binding.enabled AND instance.enabled
+                 ORDER BY source.name, client.display_name NULLS FIRST, binding.id
+                """
+            )
+            source_job_rows = cur.fetchall()
+    except DatabaseError:
+        log.exception("Source Jobs status query failed")
+        source_job_rows = []
+
+    for row in source_job_rows:
+        (
+            binding_id, source_name, client_name, schedule,
+            active_id, active_status, active_requested_at, active_started_at,
+            active_rows, active_error, active_wait_category, active_wait_reason,
+            active_stage, active_stage_detail, active_cancel_requested_at,
+            terminal_id, terminal_status, terminal_requested_at, terminal_started_at,
+            terminal_completed_at, terminal_rows, terminal_error,
+        ) = row
+        display_name = f"Refresh {source_name} data"
+        if client_name:
+            display_name += f" · {client_name}"
+        active_run = None
+        if active_id:
+            lifecycle, status_label = _operator_run_lifecycle(active_status, active_wait_category)
+            active_run = {
+                "id": active_id,
+                "status": active_status,
+                "lifecycle": lifecycle,
+                "requested_at": active_requested_at,
+                "started_at": active_started_at,
+                "rows_touched": active_rows,
+                "error": (active_error or "")[:240],
+                "wait_category": active_wait_category,
+                "wait_reason": active_wait_reason or "",
+                "stage": active_stage or "",
+                "stage_detail": active_stage_detail or "",
+                "cancellation_requested_at": active_cancel_requested_at,
+                "status_label": status_label,
+                "status_detail": "",
+            }
+            active_run["status_detail"] = _operator_run_wait_explanation(active_run)
+            state = lifecycle
+            status_detail = (
+                active_run["stage_detail"] or active_run["stage"]
+                if state == "running"
+                else active_run["status_detail"]
+            )
+            latest_at = active_started_at or active_requested_at
+            latest_at_label = "Running since" if state == "running" else "Waiting since"
+            last_result = ""
+            last_result_at = None
+            rows_touched = active_rows
+            error = active_run["error"]
+            latest_run_id = active_id
+        elif terminal_id:
+            state = "failed" if terminal_status == "stalled" else terminal_status
+            status_label = {
+                "completed": "Completed", "failed": "Failed", "cancelled": "Cancelled",
+            }.get(state, state.title())
+            rows_touched = terminal_rows
+            error = (terminal_error or "")[:240]
+            status_detail = (
+                f"{rows_touched} updated." if state == "completed" and rows_touched is not None
+                else error if state == "failed" and error else ""
+            )
+            latest_at = terminal_completed_at or terminal_started_at or terminal_requested_at
+            latest_at_label = "Completed at" if state == "completed" else "Finished at"
+            last_result = ""
+            last_result_at = None
+            latest_run_id = terminal_id
+        else:
+            state, status_label, status_detail = "not_run", "Not run yet", ""
+            rows_touched = None
+            error = ""
+            latest_at = None
+            latest_at_label = ""
+            last_result = ""
+            last_result_at = None
+            latest_run_id = None
+        minutes = _source_schedule_minutes(schedule or "")
+        jobs.append(
+            {
+                "id": f"source-refresh:{binding_id}",
+                "group_key": "source-data",
+                "name": display_name,
+                "description": f"Refresh data from {source_name}.",
+                "state": state,
+                "status_label": status_label,
+                "status_detail": status_detail,
+                "capacity_label": "",
+                "capacity_blockers": [],
+                "resource_blockers": [],
+                "latest_at": latest_at,
+                "latest_at_label": latest_at_label,
+                "last_result": last_result,
+                "last_result_at": last_result_at,
+                "latest_run_id": latest_run_id,
+                "rows_touched": rows_touched,
+                "error": error,
+                "active_run": active_run,
+                "needs_attention": state == "failed",
+                "schedule_label": _schedule_cadence_label({"minutes": minutes}) if minutes else "Not scheduled",
+                "schedule_detail": "Manage on Sources",
+                "next_due_at": None,
+                "run_key": "source-refresh",
+                "source_binding_id": binding_id,
+                "source_name": source_name,
+            }
+        )
+
     summary = {
         "running": sum(item["state"] == "running" for item in jobs),
         "waiting": sum(item["state"] == "waiting" for item in jobs),
         "ready": sum(item["state"] == "ready" for item in jobs),
         "attention": sum(item["needs_attention"] for item in jobs),
     }
+    # Admin Health uses the Jobs diagnostic lifecycle totals.  Use those same
+    # totals in this page header so a source-scoped run is never counted in one
+    # admin surface but omitted from the other.
+    control_summary = _jobs_control_health().get("summary", {})
+    for state, diagnostic_key in (
+        ("running", "running_runs"),
+        ("waiting", "waiting_runs"),
+        ("ready", "ready_runs"),
+    ):
+        if diagnostic_key in control_summary:
+            summary[state] = int(control_summary[diagnostic_key] or 0)
     if search_filter:
         jobs = [
             item
@@ -9117,6 +9318,7 @@ def admin_jobs(request: HttpRequest) -> HttpResponse:
             "admin_tab": "jobs",
             "job_groups": job_groups,
             "job_count": len(_OPERATOR_JOB_CATALOG),
+            "source_count": len(source_job_rows),
             "active_status": status_filter,
             "active_search": search_filter,
             "active_refresh": refresh_setting,
@@ -14491,7 +14693,11 @@ def sources_status(request: HttpRequest) -> HttpResponse:
                 "schedule_minutes": _source_schedule_minutes(schedule or ""),
                 "source_kind": source_kind,
                 "entity_type": entity_type,
-                "purpose": (source_capabilities or {}).get("purpose", ""),
+                "purpose": (
+                    source_capabilities.get("purpose", "")
+                    if isinstance(source_capabilities, dict)
+                    else ""
+                ),
                 "is_processing": bool(act and act[1] == "running"),
                 "has_pending": bool(act and act[1] == "queued"),
                 "active_job_url": (

@@ -64,9 +64,7 @@ EXECUTABLE_JOB_KEYS = frozenset(
         "intel-capability", "intel-lolrmm", "intel-otx", "intel-abusech",
         "intel-endoflife", "intel-category", "software-classify",
         "source-actions",
-        "source-demand",
         "agent-compliance-review-digest",
-        "source-demand-recovery",
         "run-log-recovery",
         "platform-health-evaluate",
         "metabase-bootstrap",
@@ -194,18 +192,13 @@ def _schedule_enabled(job_key: str) -> tuple[bool, str]:
     job = definition(job_key)
     if job_key in legacy_job_definition_keys():
         return False, "Disabled — retired legacy bridge."
-    if job_key in {"source-demand", "source-actions"}:
-        table = (
-            "operations.source_run_queue"
-            if job_key == "source-demand"
-            else "operations.source_action_requests"
-        )
+    if job_key == "source-actions":
+        table = "operations.source_action_requests"
         with db.transaction() as cur:
             cur.execute("SET LOCAL operations.tenant_id = 1")
             cur.execute(f"SELECT EXISTS (SELECT 1 FROM {table} WHERE status = 'pending')")
             pending = cur.fetchone()[0]
-        label = "source demand" if job_key == "source-demand" else "source actions"
-        return pending, "Available" if pending else f"Waiting for {label}."
+        return pending, "Available" if pending else "Waiting for source actions."
     enabled = {
         "always": True,
         "intel": settings.INTEL_ENABLED,
@@ -384,34 +377,6 @@ def admit_result_workflow(
     with db.transaction() as cur:
         cur.execute("SET LOCAL operations.tenant_id = 1")
         _admit_workflow(cur, root_key, root_run_id, root_scope_identity, approved)
-
-
-def _run_source_demand(job_run_id: object) -> JobExecutionResult:
-    from ingest import source_run_queue
-    from ingest.source_observations import is_identity_source
-    from ingest.sources import load_sources
-
-    with db.transaction() as cur:
-        cur.execute("SET LOCAL operations.tenant_id = 1")
-        cur.execute(
-            "SELECT df FROM operations.source_run_queue "
-            "WHERE tenant_id = 1 AND status = 'pending' AND job_run_id IS NULL "
-            "ORDER BY queued_at, id LIMIT 1"
-        )
-        row = cur.fetchone()
-    source_name = row[0] if row else ""
-    processed = source_run_queue.process_next(job_run_id)
-    if not processed:
-        return JobExecutionResult(rows=0)
-    if source_name == "Ninja":
-        return JobExecutionResult(rows=processed, signals=("identity_source",))
-    sources = [source for source in load_sources() if source.platform == source_name]
-    signal = (
-        "identity_source"
-        if any(is_identity_source(source) for source in sources)
-        else "documentation_source"
-    )
-    return JobExecutionResult(rows=processed, signals=(signal,))
 
 
 def _run_source_actions(job_run_id: object) -> JobExecutionResult:
@@ -706,7 +671,7 @@ def _execute(job_key: str, progress: V1JobProgress) -> int | JobExecutionResult 
     Importing main here avoids its startup import cycle. The direct lower-level
     functions intentionally raise, allowing the durable record to show failure.
     """
-    from ingest import cmdb_findings, main, platform_findings, runlog, source_run_queue
+    from ingest import cmdb_findings, main, platform_findings, runlog
     from ingest.intel import (
         abusech,
         capability_match,
@@ -780,14 +745,6 @@ def _execute(job_key: str, progress: V1JobProgress) -> int | JobExecutionResult 
         "source-actions": (
             "Processing approved source actions",
             lambda: _run_source_actions(progress.job_id),
-        ),
-        "source-demand": (
-            "Processing queued source demand",
-            lambda: _run_source_demand(progress.job_id),
-        ),
-        "source-demand-recovery": (
-            "Recovering expired source demand",
-            source_run_queue.recover_stale,
         ),
         "run-log-recovery": ("Recovering stale diagnostics", runlog.reap_stale),
         "platform-health-evaluate": (

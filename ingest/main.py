@@ -44,7 +44,7 @@ from ingest.source_observations import (
     is_identity_source,
     run_source_observations,
 )
-from ingest import operator_job_queue, source_run_queue
+from ingest import operator_job_queue
 from ingest.inventory import software as software_ingest
 from ingest.inventory import queue as software_queue
 from ingest.runlog import run_log
@@ -99,7 +99,7 @@ SCHEDULED_OPERATOR_JOB_KEYS = frozenset(
         "retention-history", "software-enqueue-orgs", "software-queue-drain",
         "intel-capability", "intel-category",
         "software-classify-full",
-        "source-actions", "source-demand", "source-demand-recovery",
+        "source-actions",
         "run-log-recovery", "platform-health-evaluate",
     }
 )
@@ -948,12 +948,8 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self._handle_software_demand_status()
         elif self.path == "/run/software/queue":
             self._handle_software_queue_status()
-        elif self.path in ("/run/sources", "/run/sources/enqueue") or self.path.startswith("/run/sources/enqueue?"):
-            self._handle_sources_enqueue()
-        elif self.path == "/run/sources/queue":
-            self._handle_sources_queue()
-        elif self.path.startswith("/run/sources/demand/"):
-            self._handle_sources_demand_status()
+        elif self.path.startswith("/run/sources"):
+            self._respond(410, b"source refreshes are managed in Operations Sources\n")
         elif self.path.startswith("/agent-compliance/action/") or self.path.startswith("/a/"):
             self._handle_agent_compliance_action()
         else:
@@ -980,8 +976,8 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self._handle_software_enqueue()
         elif self.path == "/run/software/scoped" or self.path.startswith("/run/software/scoped?"):
             self._handle_software_scoped()
-        elif self.path == "/run/sources/enqueue" or self.path.startswith("/run/sources/enqueue?"):
-            self._handle_sources_enqueue()
+        elif self.path.startswith("/run/sources"):
+            self._respond(410, b"source refreshes are managed in Operations Sources\n")
         elif self.path.startswith("/agent-compliance/action/"):
             self._handle_agent_compliance_action()
         else:
@@ -2066,240 +2062,6 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         """.encode("utf-8")
         self._respond_html(200, body)
 
-    def _handle_sources_enqueue(self) -> None:
-        """Form to trigger on-demand runs for Ninja / S1 / SC / LMI."""
-        if not _READY.is_set():
-            self._respond(503, b"still starting - try again shortly\n")
-            return
-        parsed = urlparse(self.path)
-        params = parse_qs(parsed.query)
-        selected = params.get("source", [])
-        confirm = params.get("confirm", ["0"])[0]
-
-        if self.command == "GET" and confirm != "1":
-            checkboxes = "\n".join(
-                f'<label style="display:block;margin:6px 0">'
-                f'<input type="checkbox" name="source" value="{s}" checked> {escape(s)}'
-                f"</label>"
-                for s in source_run_queue.available_sources()
-            )
-            body = f"""<!doctype html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <title>Source runs — trigger</title>
-  <style>
-    body {{ font-family: sans-serif; margin: 24px; color: #1f2933; max-width: 520px; }}
-    h2 {{ margin-bottom: 4px; }}
-    p.hint {{ color: #52606d; font-size: 14px; margin: 0 0 16px; }}
-    button {{ margin-top: 18px; padding: 9px 18px; font-weight: 700; cursor: pointer; }}
-    a {{ color: #0b69a3; }}
-  </style>
-</head>
-<body>
-  <h2>Trigger source run</h2>
-  <p class="hint">Each selected source is enqueued independently and fires in its own thread.
-     One pending entry per source is enforced — submitting again while running is safe.</p>
-  <form method="get" action="/run/sources/enqueue">
-    <input type="hidden" name="confirm" value="1">
-    {checkboxes}
-    <button type="submit">Run selected</button>
-  </form>
-  <p style="margin-top:20px;font-size:13px">
-    <a href="/run/sources/queue">Queue status</a>
-  </p>
-</body>
-</html>""".encode("utf-8")
-            self._respond_html(200, body)
-            return
-
-        if not selected:
-            self._respond(400, b"no source selected\n")
-            return
-
-        invalid = [s for s in selected if s not in source_run_queue.available_sources()]
-        if invalid:
-            self._respond(400, f"unknown source(s): {', '.join(invalid)}\n".encode())
-            return
-
-        for src in selected:
-            source_run_queue.enqueue_and_run(src, reason="on_demand")
-
-        location = "/run/sources/queue"
-        self.send_response(303)
-        self.send_header("Location", location)
-        self.send_header("Content-Length", "0")
-        self.end_headers()
-
-    def _handle_sources_queue(self) -> None:
-        """Overview of the source run queue."""
-        if not _READY.is_set():
-            self._respond(503, b"still starting - try again shortly\n")
-            return
-        details = source_run_queue.queue_details()
-        statuses = ["pending", "processing", "done", "failed"]
-        counts = details.get("counts", {})
-        active = details.get("active", [])
-        recent = details.get("recent", [])
-
-        import datetime as _dt
-        _now = _dt.datetime.now(_dt.timezone.utc)
-
-        def _fmt_dt(dt) -> str:
-            return dt.strftime("%H:%M:%S") if dt else "—"
-
-        rows_html = ""
-        for r in active:
-            elapsed = ""
-            if r.get("started_at"):
-                st = r["started_at"]
-                if st.tzinfo is None:
-                    st = st.replace(tzinfo=_dt.timezone.utc)
-                elapsed = f" ({int((_now - st).total_seconds())}s)"
-            rows_html += (
-                f"<tr style='background:#fff8e1'>"
-                f"<td><a href='/run/sources/demand/{r['id']}'>{escape(r['df'])}</a></td><td>processing</td>"
-                f"<td>{_fmt_dt(r.get('started_at'))}{elapsed}</td>"
-                f"<td>—</td>"
-                f"<td>{r['rows_seen'] if r.get('rows_seen') is not None else '—'}</td>"
-                f"<td></td></tr>"
-            )
-        for r in recent:
-            err_full = r.get("error") or ""
-            err_cell = (
-                f"<span style='color:#c0392b' title='{escape(err_full)}'>"
-                f"{escape(err_full[:80])}{'…' if len(err_full) > 80 else ''}</span>"
-                if err_full else ""
-            )
-            link = f"<a href='/run/sources/demand/{r['id']}'>{escape(r['df'])}</a>"
-            rows_html += (
-                f"<tr>"
-                f"<td>{link}</td><td>{r['status']}</td>"
-                f"<td>{_fmt_dt(r.get('started_at'))}</td>"
-                f"<td>{_fmt_dt(r.get('completed_at'))}</td>"
-                f"<td>{r['rows_seen'] if r.get('rows_seen') is not None else '—'}</td>"
-                f"<td>{err_cell}</td></tr>"
-            )
-
-        count_cells = "".join(f"<td>{counts.get(s, 0)}</td>" for s in statuses)
-        body = f"""<!doctype html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <title>Source run queue</title>
-  <meta http-equiv="refresh" content="15">
-  <style>
-    body {{ font-family: sans-serif; margin: 24px; color: #1f2933; max-width: 900px; }}
-    table {{ border-collapse: collapse; width: 100%; margin-top: 8px; }}
-    th, td {{ text-align: left; padding: 6px 10px; border-bottom: 1px solid #d9e2ec; font-size: 13px; }}
-    thead th {{ background: #f3f4f6; font-weight: 600; }}
-    .hint {{ color: #52606d; font-size: 14px; }}
-    a {{ color: #0b69a3; }}
-  </style>
-</head>
-<body>
-  <h2>Source run queue</h2>
-  <p class="hint">Auto-refreshes every 15 s.</p>
-  <table>
-    <thead><tr><th>Pending</th><th>Processing</th><th>Done</th><th>Failed</th></tr></thead>
-    <tbody><tr>{count_cells}</tr></tbody>
-  </table>
-  <h3 style="margin-top:24px;margin-bottom:4px">Recent runs</h3>
-  <table>
-    <thead><tr>
-      <th>Source</th><th>Status</th><th>Started</th><th>Completed</th><th>Rows</th><th>Error</th>
-    </tr></thead>
-    <tbody>{rows_html}</tbody>
-  </table>
-  <p style="margin-top:24px;">
-    <a href="/run/sources/enqueue">Trigger a run</a>
-  </p>
-</body>
-</html>""".encode("utf-8")
-        self._respond_html(200, body)
-
-    def _handle_sources_demand_status(self) -> None:
-        """Per-entry status page for a source run queue entry."""
-        if not _READY.is_set():
-            self._respond(503, b"still starting - try again shortly\n")
-            return
-        parts = self.path.rstrip("/").rsplit("/", 1)
-        try:
-            entry_id = int(parts[-1])
-        except (ValueError, IndexError):
-            self._respond(400, b"invalid entry id\n")
-            return
-
-        entry = source_run_queue.get_status(entry_id)
-        if entry is None:
-            self._respond(404, b"entry not found\n")
-            return
-
-        status = entry["status"]
-        terminal = status in ("done", "failed")
-        refresh_meta = "" if terminal else '<meta http-equiv="refresh" content="5">'
-
-        status_labels = {
-            "pending": "Queued — waiting for worker",
-            "processing": "Running…",
-            "done": "Completed",
-            "failed": "Failed",
-        }
-        status_label = status_labels.get(status, status)
-
-        def _fmt(v: object) -> str:
-            return str(v) if v is not None else "—"
-
-        error_html = (
-            f'<div class="error">{escape(entry["error"])}</div>'
-            if entry.get("error") else ""
-        )
-
-        body = f"""<!doctype html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <title>Source run #{entry_id}</title>
-  {refresh_meta}
-  <style>
-    body {{ font-family: sans-serif; margin: 24px; color: #1f2933; max-width: 720px; }}
-    h2 {{ margin-bottom: 4px; }}
-    .status {{ font-size: 18px; font-weight: 700; margin: 12px 0 20px; }}
-    .pending    {{ color: #52606d; }}
-    .processing {{ color: #0b69a3; }}
-    .done       {{ color: #27ab83; }}
-    .failed     {{ color: #ba2525; }}
-    table {{ border-collapse: collapse; width: 100%; }}
-    th, td {{ text-align: left; padding: 8px 12px; border-bottom: 1px solid #d9e2ec; }}
-    th {{ background: #f3f4f6; font-weight: 600; width: 160px; }}
-    .error {{ background: #fff5f5; border: 1px solid #fc8181; border-radius: 4px;
-              padding: 12px; margin-top: 16px; font-family: monospace; font-size: 13px;
-              white-space: pre-wrap; word-break: break-all; }}
-    a {{ color: #0b69a3; }}
-    .links {{ margin-top: 24px; }}
-  </style>
-</head>
-<body>
-  <h2>Source run #{entry_id}</h2>
-  <p class="status {status}">{escape(status_label)}</p>
-  <table>
-    <tr><th>Source</th><td>{escape(entry["df"])}</td></tr>
-    <tr><th>Reason</th><td>{escape(entry.get("reason") or "—")}</td></tr>
-    <tr><th>Queued</th><td>{_fmt(entry.get("queued_at"))}</td></tr>
-    <tr><th>Started</th><td>{_fmt(entry.get("started_at"))}</td></tr>
-    <tr><th>Completed</th><td>{_fmt(entry.get("completed_at"))}</td></tr>
-    <tr><th>Rows seen</th><td>{_fmt(entry.get("rows_seen"))}</td></tr>
-    <tr><th>Attempts</th><td>{entry.get("attempts", 0)} / {entry.get("max_attempts", 3)}</td></tr>
-  </table>
-  {error_html}
-  <p class="links">
-    <a href="/run/sources/enqueue">Trigger a run</a> &middot;
-    <a href="/run/sources/queue">Queue status</a>
-  </p>
-</body>
-</html>""".encode("utf-8")
-        self._respond_html(200, body)
-
     def _respond(self, code: int, body: bytes) -> None:
         self.send_response(code)
         self.send_header("Content-Type", "text/plain")
@@ -2332,9 +2094,8 @@ def _start_http_server() -> _ThreadingServer:
         "(/healthz liveness, /readyz readiness, /run, /run/patches, "
         "/run/agent-compliance, /run/agent-compliance-evaluate, "
         "/run/resolver, "
-        "/run/software/enqueue, /run/software/scoped, /run/software/queue, "
-        "/run/software/demand/<id>, /run/sources/enqueue, "
-        "/run/sources/queue, /run/sources/demand/<id>, /bootstrap-metabase)",
+            "/run/software/enqueue, /run/software/scoped, /run/software/queue, "
+            "/run/software/demand/<id>, /bootstrap-metabase)",
         *addr,
     )
     return httpd

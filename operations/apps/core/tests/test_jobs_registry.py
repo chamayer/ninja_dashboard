@@ -32,7 +32,7 @@ ROOT = Path(__file__).resolve().parents[4]
 def test_registry_has_one_catalog_and_schedule_owner_per_definition():
     keys = definition_keys()
 
-    assert len(keys) == 39
+    assert len(keys) == 37
     assert {entry["id"] for entry in catalog_entries()} == keys
     assert scheduled_definition_keys() < keys
     assert definition("patches").lane == "collection"
@@ -60,7 +60,7 @@ def test_checked_scheduler_source_matches_registry_schedule_keys():
     }
     assert scheduled <= scheduled_definition_keys()
     assert not scheduled
-    assert "source-demand" in scheduled_definition_keys()
+    assert "source-demand" not in scheduled_definition_keys()
 
 
 def test_scheduler_parity_constant_exactly_matches_registered_schedules():
@@ -137,19 +137,6 @@ def test_initial_workflow_edges_are_registered_and_acyclic():
     assert shape("agent-compliance") == (
         ("agent-compliance", "resolver", "agent-compliance.observations", "always"),
         ("resolver", "platform-evaluate", "identity.current", "always"),
-    )
-    assert shape("source-demand") == ()
-    assert shape("source-demand", frozenset({"identity_source"})) == (
-        ("source-demand", "resolver", "source.identity-observations", "identity_source"),
-        ("resolver", "platform-evaluate", "identity.current", "always"),
-    )
-    assert shape("source-demand", frozenset({"documentation_source"})) == (
-        (
-            "source-demand",
-            "cmdb-evaluate",
-            "source.documentation-observations",
-            "documentation_source",
-        ),
     )
     assert shape("intel-nvd") == ()
     assert shape("intel-nvd", frozenset({"material_change"})) == (

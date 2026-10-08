@@ -47,18 +47,19 @@ continuity plan is a short pointer only; this is cross-service work.
    tenant scope, failure safety, capacity, migration compatibility, and the
    full source catalog.
 
-**Current checkpoint:** implemented the first durable cutover: `source-refresh`
-is a binding-scoped registered Job, scheduled from the existing
-`source_bindings.schedule` data, with per-binding admission and a successful
-finish-only output record. Legacy capability-bucket schedules are disabled.
-The new source-aware dispatcher applies the external connection pool and an
-exclusive binding lock rather than one combined source lock. The consolidated
-Sources surface now groups device/client systems, software data, and security
-data; it owns schedule/refresh controls and reads current/previous results
-from the durable source-refresh ledger. Reference feeds are seeded as source
-bindings and their old automatic schedules are disabled. Next: expose the
-source-refresh activity consistently from Jobs, validate the migration SQL on
-the stack, then perform the compatibility and failure-safety review.
+**Current checkpoint:** source refresh is binding-scoped, scheduled from
+`source_bindings.schedule`, and publishes an output only on a successful
+fenced finish. Legacy capability-bucket schedules are disabled. Sources is the
+single configuration/health/control surface, grouped as device/client systems,
+software data, and security data; it includes reference feeds as configured
+sources. Jobs now also shows one lifecycle row for every configured source
+refresh under Refresh Source Data, while schedule changes remain on Sources.
+The legacy source-demand scheduler and HTTP queue route are retired by pending
+migration 0266 without deleting its historical rows. Migration 0265 now
+repairs an old `sources` sequence before it seeds reference feeds, and the
+Sources view accepts legacy text capabilities as having no declared purpose.
+Next: finish focused validation, review the migration sequence and deployed
+compatibility, then commit/push the cohesive cutover.
 
 ## Active plan — complete conditions framework
 

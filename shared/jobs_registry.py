@@ -604,32 +604,6 @@ _RAW_DEFINITIONS = (
         schedule_ids=("source_action_requests_cycle",),
     ),
     JobDefinition(
-        "source-demand",
-        "Source demand worker",
-        "Process one queued on-demand source refresh with its retained source record.",
-        "maintenance",
-        "collection",
-        "",
-        "source_run_queue",
-        "run_log",
-        "ingest.source_run_queue.process_next",
-        run_all=False,
-        schedule_ids=("source_demand_cycle",),
-    ),
-    JobDefinition(
-        "source-demand-recovery",
-        "Source demand recovery",
-        "Mark source-demand work whose execution lease expired for operator review.",
-        "maintenance",
-        "service",
-        "",
-        "source_run_queue",
-        "run_log",
-        "ingest.source_run_queue.recover_stale",
-        run_all=False,
-        schedule_ids=("source_demand_recovery_cycle",),
-    ),
-    JobDefinition(
         "run-log-recovery",
         "Diagnostic run recovery",
         "Close stale diagnostic run records that no active process can complete.",
@@ -782,10 +756,6 @@ _SCHEDULE_DEFINITIONS = (
         "minutes",
     ),
     ScheduleDefinition("source_action_requests_cycle", "source-actions", "constant:1", "minutes"),
-    ScheduleDefinition("source_demand_cycle", "source-demand", "constant:1", "minutes"),
-    ScheduleDefinition(
-        "source_demand_recovery_cycle", "source-demand-recovery", "constant:15", "minutes"
-    ),
     ScheduleDefinition("run_log_recovery_cycle", "run-log-recovery", "constant:30", "minutes"),
     ScheduleDefinition(
         "platform_health_evaluate_cycle", "platform-health-evaluate", "constant:30", "minutes"
@@ -902,8 +872,6 @@ _RESOURCE_KEYS_BY_DEFINITION: dict[str, tuple[str, ...]] = {
     "software-enqueue-orgs": ("tenant:{tenant_id}:software-inventory",),
     "software-queue-drain": ("tenant:{tenant_id}:software-inventory",),
     "source-actions": ("tenant:{tenant_id}:source-actions",),
-    "source-demand": ("tenant:{tenant_id}:source-demand",),
-    "source-demand-recovery": ("tenant:{tenant_id}:source-demand",),
     "run-log-recovery": ("tenant:{tenant_id}:run-history",),
     "platform-health-evaluate": ("tenant:{tenant_id}:platform-health",),
     "metabase-bootstrap": ("tenant:{tenant_id}:reporting",),
@@ -962,8 +930,6 @@ _CAPACITY_KEYS_BY_DEFINITION: dict[str, tuple[str, ...]] = {
     "software-enqueue-orgs": ("capacity:control",),
     "software-queue-drain": (),
     "source-actions": (),
-    "source-demand": (),
-    "source-demand-recovery": ("capacity:control",),
     "run-log-recovery": ("capacity:control",),
     "platform-health-evaluate": ("capacity:processing", "capacity:control"),
     "metabase-bootstrap": ("capacity:control",),
@@ -1001,12 +967,6 @@ _WORKFLOW_SUCCESSORS = MappingProxyType(
         "agent-observations": (DependencyDefinition("resolver", "source.identity-observations"),),
         "documentation-observations": (
             DependencyDefinition("cmdb-evaluate", "source.documentation-observations"),
-        ),
-        "source-demand": (
-            DependencyDefinition("resolver", "source.identity-observations", "identity_source"),
-            DependencyDefinition(
-                "cmdb-evaluate", "source.documentation-observations", "documentation_source"
-            ),
         ),
         "source-actions": (
             DependencyDefinition(
@@ -1139,8 +1099,6 @@ _SYSTEM_SERVICE_KEYS = frozenset(
         "intel-abusech",
         "intel-endoflife",
         "source-actions",
-        "source-demand",
-        "source-demand-recovery",
         "run-log-recovery",
         "platform-health-evaluate",
         "metabase-bootstrap",

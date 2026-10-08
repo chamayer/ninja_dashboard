@@ -38,6 +38,15 @@ def seed_reference_sources(apps, schema_editor):
     tenant = Tenant.objects.get(id=1)
     collector = CollectorInstance.objects.get(id=INTERNAL_COLLECTOR_ID)
     namespace = uuid.UUID("05e0f4dc-cc80-4e4c-88b9-f2a43e063a65")
+    # Older imported Sources were inserted with explicit IDs, leaving the
+    # PostgreSQL sequence behind the table maximum.  Align it before the
+    # migration creates any reference Source rows.
+    with schema_editor.connection.cursor() as cursor:
+        cursor.execute(
+            """SELECT setval(pg_get_serial_sequence('operations.sources', 'id'),
+                              COALESCE((SELECT MAX(id) FROM operations.sources), 1),
+                              TRUE)"""
+        )
     for name, source_key, purpose, minutes in REFERENCE_SOURCES:
         source, _ = Source.objects.get_or_create(
             name=name,
