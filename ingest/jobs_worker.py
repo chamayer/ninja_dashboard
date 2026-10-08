@@ -18,11 +18,10 @@ import uuid
 from dataclasses import dataclass
 from pathlib import Path
 
-from shared.jobs_registry import EMERGENCY_CHILD_CAPACITY
-
 from ingest import db, operator_job_queue
 from ingest.config import settings
 from ingest.logging_utils import install_log_safety
+from shared.jobs_registry import EMERGENCY_CHILD_CAPACITY
 
 log = logging.getLogger(__name__)
 
@@ -159,6 +158,13 @@ def run() -> int:
             for run_id, child in tuple(children.items()):
                 try:
                     child.progress.heartbeat()
+                except operator_job_queue.JobProgressRejected:
+                    log.error(
+                        "Jobs child lost durable ownership; restarting supervisor: run=%s",
+                        child.run_id,
+                    )
+                    _stopping = True
+                    break
                 except Exception:
                     log.exception("Jobs child heartbeat failed: run=%s", child.run_id)
                 if child.process.poll() is not None:

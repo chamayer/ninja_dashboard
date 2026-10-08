@@ -14,8 +14,11 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from psycopg.errors import UndefinedFunction
+from psycopg.errors import RaiseException, UndefinedFunction
 from psycopg_pool import PoolTimeout
+
+from ingest import db
+from ingest.config import settings
 from shared.jobs_registry import (
     REPLAY_SAFE_RECOVERY_EVIDENCE,
     definition,
@@ -27,15 +30,16 @@ from shared.jobs_registry import (
     workflow_edges,
 )
 
-from ingest import db
-from ingest.config import settings
-
 log = logging.getLogger(__name__)
 SCHEDULER_RUNTIME_ID = uuid.uuid4()
 
 
 class JobCancellationRequested(RuntimeError):
     """Raised only at a reviewed worker stage boundary."""
+
+
+class JobProgressRejected(RuntimeError):
+    """The durable Jobs ledger no longer accepts a child heartbeat."""
 
 
 @dataclass(frozen=True)
@@ -433,12 +437,15 @@ class V1JobProgress:
             return bool(cur.fetchone()[0])
 
     def _record(self, stage: str | None, detail: str | None) -> None:
-        with db.transaction() as cur:
-            cur.execute("SET LOCAL operations.tenant_id = 1")
-            cur.execute(
-                "SELECT operations.jobs_record_v1_progress(%s, %s, %s, %s, %s)",
-                (1, self.job_id, self.claim_token, stage, detail),
-            )
+        try:
+            with db.transaction() as cur:
+                cur.execute("SET LOCAL operations.tenant_id = 1")
+                cur.execute(
+                    "SELECT operations.jobs_record_v1_progress(%s, %s, %s, %s, %s)",
+                    (1, self.job_id, self.claim_token, stage, detail),
+                )
+        except RaiseException as exc:
+            raise JobProgressRejected("Jobs ledger rejected child progress.") from exc
 
 
 def request_system_job(job_key: str, request_source: str) -> uuid.UUID:
