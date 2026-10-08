@@ -1121,7 +1121,6 @@ def home(request: HttpRequest) -> HttpResponse:  # noqa: PLR0912, PLR0915
 
     patching_by_client: dict = {}
     source_rows: dict = {}
-    source_snapshot = {"configured": 0, "records": 0, "latest_observed": None}
     recent_patch_activity = {"installed": 0, "failed": 0}
     with transaction.atomic(), connection.cursor() as cur:
         cur.execute("SET LOCAL operations.tenant_id = 1")
@@ -1157,27 +1156,6 @@ def home(request: HttpRequest) -> HttpResponse:  # noqa: PLR0912, PLR0915
                 "success_at": row[3],
             }
             for row in cur.fetchall()
-        }
-
-        cur.execute(
-            """
-            SELECT COUNT(*)::int,
-                   COALESCE(SUM(health.current_record_count), 0)::bigint,
-                   MAX(health.last_observed_at)
-              FROM operations.v_source_instance_health health
-              JOIN operations.source_bindings binding
-                ON binding.source_instance_id = health.id
-               AND binding.tenant_id = health.tenant_id
-             WHERE health.tenant_id = 1
-               AND health.enabled = TRUE
-               AND binding.enabled = TRUE
-            """
-        )
-        configured_sources, source_records, latest_source_observed = cur.fetchone()
-        source_snapshot = {
-            "configured": configured_sources,
-            "records": source_records,
-            "latest_observed": latest_source_observed,
         }
 
         cur.execute(
@@ -1555,55 +1533,98 @@ def home(request: HttpRequest) -> HttpResponse:  # noqa: PLR0912, PLR0915
             "client_unattached_group", "unnamed_source_group", "unmatched_source_group",
         ),
     ).count()
-    data_status_summaries = [
+    open_issue_count = (
+        Finding.objects.filter(active_issue_filter).count()
+        + AdminFinding.objects.filter(
+            tenant_id=1, status__in=_FINDING_ACTIVE_STATUSES
+        ).count()
+        + EntityCandidate.objects.filter(
+            tenant_id=1, status=EntityCandidate.Status.PENDING
+        ).count()
+        + ClientCandidate.objects.filter(
+            tenant_id=1, status=ClientCandidate.Status.OPEN
+        ).count()
+    )
+    critical_issue_count = Finding.objects.filter(active_issue_filter, severity="critical").count()
+    changes_today = (
+        recent_patch_activity["installed"]
+        + recent_patch_activity["failed"]
+        + global_domain_stats["software"]["new_total"]
+    )
+    kpis = [
         {
-            "name": "Source collection",
-            "description": "Configured sources that have provided current information.",
-            "value": f"{sources_ok} of {len(registered_sources)}",
-            "value_label": "sources current",
-            "facts": [
-                {"label": f"{source_problem_count} collection problems", "href": f"{reverse('findings_queue')}?category=data_collection&type=collection_failures"},
-                {"label": f"{source_snapshot['records']:,} current source records", "href": f"{reverse('findings_queue')}?category=data_collection&type=collection_failures"},
-            ],
-            "updated_at": source_snapshot["latest_observed"],
+            "name": "Estate",
+            "value": f"{total_clients} clients",
+            "detail": f"{total_devices:,} managed devices · {active_devices:,} active",
+            "href": reverse("org_index", kwargs={"org_slug": "all"}),
+        },
+        {
+            "name": "Attention",
+            "value": f"{open_issue_count:,} open Issues",
+            "detail": f"{critical_issue_count} critical · {attention_count} clients need attention",
+            "href": reverse("findings_queue"),
+        },
+        {
+            "name": "Changes today",
+            "value": f"{changes_today:,}",
+            "detail": (
+                f"{recent_patch_activity['installed']:,} patches installed · "
+                f"{recent_patch_activity['failed']:,} patch failures · "
+                f"{global_domain_stats['software']['new_total']:,} new software reviews"
+            ),
+            "href": reverse("patching_queue"),
+        },
+        {
+            "name": "Information confidence",
+            "value": f"{sources_ok} of {len(registered_sources)} sources current",
+            "detail": (
+                f"{source_problem_count} source problems · "
+                f"{reporting_issue_count + stale_data_count} reporting or freshness gaps · "
+                f"{record_matching_count + client_matching_count} matching reviews"
+            ),
             "href": f"{reverse('findings_queue')}?category=data_collection&type=collection_failures",
         },
-        {
-            "name": "Agent reporting",
-            "description": "Devices currently reporting through their required tools.",
-            "value": f"{active_devices:,} of {total_devices:,}",
-            "value_label": "devices reporting",
-            "facts": [
-                {"label": f"{reporting_issue_count} reporting gaps", "href": f"{reverse('findings_queue')}?category=agents_reporting"},
-                {"label": f"{stale_data_count} with stale data", "href": f"{reverse('findings_queue')}?category=agents_reporting&type=stale_computer_data"},
-            ],
-            "updated_at": dashboard_updated_at,
-            "href": f"{reverse('findings_queue')}?category=agents_reporting",
-        },
-        {
-            "name": "Data freshness",
-            "description": "Current source records available for Operations to evaluate.",
-            "value": f"{source_snapshot['records']:,}",
-            "value_label": "current source records",
-            "facts": [
-                {"label": f"{stale_data_count} Computers with stale data", "href": f"{reverse('findings_queue')}?category=agents_reporting&type=stale_computer_data"},
-                {"label": f"{source_problem_count} source problems", "href": f"{reverse('findings_queue')}?category=data_collection&type=collection_failures"},
-            ],
-            "updated_at": source_snapshot["latest_observed"],
-            "href": f"{reverse('findings_queue')}?category=agents_reporting&type=stale_computer_data",
-        },
-        {
-            "name": "Record matching",
-            "description": "Source information that needs a record or client match.",
-            "value": f"{clients_connected} of {len(clients)}",
-            "value_label": "clients connected",
-            "facts": [
-                {"label": f"{record_matching_count} Computer records need a match", "href": f"{reverse('findings_queue')}?category=inventory&type=computer_identity_matching"},
-                {"label": f"{client_matching_count} client records need a match", "href": f"{reverse('findings_queue')}?category=inventory&type=client_source_mapping"},
-            ],
-            "updated_at": dashboard_updated_at,
-            "href": f"{reverse('findings_queue')}?category=inventory&type=computer_identity_matching",
-        },
+    ]
+    profile = load_active_profile()
+    attention_items = []
+    for finding in (
+        Finding.objects.filter(active_issue_filter)
+        .select_related("finding_type", "client")
+        .order_by(
+            Case(
+                When(severity="critical", then=0),
+                When(severity="high", then=1),
+                When(severity="medium", then=2),
+                default=3,
+            ),
+            "-last_detected_at",
+        )[:5]
+    ):
+        definition = profile.definitions.get(finding.finding_type.name, {})
+        attention_items.append(
+            {
+                "label": definition.get("label", finding.finding_type.name.replace("_", " ").title()),
+                "client": finding.client.display_name if finding.client else "Operations",
+                "severity": finding.severity,
+                "updated_at": finding.last_detected_at or finding.last_seen_at,
+                "href": f"{reverse('findings_queue')}?issue={finding.finding_type.name}&subject_id={finding.subject_id}",
+            }
+        )
+    if source_problem_count:
+        attention_items.append(
+            {
+                "label": "Data collection problem",
+                "client": "Operations",
+                "severity": "high",
+                "updated_at": dashboard_updated_at,
+                "href": f"{reverse('findings_queue')}?category=data_collection&type=collection_failures",
+            }
+        )
+    attention_items.sort(key=lambda item: ({"critical": 0, "high": 1, "medium": 2}.get(item["severity"], 3), item["label"]))
+    recent_changes = [
+        {"label": "Patches installed", "value": recent_patch_activity["installed"], "href": reverse("patching_queue")},
+        {"label": "Patch failures", "value": recent_patch_activity["failed"], "href": f"{reverse('patching_queue')}?type=patch_failing_repeatedly"},
+        {"label": "New software reviews", "value": global_domain_stats["software"]["new_total"], "href": f"{reverse('findings_queue')}?category=software"},
     ]
 
     return render(
@@ -1617,8 +1638,9 @@ def home(request: HttpRequest) -> HttpResponse:  # noqa: PLR0912, PLR0915
             "device_mix": device_mix,
             "total_clients": len(clients),
             "clients_connected": clients_connected,
-            "domain_summaries": domain_summaries,
-            "data_status_summaries": data_status_summaries,
+            "kpis": kpis,
+            "attention_items": attention_items[:5],
+            "recent_changes": recent_changes,
             "client_rows": client_rows,
             "priority_counts": priority_counts,
             "attention_count": priority_counts["immediate"] + priority_counts["soon"],

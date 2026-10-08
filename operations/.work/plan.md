@@ -1,5 +1,28 @@
 # Jobs ecosystem final-design reset
 
+## Operator Dashboard rework (2026-10-08)
+
+## Status
+
+Complete — the Dashboard is one operational briefing: estate, attention,
+change, and confidence; the client table remains the detailed fleet map.
+
+## Scope and decision
+
+The Dashboard is for an operator asking what is happening across Operations,
+not for platform administration. It will have one KPI strip, a short current
+attention list, a concise recent-change list, and the existing client table.
+All action links lead to Issues or scoped operational views. Admin health,
+Jobs, and Sources remain specialist evidence/control pages.
+
+## Current checkpoint
+
+The old fleet strip plus data cards plus domain cards created three competing
+summaries. They are now a single four-KPI strip, a short “Needs attention now”
+list, and a “Since yesterday” change list. Every action link leads to Issues
+or the relevant operational view. Dashboard/Sources/Issues tests (77), Django
+checks, template loading, and diff hygiene pass.
+
 ## Dashboard data snapshot expansion (2026-10-08)
 
 ## Status

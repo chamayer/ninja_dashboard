@@ -24,42 +24,28 @@
     color: inherit; text-decoration: none;
   }
   .fleet-stat:last-child { border-right: 0; }
-  .fleet-stat.supporting { background: #fafbfc; }
   .fleet-stat-label {
     display: block; color: var(--muted); font-size: 0.7rem; font-weight: 700;
     letter-spacing: 0.055em; text-transform: uppercase;
   }
   .fleet-stat-value { display: inline-block; margin-top: 0.1rem; color: #1e40af; font-size: 1.6rem; font-weight: 700; }
-  .fleet-stat.supporting .fleet-stat-value { font-size: 1.05rem; }
   .fleet-stat-note { margin-left: 0.3rem; color: var(--muted); font-size: 0.72rem; }
   .fleet-stat-detail { display: block; margin-top: 0.25rem; color: var(--muted); font-size: 0.68rem; line-height: 1.35; }
 
-  .dashboard-domains {
-    display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: 0.65rem; margin-bottom: 1rem;
-  }
-  .domain-card {
-    display: flex; min-height: 205px; padding: 0.9rem 1rem;
-    flex-direction: column; background: var(--surface); border: 1px solid var(--border);
-    border-radius: 7px;
-  }
-  .domain-card:hover { border-color: #b9c6da; box-shadow: 0 2px 8px rgba(17, 24, 39, 0.05); }
-  .domain-head { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; }
-  .domain-head h2 { margin: 0; font-size: 0.96rem; }
-  .domain-description { min-height: 2.1em; margin: 0.25rem 0 0; color: var(--muted); font-size: 0.7rem; line-height: 1.35; }
-  .domain-state { padding: 0.18rem 0.45rem; border-radius: 999px; font-size: 0.67rem; font-weight: 700; white-space: nowrap; }
-  .state-needs_action { color: #b91c1c; background: #fee2e2; }
-  .state-review { color: #92400e; background: #fef3c7; }
-  .state-monitor { color: #1d4ed8; background: #dbeafe; }
-  .state-on_track { color: #047857; background: #d1fae5; }
-  .state-delayed, .state-unavailable { color: #4b5563; background: #e5e7eb; }
-  .domain-value { margin: 0.7rem 0 0.45rem; }
-  .domain-value strong { color: #1a1a2e; font-size: 1.45rem; letter-spacing: -0.03em; }
-  .domain-value span { color: var(--muted); font-size: 0.76rem; }
-  .domain-facts { display: flex; flex-wrap: wrap; gap: 0.25rem 0.7rem; font-size: 0.71rem; }
-  .domain-facts a { color: #465167; text-underline-offset: 2px; }
-  .domain-freshness { margin-top: auto; padding-top: 0.55rem; color: var(--muted); font-size: 0.67rem; }
-  .domain-open { align-self: flex-end; margin-top: 0.2rem; font-size: 0.74rem; font-weight: 700; }
+  .dashboard-briefing { display:grid; grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr); gap:.65rem; margin-bottom:1rem; }
+  .briefing-card { padding:0; overflow:hidden; }
+  .briefing-head { display:flex; justify-content:space-between; align-items:baseline; gap:1rem; padding:.8rem 1rem .6rem; border-bottom:1px solid var(--border); }
+  .briefing-head h2 { margin:0; font-size:.95rem; }
+  .briefing-head a { font-size:.75rem; font-weight:700; white-space:nowrap; }
+  .briefing-list { list-style:none; margin:0; padding:0; }
+  .briefing-list li { display:flex; gap:.55rem; align-items:baseline; padding:.58rem 1rem; border-bottom:1px solid var(--border); font-size:.78rem; }
+  .briefing-list li:last-child { border-bottom:0; }
+  .briefing-list a { color:inherit; text-decoration:none; font-weight:650; }
+  .briefing-list a:hover { color:var(--accent); }
+  .briefing-list .muted { margin-left:auto; text-align:right; font-size:.7rem; }
+  .briefing-severity { width:.5rem; height:.5rem; flex:0 0 auto; border-radius:999px; }
+  .briefing-severity-critical { background:#dc2626; }.briefing-severity-high { background:#ea580c; }.briefing-severity-medium { background:#d99a00; }.briefing-severity-low,.briefing-severity-info { background:#2563eb; }
+  .change-value { min-width:3rem; color:#1e40af; font-weight:700; text-align:right; }
 
   .client-card { padding: 0; overflow: visible; }
   .client-card-head { padding: 1rem 1rem 0.75rem; background: var(--surface); border-bottom: 1px solid var(--border); border-radius: 6px 6px 0 0; }
@@ -139,7 +125,7 @@
   .future-line { margin-top: 0.8rem; padding: 0.55rem; color: var(--muted); border-top: 1px dashed #cbd5e1; text-align: center; font-size: 0.72rem; }
 
   @media (max-width: 1000px) {
-    .dashboard-domains { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .dashboard-briefing { grid-template-columns: 1fr; }
   }
   @media (max-width: 1160px) {
     .client-table-wrap { overflow-x: auto; }
@@ -151,7 +137,7 @@
     .dashboard-fleet { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .fleet-stat:nth-child(2) { border-right: 0; }
     .fleet-stat:nth-child(-n+2) { border-bottom: 1px solid var(--border); }
-    .dashboard-domains { grid-template-columns: 1fr; }
+    .dashboard-briefing { grid-template-columns: 1fr; }
     .client-card-title { display: block; }
     .client-card-title span { display: block; margin-top: 0.2rem; }
     .client-search { width: 100%; }
@@ -163,7 +149,7 @@
 <div class="dashboard-heading">
   <div>
     <h1>Operations overview</h1>
-    <p>What is working, what needs attention, and where to go next.</p>
+    <p>What needs attention, what changed, and where to go next.</p>
   </div>
   <div class="dashboard-scope">
     <strong>Across all {{ total_clients }} clients</strong>
@@ -175,65 +161,33 @@
   </div>
 </div>
 
-<section class="dashboard-fleet" aria-label="Operations scope">
-  <a class="fleet-stat" href="{% url 'org_index' org_slug='all' %}">
-    <span class="fleet-stat-label">Clients</span>
-    <span class="fleet-stat-value">{{ total_clients }}</span>
-    <span class="fleet-stat-note">{{ clients_connected }} connected</span>
+<section class="dashboard-fleet" aria-label="Operations at a glance">
+  {% for kpi in kpis %}
+  <a class="fleet-stat" href="{{ kpi.href }}">
+    <span class="fleet-stat-label">{{ kpi.name }}</span>
+    <span class="fleet-stat-value">{{ kpi.value }}</span>
+    <span class="fleet-stat-detail">{{ kpi.detail }}</span>
   </a>
-  <a class="fleet-stat" href="{% url 'devices_page' %}?state=active">
-    <span class="fleet-stat-label">Active devices</span>
-    <span class="fleet-stat-value">{{ active_devices }}</span>
-    <span class="fleet-stat-note">of {{ total_devices }} managed · {{ retired_devices }} retired</span>
-    <span class="fleet-stat-detail">{{ device_mix.workstations }} workstations · {{ device_mix.servers }} servers · {{ device_mix.virtual }} virtual · {{ device_mix.other }} other</span>
-  </a>
-  <a class="fleet-stat dashboard-filter-link" href="?view=attention#clients" data-filter="attention">
-    <span class="fleet-stat-label">Clients needing attention</span>
-    <span class="fleet-stat-value">{{ attention_count }}</span>
-    <span class="fleet-stat-note">{{ priority_counts.immediate }} act now · {{ priority_counts.soon }} review next</span>
-  </a>
-  <a class="fleet-stat supporting" href="{% url 'sources_status' %}">
-    <span class="fleet-stat-label">Data connections</span>
-    <span class="fleet-stat-value">{{ sources_ok }} of {{ sources_total }} working</span>
-    <span class="fleet-stat-detail">{% if stale_sources %}Delayed: {{ stale_sources|join:", " }}{% elif dashboard_updated_at %}Last checked {{ dashboard_updated_at|timesince }} ago{% else %}No updates received{% endif %}</span>
-  </a>
-</section>
-
-<section class="dashboard-domains" aria-label="Data status">
-  {% for item in data_status_summaries %}
-  <article class="domain-card">
-    <div class="domain-head"><h2>{{ item.name }}</h2></div>
-    <p class="domain-description">{{ item.description }}</p>
-    <div class="domain-value"><strong>{{ item.value }}</strong> <span>{{ item.value_label }}</span></div>
-    <div class="domain-facts">
-      {% for fact in item.facts %}<a href="{{ fact.href }}">{{ fact.label }}</a>{% endfor %}
-    </div>
-    <div class="domain-freshness">
-      {% if item.updated_at %}Updated {{ item.updated_at|timesince }} ago · {{ item.updated_at|date:"g:i A T" }}{% else %}Update time unavailable{% endif %}
-    </div>
-    <a class="domain-open" href="{{ item.href }}">Open Issues →</a>
-  </article>
   {% endfor %}
 </section>
 
-<section class="dashboard-domains" aria-label="Operational areas">
-  {% for domain in domain_summaries %}
-  <article class="domain-card">
-    <div class="domain-head">
-      <h2>{{ domain.name }}</h2>
-      <span class="domain-state state-{{ domain.state }}">{{ domain.state_label }}</span>
-    </div>
-    <p class="domain-description">{{ domain.description }}</p>
-    <div class="domain-value"><strong>{{ domain.value }}</strong> <span>{{ domain.value_label }}</span></div>
-    <div class="domain-facts">
-      {% for fact in domain.facts %}<a href="{{ fact.href }}">{{ fact.label }}</a>{% endfor %}
-    </div>
-    <div class="domain-freshness">
-      {% if domain.updated_at %}Updated {{ domain.updated_at|timesince }} ago · {{ domain.updated_at|date:"g:i A T" }}{% else %}Update time unavailable{% endif %}
-    </div>
-    <a class="domain-open" href="{{ domain.href }}">Open {{ domain.name }} →</a>
+<section class="dashboard-briefing" aria-label="Current operations briefing">
+  <article class="card briefing-card">
+    <div class="briefing-head"><h2>Needs attention now</h2><a href="{% url 'findings_queue' %}">Open all Issues →</a></div>
+    <ul class="briefing-list">
+      {% for item in attention_items %}
+      <li><span class="briefing-severity briefing-severity-{{ item.severity }}"></span><a href="{{ item.href }}">{{ item.label }}</a><span class="muted">{{ item.client }}{% if item.updated_at %} · {{ item.updated_at|timesince }} ago{% endif %}</span></li>
+      {% empty %}<li class="muted">No current Issues need review.</li>{% endfor %}
+    </ul>
   </article>
-  {% endfor %}
+  <article class="card briefing-card">
+    <div class="briefing-head"><h2>Since yesterday</h2><a href="{% url 'patching_queue' %}">Open patching →</a></div>
+    <ul class="briefing-list">
+      {% for item in recent_changes %}
+      <li><a href="{{ item.href }}">{{ item.label }}</a><span class="change-value">{{ item.value }}</span></li>
+      {% endfor %}
+    </ul>
+  </article>
 </section>
 
 <section class="card client-card" id="clients">

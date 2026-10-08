@@ -69,9 +69,12 @@ def test_raw_json_object_normalizes_only_json_objects(value, expected):
     assert _raw_json_object(value) == expected
 
 
-def test_dashboard_data_status_is_an_issues_drill_through():
+def test_dashboard_is_an_operator_briefing_with_issue_drill_throughs():
     template = get_template("home.html").template.source
 
-    assert 'aria-label="Data status"' in template
-    assert "data_status_summaries" in template
-    assert "Open Issues" in template
+    assert 'aria-label="Operations at a glance"' in template
+    assert "kpis" in template
+    assert "Needs attention now" in template
+    assert "Since yesterday" in template
+    assert "Open all Issues" in template
+    assert "data_status_summaries" not in template
