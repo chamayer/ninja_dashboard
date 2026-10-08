@@ -67,8 +67,12 @@ material-change follow-ups. The pending correction restores these as
 binding-scoped source-refresh successors (patch analysis, vulnerability
 matching, and targeted software analysis) without restoring category
 schedules. Focused source-routing, registry, Jobs, and Django checks pass.
-Next: push the workflow correction, then finish the source/dispatcher
-compatibility and live-surface audit.
+The worker recovery-policy registration then exposed a missing database
+authority for the reviewed `source-refresh` replay policy. Pending migration
+0268 creates that authority; it is required for the worker to start and does
+not weaken the replay-safety gate. Next: validate and push the recovery-policy
+repair, confirm worker health, then finish the source/dispatcher compatibility
+and live-surface audit.
 
 ## Active plan — complete conditions framework
 
