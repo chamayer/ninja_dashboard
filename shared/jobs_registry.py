@@ -949,6 +949,9 @@ _WORKFLOW_SUCCESSORS = MappingProxyType(
     {
         "source-refresh": (
             DependencyDefinition(
+                "patch-classify", "ninja.patch-snapshot", "ninja_source"
+            ),
+            DependencyDefinition(
                 "resolver", "source.identity-observations", "identity_source"
             ),
             DependencyDefinition(
@@ -956,6 +959,11 @@ _WORKFLOW_SUCCESSORS = MappingProxyType(
             ),
             DependencyDefinition(
                 "intel-matcher", "source.reference-match-data", "reference_match_data"
+            ),
+            DependencyDefinition(
+                "software-classify-only",
+                "source.reference-software-data",
+                "reference_software_data",
             ),
         ),
         "patches": (
@@ -1356,7 +1364,9 @@ def _validate_dependency_contracts() -> None:
         "always",
         "identity_source",
         "documentation_source",
+        "ninja_source",
         "reference_match_data",
+        "reference_software_data",
         "material_change",
     }
     revision_pattern = re.compile(r"[a-z0-9][a-z0-9._-]{2,119}")

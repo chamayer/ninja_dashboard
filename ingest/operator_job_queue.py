@@ -416,7 +416,9 @@ def _run_source_refresh(progress: "V1JobProgress") -> JobExecutionResult:
         if main.run_patching_once() is False:
             raise RuntimeError("Ninja collection could not acquire its execution lock")
         rows = None
-        signals = ("identity_source",)
+        # Ninja publishes both computer identity and patch snapshots.  Keep
+        # their follow-up analysis in the binding-scoped source workflow.
+        signals = ("ninja_source", "identity_source")
     elif source.source_key.startswith("reference."):
         from ingest.intel import (
             abusech, chocolatey, cisa_kev, cpe_dict, epss, lolrmm, nvd, otx, winget,
@@ -440,12 +442,14 @@ def _run_source_refresh(progress: "V1JobProgress") -> JobExecutionResult:
             raise ValueError(f"Unsupported reference source: {source.source_key}") from exc
         result = handler()
         rows = int(result) if isinstance(result, int) else None
-        signals = (
-            ("reference_match_data",)
-            if source.source_key in {"reference.nvd", "reference.cpe", "reference.kev", "reference.epss"}
-            and bool(getattr(result, "material_changed", False))
-            else ()
-        )
+        if not bool(getattr(result, "material_changed", False)):
+            signals = ()
+        elif source.source_key in {
+            "reference.nvd", "reference.cpe", "reference.kev", "reference.epss",
+        }:
+            signals = ("reference_match_data",)
+        else:
+            signals = ("reference_software_data",)
     else:
         counts = run_source_observations([source], observed_at)
         rows = sum(counts.values())

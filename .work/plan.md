@@ -60,8 +60,15 @@ repairs an old `sources` sequence before it seeds reference feeds, and the
 Sources view accepts legacy text capabilities as having no declared purpose.
 Production recorded 0265 before its original source-seeding path failed on an
 old sequence, so migration 0267 now idempotently guarantees the reference
-catalog after aligning that sequence. Next: validate and push the follow-up
-migration, then confirm its automatic rollout and the live Sources page.
+catalog after aligning that sequence. The rollout applied 0266 and 0267
+successfully. Audit then found Ninja source refreshes were not publishing the
+patch-analysis successor signal and reference-source refreshes had lost some
+material-change follow-ups. The pending correction restores these as
+binding-scoped source-refresh successors (patch analysis, vulnerability
+matching, and targeted software analysis) without restoring category
+schedules. Focused source-routing, registry, Jobs, and Django checks pass.
+Next: push the workflow correction, then finish the source/dispatcher
+compatibility and live-surface audit.
 
 ## Active plan — complete conditions framework
 

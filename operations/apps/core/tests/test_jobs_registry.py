@@ -150,6 +150,26 @@ def test_initial_workflow_edges_are_registered_and_acyclic():
         ("source-refresh", "resolver", "source.identity-observations", "identity_source"),
         ("resolver", "platform-evaluate", "identity.current", "always"),
     )
+    assert shape("source-refresh", frozenset({"ninja_source"})) == (
+        ("source-refresh", "patch-classify", "ninja.patch-snapshot", "ninja_source"),
+        ("patch-classify", "platform-evaluate", "patch.findings", "always"),
+    )
+    assert shape("source-refresh", frozenset({"reference_match_data"})) == (
+        (
+            "source-refresh",
+            "intel-matcher",
+            "source.reference-match-data",
+            "reference_match_data",
+        ),
+    )
+    assert shape("source-refresh", frozenset({"reference_software_data"})) == (
+        (
+            "source-refresh",
+            "software-classify-only",
+            "source.reference-software-data",
+            "reference_software_data",
+        ),
+    )
     for item in definitions():
         for successor in item.successors:
             assert successor.scope_mode in {"inherit", "tenant"}
