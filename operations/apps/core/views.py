@@ -1521,6 +1521,7 @@ def home(request: HttpRequest) -> HttpResponse:  # noqa: PLR0912, PLR0915
     client_rows.sort(
         key=lambda row: (priority_order[row["priority"]], row["client"].display_name.lower())
     )
+    clients_connected = sum(1 for client in clients if client_sources.get(client.id))
 
     # Data status is an operator summary, not a second work queue.  Every
     # card deliberately opens the governed Issues inbox; Sources and
@@ -1615,7 +1616,7 @@ def home(request: HttpRequest) -> HttpResponse:  # noqa: PLR0912, PLR0915
             "retired_devices": retired_devices,
             "device_mix": device_mix,
             "total_clients": len(clients),
-            "clients_connected": sum(1 for client in clients if client_sources.get(client.id)),
+            "clients_connected": clients_connected,
             "domain_summaries": domain_summaries,
             "data_status_summaries": data_status_summaries,
             "client_rows": client_rows,

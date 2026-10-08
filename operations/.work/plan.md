@@ -4,7 +4,8 @@
 
 ## Status
 
-Complete — the Dashboard Data status section is a compact,
+Complete — the Dashboard ordering regression from the snapshot expansion is
+corrected and the compact,
 operator-readable snapshot of collection, reporting, data freshness, and
 matching quality. Issue links remain the only action destination.
 
@@ -20,8 +21,10 @@ attention; sources and device pages remain evidence surfaces only.
 The four-card snapshot now shows source collection health and current record
 volume, device reporting and stale-computer data, and client/Computer matching
 coverage. Each supporting measure drills through to its exact Issues scope;
-no new action queue or health score was introduced. Dashboard/Sources/Issues
-tests (77), Django checks, template loading, and diff hygiene pass.
+no new action queue or health score was introduced. The matching card used
+`clients_connected` before it was assigned, producing a Dashboard 500. The
+value is now calculated before the snapshot. Focused Dashboard tests, Django
+checks, template loading, and diff hygiene pass.
 
 ## Data-quality Issues unification (2026-10-08)
 
