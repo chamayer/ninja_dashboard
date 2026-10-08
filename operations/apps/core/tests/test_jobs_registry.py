@@ -103,6 +103,7 @@ def test_operator_jobs_have_one_visible_boundary_and_services_stay_outside():
 
     assert "patches" not in {job.key for job in jobs}
     assert operator_job_key_for_execution("patches") is None
+    assert operator_job_key_for_execution("source-demand-recovery") is None
     assert operator_job_key_for_execution("software-classify") == "software-classify-only"
     assert next(job for job in jobs if job.key == "cmdb-evaluate").start_description == "After Hudu refresh"
     assert set(system_service_definition_keys()).isdisjoint(visible_execution_keys)

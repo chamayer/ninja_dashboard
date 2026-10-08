@@ -1301,7 +1301,7 @@ def operator_job_definition(key: str) -> OperatorJobDefinition:
 
 def operator_job_key_for_execution(key: str) -> str | None:
     """Return the visible Job owning an execution key, or None for services."""
-    if key in _SYSTEM_SERVICE_KEYS or key in _LEGACY_JOB_KEYS:
+    if key not in _INDEX or key in _SYSTEM_SERVICE_KEYS or key in _LEGACY_JOB_KEYS:
         return None
     return _JOB_MODE_PARENT.get(key, key)
 

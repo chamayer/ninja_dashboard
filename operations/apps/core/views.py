@@ -8964,7 +8964,7 @@ def admin_jobs(request: HttpRequest) -> HttpResponse:
             running_by_resource.setdefault(resource_key, []).append(active_run)
 
     for active_run in active_queue:
-        if active_run.get("wait_category") != "capacity":
+        if active_run.get("wait_category") != "capacity" or active_run["job_key"] not in definition_keys():
             continue
         capacity_keys = definition(active_run["job_key"]).capacity_keys
         blockers: list[dict[str, str]] = []
@@ -8980,7 +8980,7 @@ def admin_jobs(request: HttpRequest) -> HttpResponse:
         )
         active_run["capacity_blockers"] = blockers
     for active_run in active_queue:
-        if active_run.get("wait_category") != "resource":
+        if active_run.get("wait_category") != "resource" or active_run["job_key"] not in definition_keys():
             continue
         blockers: list[dict[str, str]] = []
         for resource_key in definition(active_run["job_key"]).resource_keys:
@@ -9598,7 +9598,7 @@ def _operator_job_name(execution_key: str) -> str:
     """Return the administrator-facing Job name for one execution key."""
     job_key = operator_job_key_for_execution(execution_key)
     if job_key is None:
-        return definition(execution_key).display_name
+        return definition(execution_key).display_name if execution_key in definition_keys() else "Retired Job"
     return operator_job_definition(job_key).name
 
 

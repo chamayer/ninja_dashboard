@@ -2,7 +2,7 @@
 
 ## Active plan — source-driven collection
 
-**Status:** in progress.
+**Status:** in progress — post-release correction.
 
 **Goal:** complete the intended source-driven collection architecture. Every
 configured source binding or shared reference source is independently
@@ -73,20 +73,50 @@ created that authority without weakening the replay-safety gate. The first live
 source follow-up showed the worker discarded the claimed scope before workflow
 admission; that correction now carries scope through the child lifecycle and
 fails a run immediately when required follow-up work cannot be admitted. Live
-workers are healthy after the rollout. The remaining transition gap is source
-presentation: reference feeds retain valid history under their former Job
-keys, so Sources must carry that forward until each feed completes its first
-source-managed run, and must assess staleness against its own cadence. Next:
-implement and validate that transition history, then finish the
-source/dispatcher compatibility and live-surface audit. Migration 0269 now
-adds the former reference Job key as source-instance transition metadata;
-Sources uses that metadata only to display verified prior results until the
-first source-managed completion and labels it "previous schedule." Staleness
-is now twice the configured cadence, with an eight-hour floor, rather than a
-global eight-hour rule. Focused Sources/Jobs tests, worker/source workflow
-tests, Django system check, compilation, and diff check pass. Next: commit and
-push this transition fix, verify automatic rollout and live Sources behavior,
-then finish the remaining audit.
+workers are healthy after the rollout. Migration 0269 adds the former
+reference Job key as source-instance transition metadata; Sources uses that
+metadata only to display verified prior results until the first source-managed
+completion and labels it "previous schedule." Staleness is twice the configured
+cadence, with an eight-hour floor, rather than a global eight-hour rule.
+
+**Completion evidence:**
+
+- One `source-refresh` schedule is reconciled for each enabled binding, while
+  schedule ownership stays on `source_bindings`; the current schedule catalog
+  excludes the retired reference-feed schedules.
+- The deployed `jobs_claim_next_v7` function atomically enforces both
+  source-connection capacity and an exact binding data lock. Its fenced finish
+  function writes `source_refresh_outputs` only for successful completions.
+- The shared handler preserves source-specific collection/storage paths for
+  Ninja, configured environment sources, and reference feeds. Focused routing
+  tests cover Ninja patch/identity signals and material-change-only reference
+  matching/software-analysis signals; worker-scope coverage verifies follow-up
+  admission uses the claimed binding scope.
+- Sources owns source schedules and manual refresh; Jobs exposes the same
+  binding-scoped lifecycle and refresh control. The former category queue and
+  endpoint are retired without deleting history.
+- Focused registry, Sources/Jobs, workflow, and worker-scope tests passed
+  (20 tests); Django system check, compilation, and diff check passed.
+- `9ff63b2` is pushed to `origin` and `a-m-rose`; automatic rollout applied
+  migration 0269. Operations and the Jobs worker passed their health checks.
+
+The production branch deliberately retains this completed plan locally rather
+than creating a plan-only deployment commit.
+
+**Post-release correction (2026-10-08):** the deployed Jobs page encountered
+an old `source-demand-recovery` Run that predates the source-bound contract.
+The current presentation treated that retired execution key as a visible
+operator Job and raised a registry error. Scope: close only remaining active
+retired source-demand Runs and make Jobs classify unknown/retired execution
+keys as historical diagnostics rather than failing the operator page. Validate
+the affected view and automatic rollout; preserve historical records.
+
+Implementation: `operator_job_key_for_execution` now rejects unknown registry
+keys, and the Jobs view avoids asking capacity/resource metadata of historical
+keys. Migration 0270 cancels unstarted retired source-demand Runs and marks any
+unexpected active one failed with its claims contained. Focused registry/Jobs
+tests (19), Django check, compilation, and diff check pass. Next: commit,
+push, and verify the automatic rollout and Jobs URL.
 
 ## Active plan — complete conditions framework
 
