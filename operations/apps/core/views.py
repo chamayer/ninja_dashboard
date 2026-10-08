@@ -1121,6 +1121,7 @@ def home(request: HttpRequest) -> HttpResponse:  # noqa: PLR0912, PLR0915
 
     patching_by_client: dict = {}
     source_rows: dict = {}
+    source_snapshot = {"configured": 0, "records": 0, "latest_observed": None}
     recent_patch_activity = {"installed": 0, "failed": 0}
     with transaction.atomic(), connection.cursor() as cur:
         cur.execute("SET LOCAL operations.tenant_id = 1")
@@ -1156,6 +1157,27 @@ def home(request: HttpRequest) -> HttpResponse:  # noqa: PLR0912, PLR0915
                 "success_at": row[3],
             }
             for row in cur.fetchall()
+        }
+
+        cur.execute(
+            """
+            SELECT COUNT(*)::int,
+                   COALESCE(SUM(health.current_record_count), 0)::bigint,
+                   MAX(health.last_observed_at)
+              FROM operations.v_source_instance_health health
+              JOIN operations.source_bindings binding
+                ON binding.source_instance_id = health.id
+               AND binding.tenant_id = health.tenant_id
+             WHERE health.tenant_id = 1
+               AND health.enabled = TRUE
+               AND binding.enabled = TRUE
+            """
+        )
+        configured_sources, source_records, latest_source_observed = cur.fetchone()
+        source_snapshot = {
+            "configured": configured_sources,
+            "records": source_records,
+            "latest_observed": latest_source_observed,
         }
 
         cur.execute(
@@ -1506,55 +1528,80 @@ def home(request: HttpRequest) -> HttpResponse:  # noqa: PLR0912, PLR0915
     active_issue_filter = Q(status__in=_FINDING_ACTIVE_STATUSES) & (
         Q(snoozed_until__isnull=True) | Q(snoozed_until__lt=now)
     )
+    source_problem_count = AdminFinding.objects.filter(
+        tenant_id=1,
+        status__in=_FINDING_ACTIVE_STATUSES,
+        finding_type__name="source_failure",
+    ).count()
+    reporting_issue_count = Finding.objects.filter(active_issue_filter).filter(
+        finding_type__name__in=(
+            "missing_required_platform", "stale_required_platform", "device_unenrolled"
+        )
+    ).count()
+    stale_data_count = Finding.objects.filter(active_issue_filter).filter(
+        finding_type__name="device_stale_data"
+    ).count()
+    record_matching_count = Finding.objects.filter(active_issue_filter).filter(
+        finding_type__name__in=("identity_resolution_pending", "unlinked_external_identity")
+    ).count() + EntityCandidate.objects.filter(
+        tenant_id=1, status=EntityCandidate.Status.PENDING
+    ).count()
+    client_matching_count = AdminFinding.objects.filter(
+        tenant_id=1,
+        status__in=_FINDING_ACTIVE_STATUSES,
+        finding_type__name__in=(
+            "client_link_collision", "client_source_group_merge",
+            "client_unattached_group", "unnamed_source_group", "unmatched_source_group",
+        ),
+    ).count()
     data_status_summaries = [
         {
             "name": "Source collection",
-            "count": AdminFinding.objects.filter(
-                tenant_id=1,
-                status__in=_FINDING_ACTIVE_STATUSES,
-                finding_type__name="source_failure",
-            ).count(),
-            "label": "need attention",
+            "description": "Configured sources that have provided current information.",
+            "value": f"{sources_ok} of {len(registered_sources)}",
+            "value_label": "sources current",
+            "facts": [
+                {"label": f"{source_problem_count} collection problems", "href": f"{reverse('findings_queue')}?category=data_collection&type=collection_failures"},
+                {"label": f"{source_snapshot['records']:,} current source records", "href": f"{reverse('findings_queue')}?category=data_collection&type=collection_failures"},
+            ],
+            "updated_at": source_snapshot["latest_observed"],
             "href": f"{reverse('findings_queue')}?category=data_collection&type=collection_failures",
         },
         {
             "name": "Agent reporting",
-            "count": Finding.objects.filter(active_issue_filter).filter(
-                finding_type__name__in=("missing_required_platform", "stale_required_platform", "device_unenrolled")
-            ).count(),
-            "label": "need attention",
+            "description": "Devices currently reporting through their required tools.",
+            "value": f"{active_devices:,} of {total_devices:,}",
+            "value_label": "devices reporting",
+            "facts": [
+                {"label": f"{reporting_issue_count} reporting gaps", "href": f"{reverse('findings_queue')}?category=agents_reporting"},
+                {"label": f"{stale_data_count} with stale data", "href": f"{reverse('findings_queue')}?category=agents_reporting&type=stale_computer_data"},
+            ],
+            "updated_at": dashboard_updated_at,
             "href": f"{reverse('findings_queue')}?category=agents_reporting",
         },
         {
-            "name": "Computer data",
-            "count": Finding.objects.filter(active_issue_filter).filter(
-                finding_type__name="device_stale_data"
-            ).count(),
-            "label": "need attention",
+            "name": "Data freshness",
+            "description": "Current source records available for Operations to evaluate.",
+            "value": f"{source_snapshot['records']:,}",
+            "value_label": "current source records",
+            "facts": [
+                {"label": f"{stale_data_count} Computers with stale data", "href": f"{reverse('findings_queue')}?category=agents_reporting&type=stale_computer_data"},
+                {"label": f"{source_problem_count} source problems", "href": f"{reverse('findings_queue')}?category=data_collection&type=collection_failures"},
+            ],
+            "updated_at": source_snapshot["latest_observed"],
             "href": f"{reverse('findings_queue')}?category=agents_reporting&type=stale_computer_data",
         },
         {
             "name": "Record matching",
-            "count": Finding.objects.filter(active_issue_filter).filter(
-                finding_type__name__in=("identity_resolution_pending", "unlinked_external_identity")
-            ).count() + EntityCandidate.objects.filter(
-                tenant_id=1, status=EntityCandidate.Status.PENDING
-            ).count(),
-            "label": "need attention",
+            "description": "Source information that needs a record or client match.",
+            "value": f"{clients_connected} of {len(clients)}",
+            "value_label": "clients connected",
+            "facts": [
+                {"label": f"{record_matching_count} Computer records need a match", "href": f"{reverse('findings_queue')}?category=inventory&type=computer_identity_matching"},
+                {"label": f"{client_matching_count} client records need a match", "href": f"{reverse('findings_queue')}?category=inventory&type=client_source_mapping"},
+            ],
+            "updated_at": dashboard_updated_at,
             "href": f"{reverse('findings_queue')}?category=inventory&type=computer_identity_matching",
-        },
-        {
-            "name": "Client matching",
-            "count": AdminFinding.objects.filter(
-                tenant_id=1,
-                status__in=_FINDING_ACTIVE_STATUSES,
-                finding_type__name__in=(
-                    "client_link_collision", "client_source_group_merge",
-                    "client_unattached_group", "unnamed_source_group", "unmatched_source_group",
-                ),
-            ).count(),
-            "label": "need attention",
-            "href": f"{reverse('findings_queue')}?category=inventory&type=client_source_mapping",
         },
     ]
 

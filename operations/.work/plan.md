@@ -1,5 +1,28 @@
 # Jobs ecosystem final-design reset
 
+## Dashboard data snapshot expansion (2026-10-08)
+
+## Status
+
+Complete — the Dashboard Data status section is a compact,
+operator-readable snapshot of collection, reporting, data freshness, and
+matching quality. Issue links remain the only action destination.
+
+## Scope and decision
+
+Use existing source-health, device, and Issue projections. Do not introduce a
+parallel data-health score or a new review queue. Each card must show a useful
+positive population/coverage measure alongside the Issue count that needs
+attention; sources and device pages remain evidence surfaces only.
+
+## Current checkpoint
+
+The four-card snapshot now shows source collection health and current record
+volume, device reporting and stale-computer data, and client/Computer matching
+coverage. Each supporting measure drills through to its exact Issues scope;
+no new action queue or health score was introduced. Dashboard/Sources/Issues
+tests (77), Django checks, template loading, and diff hygiene pass.
+
 ## Data-quality Issues unification (2026-10-08)
 
 ## Status
