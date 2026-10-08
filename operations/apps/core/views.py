@@ -8904,6 +8904,221 @@ def _job_schedule_presentation(
     return {"label": "Run manually", "detail": "", "next_due_at": None}
 
 
+def _source_job_rows() -> list[dict]:
+    """Project each configured source into the complete Jobs execution view."""
+    with transaction.atomic(), connection.cursor() as cur:
+        cur.execute("SET LOCAL operations.tenant_id = 1")
+        cur.execute(
+            """
+            SELECT binding.id, source.name, client.display_name, binding.schedule,
+                   latest.id, latest.status, latest.requested_at, latest.started_at,
+                   latest.completed_at, latest.rows_touched, latest.error,
+                   latest.wait_category, latest.wait_reason, latest.stage,
+                   latest.stage_detail,
+                   terminal.status, terminal.completed_at, terminal.rows_touched,
+                   terminal.error,
+                   (native_latest.id IS NULL AND legacy_terminal.id IS NOT NULL)
+              FROM operations.source_bindings binding
+              JOIN operations.source_instances instance
+                ON instance.id = binding.source_instance_id
+               AND instance.tenant_id = binding.tenant_id
+              JOIN operations.sources source ON source.id = instance.source_id
+         LEFT JOIN operations.clients client ON client.id = instance.client_id
+         LEFT JOIN LATERAL (
+                   SELECT run.id, run.status, run.requested_at, run.started_at,
+                          run.completed_at, run.rows_touched, run.error,
+                          run.wait_category, run.wait_reason, run.stage,
+                          run.stage_detail
+                     FROM operations.operator_job_runs run
+                    WHERE run.tenant_id = binding.tenant_id
+                      AND run.job_key = 'source-refresh'
+                      AND run.scope_identity = 'source-binding:' || binding.id::text
+                    ORDER BY run.requested_at DESC, run.id DESC
+                    LIMIT 1
+                   ) native_latest ON TRUE
+         LEFT JOIN LATERAL (
+                   SELECT run.id, run.status, run.requested_at, run.started_at,
+                          run.completed_at, run.rows_touched, run.error,
+                          run.wait_category, run.wait_reason, run.stage,
+                          run.stage_detail
+                     FROM operations.operator_job_runs run
+                    WHERE run.tenant_id = binding.tenant_id
+                      AND run.job_key = instance.config->>'legacy_job_key'
+                      AND run.status IN ('completed', 'failed', 'stalled', 'cancelled')
+                    ORDER BY COALESCE(run.completed_at, run.started_at, run.requested_at) DESC,
+                             run.id DESC
+                    LIMIT 1
+                   ) legacy_terminal ON TRUE
+         LEFT JOIN LATERAL (
+                   SELECT run.status, run.completed_at, run.rows_touched, run.error
+                     FROM operations.operator_job_runs run
+                    WHERE run.tenant_id = binding.tenant_id
+                      AND run.job_key = 'source-refresh'
+                      AND run.scope_identity = 'source-binding:' || binding.id::text
+                      AND run.status IN ('completed', 'failed', 'stalled', 'cancelled')
+                    ORDER BY run.completed_at DESC NULLS LAST, run.requested_at DESC, run.id DESC
+                    LIMIT 1
+                   ) native_terminal ON TRUE
+         LEFT JOIN LATERAL (
+                   SELECT CASE WHEN native_latest.id IS NOT NULL
+                               THEN native_latest.id ELSE legacy_terminal.id END AS id,
+                          CASE WHEN native_latest.id IS NOT NULL
+                               THEN native_latest.status ELSE legacy_terminal.status END AS status,
+                          CASE WHEN native_latest.id IS NOT NULL
+                               THEN native_latest.requested_at
+                               ELSE legacy_terminal.requested_at END AS requested_at,
+                          CASE WHEN native_latest.id IS NOT NULL
+                               THEN native_latest.started_at
+                               ELSE legacy_terminal.started_at END AS started_at,
+                          CASE WHEN native_latest.id IS NOT NULL
+                               THEN native_latest.completed_at
+                               ELSE legacy_terminal.completed_at END AS completed_at,
+                          CASE WHEN native_latest.id IS NOT NULL
+                               THEN native_latest.rows_touched
+                               ELSE legacy_terminal.rows_touched END AS rows_touched,
+                          CASE WHEN native_latest.id IS NOT NULL
+                               THEN native_latest.error ELSE legacy_terminal.error END AS error,
+                          native_latest.wait_category, native_latest.wait_reason,
+                          native_latest.stage, native_latest.stage_detail
+                   ) latest ON TRUE
+         LEFT JOIN LATERAL (
+                   SELECT CASE WHEN native_terminal.status IS NOT NULL
+                               THEN native_terminal.status ELSE legacy_terminal.status END AS status,
+                          CASE WHEN native_terminal.status IS NOT NULL
+                               THEN native_terminal.completed_at
+                               ELSE legacy_terminal.completed_at END AS completed_at,
+                          CASE WHEN native_terminal.status IS NOT NULL
+                               THEN native_terminal.rows_touched
+                               ELSE legacy_terminal.rows_touched END AS rows_touched,
+                          CASE WHEN native_terminal.status IS NOT NULL
+                               THEN native_terminal.error ELSE legacy_terminal.error END AS error
+                   ) terminal ON TRUE
+             WHERE binding.tenant_id = 1 AND binding.enabled AND instance.enabled
+             ORDER BY source.name, client.display_name NULLS FIRST, binding.id
+            """
+        )
+        rows = cur.fetchall()
+
+    now = timezone.now()
+    result: list[dict] = []
+    for row in rows:
+        (
+            binding_id,
+            source_name,
+            client_name,
+            schedule,
+            run_id,
+            status,
+            requested_at,
+            started_at,
+            completed_at,
+            rows_touched,
+            error,
+            wait_category,
+            wait_reason,
+            stage,
+            stage_detail,
+            terminal_status,
+            terminal_at,
+            terminal_rows,
+            _terminal_error,
+            previous_result,
+        ) = row
+        active = status in {"queued", "running"}
+        if status == "queued":
+            state, status_label = _operator_run_lifecycle(status, wait_category)
+            status_detail = {
+                "dependency": "Waiting for a related update to finish.",
+                "workflow": "Waiting for a related update to finish.",
+                "resource": "Another update is finishing first.",
+                "capacity": "Other updates are using the available capacity.",
+            }.get(wait_category, wait_reason or "Starts shortly.")
+            latest_at_label = "Waiting since"
+        elif status == "running":
+            state, status_label = "running", "Running"
+            status_detail = stage_detail or stage or f"Refreshing {source_name}"
+            latest_at_label = "Running since"
+        elif status:
+            state = "failed" if status == "stalled" else status
+            status_label = {
+                "completed": "Completed",
+                "failed": "Failed",
+                "cancelled": "Cancelled",
+            }.get(state, state.title())
+            status_detail = (
+                f"{rows_touched} updated."
+                if state == "completed" and rows_touched is not None
+                else (error or "The refresh did not complete.")[:240]
+                if state == "failed"
+                else ""
+            )
+            latest_at_label = "Completed at" if state == "completed" else "Finished at"
+        else:
+            state, status_label, status_detail, latest_at_label = (
+                "not_run",
+                "Not run yet",
+                "",
+                "",
+            )
+
+        schedule_minutes = _source_schedule_minutes(schedule or "")
+        schedule_label = (
+            _schedule_cadence_label({"minutes": schedule_minutes})
+            if schedule_minutes
+            else "Runs when requested"
+        )
+        latest_at = completed_at or started_at or requested_at
+        last_result = ""
+        if active and terminal_status:
+            if terminal_status == "completed":
+                last_result = (
+                    f"Last completed: {terminal_rows} updated"
+                    if terminal_rows is not None
+                    else "Last completed"
+                )
+            elif terminal_status == "cancelled":
+                last_result = "Last stopped"
+            else:
+                last_result = "Last failed"
+        result.append(
+            {
+                "id": f"source-refresh:{binding_id}",
+                "group_key": "source-data",
+                "name": f"Refresh {source_name}" + (f" · {client_name}" if client_name else ""),
+                "description": f"Collect current information from {source_name}.",
+                "state": state,
+                "status_label": status_label,
+                "status_detail": status_detail,
+                "capacity_label": "",
+                "capacity_blockers": [],
+                "resource_blockers": [],
+                "latest_at": latest_at,
+                "latest_at_label": latest_at_label,
+                "last_result": last_result,
+                "last_result_at": terminal_at,
+                "latest_run_id": run_id,
+                "rows_touched": rows_touched,
+                "error": (error or "")[:240],
+                "active_run": {"id": run_id} if active and run_id else None,
+                "needs_attention": state == "failed",
+                "schedule_label": schedule_label,
+                "schedule_detail": "Managed on Sources",
+                "next_due_at": None,
+                "run_key": "source-refresh",
+                "is_source": True,
+                "binding_id": binding_id,
+                "detail_url": f"{reverse('sources_status')}?{urlencode({'source': source_name})}",
+                "previous_result": bool(previous_result),
+                "is_stale": bool(
+                    terminal_status == "completed"
+                    and terminal_at
+                    and _source_is_stale(terminal_at, schedule_minutes, now)
+                ),
+            }
+        )
+    return result
+
+
 def _jobs_diagnostic_query(
     section: str, *, limit: int = 100, offset: int = 0, cursor=None
 ) -> tuple[int, list[dict]]:
@@ -9463,13 +9678,24 @@ def admin_jobs(request: HttpRequest) -> HttpResponse:
             }
         )
 
-    # Source refresh is one scoped execution mechanism, not sixteen Jobs.
-    # Sources owns its schedules, history, and manual refresh controls.
-    sources, sources_available = _admin_health_sources(timezone.now())
+    # Sources owns connection configuration; Jobs owns the complete execution
+    # view. Each enabled binding is therefore one visible scoped execution row.
+    try:
+        source_jobs = _source_job_rows()
+    except DatabaseError:
+        log.exception("Source execution status query failed")
+        source_jobs = []
+        sources_available = False
+    else:
+        sources_available = True
+        jobs.extend(source_jobs)
     source_summary = {
         "available": sources_available,
-        "total": len(sources),
-        "current": sum(not source["needs_attention"] for source in sources),
+        "total": len(source_jobs),
+        "current": sum(
+            not source["needs_attention"] and not source["is_stale"]
+            for source in source_jobs
+        ),
     }
 
     summary = {
@@ -9539,6 +9765,7 @@ def admin_jobs(request: HttpRequest) -> HttpResponse:
             "admin_tab": "jobs",
             "job_groups": job_groups,
             "job_count": len(_OPERATOR_JOB_CATALOG),
+            "source_job_count": len(source_jobs),
             "source_summary": source_summary,
             "active_status": status_filter,
             "active_search": search_filter,

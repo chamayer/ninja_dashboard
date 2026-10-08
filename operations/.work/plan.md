@@ -1,4 +1,54 @@
-# Operations ecosystem Dashboard (2026-10-08)
+# Complete Jobs execution view (2026-10-08)
+
+## Status
+
+Complete — every enabled source refresh is restored to Jobs as a scoped
+execution row while Sources remains the configuration authority.
+
+## Goal and fixed decisions
+
+Jobs must show all current execution, including each scoped source refresh.
+Moving source schedules and source-specific evidence to Sources did not justify
+hiding those executions from Jobs.
+
+- Sources owns source configuration, cadence, evidence, and source history.
+- Jobs owns the complete execution overview: current state, latest result,
+  waiting/running/failed visibility, stop/retry/refresh actions, and filtering.
+- A source refresh row is a scoped execution of the registered `source-refresh`
+  Job, not a second Job definition or duplicated schedule authority.
+- Source rows use the same lifecycle language and table as registered Jobs.
+- Legacy source-run results may provide the previous result until that source
+  has a native source-refresh result; they never create a second lifecycle.
+
+## Scope and validation
+
+- Add one shared source-execution projection for the Jobs view using source
+  bindings and durable Jobs runs.
+- Insert source rows into the existing `Refresh Source Data` group and include
+  them in search, status, summary, and safe actions.
+- Keep source-management links routed to Sources.
+- Update focused Jobs tests; run Dashboard/Jobs tests, Django checks,
+  compilation, focused Ruff undefined/unused checks, and diff hygiene.
+- Commit and push under the user’s live-preview authorization. GitOps owns the
+  deployment; do not trigger Portainer manually.
+
+## Current checkpoint and validation
+
+Jobs now combines its 13 operator Job definitions with every enabled source
+binding in the existing Refresh Source Data group. Source rows show current
+lifecycle, latest result, cadence, previous terminal result while active,
+direct source evidence, and safe refresh/cancel/retry controls. They participate
+in search, status filters, counts, and bulk cancellation. Sources remains the
+only place to change source schedules or inspect source-specific evidence.
+
+Validation passed: focused Jobs and Dashboard tests (20), Django checks,
+Python compilation, focused Ruff undefined/unused-symbol checks, and diff
+hygiene. Next: commit and push; verify the automatic rollout and both live
+Dashboard and Jobs pages without manually invoking Portainer.
+
+---
+
+# Completed Operations ecosystem Dashboard (2026-10-08)
 
 ## Status
 

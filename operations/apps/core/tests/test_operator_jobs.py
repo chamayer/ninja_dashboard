@@ -111,10 +111,14 @@ def test_admin_navigation_folds_services_into_jobs():
     assert 'next_due_at = parse_datetime(next_due_at)' in views
     assert "Next: {{ job.next_due_at" in jobs_template
     assert "Request stop for selected Jobs" in jobs_template
-    assert "job.active_run and job.state == 'running'" in jobs_template
+    assert "{% if job.active_run %}" in jobs_template
     assert "source_summary.current" in jobs_template
     assert "configured Sources" not in jobs_template
-    assert '"source-refresh:{binding_id}"' not in views
+    assert "def _source_job_rows" in views
+    assert '"id": f"source-refresh:{binding_id}"' in views
+    assert '"source_job_count": len(source_jobs)' in views
+    assert "source_refresh_run" in jobs_template
+    assert "job.detail_url" in jobs_template
     assert views.count("health = _admin_health_snapshot") == 2
     assert 'finding_type__category__name="platform_health"' in views
     assert 'return redirect("admin_jobs")' in views
