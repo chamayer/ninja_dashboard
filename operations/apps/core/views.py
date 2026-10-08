@@ -14620,23 +14620,80 @@ def sources_status(request: HttpRequest) -> HttpResponse:
             )
             latest_refresh = {row[0]: row[1:] for row in cur.fetchall()}
 
-            # Source-refresh runs are the authoritative operational history.
-            # Keep the old source run log only as historical evidence; it is
-            # not a second current lifecycle.
+            # Reference feeds were previously run under individual Job keys.
+            # Keep their verified terminal results visible until the first
+            # source-managed refresh completes; this is transition history,
+            # not a second live lifecycle.
             cur.execute(
                 """
-                SELECT source.name, run.status, run.started_at, run.completed_at,
-                       run.rows_touched, run.error
-                  FROM operations.operator_job_runs run
-                  JOIN operations.source_bindings binding
-                    ON binding.id = substring(run.scope_identity FROM 16)::uuid
-                   AND binding.tenant_id = run.tenant_id
-                  JOIN operations.source_instances instance ON instance.id = binding.source_instance_id
-                  JOIN operations.sources source ON source.id = instance.source_id
-                 WHERE run.tenant_id = %s AND run.job_key = 'source-refresh'
-                 ORDER BY run.requested_at DESC, run.id DESC LIMIT 30
-            """,
+                SELECT binding.id, run.status, run.completed_at, run.started_at,
+                       run.requested_at, run.rows_touched, run.error
+                  FROM operations.source_bindings binding
+                  JOIN operations.source_instances instance
+                    ON instance.id = binding.source_instance_id
+                  JOIN operations.operator_job_runs run
+                    ON run.tenant_id = binding.tenant_id
+                   AND run.job_key = instance.config->>'legacy_job_key'
+                 WHERE binding.tenant_id = %s
+                   AND COALESCE(instance.config->>'legacy_job_key', '') <> ''
+                   AND run.status IN ('completed', 'failed', 'stalled', 'cancelled')
+                 ORDER BY binding.id,
+                          COALESCE(run.completed_at, run.started_at, run.requested_at) DESC,
+                          run.id DESC
+                """,
                 (tenant_id,),
+            )
+            legacy_refresh: dict = {}
+            legacy_success: dict = {}
+            for row in cur.fetchall():
+                binding_id, status, completed_at, started_at, requested_at, rows_touched, error = row
+                legacy_refresh.setdefault(binding_id, row[1:])
+                if status == "completed":
+                    legacy_success.setdefault(binding_id, row[1:])
+
+            # Source-refresh runs are the authoritative operational history.
+            # The former reference-feed runs remain visible only while a
+            # source has not yet completed under its source-managed schedule.
+            cur.execute(
+                """
+                SELECT source, status, started_at, completed_at, rows_touched, error, history_kind
+                  FROM (
+                    SELECT source.name AS source, run.status, run.started_at, run.completed_at,
+                           run.rows_touched, run.error, 'current' AS history_kind,
+                           run.requested_at
+                      FROM operations.operator_job_runs run
+                      JOIN operations.source_bindings binding
+                        ON binding.id = substring(run.scope_identity FROM 16)::uuid
+                       AND binding.tenant_id = run.tenant_id
+                      JOIN operations.source_instances instance ON instance.id = binding.source_instance_id
+                      JOIN operations.sources source ON source.id = instance.source_id
+                     WHERE run.tenant_id = %s AND run.job_key = 'source-refresh'
+                    UNION ALL
+                    SELECT source.name AS source, run.status, run.started_at, run.completed_at,
+                           run.rows_touched, run.error, 'previous' AS history_kind,
+                           run.requested_at
+                      FROM operations.operator_job_runs run
+                      JOIN operations.source_bindings binding
+                        ON binding.tenant_id = run.tenant_id
+                      JOIN operations.source_instances instance
+                        ON instance.id = binding.source_instance_id
+                       AND run.job_key = instance.config->>'legacy_job_key'
+                      JOIN operations.sources source ON source.id = instance.source_id
+                     WHERE run.tenant_id = %s
+                       AND COALESCE(instance.config->>'legacy_job_key', '') <> ''
+                       AND NOT EXISTS (
+                           SELECT 1
+                             FROM operations.operator_job_runs current_run
+                            WHERE current_run.tenant_id = binding.tenant_id
+                              AND current_run.job_key = 'source-refresh'
+                              AND current_run.scope_identity = 'source-binding:' || binding.id::text
+                              AND current_run.status = 'completed'
+                       )
+                  ) AS source_history
+                 ORDER BY COALESCE(completed_at, started_at, requested_at) DESC NULLS LAST
+                 LIMIT 30
+            """,
+                (tenant_id, tenant_id),
             )
             recent_runs = [
                 {
@@ -14646,6 +14703,7 @@ def sources_status(request: HttpRequest) -> HttpResponse:
                     "completed_at": r[3],
                     "rows_seen": r[4],
                     "error": r[5] or None,
+                    "history_kind": r[6],
                 }
                 for r in cur.fetchall()
             ]
@@ -14671,6 +14729,7 @@ def sources_status(request: HttpRequest) -> HttpResponse:
         ) = row
         act = active.get(binding_id)
         latest = latest_refresh.get(binding_id)
+        previous_result = False
         if latest and latest[0] in {"completed", "failed", "stalled", "cancelled"}:
             terminal_at = latest[1] or latest[2] or latest[3]
             last_success = terminal_at if latest[0] == "completed" else last_success
@@ -14680,7 +14739,18 @@ def sources_status(request: HttpRequest) -> HttpResponse:
         else:
             last_fail = last_run_ended_at if last_run_ok is False else None
             last_error = (last_run_error or None) if last_run_ok is False else None
-        is_stale = last_success is None or (now - last_success).total_seconds() > 8 * 3600
+        if not (latest and latest[0] in {"completed", "failed", "stalled", "cancelled"}):
+            legacy_latest = legacy_refresh.get(binding_id)
+            legacy_last_success = legacy_success.get(binding_id)
+            if legacy_last_success:
+                last_success = legacy_last_success[1] or legacy_last_success[2] or legacy_last_success[3]
+                last_success_rows = legacy_last_success[4]
+                previous_result = True
+            if legacy_latest and legacy_latest[0] in {"failed", "stalled"}:
+                last_fail = legacy_latest[1] or legacy_latest[2] or legacy_latest[3]
+                last_error = legacy_latest[5] or None
+        schedule_minutes = _source_schedule_minutes(schedule or "")
+        is_stale = _source_is_stale(last_success, schedule_minutes, now)
         sources.append(
             {
                 "id": source_instance_id,
@@ -14690,7 +14760,7 @@ def sources_status(request: HttpRequest) -> HttpResponse:
                 "run_platform": run_platform,
                 "binding_id": binding_id,
                 "schedule": schedule or "",
-                "schedule_minutes": _source_schedule_minutes(schedule or ""),
+                "schedule_minutes": schedule_minutes,
                 "source_kind": source_kind,
                 "entity_type": entity_type,
                 "purpose": (
@@ -14706,6 +14776,7 @@ def sources_status(request: HttpRequest) -> HttpResponse:
                     else ""
                 ),
                 "last_success": last_success,
+                "last_result_is_previous": previous_result,
                 "last_failure": last_fail,
                 "last_rows": last_success_rows if last_success_rows is not None else last_run_rows,
                 "last_error": last_error,
@@ -14783,6 +14854,14 @@ def _source_schedule_minutes(value: str) -> int | None:
     except ValueError:
         return None
     return minutes if 1 <= minutes <= 10080 else None
+
+
+def _source_is_stale(last_success: datetime | None, schedule_minutes: int | None, now: datetime) -> bool:
+    """Mark a source stale only after twice its expected cadence (minimum eight hours)."""
+    if last_success is None:
+        return True
+    expected_minutes = max(8 * 60, (schedule_minutes or 8 * 60) * 2)
+    return now - last_success > timedelta(minutes=expected_minutes)
 
 
 @login_required

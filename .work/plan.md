@@ -68,15 +68,25 @@ binding-scoped source-refresh successors (patch analysis, vulnerability
 matching, and targeted software analysis) without restoring category
 schedules. Focused source-routing, registry, Jobs, and Django checks pass.
 The worker recovery-policy registration then exposed a missing database
-authority for the reviewed `source-refresh` replay policy. Pending migration
-0268 creates that authority; it is required for the worker to start and does
-not weaken the replay-safety gate. The authority is now live and the worker
-starts, but the first live source follow-up showed the worker discarded the
-claimed scope before workflow admission. The pending correction carries scope
-through the child lifecycle and fails a run immediately when required follow-up
-work cannot be admitted. Next: validate and push this correction, confirm
-worker execution health, then finish the source/dispatcher compatibility and
-live-surface audit.
+authority for the reviewed `source-refresh` replay policy. Migration 0268
+created that authority without weakening the replay-safety gate. The first live
+source follow-up showed the worker discarded the claimed scope before workflow
+admission; that correction now carries scope through the child lifecycle and
+fails a run immediately when required follow-up work cannot be admitted. Live
+workers are healthy after the rollout. The remaining transition gap is source
+presentation: reference feeds retain valid history under their former Job
+keys, so Sources must carry that forward until each feed completes its first
+source-managed run, and must assess staleness against its own cadence. Next:
+implement and validate that transition history, then finish the
+source/dispatcher compatibility and live-surface audit. Migration 0269 now
+adds the former reference Job key as source-instance transition metadata;
+Sources uses that metadata only to display verified prior results until the
+first source-managed completion and labels it "previous schedule." Staleness
+is now twice the configured cadence, with an eight-hour floor, rather than a
+global eight-hour rule. Focused Sources/Jobs tests, worker/source workflow
+tests, Django system check, compilation, and diff check pass. Next: commit and
+push this transition fix, verify automatic rollout and live Sources behavior,
+then finish the remaining audit.
 
 ## Active plan — complete conditions framework
 
