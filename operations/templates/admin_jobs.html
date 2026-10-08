@@ -28,6 +28,8 @@
   .jobs-table { width:100%; border-collapse:collapse; background:var(--surface); border:1px solid var(--border); font-size:.86rem; }
   .jobs-table th,.jobs-table td { padding:.65rem .75rem; border-bottom:1px solid var(--border); text-align:left; vertical-align:top; }
   .jobs-table th { color:var(--muted); font-size:.72rem; text-transform:uppercase; letter-spacing:.05em; }
+  .jobs-group th { background:var(--surface-alt, #f8fafc); color:inherit; font-size:.88rem; text-transform:none; letter-spacing:normal; }
+  .jobs-group-count { color:var(--muted); font-weight:400; margin-left:.4rem; }
   .jobs-name { font-weight:700; }
   .jobs-description,.jobs-detail { display:block; color:var(--muted); font-size:.78rem; margin-top:.2rem; max-width:42rem; }
   .jobs-state { font-weight:700; }
@@ -90,11 +92,13 @@
   </div>
 </form>
 
-{% if jobs %}
+{% if job_groups %}
 <table class="jobs-table">
   <thead><tr><th></th><th>Job</th><th>Status</th><th>Schedule</th><th>Action</th></tr></thead>
   <tbody>
-  {% for job in jobs %}
+  {% for group in job_groups %}
+    <tr class="jobs-group"><th scope="rowgroup" colspan="5">{{ group.label }}<span class="jobs-group-count">{{ group.jobs|length }} Job{{ group.jobs|length|pluralize }}</span></th></tr>
+    {% for job in group.jobs %}
     <tr>
       <td>{% if job.active_run and job.state == 'running' %}<input form="job-bulk-action" type="checkbox" name="run_id" value="{{ job.active_run.id }}" aria-label="Select {{ job.name }}">{% endif %}</td>
       <td><a class="jobs-name" href="{% url 'admin_job_detail' job_id=job.id %}">{{ job.name }}</a><span class="jobs-description">{{ job.description }}</span></td>
@@ -116,6 +120,7 @@
         {% else %}<span class="muted">—</span>{% endif %}
       </td>
     </tr>
+    {% endfor %}
   {% endfor %}
   </tbody>
 </table>

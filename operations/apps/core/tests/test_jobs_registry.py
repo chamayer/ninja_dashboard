@@ -17,6 +17,7 @@ from shared.jobs_registry import (
     definitions,
     legacy_job_definition_keys,
     operator_job_definitions,
+    operator_job_group_definitions,
     operator_job_key_for_execution,
     schedule_definitions,
     scheduled_definition_keys,
@@ -112,6 +113,9 @@ def test_operator_jobs_have_one_visible_boundary_and_services_stay_outside():
         | set(legacy_job_definition_keys())
         == definition_keys()
     )
+    group_keys = {key for key, _label in operator_job_group_definitions()}
+    assert {job.group_key for job in jobs} <= group_keys
+    assert next(job for job in jobs if job.key == "cmdb-evaluate").group_key == "analysis"
 
 
 def test_initial_workflow_edges_are_registered_and_acyclic():

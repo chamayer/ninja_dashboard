@@ -49,6 +49,7 @@ from shared.jobs_registry import (
     legacy_job_definition_keys,
     operator_job_definition,
     operator_job_definitions,
+    operator_job_group_definitions,
     operator_job_key_for_execution,
     registry_digest,
     schedule_definitions,
@@ -8420,6 +8421,7 @@ validate_registry(catalog_keys=(entry["id"] for entry in _JOB_CATALOG))
 _OPERATOR_JOB_CATALOG: list[dict] = [
     {
         "id": job.key,
+        "group_key": job.group_key,
         "name": job.name,
         "description": job.description,
         "start_description": job.start_description,
@@ -9097,6 +9099,14 @@ def admin_jobs(request: HttpRequest) -> HttpResponse:
         ]
     state_order = {"failed": 0, "running": 1, "waiting": 2, "ready": 3}
     jobs.sort(key=lambda item: (state_order.get(item["state"], 4), item["name"].lower()))
+    jobs_by_group: dict[str, list[dict]] = {}
+    for job in jobs:
+        jobs_by_group.setdefault(job["group_key"], []).append(job)
+    job_groups = [
+        {"key": key, "label": label, "jobs": jobs_by_group[key]}
+        for key, label in operator_job_group_definitions()
+        if key in jobs_by_group
+    ]
 
     return render(
         request,
@@ -9104,7 +9114,7 @@ def admin_jobs(request: HttpRequest) -> HttpResponse:
         {
             "admin_group": "integrations",
             "admin_tab": "jobs",
-            "jobs": jobs,
+            "job_groups": job_groups,
             "job_count": len(_OPERATOR_JOB_CATALOG),
             "active_status": status_filter,
             "active_search": search_filter,

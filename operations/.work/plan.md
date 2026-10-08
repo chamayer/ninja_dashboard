@@ -1,5 +1,36 @@
 # Jobs ecosystem final-design reset
 
+## Operator Jobs grouping (2026-10-08)
+
+## Status
+
+Complete — the Jobs list is organized by registry-owned, plain-language
+purpose without creating a second workflow, lifecycle, or governance model.
+
+## Scope and decision
+
+The registry owns each visible Job's operator group, so the view does not
+infer purpose from schedules, resource claims, or current state. The Jobs page
+will retain one set of columns, filters, status summaries, and controls; it
+will add simple, always-expanded group headings in this order:
+
+1. Refresh Source Data
+2. Refresh Software Data
+3. Refresh Security Data
+4. Match Records
+5. Analyze Source Information
+6. Maintain Operations
+7. Send Notifications
+
+Groups explain why an operator would recognize a Job. They do not represent
+execution capacity, safety locks, dependency order, or a separate workflow.
+
+## Completion evidence
+
+Focused registry and Jobs-page coverage (19 tests), focused Ruff, Django
+checks, and `git diff --check` pass. Next: commit and push the scoped
+presentation change under the existing authorization.
+
 ## CMDB finding eligibility (2026-10-08)
 
 ## Status

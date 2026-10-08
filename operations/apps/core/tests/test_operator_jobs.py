@@ -20,6 +20,7 @@ def test_jobs_keep_durable_queue_and_terminal_step_contracts():
 def test_jobs_present_one_list_detail_and_configuration_surface():
     views = Path("apps/core/views.py").read_text(encoding="utf-8")
     jobs_template = Path("templates/admin_jobs.html").read_text(encoding="utf-8")
+    registry = Path("../shared/jobs_registry.py").read_text(encoding="utf-8")
     detail_template = Path("templates/admin_job_detail.html").read_text(encoding="utf-8")
     configuration_template = Path("templates/admin_jobs_control_plane.html").read_text(
         encoding="utf-8"
@@ -35,6 +36,9 @@ def test_jobs_present_one_list_detail_and_configuration_surface():
     assert "Status: {{ job.status_label }}" in jobs_template
     assert '{{ job.latest_at_label }} {{ job.latest_at|date:"M j, Y, g:i A" }}' in jobs_template
     assert "resource_blockers" in jobs_template
+    assert "job_groups" in jobs_template
+    assert "Analyze Source Information" in registry
+    assert "Refresh Security Data" in registry
     assert "Last completed:" in views
     assert '"start_description": job.start_description' in views
     assert "_jobs_diagnostic_all(\"schedules\", cur)" in views

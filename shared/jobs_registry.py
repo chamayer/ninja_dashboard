@@ -73,6 +73,7 @@ class OperatorJobDefinition:
     """
 
     key: str
+    group_key: str
     name: str
     description: str
     start_description: str
@@ -1205,6 +1206,52 @@ _JOB_START_PRESENTATION = MappingProxyType(
 )
 
 
+_OPERATOR_JOB_GROUPS = (
+    ("source-data", "Refresh Source Data"),
+    ("software-data", "Refresh Software Data"),
+    ("security-data", "Refresh Security Data"),
+    ("matching", "Match Records"),
+    ("analysis", "Analyze Source Information"),
+    ("maintenance", "Maintain Operations"),
+    ("notifications", "Send Notifications"),
+)
+_OPERATOR_JOB_GROUP_BY_KEY = MappingProxyType(
+    {
+        "patches": "source-data",
+        "agent-observations": "source-data",
+        "documentation-observations": "source-data",
+        "software-queue-drain": "source-data",
+        "intel-cpe-dict": "software-data",
+        "intel-winget": "software-data",
+        "intel-chocolatey": "software-data",
+        "intel-capability": "software-data",
+        "intel-lolrmm": "software-data",
+        "intel-endoflife": "software-data",
+        "intel-category": "software-data",
+        "intel-kev": "security-data",
+        "intel-nvd": "security-data",
+        "intel-epss": "security-data",
+        "intel-otx": "security-data",
+        "intel-abusech": "security-data",
+        "resolver": "matching",
+        "intel-matcher": "matching",
+        "software-classify-only": "analysis",
+        "patch-classify": "analysis",
+        "platform-evaluate": "analysis",
+        "cmdb-evaluate": "analysis",
+        "parity-check": "maintenance",
+        "retention-history": "maintenance",
+        "notifications-dispatch": "notifications",
+        "notifications-digest": "notifications",
+    }
+)
+
+
+def operator_job_group_definitions() -> tuple[tuple[str, str], ...]:
+    """Return ordered, operator-facing Jobs groups."""
+    return _OPERATOR_JOB_GROUPS
+
+
 def operator_job_definitions() -> tuple[OperatorJobDefinition, ...]:
     """Return the Jobs catalog; System services and legacy bridges stay out."""
     members: dict[str, list[str]] = {}
@@ -1213,13 +1260,26 @@ def operator_job_definitions() -> tuple[OperatorJobDefinition, ...]:
             continue
         catalog_key = _JOB_MODE_PARENT.get(item.key, item.key)
         members.setdefault(catalog_key, []).append(item.key)
+    catalog_keys = set(members)
+    configured_keys = set(_OPERATOR_JOB_GROUP_BY_KEY)
+    if catalog_keys != configured_keys:
+        raise RegistryValidationError(
+            "Operator Jobs grouping does not cover the visible Jobs catalog: "
+            f"missing={sorted(catalog_keys - configured_keys)} "
+            f"unknown={sorted(configured_keys - catalog_keys)}"
+        )
+    group_keys = {key for key, _label in _OPERATOR_JOB_GROUPS}
     result = []
     for key, execution_keys in members.items():
         item = _INDEX[key]
         name, description = _JOB_PRESENTATION.get(key, (item.display_name, item.description))
+        group_key = _OPERATOR_JOB_GROUP_BY_KEY[key]
+        if group_key not in group_keys:
+            raise RegistryValidationError(f"Operator Job {key} has an unknown group")
         result.append(
             OperatorJobDefinition(
                 key=key,
+                group_key=group_key,
                 name=name,
                 description=description,
                 start_description=_JOB_START_PRESENTATION.get(key, ""),
