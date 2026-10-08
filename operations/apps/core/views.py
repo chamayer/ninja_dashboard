@@ -9053,6 +9053,7 @@ def admin_jobs(request: HttpRequest) -> HttpResponse:
         jobs.append(
             {
                 "id": entry["id"],
+                "group_key": entry["group_key"],
                 "name": entry["name"],
                 "description": entry["description"],
                 "state": state,

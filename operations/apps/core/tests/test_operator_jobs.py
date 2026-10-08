@@ -39,6 +39,7 @@ def test_jobs_present_one_list_detail_and_configuration_surface():
     assert "job_groups" in jobs_template
     assert "Analyze Source Information" in registry
     assert "Refresh Security Data" in registry
+    assert '"group_key": entry["group_key"]' in views
     assert "Last completed:" in views
     assert '"start_description": job.start_description' in views
     assert "_jobs_diagnostic_all(\"schedules\", cur)" in views

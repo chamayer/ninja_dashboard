@@ -1,5 +1,24 @@
 # Jobs ecosystem final-design reset
 
+## Jobs grouping 500 correction (2026-10-08)
+
+## Status
+
+Complete — the rendered row now preserves its registry-owned group metadata.
+
+## Scope and decision
+
+The registry has complete group assignments and the catalog carries them. The
+page row must preserve that same metadata before grouping; no fallback or
+template inference is appropriate because it could hide an invalid registry
+contract.
+
+## Completion evidence
+
+Focused registry and Jobs-page coverage (19 tests), Django checks, focused
+Ruff, and `git diff --check` pass. Next: commit and push the single wiring
+correction, then verify the deployed Jobs URL.
+
 ## Operator Jobs grouping (2026-10-08)
 
 ## Status
