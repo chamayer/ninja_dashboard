@@ -5,9 +5,9 @@ entity findings in operations.findings. Runs after each ingest cycle and
 on a 4-hour sweep.
 
 Pipeline per run (device_id=None means full sweep):
-  1. Source-failure guard — platforms whose latest run_log entry failed
-     or is overdue are skipped for coverage this cycle and raise an
-     admin_findings row (resolved automatically once healthy).
+  1. Source-failure guard — failed or overdue configured source bindings raise
+     a binding-scoped admin Issue. Dependent coverage results remain recorded
+     but are blocked by that root Issue until current source data returns.
   2. Device-role sync — devices get their server/workstation role from
      the latest role-bearing observation of any source; disagreeing
      sources raise device_role_conflict (Ninja stays authoritative).
@@ -37,11 +37,16 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from ingest import db
-from ingest.conditions import load_active_profile, record_assessment
 from ingest.condition_evidence import preserve_operator_episode
+from ingest.conditions import load_active_profile, record_assessment
 from ingest.identity import identity_entity_types
 from ingest.intel.windows_servicing import sync as sync_windows_servicing
 from ingest.normalize import normalize_hostname
+from ingest.source_health import (
+    SourceCollectionProblem,
+    blockers_for_platform,
+    collection_problems,
+)
 from shared.conditions.contracts import (
     Condition,
     EvaluationCoverage,
@@ -53,7 +58,6 @@ from shared.conditions.contracts import (
 log = logging.getLogger(__name__)
 
 _DEVICE_MISSING_MIN_AGE_HOURS = 1
-_SOURCE_OVERDUE_HOURS = 24
 _CORROBORATION_WINDOW_HOURS = 48
 _LONG_OFFLINE_DAYS = 7
 _STALE_DATA_DAYS = 7
@@ -91,13 +95,13 @@ def evaluate(tenant_id: int, device_id: uuid.UUID | None = None) -> int:
     evaluator_run_id = uuid.uuid4()
     affected = 0
     error_msg: str | None = None
-    skip_platforms: set[str] = set()
+    source_problems: list[SourceCollectionProblem] = []
 
     try:
         with db.pool.connection() as conn:
             with conn.cursor() as cur:
                 cur.execute(f"SET LOCAL operations.tenant_id = {tenant_id}")
-                skip_platforms = _source_failure_guard(cur, tenant_id, now)
+                source_problems = _source_failure_guard(cur, tenant_id, now)
                 affected += _sync_source_withdrawal_lifecycle(
                     cur, tenant_id, now, evaluator_run_id, device_id
                 )
@@ -110,10 +114,12 @@ def evaluate(tenant_id: int, device_id: uuid.UUID | None = None) -> int:
                     affected += _evaluate_duplicate_records(cur, tenant_id, now)
                 corroborated = _load_corroborated_devices(cur, tenant_id)
                 affected += _evaluate_coverage(
-                    cur, tenant_id, device_id, now, skip_platforms, corroborated
+                    cur, tenant_id, device_id, now, source_problems, corroborated
                 )
                 affected += _evaluate_unenrolled(cur, tenant_id, device_id, now)
-                affected += _evaluate_device_lifecycle(cur, tenant_id, device_id, now)
+                affected += _evaluate_device_lifecycle(
+                    cur, tenant_id, device_id, now, source_problems
+                )
                 affected += sync_windows_servicing(
                     cur, tenant_id, device_id, now=now
                 )
@@ -150,10 +156,10 @@ def evaluate(tenant_id: int, device_id: uuid.UUID | None = None) -> int:
             log.exception("evaluator: run_log write failed — continuing")
 
     log.info(
-        "evaluator: tenant=%d findings_affected=%d skipped_platforms=%s",
+        "evaluator: tenant=%d findings_affected=%d blocked_sources=%s",
         tenant_id,
         affected,
-        sorted(skip_platforms) or "-",
+        sorted(problem.source_name for problem in source_problems) or "-",
     )
     return affected
 
@@ -163,85 +169,63 @@ def evaluate(tenant_id: int, device_id: uuid.UUID | None = None) -> int:
 # --------------------------------------------------------------------------
 
 
-def _source_failure_guard(cur: Any, tenant_id: int, now: datetime) -> set[str]:
-    """Return platforms to skip this cycle; maintain source_failure admin findings.
-
-    A platform is skipped when its latest run_log entry failed, or its
-    latest success is older than _SOURCE_OVERDUE_HOURS. Platforms with no
-    run_log rows at all are treated as healthy (transition period — the
-    writers only started recording runs with this release).
-    """
-    cur.execute(
-        """
-        SELECT DISTINCT platform FROM operations.coverage_requirements
-        WHERE tenant_id = %s AND enabled = TRUE
-        """,
-        (tenant_id,),
-    )
-    platforms = [row[0] for row in cur.fetchall()]
-
+def _source_failure_guard(
+    cur: Any, tenant_id: int, now: datetime
+) -> list[SourceCollectionProblem]:
+    """Emit source-bound root Issues and return their affected source scopes."""
     ft_id = _get_finding_type_id(cur, "source_failure")
-    skip: set[str] = set()
-    for platform in platforms:
+    problems = collection_problems(cur, tenant_id, now)
+    active_keys = [problem.condition_key for problem in problems]
+    if ft_id:
+        for problem in problems:
+            _upsert_admin_finding(
+                cur,
+                tenant_id,
+                ft_id,
+                problem.condition_key,
+                "high",
+                now,
+                {
+                    "source_binding_id": problem.binding_id,
+                    "platform": problem.platform,
+                    "client_id": str(problem.client_id) if problem.client_id else None,
+                },
+                {
+                    "source": problem.source_name,
+                    "reason": problem.reason,
+                    "last_failure_at": problem.last_failure_at.isoformat()
+                    if problem.last_failure_at
+                    else None,
+                    "last_success_at": problem.last_success_at.isoformat()
+                    if problem.last_success_at
+                    else None,
+                    "error": problem.error,
+                },
+                measured=True,
+            )
         cur.execute(
             """
-            SELECT ok, ended_at, error FROM operations.run_log
-            WHERE tenant_id = %s
-              AND (kind = %s OR kind LIKE %s)
-            ORDER BY started_at DESC
-            LIMIT 1
+            UPDATE operations.admin_findings
+               SET status = 'resolved', resolved_at = %s
+             WHERE tenant_id = %s
+               AND condition_key LIKE 'source_failure:binding:%%'
+               AND status IN ('open', 'acknowledged', 'investigating')
+               AND NOT (condition_key = ANY(%s::text[]))
+               AND EXISTS (
+                   SELECT 1 FROM operations.condition_assessments assessment
+                   JOIN operations.condition_policy_versions policy
+                     ON policy.version = assessment.policy_version AND policy.active
+                  WHERE assessment.tenant_id = operations.admin_findings.tenant_id
+                    AND assessment.row_kind = 'admin'
+                    AND assessment.finding_id = operations.admin_findings.id
+                    AND (assessment.response->>'may_clear')::boolean IS TRUE
+                    AND assessment.assessed_at >= now() -
+                        (policy.policy->>'freshness_hours')::integer * interval '1 hour'
+               )
             """,
-            (tenant_id, f"source.{platform}", f"source.{platform}.%"),
+            (now, tenant_id, active_keys),
         )
-        row = cur.fetchone()
-        if row is None:
-            continue
-        ok, ended_at, error = row
-        reason = ""
-        if not ok:
-            reason = f"latest run failed: {error or 'unknown error'}"
-        elif ended_at is not None:
-            if ended_at.tzinfo is None:
-                ended_at = ended_at.replace(tzinfo=timezone.utc)
-            if now - ended_at > timedelta(hours=_SOURCE_OVERDUE_HOURS):
-                reason = f"no successful run since {ended_at.isoformat()}"
-
-        condition_key = f"source_failure:{platform}"
-        if reason:
-            skip.add(platform)
-            if ft_id:
-                severity = "critical" if platform == "Ninja" else "high"
-                _upsert_admin_finding(
-                    cur,
-                    tenant_id,
-                    ft_id,
-                    condition_key,
-                    severity,
-                    now,
-                    {"platform": platform},
-                    {"reason": reason[:500]},
-                )
-        else:
-            cur.execute(
-                """
-                UPDATE operations.admin_findings
-                SET status = 'resolved', resolved_at = %s
-                WHERE tenant_id = %s AND condition_key = %s
-                  AND status IN ('open', 'acknowledged')
-                  AND EXISTS (
-                      SELECT 1 FROM operations.condition_assessments a
-                       WHERE a.tenant_id = operations.admin_findings.tenant_id
-                         AND a.row_kind = 'admin'
-                         AND a.finding_id = operations.admin_findings.id
-                         AND (a.response->>'may_clear')::boolean IS TRUE
-                         AND a.policy_version = (SELECT version FROM operations.condition_policy_versions WHERE active ORDER BY version DESC LIMIT 1)
-                         AND a.assessed_at >= now() - (SELECT (policy->>'freshness_hours')::integer * interval '1 hour' FROM operations.condition_policy_versions WHERE active ORDER BY version DESC LIMIT 1)
-                  )
-                """,
-                (now, tenant_id, condition_key),
-            )
-
-    return skip
+    return problems
 
 
 def _upsert_admin_finding(
@@ -253,6 +237,8 @@ def _upsert_admin_finding(
     now: datetime,
     subject_ref: dict[str, Any],
     details: dict[str, Any],
+    *,
+    measured: bool = False,
 ) -> None:
     preserved = preserve_operator_episode(cur, "admin_findings", tenant_id, condition_key, now, details)
     if preserved is not None:
@@ -300,7 +286,7 @@ def _upsert_admin_finding(
         cur,
         condition,
         (),
-        EvaluationCoverage(False, False, False, False),
+        EvaluationCoverage(measured, measured, measured, measured),
         now=now,
         reevaluation_key=f"evaluator-admin:{condition_key}:{now.isoformat()}",
     )
@@ -1255,7 +1241,7 @@ def _evaluate_coverage(
     tenant_id: int,
     device_id: uuid.UUID | None,
     now: datetime,
-    skip_platforms: set[str],
+    source_problems: list[SourceCollectionProblem],
     corroborated: set[uuid.UUID],
 ) -> int:
     """Emit coverage findings from baseline requirements plus client overrides.
@@ -1446,8 +1432,6 @@ def _evaluate_coverage(
             prob_hours,
             conf_hours,
         ) in tier_rows:
-            if platform in skip_platforms:
-                continue
             if entity_type in exemptions:
                 continue
             # Agent physics: skip if device's os_group isn't in the
@@ -1480,6 +1464,9 @@ def _evaluate_coverage(
                 (tenant_id, dev_id, entity_type, platform, platform),
             )
             (last_observed,) = cur.fetchone()
+            collection_blockers = blockers_for_platform(
+                source_problems, platform, dev_client_id
+            )
 
             # BLUEPRINT 1.4 split:
             #   MISSING (last_observed IS NULL) → emit immediately.
@@ -1539,15 +1526,14 @@ def _evaluate_coverage(
                         dev_id,
                         identity_blocked,
                         offline=offline_downgrade,
-                        collection_skipped=False,
+                        collection_skipped=bool(collection_blockers),
+                        collection_blockers=collection_blockers,
                     ),
-                    # The source-failure guard excludes unhealthy platforms;
-                    # this row therefore has a measured requirement scope.
                     EvaluationCoverage(
-                        platform not in skip_platforms,
-                        platform not in skip_platforms,
-                        platform not in skip_platforms,
-                        platform not in skip_platforms,
+                        not collection_blockers,
+                        not collection_blockers,
+                        not collection_blockers,
+                        not collection_blockers,
                     ),
                 ),
             )
@@ -1675,6 +1661,7 @@ def _evaluate_device_lifecycle(
     tenant_id: int,
     device_id: uuid.UUID | None,
     now: datetime,
+    source_problems: list[SourceCollectionProblem],
 ) -> int:
     """Withdrawal review, offline, and stale-data findings."""
     count = 0
@@ -1793,7 +1780,7 @@ def _evaluate_device_lifecycle(
 
     if device_id is None:
         count += _evaluate_device_offline(cur, tenant_id, now)
-        count += _evaluate_stale_data(cur, tenant_id, now)
+        count += _evaluate_stale_data(cur, tenant_id, now, source_problems)
     return count
 
 
@@ -1924,6 +1911,7 @@ def _device_condition_signals(
     *,
     offline: bool,
     collection_skipped: bool,
+    collection_blockers: tuple[str, ...] = (),
 ) -> tuple[Signal, ...]:
     participant = Participant("device", str(device_id), "affected", tenant_id)
     return (
@@ -1942,6 +1930,7 @@ def _device_condition_signals(
             "collection:incomplete_or_stale"
             if collection_skipped
             else "collection:complete_snapshot",
+            collection_blockers,
         ),
         Signal(
             "offline",
@@ -1952,7 +1941,12 @@ def _device_condition_signals(
     )
 
 
-def _evaluate_stale_data(cur: Any, tenant_id: int, now: datetime) -> int:
+def _evaluate_stale_data(
+    cur: Any,
+    tenant_id: int,
+    now: datetime,
+    source_problems: list[SourceCollectionProblem],
+) -> int:
     """Devices no source has observed at all in the stale window."""
     ft_id = _get_finding_type_id(cur, "device_stale_data")
     if ft_id is None:
@@ -1960,7 +1954,7 @@ def _evaluate_stale_data(cur: Any, tenant_id: int, now: datetime) -> int:
     cur.execute(
         """
         SELECT apc.device_id, d.client_id, d.canonical_hostname,
-               MAX(apc.last_observed_at)
+               MAX(apc.last_observed_at), ARRAY_AGG(DISTINCT apc.platform)
         FROM operations.device_agent_presence_current apc
         JOIN operations.devices d
              ON d.id = apc.device_id AND d.tenant_id = apc.tenant_id
@@ -1973,8 +1967,15 @@ def _evaluate_stale_data(cur: Any, tenant_id: int, now: datetime) -> int:
     count = 0
     offenders: list[uuid.UUID] = []
     identity_blocked = _identity_blocked_devices(cur, tenant_id)
-    for dev_id, client_id, hostname, last_observed in cur.fetchall():
+    for dev_id, client_id, hostname, last_observed, platforms in cur.fetchall():
         offenders.append(dev_id)
+        collection_blockers = tuple(
+            dict.fromkeys(
+                blocker
+                for platform in platforms or []
+                for blocker in blockers_for_platform(source_problems, platform, client_id)
+            )
+        )
         ckey = _condition_key(tenant_id, client_id, dev_id, "device_stale_data", "")
         count += _upsert_finding(
             cur,
@@ -1996,9 +1997,15 @@ def _evaluate_stale_data(cur: Any, tenant_id: int, now: datetime) -> int:
                     dev_id,
                     identity_blocked,
                     offline=False,
-                    collection_skipped=False,
+                    collection_skipped=bool(collection_blockers),
+                    collection_blockers=collection_blockers,
                 ),
-                EvaluationCoverage(True, True, True, True),
+                EvaluationCoverage(
+                    not collection_blockers,
+                    not collection_blockers,
+                    not collection_blockers,
+                    not collection_blockers,
+                ),
             ),
         )
     _resolve_findings_absent(

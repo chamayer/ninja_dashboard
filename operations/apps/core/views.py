@@ -1500,6 +1500,64 @@ def home(request: HttpRequest) -> HttpResponse:  # noqa: PLR0912, PLR0915
         key=lambda row: (priority_order[row["priority"]], row["client"].display_name.lower())
     )
 
+    # Data status is an operator summary, not a second work queue.  Every
+    # card deliberately opens the governed Issues inbox; Sources and
+    # Computers remain evidence/control surfaces.
+    active_issue_filter = Q(status__in=_FINDING_ACTIVE_STATUSES) & (
+        Q(snoozed_until__isnull=True) | Q(snoozed_until__lt=now)
+    )
+    data_status_summaries = [
+        {
+            "name": "Source collection",
+            "count": AdminFinding.objects.filter(
+                tenant_id=1,
+                status__in=_FINDING_ACTIVE_STATUSES,
+                finding_type__name="source_failure",
+            ).count(),
+            "label": "need attention",
+            "href": f"{reverse('findings_queue')}?category=data_collection&type=collection_failures",
+        },
+        {
+            "name": "Agent reporting",
+            "count": Finding.objects.filter(active_issue_filter).filter(
+                finding_type__name__in=("missing_required_platform", "stale_required_platform", "device_unenrolled")
+            ).count(),
+            "label": "need attention",
+            "href": f"{reverse('findings_queue')}?category=agents_reporting",
+        },
+        {
+            "name": "Computer data",
+            "count": Finding.objects.filter(active_issue_filter).filter(
+                finding_type__name="device_stale_data"
+            ).count(),
+            "label": "need attention",
+            "href": f"{reverse('findings_queue')}?category=agents_reporting&type=stale_computer_data",
+        },
+        {
+            "name": "Record matching",
+            "count": Finding.objects.filter(active_issue_filter).filter(
+                finding_type__name__in=("identity_resolution_pending", "unlinked_external_identity")
+            ).count() + EntityCandidate.objects.filter(
+                tenant_id=1, status=EntityCandidate.Status.PENDING
+            ).count(),
+            "label": "need attention",
+            "href": f"{reverse('findings_queue')}?category=inventory&type=computer_identity_matching",
+        },
+        {
+            "name": "Client matching",
+            "count": AdminFinding.objects.filter(
+                tenant_id=1,
+                status__in=_FINDING_ACTIVE_STATUSES,
+                finding_type__name__in=(
+                    "client_link_collision", "client_source_group_merge",
+                    "client_unattached_group", "unnamed_source_group", "unmatched_source_group",
+                ),
+            ).count(),
+            "label": "need attention",
+            "href": f"{reverse('findings_queue')}?category=inventory&type=client_source_mapping",
+        },
+    ]
+
     return render(
         request,
         "home.html",
@@ -1512,6 +1570,7 @@ def home(request: HttpRequest) -> HttpResponse:  # noqa: PLR0912, PLR0915
             "total_clients": len(clients),
             "clients_connected": sum(1 for client in clients if client_sources.get(client.id)),
             "domain_summaries": domain_summaries,
+            "data_status_summaries": data_status_summaries,
             "client_rows": client_rows,
             "priority_counts": priority_counts,
             "attention_count": priority_counts["immediate"] + priority_counts["soon"],
@@ -5374,11 +5433,16 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
                 )
         for finding in admin_rows:
             ref = finding.subject_ref or {}
+            details = finding.details or {}
             client = clients_by_id.get(str(ref.get("client_id")))
-            source_name = source_names_by_id.get(str(ref.get("source_id")), "")
-            source_reference = ref.get("external_id") or " · ".join(
-                (finding.details or {}).get("external_ids") or []
+            source_name = details.get("source") or source_names_by_id.get(
+                str(ref.get("source_id")), ""
             )
+            source_reference = ref.get("external_id") or " · ".join(
+                details.get("external_ids") or []
+            )
+            if finding.finding_type.name == "source_failure":
+                source_reference = details.get("reason") or "Collection needs attention"
             references = client_references_by_id.get(str(ref.get("client_id")), [])
             matching_reference = next(
                 (
@@ -5406,7 +5470,10 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
             candidate = client_candidates_by_source_record.get(
                 (str(ref.get("source_id") or ""), str(ref.get("external_id") or ""))
             )
-            if candidate:
+            if finding.finding_type.name == "source_failure":
+                resolution_url = reverse("sources_status")
+                resolution_label = "View source"
+            elif candidate:
                 resolution_url = reverse(
                     "client_candidate_detail", kwargs={"candidate_id": candidate.id}
                 )

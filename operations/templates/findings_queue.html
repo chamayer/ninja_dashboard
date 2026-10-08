@@ -281,6 +281,22 @@
     {% if not findings and not admin_findings %}<p class="muted">Select a Category above to open its rows.</p>{% endif %}
     {% if admin_findings %}
     <section class="card" style="margin:1rem 0 0; border-left:4px solid #b45309;">
+        {% if admin_findings.0.finding.finding_type.name == "source_failure" %}
+        <h2 style="margin-top:0;">Data collection problems</h2>
+        <p class="muted">The source is the action to take. Dependent checks are paused until it provides current data again.</p>
+        <table class="ops-table">
+            <thead><tr><th>Severity</th><th>Source</th><th>What happened</th><th>Status</th><th></th></tr></thead>
+            <tbody>{% for row in admin_findings %}
+                <tr>
+                    <td>{{ row.finding.get_severity_display }}</td>
+                    <td>{{ row.source_name|default:"Configured source" }}</td>
+                    <td>{{ row.source_reference }}</td>
+                    <td>{{ row.finding.status }}</td>
+                    <td><a href="{{ row.admin_url }}">{{ row.admin_label }}</a></td>
+                </tr>
+            {% endfor %}</tbody>
+        </table>
+        {% else %}
         <h2 style="margin-top:0;">Issues needing record matching</h2>
         <p class="muted">These issues do not have one Computer or Client subject yet. Review the source record to resolve the match.</p>
         <table class="ops-table">
@@ -299,6 +315,7 @@
                 </tr>
             {% endfor %}</tbody>
         </table>
+        {% endif %}
     </section>
     {% endif %}
     {% if entity_candidate_items %}

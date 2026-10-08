@@ -5,7 +5,8 @@ nothing ever emitted them. Meanwhile `activities` failed 20 times in 7 days,
 `agent_compliance` 11 times, and `software.activity` sat at 4x its configured
 `max_depth` — all silent. This module closes that gap.
 
-  - `source_failure`         — an ingest domain whose most recent run failed.
+  - `source_failure`         — a configured source binding whose latest
+                               collection failed or became overdue.
   - `software_queue_stalled` — a registered queue over its own `max_depth`
                                or `max_pending_age_m` threshold.
   - `jobs_*` — measured health conditions for durable schedules, executions,
@@ -15,11 +16,9 @@ Both surface on the Operations admin health page (`findings_admin_health`),
 which lists `FindingType.objects.filter(finding_class="admin")` — no UI work
 is required for them to appear.
 
-Subject convention follows the existing admin-finding precedent in
-`ingest/identity/resolver.py`: `subject_type='source_binding'` with a
-deterministic UUID and the real context in `finding_details`. Assessment
-participants use the non-owned `platform_signal` kind because these UUIDs are
-synthetic and are not rows in `source_bindings`.
+Source failure keys identify the real configured source binding. The
+admin-finding subject remains deterministic for compatibility; source binding,
+scope, and collection evidence live in the finding reference and details.
 
 Default is dry-run: nothing is written unless `dry_run=False` is passed.
 """
@@ -49,6 +48,7 @@ from ingest.cmdb_findings import (
 )
 from ingest.condition_evidence import preserve_operator_episode
 from ingest.conditions import record_assessment
+from ingest.source_health import collection_problems
 
 log = logging.getLogger(__name__)
 
@@ -210,62 +210,40 @@ def _resolve_admin_absent(
 def _eval_source_failures(
     cur: Any, finding_type_id: int, now: datetime, counts: dict[str, int], dry_run: bool
 ) -> list[str]:
-    """One finding per domain whose LATEST run failed.
-
-    Keyed on the latest run rather than any recent failure, so a transient
-    blip that has since recovered does not hold a finding open.
-    """
-    cur.execute(
-        """
-        WITH latest AS (
-            SELECT DISTINCT ON (domain)
-                   domain, status, error_text, started_at, finished_at
-              FROM ninja_core.run_log
-             WHERE status <> 'running'
-             ORDER BY domain, started_at DESC
-        ),
-        recent AS (
-            SELECT domain,
-                   count(*) FILTER (WHERE status = 'failed') AS failures_24h,
-                   max(started_at) FILTER (WHERE status = 'ok') AS last_ok
-              FROM ninja_core.run_log
-             WHERE started_at > now() - interval '24 hours'
-             GROUP BY domain
-        )
-        SELECT l.domain, l.error_text, l.started_at,
-               COALESCE(r.failures_24h, 0), r.last_ok
-          FROM latest l
-          LEFT JOIN recent r ON r.domain = l.domain
-         WHERE l.status = 'failed'
-         ORDER BY l.domain
-        """
-    )
+    """One root finding for each failed or overdue configured source binding."""
     keys: list[str] = []
-    for domain, error_text, started_at, failures_24h, last_ok in cur.fetchall():
-        key = f"source_failure:{domain}"
+    for problem in collection_problems(cur, TENANT_ID, now):
+        key = problem.condition_key
         keys.append(key)
         counts["source_failure"] += 1
         if dry_run:
             continue
-        subject_id = _subject("domain", domain)
+        subject_id = _subject("source_binding", problem.binding_id)
         finding_id = _upsert_admin_finding(
             cur,
             finding_type_id=finding_type_id,
             condition_key=key,
-            # A domain with no success in 24h is broken, not flaky.
-            severity="high" if last_ok is None else "medium",
+            severity="high",
             now=now,
-            subject_ref={"signal_kind": "domain", "signal_id": str(subject_id)},
+            subject_ref={
+                "source_binding_id": problem.binding_id,
+                "platform": problem.platform,
+                "client_id": str(problem.client_id) if problem.client_id else None,
+            },
             details={
-                "domain": domain,
-                "last_failure_at": started_at.isoformat() if started_at else None,
-                "failures_24h": failures_24h,
-                "last_success_at": last_ok.isoformat() if last_ok else None,
-                "error": (error_text or "")[:500],
+                "source": problem.source_name,
+                "reason": problem.reason,
+                "last_failure_at": problem.last_failure_at.isoformat()
+                if problem.last_failure_at
+                else None,
+                "last_success_at": problem.last_success_at.isoformat()
+                if problem.last_success_at
+                else None,
+                "error": problem.error,
             },
         )
         _record_platform_assessment(
-            cur, finding_id, key, "source_failure", subject_id, now
+            cur, finding_id, key, "source_failure", subject_id, now, measured=True
         )
     return keys
 

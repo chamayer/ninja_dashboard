@@ -1,5 +1,60 @@
 # Jobs ecosystem final-design reset
 
+## Data-quality Issues unification (2026-10-08)
+
+## Status
+
+Complete — Issues is the single operator action queue for data quality;
+Sources, Computers, and Jobs provide evidence or controls without becoming
+parallel queues.
+
+## Goal and fixed decisions
+
+An operator-facing data-status summary on the main Dashboard may link only to
+verified Issue-producing conditions. Sources and Computers remain evidence and
+control surfaces; they do not become separate action queues.
+
+- A failed or overdue configured source is a root `source_failure` Issue for
+  that exact source binding, not a vague platform-health message.
+- Coverage, freshness, matching, and derived-status conditions affected by an
+  open root source problem are dependency-blocked and do not create or retain
+  a competing actionable Issue. The root Issue records the affected scope and
+  the suppression reason.
+- A source recovery releases that block; dependent conditions are re-evaluated
+  from current evidence and become Issues only if the condition remains true.
+- Independent evidence is never suppressed: a device with another current
+  source, or a condition unrelated to the failed source, remains actionable.
+- Existing Finding and condition-assessment contracts are the enforcement
+  mechanism. No second data-health model or parallel review list is allowed.
+
+## Scope and validation
+
+Audit the source-refresh lifecycle against source-failure emission, condition
+assessments, coverage/freshness/matching evaluators, Issue filters, and
+Dashboard links. Extend the source-bound evaluator and dependency evidence as
+needed; preserve tenant/RLS scope and immutable source-run history. Validate
+root Issue emission, downstream suppression, independent-condition visibility,
+recovery/re-evaluation, Dashboard drill-through, focused evaluator/condition
+tests, Django checks, and diff hygiene.
+
+## Current checkpoint
+
+Implemented: source collection health now reads the binding-scoped durable
+`source-refresh` lifecycle and publishes the root `source_failure` condition
+as `source_failure:binding:<id>`. The coverage evaluator no longer skips an
+unhealthy platform. It keeps evaluating the affected requirement and records a
+blocked collection signal with the root condition key, while client-scoped
+source bindings block only their own client. The Dashboard has a compact Data
+status section whose cards open exact Issue scopes; source failures render in
+Issues as collection problems instead of as record-matching work.
+
+Validation passed: focused source-health, evaluator override, and
+condition-safety tests (47); Dashboard, Sources, and Issues view tests (77);
+`manage.py check`; template loading; compilation; and diff hygiene. The
+broader conditions test suite has two pre-existing stale assertions expecting
+54 profile definitions while the checked-in profile contains 61; that mismatch
+is outside this change and is recorded for follow-up rather than masking it.
+
 ## Source-driven collection
 
 Cross-service implementation is active in the root [source-driven collection

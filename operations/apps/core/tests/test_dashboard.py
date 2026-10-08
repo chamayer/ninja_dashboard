@@ -1,4 +1,5 @@
 import pytest
+from django.template.loader import get_template
 
 from apps.core.views import (
     _dashboard_display_state,
@@ -66,3 +67,11 @@ def test_dashboard_priority_has_clear_no_concern_state():
 )
 def test_raw_json_object_normalizes_only_json_objects(value, expected):
     assert _raw_json_object(value) == expected
+
+
+def test_dashboard_data_status_is_an_issues_drill_through():
+    template = get_template("home.html").template.source
+
+    assert 'aria-label="Data status"' in template
+    assert "data_status_summaries" in template
+    assert "Open Issues" in template

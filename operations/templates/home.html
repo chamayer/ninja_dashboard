@@ -199,6 +199,17 @@
   </a>
 </section>
 
+<section class="dashboard-domains" aria-label="Data status">
+  {% for item in data_status_summaries %}
+  <article class="domain-card">
+    <div class="domain-head"><h2>{{ item.name }}</h2></div>
+    <p class="domain-description">Open Issues to review and act on the current concern.</p>
+    <div class="domain-value"><strong>{{ item.count }}</strong> <span>{{ item.label }}</span></div>
+    <a class="domain-open" href="{{ item.href }}">Open Issues →</a>
+  </article>
+  {% endfor %}
+</section>
+
 <section class="dashboard-domains" aria-label="Operational areas">
   {% for domain in domain_summaries %}
   <article class="domain-card">
