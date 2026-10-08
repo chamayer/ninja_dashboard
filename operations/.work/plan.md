@@ -1,42 +1,44 @@
-# Admin data status surface (2026-10-08)
+# Administration status correction (2026-10-08)
 
 ## Status
 
-Complete — Admin → Data is the data evidence surface; Sources, Jobs, and
-Issues retain their distinct control and action responsibilities.
+Complete — Jobs, Sources, and Services distinguish current operational state
+from historical deployment records and source-run transition history.
 
 ## Goal and fixed decisions
 
-Data is an administrative supporting component, not Inventory and not a
-primary-navigation domain. The new Admin → Data page must answer whether data
-is arriving, what Operations currently holds, and whether coverage, freshness,
-or matching needs action. Sources retains collection schedules and manual
-refresh controls; Jobs and Services retain execution controls; Issues remains
-the only action queue.
+Jobs lists registered Jobs and their execution state. Sources owns every
+individual source's collection schedule, run history, and refresh control. A
+source refresh is a scoped execution of one mechanism, not a separate Job.
+Disabled notification Jobs remain visible as disabled configuration, and real
+failed Jobs remain visible for recovery.
+Services reports only live Scheduler and Worker runtimes; historical deployment
+instances belong to history, not current health.
 
 ## Scope, affected areas, and validation
 
-- Add an admin-only Data route and Admin sub-navigation entry.
-- Use existing tenant-scoped projections and finding/candidate models; no new
-  health score, database schema, or duplicate lifecycle.
-- Present collection, current data footprint, data completeness, and record
-  matching as evidence panels. Every attention count must link to its existing
-  filtered Issues or review surface.
-- Update the Dashboard only to point its compact data signal at Admin → Data;
-  do not rebuild the Dashboard in this task.
-- Validate focused template/view tests, Django checks, template loading,
-  compilation, and diff hygiene.
+- Remove per-binding source rows from Jobs; do not invent or backfill generic
+  source-run history.
+- Retain a compact collection summary and link to Sources as the authority.
+- Ensure Jobs counts and filters describe only configured Jobs and their runs.
+- Collapse Services to current runtime health and use operator-readable health
+  messages; do not surface historical runtime rows as live failures.
+- Repair the Admin overview's AuditLog aggregation failure.
+- Validate focused Jobs tests, Django checks, template loading, compilation,
+  and diff hygiene.
 
 ## Current checkpoint
 
-The prior Dashboard rework and its KPI-context repair were deployed in
-`51eb7f8` and `7aa84d7`. Admin → Data now uses existing tenant-scoped source
-health, canonical client/device counts, and governed Issue counts. It presents
-collection, data footprint, completeness, matching, and per-source receipt
-evidence; it contains no refresh, schedule, or Job controls. The Dashboard’s
-compact Data status KPI opens this page. Focused admin-navigation and
-Dashboard tests, Django checks, template loading, compilation, and diff
+The Jobs page had appended one pseudo-Job per source binding. That made the
+generic source-refresh transition read as “Not run yet” even where legacy
+source data had been collected and downstream analysis completed. Jobs now
+shows only its 13 configured Jobs and a compact current-source summary linked
+to Sources. The Admin overview failure was also corrected: AuditLog uses
+`audit_id`, not `id`, when grouping recent administrator activity. Focused
+Jobs/Dashboard tests, Django checks, template loading, compilation, and diff
 hygiene pass.
+Services now displays one aggregate row for each current Scheduler and Worker
+rather than obsolete runtime instances.
 
 ## Dashboard data snapshot expansion (2026-10-08)
 

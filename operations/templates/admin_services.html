@@ -25,14 +25,15 @@
 </section>
 
 <section class="service-card">
-  <h2>Scheduler and workers</h2>
+  <h2>Current scheduler and workers</h2>
+  <p class="muted">Only services currently checking in are used for health. Previous deployment instances are recorded as history, not service failures.</p>
   {% if services %}
   <table class="service-table"><thead><tr><th>Service</th><th>Status</th><th>Last check-in</th><th>Revision</th></tr></thead><tbody>
     {% for service in services %}<tr>
-      <td><strong>{{ service.name }}</strong>{% if service.identity %}<span class="muted"> · {{ service.identity }}</span>{% endif %}</td>
-      <td>{% if service.current %}<span class="service-state ok">Running</span>{% elif service.stopped_at %}<span class="service-state bad">Stopped</span>{% else %}<span class="service-state bad">Not checking in</span>{% endif %}</td>
+      <td><strong>{{ service.name }}</strong>{% if service.current %}<span class="muted"> · {{ service.instance_count }} running</span>{% endif %}</td>
+      <td>{% if service.current %}<span class="service-state ok">Running</span>{% else %}<span class="service-state bad">Not checking in</span>{% endif %}</td>
       <td>{% if service.heartbeat_at %}{{ service.heartbeat_at|date:"M j, Y, g:i A" }} ({{ service.heartbeat_at|timesince }} ago){% else %}No check-in recorded{% endif %}</td>
-      <td>{% if service.current_revision %}Current{% else %}Needs deployment review{% endif %}</td>
+      <td>{% if service.current %}{% if service.current_revision %}Current{% else %}Needs deployment review{% endif %}{% else %}—{% endif %}</td>
     </tr>{% endfor %}
   </tbody></table>
   {% else %}<p class="muted">No scheduler or worker check-ins have been recorded.</p>{% endif %}

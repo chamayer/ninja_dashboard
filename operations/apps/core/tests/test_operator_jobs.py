@@ -107,14 +107,21 @@ def test_admin_navigation_separates_jobs_services_health_and_settings():
     assert "SET LOCAL operations.tenant_id = 1" in views
     assert 'finding_type__name="source_failure"' in views
     assert "actor_kind=AuditLog.ActorKind.USER" in views
-    assert "occurrence_count=Count(\"id\")" in views
+    assert "occurrence_count=Count(\"audit_id\")" in views
     assert 'next_due_at = parse_datetime(next_due_at)' in views
     assert "Next: {{ job.next_due_at" in jobs_template
     assert "Request stop for selected Jobs" in jobs_template
     assert "job.active_run and job.state == 'running'" in jobs_template
+    assert "source_summary.current" in jobs_template
+    assert "configured Sources" not in jobs_template
+    assert '"source-refresh:{binding_id}"' not in views
     assert views.count("health = _admin_health_snapshot") == 2
     assert 'finding_type__category__name="platform_health"' in views
     assert "Deployment owns their lifecycle" in services_template
+    assert "Previous deployment instances are recorded as history" in services_template
+    assert 'for kind in ("scheduler", "worker")' in views
+    assert "Some schedules need to be brought up to date." in views
+    assert "A previous Job may still be using protected data." in views
     assert "Django Admin" in settings_template
     assert "What Operations has received" in data_template
     assert "Inspect sources" in data_template
