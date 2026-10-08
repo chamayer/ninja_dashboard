@@ -1,4 +1,68 @@
-# Operator-surface completion (2026-10-08)
+# Operations ecosystem Dashboard (2026-10-08)
+
+## Status
+
+Complete — the Dashboard is a full operator briefing built from the existing
+Issues, domain, client, source, and Jobs authorities.
+
+## Goal and fixed decisions
+
+The main Dashboard answers: “What is happening across MSP Operations, and
+where should I go next?” It summarizes the managed estate, actionable Issues,
+operating outcomes, client priorities, recent movement, and the reliability of
+the underlying data and processing.
+
+- Issues remains the only operator action queue.
+- Attention is grouped by root concern/type and shows affected clients and
+  subjects; repeated per-device or per-agent findings must not fill the list.
+- Patching, Security & coverage, Software, and Inventory are the four visible
+  operating areas. Each shows one outcome, actionable Issue volume, affected
+  clients, freshness, and a direct drill-through.
+- The client portfolio remains on the page and links directly into each
+  client/area; no extra preview click is required.
+- A compact 24-hour movement section explains what changed.
+- Data-source and Jobs reliability is compact supporting context. Service
+  instances and technical diagnostics remain under Admin.
+- Every displayed count comes from an existing authoritative model or read
+  projection; no confidence score or parallel health state is introduced.
+
+## Scope and affected files
+
+- `apps/core/views.py`: grouped attention, area summaries, movement, and
+  compact data/processing context.
+- `templates/home.html`: full ecosystem information hierarchy and direct
+  drill-throughs.
+- `apps/core/tests/test_dashboard.py`: enforce the operator briefing contract.
+- No schema, migration, queue, schedule, or execution-policy change.
+
+## Steps and validation
+
+1. Reuse and expose the existing domain summaries.
+2. Aggregate current Issues by root type with affected-client/subject counts.
+3. Add bounded 24-hour opened/resolved/activity totals.
+4. Add compact configured-source and Jobs status without diagnostic noise.
+5. Rework the template and focused tests.
+6. Run focused tests, Django checks, template loading, compilation, and diff
+   hygiene; then commit and push under the user’s live-preview authorization.
+
+## Current checkpoint and validation
+
+The page now presents five ecosystem KPIs, grouped root concerns, four
+operating-area summaries, the sortable client portfolio, 24-hour movement,
+and compact data/processing reliability. Repeated per-computer agent findings
+are grouped by Issue type with affected-subject and client counts. Portfolio-
+wide software findings remain in global totals without inventing client
+attribution. Exact concern links include both their policy-owned Type and Issue
+filters. Technical runtime and schedule details remain in Admin.
+
+Validation passed: focused Dashboard and Jobs tests (20), Django checks,
+Python compilation, focused Ruff undefined/unused-symbol checks, and diff
+hygiene. Next: commit and push the completed operator Dashboard; GitOps owns
+the live rollout.
+
+---
+
+# Prior completed operator-surface work (2026-10-08)
 
 ## Status
 

@@ -74,7 +74,13 @@ def test_dashboard_is_an_operator_briefing_with_issue_drill_throughs():
 
     assert 'aria-label="Operations at a glance"' in template
     assert "kpis" in template
-    assert "Needs attention now" in template
-    assert "Since yesterday" not in template
+    assert "What needs attention" in template
+    assert "item.affected" in template
+    assert "item.client" not in template
     assert "Open all Issues" in template
+    assert 'aria-label="Operational areas"' in template
+    assert "domain_summaries" in template
+    assert "Client portfolio" in template
+    assert "What changed in the last 24 hours" in template
+    assert 'aria-label="Data and processing status"' in template
     assert "data_status_summaries" not in template

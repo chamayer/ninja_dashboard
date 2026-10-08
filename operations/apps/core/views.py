@@ -1077,7 +1077,6 @@ def home(request: HttpRequest) -> HttpResponse:  # noqa: PLR0912, PLR0915
     issue_rows = (
         Finding.objects.filter(
             tenant_id=1,
-            client_id__isnull=False,
             status__in=_FINDING_ACTIVE_STATUSES,
             finding_type__category__name__in=_DASHBOARD_DOMAIN_CATEGORIES,
         )
@@ -1280,8 +1279,8 @@ def home(request: HttpRequest) -> HttpResponse:  # noqa: PLR0912, PLR0915
         },
         {
             "key": "compliance",
-            "name": "Compliance",
-            "description": "Required controls and reporting",
+            "name": "Security & coverage",
+            "description": "Required security tools and reporting",
             "value": f"{_percent(compliance_covered, total_devices)}%",
             "value_label": "devices covered",
             "has_data": total_devices > 0,
@@ -1432,7 +1431,7 @@ def home(request: HttpRequest) -> HttpResponse:  # noqa: PLR0912, PLR0915
             },
             {
                 "key": "compliance",
-                "name": "Compliance",
+                "name": "Security & coverage",
                 "stats": compliance,
                 "has_data": devices > 0 and bool(linked_health),
                 "delayed": bool(delayed_links),
@@ -1514,27 +1513,6 @@ def home(request: HttpRequest) -> HttpResponse:  # noqa: PLR0912, PLR0915
         status__in=_FINDING_ACTIVE_STATUSES,
         finding_type__name="source_failure",
     ).count()
-    reporting_issue_count = Finding.objects.filter(active_issue_filter).filter(
-        finding_type__name__in=(
-            "missing_required_platform", "stale_required_platform", "device_unenrolled"
-        )
-    ).count()
-    stale_data_count = Finding.objects.filter(active_issue_filter).filter(
-        finding_type__name="device_stale_data"
-    ).count()
-    record_matching_count = Finding.objects.filter(active_issue_filter).filter(
-        finding_type__name__in=("identity_resolution_pending", "unlinked_external_identity")
-    ).count() + EntityCandidate.objects.filter(
-        tenant_id=1, status=EntityCandidate.Status.PENDING
-    ).count()
-    client_matching_count = AdminFinding.objects.filter(
-        tenant_id=1,
-        status__in=_FINDING_ACTIVE_STATUSES,
-        finding_type__name__in=(
-            "client_link_collision", "client_source_group_merge",
-            "client_unattached_group", "unnamed_source_group", "unmatched_source_group",
-        ),
-    ).count()
     open_issue_count = (
         Finding.objects.filter(active_issue_filter).count()
         + AdminFinding.objects.filter(
@@ -1543,71 +1521,298 @@ def home(request: HttpRequest) -> HttpResponse:  # noqa: PLR0912, PLR0915
         + EntityCandidate.objects.filter(
             tenant_id=1, status=EntityCandidate.Status.PENDING
         ).count()
-        + ClientCandidate.objects.filter(
-            tenant_id=1, status=ClientCandidate.Status.OPEN
-        ).count()
     )
-    critical_issue_count = Finding.objects.filter(active_issue_filter, severity="critical").count()
+    critical_issue_count = Finding.objects.filter(
+        active_issue_filter, severity="critical"
+    ).count() + AdminFinding.objects.filter(
+        tenant_id=1,
+        status__in=_FINDING_ACTIVE_STATUSES,
+        severity="critical",
+    ).count()
+    patch_subject_count = Finding.objects.filter(
+        active_issue_filter,
+        tenant_id=1,
+        finding_type__category__name="patching",
+    ).values("subject_id").distinct().count()
+    patch_clear_count = max(total_devices - patch_subject_count, 0)
     kpis = [
         {
-            "name": "Estate",
-            "value": f"{total_clients} clients",
-            "detail": f"{total_devices:,} managed devices · {active_devices:,} active",
+            "name": "Clients",
+            "value": f"{total_clients}",
+            "detail": f"{attention_count} need attention",
             "href": reverse("org_index", kwargs={"org_slug": "all"}),
         },
         {
-            "name": "Attention",
-            "value": f"{open_issue_count:,} open Issues",
-            "detail": f"{critical_issue_count} critical · {attention_count} clients need attention",
+            "name": "Computers",
+            "value": f"{total_devices:,}",
+            "detail": f"{active_devices:,} active · {retired_devices:,} retired",
+            "href": reverse("devices_page"),
+        },
+        {
+            "name": "Issues",
+            "value": f"{open_issue_count:,}",
+            "detail": f"{critical_issue_count} critical · current action queue",
             "href": reverse("findings_queue"),
         },
         {
-            "name": "Data status",
-            "value": f"{sources_ok} of {len(registered_sources)} sources current",
-            "detail": (
-                f"{source_problem_count} source problems · "
-                f"{reporting_issue_count + stale_data_count} reporting or freshness gaps · "
-                f"{record_matching_count + client_matching_count} matching reviews"
-            ),
-            "href": reverse("admin_data"),
+            "name": "Patching",
+            "value": f"{_percent(patch_clear_count, total_devices)}%",
+            "detail": f"{patch_subject_count:,} computers need patching attention",
+            "href": reverse("patching_queue"),
+        },
+        {
+            "name": "Software",
+            "value": f"{software_catalog_titles:,}",
+            "detail": f"{global_domain_stats['software']['total']:,} Issues need review",
+            "href": reverse("software_page"),
         },
     ]
     profile = load_active_profile()
-    attention_items = []
-    for finding in (
-        Finding.objects.filter(active_issue_filter)
-        .select_related("finding_type", "client")
-        .order_by(
-            Case(
-                When(severity="critical", then=0),
-                When(severity="high", then=1),
-                When(severity="medium", then=2),
-                default=3,
+    _issue_categories, issue_type_groups = _operator_issue_taxonomy()
+    issue_group_by_name = {
+        issue_name: group_key
+        for group_key, group in issue_type_groups.items()
+        for issue_name in group["types"]
+    }
+    severity_rank = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
+    severity_from_level = {5: "critical", 4: "high", 3: "medium", 2: "low", 1: "info"}
+    attention_by_type: dict[str, dict] = {}
+    grouped_findings = (
+        Finding.objects.filter(active_issue_filter, tenant_id=1)
+        .values("finding_type__name", "finding_type__category__name")
+        .annotate(
+            count=Count("id"),
+            clients=Count("client_id", distinct=True),
+            subjects=Count("subject_id", distinct=True),
+            new=Count("id", filter=Q(first_seen_at__gte=yesterday)),
+            updated_at=Max(Coalesce("last_detected_at", "last_seen_at")),
+            severity_level=Max(
+                Case(
+                    When(severity="critical", then=Value(5)),
+                    When(severity="high", then=Value(4)),
+                    When(severity="medium", then=Value(3)),
+                    When(severity="low", then=Value(2)),
+                    default=Value(1),
+                )
             ),
-            "-last_detected_at",
-        )[:5]
+        )
+    )
+    for row in grouped_findings:
+        type_name = row["finding_type__name"]
+        row_severity = severity_from_level.get(row["severity_level"], "info")
+        item = attention_by_type.setdefault(
+            type_name,
+            {
+                "type_name": type_name,
+                "category": row["finding_type__category__name"] or "",
+                "count": 0,
+                "clients": 0,
+                "subjects": 0,
+                "new": 0,
+                "severity": row_severity,
+                "updated_at": row["updated_at"],
+            },
+        )
+        item["count"] += row["count"]
+        item["clients"] += row["clients"]
+        item["subjects"] += row["subjects"]
+        item["new"] += row["new"]
+        if severity_rank.get(row_severity, 9) < severity_rank.get(item["severity"], 9):
+            item["severity"] = row_severity
+        if row["updated_at"] and (
+            not item["updated_at"] or row["updated_at"] > item["updated_at"]
+        ):
+            item["updated_at"] = row["updated_at"]
+
+    for row in (
+        AdminFinding.objects.filter(tenant_id=1, status__in=_FINDING_ACTIVE_STATUSES)
+        .values("finding_type__name", "finding_type__category__name")
+        .annotate(
+            count=Count("id"),
+            new=Count("id", filter=Q(first_detected_at__gte=yesterday)),
+            updated_at=Max("last_detected_at"),
+            severity_level=Max(
+                Case(
+                    When(severity="critical", then=Value(5)),
+                    When(severity="high", then=Value(4)),
+                    When(severity="medium", then=Value(3)),
+                    When(severity="low", then=Value(2)),
+                    default=Value(1),
+                )
+            ),
+        )
     ):
-        definition = profile.definitions.get(finding.finding_type.name, {})
-        attention_items.append(
+        type_name = row["finding_type__name"]
+        row_severity = severity_from_level.get(row["severity_level"], "info")
+        item = attention_by_type.setdefault(
+            type_name,
             {
-                "label": definition.get("label", finding.finding_type.name.replace("_", " ").title()),
-                "client": finding.client.display_name if finding.client else "Operations",
-                "severity": finding.severity,
-                "updated_at": finding.last_detected_at or finding.last_seen_at,
-                "href": f"{reverse('findings_queue')}?issue={finding.finding_type.name}&subject_id={finding.subject_id}",
-            }
+                "type_name": type_name,
+                "category": row["finding_type__category__name"] or "",
+                "count": 0,
+                "clients": 0,
+                "subjects": 0,
+                "new": 0,
+                "severity": row_severity,
+                "updated_at": row["updated_at"],
+            },
         )
-    if source_problem_count:
-        attention_items.append(
+        item["count"] += row["count"]
+        item["subjects"] += row["count"]
+        item["new"] += row["new"]
+        if severity_rank.get(row_severity, 9) < severity_rank.get(item["severity"], 9):
+            item["severity"] = row_severity
+        if row["updated_at"] and (
+            not item["updated_at"] or row["updated_at"] > item["updated_at"]
+        ):
+            item["updated_at"] = row["updated_at"]
+
+    pending_candidates = EntityCandidate.objects.filter(
+        tenant_id=1, status=EntityCandidate.Status.PENDING
+    )
+    candidate_count = pending_candidates.count()
+    if candidate_count:
+        candidate_clients = pending_candidates.exclude(client_id__isnull=True).values(
+            "client_id"
+        ).distinct().count()
+        candidate_new = pending_candidates.filter(first_observed_at__gte=yesterday).count()
+        item = attention_by_type.setdefault(
+            "identity_resolution_pending",
             {
-                "label": "Data collection problem",
-                "client": "Operations",
-                "severity": "high",
-                "updated_at": dashboard_updated_at,
-                "href": f"{reverse('findings_queue')}?category=data_collection&type=collection_failures",
-            }
+                "type_name": "identity_resolution_pending",
+                "category": "identity",
+                "count": 0,
+                "clients": 0,
+                "subjects": 0,
+                "new": 0,
+                "severity": "medium",
+                "updated_at": None,
+            },
         )
-    attention_items.sort(key=lambda item: ({"critical": 0, "high": 1, "medium": 2}.get(item["severity"], 3), item["label"]))
+        item["count"] += candidate_count
+        item["clients"] += candidate_clients
+        item["subjects"] += candidate_count
+        item["new"] += candidate_new
+
+    attention_items = []
+    for item in attention_by_type.values():
+        definition = profile.definitions.get(item["type_name"], {})
+        item["label"] = definition.get(
+            "label", item["type_name"].replace("_", " ").title()
+        )
+        issue_group = issue_group_by_name.get(item["type_name"], item["type_name"])
+        item["href"] = (
+            f"{reverse('findings_queue')}?type={issue_group}&issue={item['type_name']}"
+        )
+        if item["clients"]:
+            item["affected"] = (
+                f"{item['subjects']:,} affected · {item['clients']:,} "
+                f"client{'s' if item['clients'] != 1 else ''}"
+            )
+        else:
+            item["affected"] = f"{item['subjects']:,} affected"
+        item["change"] = f"{item['new']:,} new today" if item["new"] else "Ongoing"
+        attention_items.append(item)
+    attention_items.sort(
+        key=lambda item: (
+            severity_rank.get(item["severity"], 9),
+            -item["clients"],
+            -item["count"],
+            item["label"],
+        )
+    )
+
+    affected_clients_by_domain = {
+        key: sum(
+            1
+            for client_stats in client_domain_stats.values()
+            if client_stats.get(key, {}).get("total", 0)
+        )
+        for key in ("patching", "compliance", "software", "inventory")
+    }
+    for summary in domain_summaries:
+        summary["issue_count"] = global_domain_stats[summary["key"]]["total"]
+        summary["affected_clients"] = affected_clients_by_domain[summary["key"]]
+        if summary["key"] == "patching":
+            summary["value"] = f"{_percent(patch_clear_count, total_devices)}%"
+            summary["value_label"] = "computers without patch Issues"
+
+    configured_sources, configured_sources_available = _configured_source_data_status(now)
+    configured_sources_current = sum(
+        not source["needs_attention"] for source in configured_sources
+    )
+    configured_updates = [
+        source["observed_at"] for source in configured_sources if source["observed_at"]
+    ]
+    jobs_health = _jobs_control_health()
+    jobs_summary = jobs_health.get("summary", {})
+    current_runtime_kinds = {
+        str(runtime.get("runtime_kind"))
+        for runtime in jobs_health["runtimes"]
+        if not runtime.get("stopped_at")
+        and (heartbeat := parse_datetime(str(runtime.get("heartbeat_at") or "")))
+        and now - heartbeat <= timedelta(minutes=3)
+    }
+    if not jobs_health["available"]:
+        jobs_label = "Job status unavailable"
+    elif not {"scheduler", "worker"}.issubset(current_runtime_kinds):
+        jobs_label = "Job processing needs attention"
+    elif int(jobs_summary.get("contained_claims") or 0):
+        jobs_label = "Job processing needs recovery"
+    else:
+        jobs_label = "Jobs processing normally"
+    system_status = {
+        "sources_available": configured_sources_available,
+        "sources_current": configured_sources_current,
+        "sources_total": len(configured_sources),
+        "source_problems": source_problem_count,
+        "jobs_label": jobs_label,
+        "jobs_running": int(jobs_summary.get("running_runs") or 0),
+        "jobs_waiting": int(jobs_summary.get("waiting_runs") or 0),
+        "processed_at": max(configured_updates, default=dashboard_updated_at),
+    }
+
+    issues_opened_24h = Finding.objects.filter(
+        tenant_id=1, first_seen_at__gte=yesterday
+    ).count() + AdminFinding.objects.filter(
+        tenant_id=1, first_detected_at__gte=yesterday
+    ).count() + EntityCandidate.objects.filter(
+        tenant_id=1,
+        status=EntityCandidate.Status.PENDING,
+        first_observed_at__gte=yesterday,
+    ).count()
+    issues_closed_24h = Finding.objects.filter(
+        tenant_id=1, closed_at__gte=yesterday
+    ).count() + AdminFinding.objects.filter(
+        tenant_id=1, resolved_at__gte=yesterday
+    ).count()
+    movement = [
+        {
+            "label": "Issues opened",
+            "value": issues_opened_24h,
+            "href": reverse("findings_queue"),
+        },
+        {
+            "label": "Issues closed",
+            "value": issues_closed_24h,
+            "href": f"{reverse('findings_queue')}?status=resolved",
+        },
+        {
+            "label": "Patches installed",
+            "value": recent_patch_activity["installed"],
+            "href": f"{reverse('patch_activity_search_page')}?days=1&status=Installed",
+        },
+        {
+            "label": "Patch failures",
+            "value": recent_patch_activity["failed"],
+            "href": f"{reverse('patch_activity_search_page')}?days=1&status=Failed",
+        },
+        {
+            "label": "New software Issues",
+            "value": global_domain_stats["software"]["new_total"],
+            "href": f"{reverse('findings_queue')}?category=software",
+        },
+    ]
 
     return render(
         request,
@@ -1621,7 +1826,11 @@ def home(request: HttpRequest) -> HttpResponse:  # noqa: PLR0912, PLR0915
             "total_clients": total_clients,
             "clients_connected": clients_connected,
             "kpis": kpis,
-            "attention_items": attention_items[:5],
+            "attention_items": attention_items[:6],
+            "attention_group_count": len(attention_items),
+            "domain_summaries": domain_summaries,
+            "movement": movement,
+            "system_status": system_status,
             "client_rows": client_rows,
             "priority_counts": priority_counts,
             "attention_count": attention_count,
