@@ -5,6 +5,7 @@ from django.template.loader import get_template
 
 def test_jobs_keep_durable_queue_and_terminal_step_contracts():
     queue = Path("../ingest/operator_job_queue.py").read_text(encoding="utf-8")
+    worker = Path("../ingest/jobs_worker.py").read_text(encoding="utf-8")
     migration = Path("apps/core/migrations/0244_jobs_operation_entrypoints.py").read_text(
         encoding="utf-8"
     )
@@ -15,6 +16,9 @@ def test_jobs_keep_durable_queue_and_terminal_step_contracts():
     assert "A run is one executable step, not a workflow coordinator." in migration
     assert "status = p_status" in migration
     assert "jobs_propagate_dependency_terminal_v1" in migration
+    assert '"scope_identity": row[3]' in queue
+    assert "child.scope_identity" in worker
+    assert "Required follow-up work could not be scheduled" in worker
 
 
 def test_jobs_present_one_list_detail_and_configuration_surface():

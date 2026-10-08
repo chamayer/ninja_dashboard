@@ -36,6 +36,7 @@ class _Child:
     run_id: uuid.UUID
     claim_token: uuid.UUID
     job_key: str
+    scope_identity: str
     process: subprocess.Popen[str]
     progress: operator_job_queue.V1JobProgress
 
@@ -58,7 +59,7 @@ def _start_child(incarnation: uuid.UUID) -> _Child | None:
         [sys.executable, "-m", "ingest.jobs_child", row["job_key"], str(row["id"]), str(row["claim_token"])],
         stdout=subprocess.PIPE, text=True,
     )
-    return _Child(row["id"], row["claim_token"], row["job_key"], process,
+    return _Child(row["id"], row["claim_token"], row["job_key"], row["scope_identity"], process,
                   operator_job_queue.V1JobProgress(row["id"], row["claim_token"]))
 
 
@@ -75,11 +76,23 @@ def _finish_child(child: _Child) -> None:
     if result.get("cancelled"):
         operator_job_queue._finish_cancelled_v1(child.run_id, child.claim_token)
     elif result.get("ok"):
-        operator_job_queue.admit_result_workflow(
-            child.job_key,
-            child.run_id,
-            tuple(result.get("signals") or ()),
-        )
+        try:
+            operator_job_queue.admit_result_workflow(
+                child.job_key,
+                child.run_id,
+                tuple(result.get("signals") or ()),
+                child.scope_identity,
+            )
+        except Exception:
+            log.exception("Jobs workflow admission failed: run=%s", child.run_id)
+            operator_job_queue._finish_v1(
+                child.run_id,
+                child.claim_token,
+                "failed",
+                error="Required follow-up work could not be scheduled; review the Jobs error before retrying.",
+                result=result.get("result") or {},
+            )
+            return
         operator_job_queue._finish_v1(
             child.run_id,
             child.claim_token,

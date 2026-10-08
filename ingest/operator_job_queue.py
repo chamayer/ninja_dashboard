@@ -626,7 +626,10 @@ def _claim_next_v7(worker_incarnation: uuid.UUID) -> dict[str, Any] | None:
         with db.transaction() as cur:
             cur.execute("SET LOCAL operations.tenant_id = 1")
             cur.execute(
-                "SELECT run_id, claim_token, job_key FROM operations.jobs_claim_next_v7(%s, %s)",
+                """SELECT claimed.run_id, claimed.claim_token, claimed.job_key, run.scope_identity
+                     FROM operations.jobs_claim_next_v7(%s, %s) AS claimed
+                     JOIN operations.operator_job_runs run
+                       ON run.tenant_id = 1 AND run.id = claimed.run_id""",
                 (1, worker_incarnation),
             )
             row = cur.fetchone()
@@ -634,7 +637,12 @@ def _claim_next_v7(worker_incarnation: uuid.UUID) -> dict[str, Any] | None:
         return None
     if row is None:
         return None
-    return {"id": row[0], "claim_token": row[1], "job_key": row[2]}
+    return {
+        "id": row[0],
+        "claim_token": row[1],
+        "job_key": row[2],
+        "scope_identity": row[3],
+    }
 
 
 def _finish_v1(

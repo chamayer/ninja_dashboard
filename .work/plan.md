@@ -70,9 +70,13 @@ schedules. Focused source-routing, registry, Jobs, and Django checks pass.
 The worker recovery-policy registration then exposed a missing database
 authority for the reviewed `source-refresh` replay policy. Pending migration
 0268 creates that authority; it is required for the worker to start and does
-not weaken the replay-safety gate. Next: validate and push the recovery-policy
-repair, confirm worker health, then finish the source/dispatcher compatibility
-and live-surface audit.
+not weaken the replay-safety gate. The authority is now live and the worker
+starts, but the first live source follow-up showed the worker discarded the
+claimed scope before workflow admission. The pending correction carries scope
+through the child lifecycle and fails a run immediately when required follow-up
+work cannot be admitted. Next: validate and push this correction, confirm
+worker execution health, then finish the source/dispatcher compatibility and
+live-surface audit.
 
 ## Active plan — complete conditions framework
 
