@@ -48,6 +48,7 @@ class JobExecutionResult:
 
     rows: int | None = None
     signals: tuple[str, ...] = ()
+    result: dict[str, object] | None = None
 
 # Keep this independent from the registry so an omitted or extra dispatcher
 # handler prevents readiness instead of becoming an unreviewed live path.
@@ -55,6 +56,7 @@ EXECUTABLE_JOB_KEYS = frozenset(
     {
         "patch-classify", "platform-evaluate", "cmdb-evaluate", "parity-check", "software-classify-only",
         "software-classify-full", "resolver", "patches", "agent-observations",
+        "source-refresh",
         "documentation-observations", "agent-compliance", "agent-compliance-evaluate",
         "retention-history", "software-enqueue-orgs", "software-queue-drain",
         "notifications-dispatch", "notifications-digest", "intel-nvd", "intel-cpe-dict",
@@ -241,6 +243,80 @@ def reconcile_schedule_catalog() -> bool:
     return True
 
 
+def _source_cadence(schedule: str) -> dict[str, int] | None:
+    """Parse the deliberately small, data-owned source schedule contract."""
+    prefix, separator, minutes_text = (schedule or "").partition(":")
+    if prefix != "interval" or not separator:
+        return None
+    try:
+        minutes = int(minutes_text)
+    except ValueError:
+        return None
+    if not 1 <= minutes <= 10080:
+        return None
+    return {"kind": "interval", "minutes": minutes}
+
+
+def reconcile_source_refresh_schedules() -> bool:
+    """Reconcile one generic source-refresh schedule for every source binding.
+
+    Schedule data remains on ``source_bindings``.  Jobs owns execution only;
+    it receives a normal durable schedule whose scope is that exact binding.
+    """
+    job = definition("source-refresh")
+    try:
+        with db.transaction() as cur:
+            cur.execute("SET LOCAL operations.tenant_id = 1")
+            cur.execute(
+                """
+                SELECT binding.id, binding.enabled, instance.enabled, binding.schedule
+                 FROM operations.source_bindings binding
+                  JOIN operations.source_instances instance
+                    ON instance.id = binding.source_instance_id
+                 WHERE binding.tenant_id = 1 AND instance.tenant_id = 1
+                """
+            )
+            for binding_id, enabled, instance_enabled, schedule in cur.fetchall():
+                cadence = _source_cadence(schedule or "")
+                scheduled = bool(enabled and instance_enabled and cadence)
+                reason = (
+                    "Configured source schedule."
+                    if scheduled
+                    else "Disabled — set a valid source refresh schedule."
+                )
+                revision = hashlib.sha256(
+                    json.dumps(
+                        {
+                            "binding_id": str(binding_id),
+                            "enabled": scheduled,
+                            "cadence": cadence or {},
+                        },
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    ).encode()
+                ).hexdigest()
+                cur.execute(
+                    "SELECT operations.jobs_reconcile_schedule_v2(%s, %s, %s, %s, %s, %s::jsonb, %s, %s)",
+                    (
+                        1,
+                        job.key,
+                        job.snapshot_digest(),
+                        f"source-binding:{binding_id}",
+                        revision,
+                        json.dumps(cadence or {"kind": "interval", "minutes": 60}),
+                        scheduled,
+                        reason,
+                    ),
+                )
+    except UndefinedFunction:
+        log.info("source refresh schedule API is not available yet")
+        return False
+    except Exception:
+        log.exception("source refresh schedule reconciliation failed")
+        return False
+    return True
+
+
 def _next_due_at(due_at: datetime, cadence: dict[str, Any], now: datetime) -> datetime:
     """Coalesce missed ticks into one request and advance beyond the present."""
     interval = timedelta(
@@ -257,6 +333,7 @@ def _admit_workflow(
     cur: Any,
     root_key: str,
     root_run_id: uuid.UUID,
+    root_scope_identity: str = "tenant:1",
     conditions: frozenset[str] = frozenset({"always"}),
 ) -> None:
     """Create matching successor runs and revision edges atomically."""
@@ -272,29 +349,33 @@ def _admit_workflow(
         request_identity = hashlib.sha256(
             f"workflow:{root_run_id}:{edge.dependent}:{edge.revision_name}".encode()
         ).hexdigest()
+        dependent_scope = root_scope_identity if edge.scope_mode == "inherit" else "tenant:1"
         cur.execute(
             f"SELECT {request_api}(%s, %s, %s, %s, %s, %s, NULL, %s::jsonb, %s::jsonb, %s)",
             (
-                1, dependent.key, dependent.snapshot_digest(), "tenant:1",
+                1, dependent.key, dependent.snapshot_digest(), dependent_scope,
                 request_identity, "dependency", "{}", "{}", root_run_id,
             ),
         )
         dependent_id = cur.fetchone()[0]
         runs[edge.dependent] = dependent_id
         required_revision = hashlib.sha256(
-            f"{prerequisite_id}:{edge.revision_name}:tenant:1".encode()
+            f"{prerequisite_id}:{edge.revision_name}:{dependent_scope}".encode()
         ).hexdigest()
         cur.execute(
             "SELECT operations.jobs_add_revision_dependency_v1(%s, %s, %s, %s, %s, %s)",
             (
                 1, dependent_id, prerequisite_id, edge.revision_name,
-                "tenant:1", required_revision,
+                dependent_scope, required_revision,
             ),
         )
 
 
 def admit_result_workflow(
-    root_key: str, root_run_id: uuid.UUID, signals: tuple[str, ...]
+    root_key: str,
+    root_run_id: uuid.UUID,
+    signals: tuple[str, ...],
+    root_scope_identity: str = "tenant:1",
 ) -> None:
     """Admit only registry-approved conditional edges from a fenced result."""
     approved = frozenset(signals) - {"always"}
@@ -302,7 +383,7 @@ def admit_result_workflow(
         return
     with db.transaction() as cur:
         cur.execute("SET LOCAL operations.tenant_id = 1")
-        _admit_workflow(cur, root_key, root_run_id, approved)
+        _admit_workflow(cur, root_key, root_run_id, root_scope_identity, approved)
 
 
 def _run_source_demand(job_run_id: object) -> JobExecutionResult:
@@ -341,6 +422,77 @@ def _run_source_actions(job_run_id: object) -> JobExecutionResult:
     return JobExecutionResult(rows=sum(outcome.values()), signals=signals)
 
 
+def _source_refresh_binding(job_run_id: object, claim_token: uuid.UUID) -> uuid.UUID:
+    """Read the fenced source scope for a running generic refresh."""
+    with db.transaction() as cur:
+        cur.execute("SET LOCAL operations.tenant_id = 1")
+        cur.execute(
+            "SELECT operations.jobs_source_refresh_context_v1(%s, %s, %s)",
+            (1, job_run_id, claim_token),
+        )
+        row = cur.fetchone()
+    if row is None or row[0] is None:
+        raise RuntimeError("Source refresh run has no configured source scope")
+    return row[0] if isinstance(row[0], uuid.UUID) else uuid.UUID(str(row[0]))
+
+
+def _run_source_refresh(progress: "V1JobProgress") -> JobExecutionResult:
+    """Refresh exactly one configured source binding through the shared contract."""
+    from ingest import main
+    from ingest.source_observations import is_identity_source, run_source_observations
+    from ingest.sources import load_source_binding
+
+    binding_id = _source_refresh_binding(progress.job_id, progress.claim_token)
+    source = load_source_binding(binding_id)
+    source_label = source.source_name or source.platform
+    progress.update(f"Collecting {source_label} information", "")
+    observed_at = datetime.now(timezone.utc)
+    if source.platform == "Ninja":
+        if main.run_patching_once() is False:
+            raise RuntimeError("Ninja collection could not acquire its execution lock")
+        rows = None
+        signals = ("identity_source",)
+    elif source.source_key.startswith("reference."):
+        from ingest.intel import (
+            abusech, chocolatey, cisa_kev, cpe_dict, epss, lolrmm, nvd, otx, winget,
+        )
+
+        handlers = {
+            "reference.nvd": nvd.run_once,
+            "reference.cpe": cpe_dict.run_once,
+            "reference.kev": cisa_kev.run_once,
+            "reference.epss": epss.run_once,
+            "reference.otx": otx.run_once,
+            "reference.abusech": abusech.run_once,
+            "reference.winget": winget.run_once,
+            "reference.chocolatey": chocolatey.run_once,
+            "reference.remote-access": lolrmm.run_once,
+            "reference.end-of-life": main.run_intel_endoflife_once,
+        }
+        try:
+            handler = handlers[source.source_key]
+        except KeyError as exc:
+            raise ValueError(f"Unsupported reference source: {source.source_key}") from exc
+        result = handler()
+        rows = int(result) if isinstance(result, int) else None
+        signals = (
+            ("reference_match_data",)
+            if source.source_key in {"reference.nvd", "reference.cpe", "reference.kev", "reference.epss"}
+            and bool(getattr(result, "material_changed", False))
+            else ()
+        )
+    else:
+        counts = run_source_observations([source], observed_at)
+        rows = sum(counts.values())
+        main.refresh_after_collection(f"{source_label} source refresh")
+        signals = ("identity_source",) if is_identity_source(source) else ("documentation_source",)
+    return JobExecutionResult(
+        rows=rows,
+        signals=signals,
+        result={"source_refresh": {"binding_id": str(binding_id)}},
+    )
+
+
 def produce_due_schedules() -> int:
     """Elect a short-lived leader and atomically admit each due durable schedule."""
     admitted = 0
@@ -353,7 +505,7 @@ def produce_due_schedules() -> int:
             "poll_seconds": 60,
         },
     )
-    if not reconcile_schedule_catalog():
+    if not reconcile_schedule_catalog() or not reconcile_source_refresh_schedules():
         return admitted
     try:
         with db.pool.connection() as conn, conn.cursor() as cur:
@@ -386,11 +538,12 @@ def produce_due_schedules() -> int:
                             run_id = cur.fetchone()[0]
                             if run_id is not None:
                                 cur.execute(
-                                    "SELECT definition_key FROM operations.job_schedules "
-                                    "WHERE tenant_id = 1 AND id = %s",
-                                    (schedule_id,),
-                                )
-                                _admit_workflow(cur, cur.fetchone()[0], run_id)
+                                "SELECT definition_key, scope_identity FROM operations.job_schedules "
+                                "WHERE tenant_id = 1 AND id = %s",
+                                (schedule_id,),
+                            )
+                                definition_key, scope_identity = cur.fetchone()
+                                _admit_workflow(cur, definition_key, run_id, scope_identity)
                                 admitted += 1
                     except Exception:
                         log.exception("durable Jobs schedule %s was deferred", schedule_id)
@@ -493,13 +646,13 @@ def dispatch_ready_v1() -> int:
         return 0
 
 
-def _claim_next_v6(worker_incarnation: uuid.UUID) -> dict[str, Any] | None:
-    """Claim one Ready run through the pool-aware dispatcher."""
+def _claim_next_v7(worker_incarnation: uuid.UUID) -> dict[str, Any] | None:
+    """Claim one Ready run, including source-binding resource identity."""
     try:
         with db.transaction() as cur:
             cur.execute("SET LOCAL operations.tenant_id = 1")
             cur.execute(
-                "SELECT run_id, claim_token, job_key FROM operations.jobs_claim_next_v6(%s, %s)",
+                "SELECT run_id, claim_token, job_key FROM operations.jobs_claim_next_v7(%s, %s)",
                 (1, worker_incarnation),
             )
             row = cur.fetchone()
@@ -517,12 +670,13 @@ def _finish_v1(
     *,
     rows: int | None = None,
     error: str = "",
+    result: dict[str, object] | None = None,
 ) -> None:
     with db.transaction() as cur:
         cur.execute("SET LOCAL operations.tenant_id = 1")
         cur.execute(
             "SELECT operations.jobs_finish_v1(%s, %s, %s, %s, %s, %s, %s::jsonb)",
-            (1, job_id, claim_token, status, rows, error, "{}"),
+            (1, job_id, claim_token, status, rows, error, json.dumps(result or {})),
         )
 
 
@@ -570,6 +724,7 @@ def _execute(job_key: str, progress: V1JobProgress) -> int | JobExecutionResult 
     from ingest.software_findings import incremental_pending_count
 
     jobs = {
+        "source-refresh": ("Collecting source information", lambda: _run_source_refresh(progress)),
         "patch-classify": ("Classifying changed patch state", lambda: main.patch_classify(tenant_id=1, incremental=True)),
         "platform-evaluate": (
             "Evaluating platform conditions",

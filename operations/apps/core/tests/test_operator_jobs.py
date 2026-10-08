@@ -9,7 +9,7 @@ def test_jobs_keep_durable_queue_and_terminal_step_contracts():
         encoding="utf-8"
     )
 
-    assert "operations.jobs_claim_next_v6" in queue
+    assert "operations.jobs_claim_next_v7" in queue
     assert "operations.jobs_finish_v1" in queue
     assert "_admit_workflow" in queue
     assert "A run is one executable step, not a workflow coordinator." in migration

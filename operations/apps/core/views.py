@@ -9280,11 +9280,12 @@ def _enqueue_operator_job(
     *,
     batch_id: uuid.UUID | None = None,
     retry_of: uuid.UUID | None = None,
+    scope_identity: str = "tenant:1",
 ) -> tuple[uuid.UUID, bool]:
     """Create a v1 operator request through the governed Jobs API."""
     job = definition(job_key)
     request_identity = hashlib.sha256(
-        f"operator:{user_id}:{job_key}:{batch_id or ''}:{uuid.uuid4()}".encode()
+        f"operator:{user_id}:{job_key}:{scope_identity}:{batch_id or ''}:{uuid.uuid4()}".encode()
     ).hexdigest()
     request_api = (
         "operations.jobs_request_software_v1"
@@ -9310,7 +9311,7 @@ def _enqueue_operator_job(
                 1,
                 job.key,
                 job.snapshot_digest(),
-                "tenant:1",
+                scope_identity,
                 request_identity,
                 "operator",
                 user_id,
@@ -9739,6 +9740,8 @@ def admin_job_status(request: HttpRequest) -> HttpResponse:
                 execution_key = row[0] if row else ""
         except DatabaseError:
             execution_key = ""
+    if execution_key == "source-refresh":
+        return redirect("sources_status")
     visible_key = operator_job_key_for_execution(execution_key) if execution_key else None
     if visible_key:
         target = reverse("admin_job_detail", kwargs={"job_id": visible_key})
@@ -14348,13 +14351,19 @@ def sources_status(request: HttpRequest) -> HttpResponse:
             )
             cur.execute(
                 """
-                SELECT id, source_name, client_display_name, enabled, run_platform,
+                SELECT health.id, health.source_name, health.client_display_name, health.enabled, health.run_platform,
                        last_observed_at, current_record_count, active_record_count,
                        last_run_ok, last_run_ended_at, last_run_rows,
-                       last_run_error, last_success_at, last_success_rows
-                  FROM operations.v_source_instance_health
-                 WHERE tenant_id = %s
-                 ORDER BY source_name, client_display_name NULLS FIRST, id
+                       last_run_error, last_success_at, last_success_rows,
+                       binding.id, binding.schedule, source.kind, source.entity_type, source.capabilities
+                  FROM operations.v_source_instance_health health
+                  JOIN operations.source_bindings binding
+                    ON binding.source_instance_id = health.id
+                   AND binding.tenant_id = health.tenant_id AND binding.enabled
+                  JOIN operations.source_instances instance ON instance.id = health.id
+                  JOIN operations.sources source ON source.id = instance.source_id
+                 WHERE health.tenant_id = %s
+                 ORDER BY health.source_name, health.client_display_name NULLS FIRST, health.id
                 """,
                 (tenant_id,),
             )
@@ -14382,31 +14391,55 @@ def sources_status(request: HttpRequest) -> HttpResponse:
                     }
                 )
 
-            # Currently pending or processing (manual demand queue)
+            # The durable Jobs record is the only current source lifecycle.
             cur.execute(
                 """
-                SELECT df, status, queued_at, started_at, job_run_id
-                  FROM operations.source_run_queue
-                 WHERE tenant_id = %s AND status IN ('pending', 'processing')
+                SELECT substring(scope_identity FROM 16)::uuid, id, status,
+                       requested_at, started_at
+                  FROM operations.operator_job_runs
+                 WHERE tenant_id = %s AND job_key = 'source-refresh'
+                   AND status IN ('queued', 'running')
                 """,
                 (tenant_id,),
             )
-            active = {r[0]: r for r in cur.fetchall()}
+            active = {r[0]: r[1:] for r in cur.fetchall()}
 
-            # Recent run history — every recorded source run
             cur.execute(
                 """
-                SELECT substring(kind FROM 8), ok, started_at, ended_at, rows, error
-                FROM operations.run_log
-                WHERE tenant_id = %s AND kind LIKE 'source.%%'
-                ORDER BY started_at DESC LIMIT 30
+                SELECT DISTINCT ON (substring(scope_identity FROM 16)::uuid)
+                       substring(scope_identity FROM 16)::uuid, status,
+                       completed_at, started_at, requested_at, rows_touched, error
+                  FROM operations.operator_job_runs
+                 WHERE tenant_id = %s AND job_key = 'source-refresh'
+                 ORDER BY substring(scope_identity FROM 16)::uuid,
+                          requested_at DESC, id DESC
+                """,
+                (tenant_id,),
+            )
+            latest_refresh = {row[0]: row[1:] for row in cur.fetchall()}
+
+            # Source-refresh runs are the authoritative operational history.
+            # Keep the old source run log only as historical evidence; it is
+            # not a second current lifecycle.
+            cur.execute(
+                """
+                SELECT source.name, run.status, run.started_at, run.completed_at,
+                       run.rows_touched, run.error
+                  FROM operations.operator_job_runs run
+                  JOIN operations.source_bindings binding
+                    ON binding.id = substring(run.scope_identity FROM 16)::uuid
+                   AND binding.tenant_id = run.tenant_id
+                  JOIN operations.source_instances instance ON instance.id = binding.source_instance_id
+                  JOIN operations.sources source ON source.id = instance.source_id
+                 WHERE run.tenant_id = %s AND run.job_key = 'source-refresh'
+                 ORDER BY run.requested_at DESC, run.id DESC LIMIT 30
             """,
                 (tenant_id,),
             )
             recent_runs = [
                 {
                     "source": r[0],
-                    "status": "done" if r[1] else "failed",
+                    "status": {"completed": "done", "running": "processing"}.get(r[1], r[1]),
                     "started_at": r[2],
                     "completed_at": r[3],
                     "rows_seen": r[4],
@@ -14432,11 +14465,19 @@ def sources_status(request: HttpRequest) -> HttpResponse:
             last_run_rows,
             last_run_error,
             last_success,
-            last_success_rows,
+            last_success_rows, binding_id, schedule, source_kind, entity_type, source_capabilities,
         ) = row
-        act = active.get(run_platform)
-        last_fail = last_run_ended_at if last_run_ok is False else None
-        last_error = (last_run_error or None) if last_run_ok is False else None
+        act = active.get(binding_id)
+        latest = latest_refresh.get(binding_id)
+        if latest and latest[0] in {"completed", "failed", "stalled", "cancelled"}:
+            terminal_at = latest[1] or latest[2] or latest[3]
+            last_success = terminal_at if latest[0] == "completed" else last_success
+            last_success_rows = latest[4] if latest[0] == "completed" else last_success_rows
+            last_fail = terminal_at if latest[0] in {"failed", "stalled"} else None
+            last_error = latest[5] if latest[0] in {"failed", "stalled"} else None
+        else:
+            last_fail = last_run_ended_at if last_run_ok is False else None
+            last_error = (last_run_error or None) if last_run_ok is False else None
         is_stale = last_success is None or (now - last_success).total_seconds() > 8 * 3600
         sources.append(
             {
@@ -14445,11 +14486,17 @@ def sources_status(request: HttpRequest) -> HttpResponse:
                 "client_name": client_display_name,
                 "enabled": enabled,
                 "run_platform": run_platform,
-                "is_processing": bool(act and act[1] == "processing"),
-                "has_pending": bool(act and act[1] == "pending"),
+                "binding_id": binding_id,
+                "schedule": schedule or "",
+                "schedule_minutes": _source_schedule_minutes(schedule or ""),
+                "source_kind": source_kind,
+                "entity_type": entity_type,
+                "purpose": (source_capabilities or {}).get("purpose", ""),
+                "is_processing": bool(act and act[1] == "running"),
+                "has_pending": bool(act and act[1] == "queued"),
                 "active_job_url": (
-                    reverse("admin_job_status") + "?" + urlencode({"run": act[4]})
-                    if act and act[4]
+                    reverse("admin_job_status") + "?" + urlencode({"run": act[0]})
+                    if act and act[0]
                     else ""
                 ),
                 "last_success": last_success,
@@ -14467,6 +14514,25 @@ def sources_status(request: HttpRequest) -> HttpResponse:
     source_options = sorted({source["name"] for source in sources})
     if source_filter:
         sources = [source for source in sources if source["name"] == source_filter]
+    source_groups: dict[str, list[dict]] = {
+        "Device and client systems": [],
+        "Software data": [],
+        "Security data": [],
+        "Other sources": [],
+    }
+    for source in sources:
+        group = {
+            "software": "Software data",
+            "security": "Security data",
+        }.get(source["purpose"])
+        if group is None:
+            group = (
+                "Device and client systems"
+                if source["entity_type"] in {"agent.rmm", "agent.edr", "agent.remote_access", "cmdb.asset"}
+                else "Other sources"
+            )
+        source_groups[group].append(source)
+    source_groups = {key: value for key, value in source_groups.items() if value}
     stale_count = sum(1 for s in sources if s["is_stale"] and not s["is_processing"])
     if wants_csv(request):
         return csv_response(
@@ -14493,12 +14559,75 @@ def sources_status(request: HttpRequest) -> HttpResponse:
             "admin_group": "integrations",
             "admin_tab": "sources",
             "sources": sources,
+            "source_groups": source_groups,
             "source_options": source_options,
             "active_source": source_filter,
             "recent_runs": recent_runs,
             "stale_count": stale_count,
         },
     )
+
+
+def _source_schedule_minutes(value: str) -> int | None:
+    prefix, separator, minutes_text = value.strip().partition(":")
+    if prefix != "interval" or not separator:
+        return None
+    try:
+        minutes = int(minutes_text)
+    except ValueError:
+        return None
+    return minutes if 1 <= minutes <= 10080 else None
+
+
+@login_required
+@require_admin
+@require_POST
+def source_refresh_run(request: HttpRequest, binding_id: uuid.UUID) -> HttpResponse:
+    """Request one configured source refresh through the normal Jobs API."""
+    with transaction.atomic(), connection.cursor() as cur:
+        cur.execute("SET LOCAL operations.tenant_id = 1")
+        cur.execute(
+            """SELECT source.name FROM operations.source_bindings binding
+                 JOIN operations.source_instances instance ON instance.id = binding.source_instance_id
+                 JOIN operations.sources source ON source.id = instance.source_id
+                WHERE binding.tenant_id = 1 AND binding.id = %s AND binding.enabled""",
+            (binding_id,),
+        )
+        row = cur.fetchone()
+    if row is None:
+        raise Http404("Configured source is unavailable")
+    run_id, created = _enqueue_operator_job(
+        "source-refresh", request.user.id, scope_identity=f"source-binding:{binding_id}"
+    )
+    if created:
+        messages.success(request, f"{row[0]} refresh was requested.")
+    else:
+        messages.info(request, f"{row[0]} already has an active refresh.")
+    return redirect("sources_status")
+
+
+@login_required
+@require_admin
+@require_POST
+def source_schedule_update(request: HttpRequest, binding_id: uuid.UUID) -> HttpResponse:
+    """Update a source-owned cadence without exposing Jobs internals."""
+    schedule = (request.POST.get("schedule") or "").strip()
+    minutes = _source_schedule_minutes(schedule)
+    if minutes is None:
+        messages.error(request, "Use a refresh interval from 1 minute to 7 days.")
+        return redirect("sources_status")
+    with transaction.atomic(), connection.cursor() as cur:
+        cur.execute("SET LOCAL operations.tenant_id = 1")
+        cur.execute(
+            """UPDATE operations.source_bindings SET schedule = %s
+                 WHERE tenant_id = 1 AND id = %s AND enabled
+                 RETURNING id""",
+            (f"interval:{minutes}", binding_id),
+        )
+        if cur.fetchone() is None:
+            raise Http404("Configured source is unavailable")
+    messages.success(request, "Source refresh schedule updated.")
+    return redirect("sources_status")
 
 
 # ── Client candidates (Track C.4 evidence panel) ─────────────────────────────

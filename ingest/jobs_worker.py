@@ -51,7 +51,7 @@ def healthcheck() -> int:
 
 
 def _start_child(incarnation: uuid.UUID) -> _Child | None:
-    row = operator_job_queue._claim_next_v6(incarnation)
+    row = operator_job_queue._claim_next_v7(incarnation)
     if row is None:
         return None
     process = subprocess.Popen(
@@ -80,7 +80,13 @@ def _finish_child(child: _Child) -> None:
             child.run_id,
             tuple(result.get("signals") or ()),
         )
-        operator_job_queue._finish_v1(child.run_id, child.claim_token, "completed", rows=result.get("rows"))
+        operator_job_queue._finish_v1(
+            child.run_id,
+            child.claim_token,
+            "completed",
+            rows=result.get("rows"),
+            result=result.get("result") or {},
+        )
     else:
         operator_job_queue._finish_v1(child.run_id, child.claim_token, "failed", error=str(result.get("error", "Jobs child failed."))[:2000])
 

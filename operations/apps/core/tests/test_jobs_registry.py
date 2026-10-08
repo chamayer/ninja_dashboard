@@ -32,7 +32,7 @@ ROOT = Path(__file__).resolve().parents[4]
 def test_registry_has_one_catalog_and_schedule_owner_per_definition():
     keys = definition_keys()
 
-    assert len(keys) == 38
+    assert len(keys) == 39
     assert {entry["id"] for entry in catalog_entries()} == keys
     assert scheduled_definition_keys() < keys
     assert definition("patches").lane == "collection"
@@ -101,8 +101,8 @@ def test_operator_jobs_have_one_visible_boundary_and_services_stay_outside():
     jobs = operator_job_definitions()
     visible_execution_keys = {execution_key for job in jobs for execution_key in job.execution_keys}
 
-    assert "patches" in {job.key for job in jobs}
-    assert operator_job_key_for_execution("patches") == "patches"
+    assert "patches" not in {job.key for job in jobs}
+    assert operator_job_key_for_execution("patches") is None
     assert operator_job_key_for_execution("software-classify") == "software-classify-only"
     assert next(job for job in jobs if job.key == "cmdb-evaluate").start_description == "After Hudu refresh"
     assert set(system_service_definition_keys()).isdisjoint(visible_execution_keys)
@@ -159,9 +159,13 @@ def test_initial_workflow_edges_are_registered_and_acyclic():
         ("intel-matcher", "software-classify-only", "software.cve-match", "material_change"),
     )
 
+    assert shape("source-refresh", frozenset({"identity_source"})) == (
+        ("source-refresh", "resolver", "source.identity-observations", "identity_source"),
+        ("resolver", "platform-evaluate", "identity.current", "always"),
+    )
     for item in definitions():
         for successor in item.successors:
-            assert successor.scope_mode == "inherit"
+            assert successor.scope_mode in {"inherit", "tenant"}
             assert successor.coalescing == "definition_scope"
             assert successor.failure_rule == "block"
 
@@ -237,6 +241,12 @@ def test_registry_exposes_the_approved_pool_and_resource_policy():
     assert READY_WINDOW_CAPACITY == 2
     assert EMERGENCY_CHILD_CAPACITY == 5
     assert dict(EXECUTION_POOL_POLICIES) == {
+        "capacity:external-io": {
+            "label": "Source connections",
+            "capacity": 3,
+            "minimum": 1,
+            "maximum": 3,
+        },
         "capacity:processing": {
             "label": "Data processing",
             "capacity": 2,
@@ -246,6 +256,9 @@ def test_registry_exposes_the_approved_pool_and_resource_policy():
         "capacity:control": {"label": "Control work", "capacity": 1, "minimum": 1, "maximum": 2},
     }
     assert definition("patches").resource_keys == ("tenant:{tenant_id}:ninja-source",)
+    assert definition("source-refresh").resource_keys == (
+        "tenant:{tenant_id}:source-binding:{scope_identity}",
+    )
     assert definition("agent-observations").resource_keys == ("tenant:{tenant_id}:agent-sources",)
     assert definition("patch-classify").resource_keys == ("tenant:{tenant_id}:patch-state",)
     assert "global:intel-cve-corpus" in definition("intel-nvd").resource_keys

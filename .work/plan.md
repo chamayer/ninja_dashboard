@@ -1,5 +1,65 @@
 # Active root implementation plan
 
+## Active plan — source-driven collection
+
+**Status:** in progress.
+
+**Goal:** complete the intended source-driven collection architecture. Every
+configured source binding or shared reference source is independently
+scheduled, executed, locked, observed, and able to publish completed output
+revisions that trigger only the relevant matching and analysis. Preserve
+source-specific connectors and raw/domain storage; do not introduce a second
+queue, a vendor-specific scheduler graph, or a manual deployment path.
+
+**Scope:** `shared/jobs_registry.py`, ingest scheduler/source collection and
+Jobs worker, Operations Jobs/source scheduling storage and APIs, Sources and
+Jobs presentation, focused tests and applicable decisions. The Operations
+continuity plan is a short pointer only; this is cross-service work.
+
+**Fixed decisions:**
+
+- A configured source binding is the scope of an environment-source refresh.
+  Shared reference sources use their source scope and never reference
+  tenant/client records.
+- Connector/storage differences remain source-specific. The common contract is
+  scheduling, lifecycle, output publication, health, and downstream scope.
+- A completed source output references a durable collected batch/dirty scope;
+  failed or incomplete collection publishes no completion and cannot clear
+  downstream state.
+- Matching and analysis consume completed outputs narrowly where their input
+  contract permits. Periodic full reconciliation remains the safety net.
+- Source schedule/configuration belongs on Sources; Jobs shows execution,
+  results, history, and safe controls. Platform capacity stays in Jobs
+  settings.
+
+**Implementation order:**
+
+1. Trace and consolidate the existing source-demand, scheduler, Jobs-request,
+   source-run, dependency, and source-admin contracts.
+2. Add migration-backed source refresh definitions/schedules/publications and
+   source-scoped Jobs admission without duplicating lifecycle state.
+3. Convert generic source collectors first, then Ninja and reference sources
+   through the common publication contract; wire targeted matching/evaluation
+   and retain full reconciliation.
+4. Replace interim agent/documentation scheduling after compatible source
+   refreshes are registered and verified; preserve history and deep links.
+5. Present source-level Jobs and source-level configuration/health; validate
+   tenant scope, failure safety, capacity, migration compatibility, and the
+   full source catalog.
+
+**Current checkpoint:** implemented the first durable cutover: `source-refresh`
+is a binding-scoped registered Job, scheduled from the existing
+`source_bindings.schedule` data, with per-binding admission and a successful
+finish-only output record. Legacy capability-bucket schedules are disabled.
+The new source-aware dispatcher applies the external connection pool and an
+exclusive binding lock rather than one combined source lock. The consolidated
+Sources surface now groups device/client systems, software data, and security
+data; it owns schedule/refresh controls and reads current/previous results
+from the durable source-refresh ledger. Reference feeds are seeded as source
+bindings and their old automatic schedules are disabled. Next: expose the
+source-refresh activity consistently from Jobs, validate the migration SQL on
+the stack, then perform the compatibility and failure-safety review.
+
 ## Active plan — complete conditions framework
 
 The audited cross-service implementation and acceptance plan is

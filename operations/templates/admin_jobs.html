@@ -49,7 +49,8 @@
   </div>
   <div class="jobs-tools">
     <button type="button" title="Reload this Jobs page now." onclick="location.reload()">Refresh page</button>
-    <a title="Choose which client or data source to refresh." href="{% url 'targeted_refresh' %}">Choose data to refresh</a>
+    <a title="View source health, schedules, and source-specific refresh controls." href="{% url 'sources_status' %}">Sources</a>
+    <a title="Request a refresh for selected client data." href="{% url 'targeted_refresh' %}">Refresh selected data</a>
     <a href="{% url 'admin_jobs_control_plane' %}">Job settings</a>
   </div>
 </div>

@@ -1,5 +1,18 @@
 # Jobs ecosystem final-design reset
 
+## Source-driven collection
+
+Cross-service implementation is active in the root [source-driven collection
+plan](../../.work/plan.md). Operations owns the migration-backed source
+schedule/publication read/control surfaces and clear Jobs/Sources presentation;
+ingest and shared registry changes are tracked in that root plan.
+
+Checkpoint: source-refresh is now a binding-scoped Jobs definition with
+source-owned schedule data and source-specific controls on Sources. Reference
+feeds are also source bindings and the Sources page groups the complete
+inventory. Pending: expose source-refresh activity consistently from Jobs and
+validate the migration contract on the stack.
+
 ## Jobs grouping 500 correction (2026-10-08)
 
 ## Status

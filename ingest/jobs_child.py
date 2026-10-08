@@ -12,10 +12,10 @@ def main() -> None:
     try:
         result = operator_job_queue._execute(job_key, operator_job_queue.V1JobProgress(uuid.UUID(run_id), uuid.UUID(claim_token)))
         if isinstance(result, operator_job_queue.JobExecutionResult):
-            rows, signals = result.rows, result.signals
+            rows, signals, result_detail = result.rows, result.signals, result.result
         else:
-            rows, signals = result, ()
-        print(json.dumps({"ok": True, "rows": rows, "signals": signals}))
+            rows, signals, result_detail = result, (), None
+        print(json.dumps({"ok": True, "rows": rows, "signals": signals, "result": result_detail or {}}))
     except operator_job_queue.JobCancellationRequested as exc:
         print(json.dumps({"ok": False, "cancelled": True, "error": str(exc)}))
     except Exception as exc:

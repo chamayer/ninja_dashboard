@@ -169,6 +169,19 @@ class JobDefinition:
 
 _RAW_DEFINITIONS = (
     JobDefinition(
+        "source-refresh",
+        "Source refresh",
+        "Collect current data from one configured source.",
+        "source ingest",
+        "collection",
+        "",
+        "source.refresh",
+        "run_log_like",
+        "ingest.operator_job_queue._run_source_refresh",
+        run_all=False,
+        handler_version="source-refresh-v1",
+    ),
+    JobDefinition(
         "patches",
         "Ninja source cycle",
         "Refresh computers, patches, and activity from Ninja.",
@@ -178,7 +191,6 @@ _RAW_DEFINITIONS = (
         "source.Ninja",
         "run_log_like",
         "ingest.main.run_patching_once",
-        schedule_ids=("patch_ingest_cycle",),
     ),
     JobDefinition(
         "agent-observations",
@@ -190,7 +202,6 @@ _RAW_DEFINITIONS = (
         "source.",
         "run_log_like",
         "ingest.main.run_agent_observations_once",
-        schedule_ids=("agent_observations_cycle",),
     ),
     JobDefinition(
         "documentation-observations",
@@ -203,7 +214,6 @@ _RAW_DEFINITIONS = (
         "run_log_like",
         "ingest.main.run_documentation_observations_once",
         run_all=False,
-        schedule_ids=("documentation_observations_cycle",),
     ),
     JobDefinition(
         "software-classify",
@@ -665,6 +675,11 @@ _RAW_DEFINITIONS = (
 # change the historical definition that admitted that run.
 REPLAY_SAFE_RECOVERY_EVIDENCE = MappingProxyType(
     {
+        "source-refresh": (
+            "A source refresh only reads the configured source API and reconciles local "
+            "evidence. Replaying it converges to current source data and performs no "
+            "source-side mutation."
+        ),
         "intel-matcher": (
             "The CVE matcher rebuilds local match rows in one database transaction and "
             "refreshes a local read model afterward. A later replay converges to current "
@@ -747,15 +762,6 @@ _RECOVERY_MODE_BY_DEFINITION = MappingProxyType(
 
 
 _SCHEDULE_DEFINITIONS = (
-    ScheduleDefinition("patch_ingest_cycle", "patches", "PATCH_INGEST_SCHEDULE_HOURS"),
-    ScheduleDefinition(
-        "agent_observations_cycle", "agent-observations", "AGENT_COMPLIANCE_SCHEDULE_HOURS"
-    ),
-    ScheduleDefinition(
-        "documentation_observations_cycle",
-        "documentation-observations",
-        "DOCUMENTATION_SCHEDULE_HOURS",
-    ),
     ScheduleDefinition("identity_resolver_cycle", "resolver", "constant:30", "minutes"),
     ScheduleDefinition("platform_evaluate_cycle", "platform-evaluate", "constant:4"),
     ScheduleDefinition(
@@ -828,6 +834,12 @@ _SCHEDULE_DEFINITIONS = (
 
 EXECUTION_POOL_POLICIES = MappingProxyType(
     {
+        "capacity:external-io": {
+            "label": "Source connections",
+            "capacity": 3,
+            "minimum": 1,
+            "maximum": 3,
+        },
         "capacity:processing": {
             "label": "Data processing",
             "capacity": 2,
@@ -853,6 +865,7 @@ _GLOBAL_ONLY = frozenset(
     }
 )
 _RESOURCE_KEYS_BY_DEFINITION: dict[str, tuple[str, ...]] = {
+    "source-refresh": ("tenant:{tenant_id}:source-binding:{scope_identity}",),
     "patches": ("tenant:{tenant_id}:ninja-source",),
     "agent-observations": ("tenant:{tenant_id}:agent-sources",),
     "documentation-observations": ("tenant:{tenant_id}:documentation-source",),
@@ -915,6 +928,7 @@ for _key in ("software-classify", "software-classify-only", "software-classify-f
     _RESOURCE_KEYS_BY_DEFINITION[_key] += ("tenant:{tenant_id}:software-findings",)
 
 _CAPACITY_KEYS_BY_DEFINITION: dict[str, tuple[str, ...]] = {
+    "source-refresh": ("capacity:external-io",),
     "patches": (),
     "agent-observations": (),
     "documentation-observations": (),
@@ -967,6 +981,17 @@ _SUPERSESSION_FAMILIES = MappingProxyType(
 )
 _WORKFLOW_SUCCESSORS = MappingProxyType(
     {
+        "source-refresh": (
+            DependencyDefinition(
+                "resolver", "source.identity-observations", "identity_source"
+            ),
+            DependencyDefinition(
+                "cmdb-evaluate", "source.documentation-observations", "documentation_source"
+            ),
+            DependencyDefinition(
+                "intel-matcher", "source.reference-match-data", "reference_match_data"
+            ),
+        ),
         "patches": (
             DependencyDefinition("patch-classify", "ninja.patch-snapshot"),
             DependencyDefinition("resolver", "ninja.identity-snapshot"),
@@ -1090,12 +1115,29 @@ def schedule_definitions() -> tuple[ScheduleDefinition, ...]:
     """Return cadences for operation entry points, never dependent steps."""
     dependent_keys = {successor.successor for item in _DEFINITIONS for successor in item.successors}
     return tuple(
-        schedule for schedule in _SCHEDULE_DEFINITIONS if schedule.job_key not in dependent_keys
+        schedule
+        for schedule in _SCHEDULE_DEFINITIONS
+        if schedule.job_key not in dependent_keys
+        and schedule.job_key not in _SOURCE_OWNED_DEFINITION_KEYS
     )
 
 
 _SYSTEM_SERVICE_KEYS = frozenset(
     {
+        "source-refresh",
+        "patches",
+        "agent-observations",
+        "documentation-observations",
+        "intel-nvd",
+        "intel-cpe-dict",
+        "intel-kev",
+        "intel-epss",
+        "intel-winget",
+        "intel-chocolatey",
+        "intel-lolrmm",
+        "intel-otx",
+        "intel-abusech",
+        "intel-endoflife",
         "source-actions",
         "source-demand",
         "source-demand-recovery",
@@ -1103,6 +1145,13 @@ _SYSTEM_SERVICE_KEYS = frozenset(
         "platform-health-evaluate",
         "metabase-bootstrap",
         "software-enqueue-orgs",
+    }
+)
+_SOURCE_OWNED_DEFINITION_KEYS = frozenset(
+    {
+        "intel-nvd", "intel-cpe-dict", "intel-kev", "intel-epss", "intel-winget",
+        "intel-chocolatey", "intel-lolrmm", "intel-otx", "intel-abusech",
+        "intel-endoflife",
     }
 )
 _LEGACY_JOB_KEYS = frozenset(
@@ -1217,22 +1266,9 @@ _OPERATOR_JOB_GROUPS = (
 )
 _OPERATOR_JOB_GROUP_BY_KEY = MappingProxyType(
     {
-        "patches": "source-data",
-        "agent-observations": "source-data",
-        "documentation-observations": "source-data",
         "software-queue-drain": "source-data",
-        "intel-cpe-dict": "software-data",
-        "intel-winget": "software-data",
-        "intel-chocolatey": "software-data",
         "intel-capability": "software-data",
-        "intel-lolrmm": "software-data",
-        "intel-endoflife": "software-data",
         "intel-category": "software-data",
-        "intel-kev": "security-data",
-        "intel-nvd": "security-data",
-        "intel-epss": "security-data",
-        "intel-otx": "security-data",
-        "intel-abusech": "security-data",
         "resolver": "matching",
         "intel-matcher": "matching",
         "software-classify-only": "analysis",
@@ -1362,6 +1398,7 @@ def _validate_dependency_contracts() -> None:
         "always",
         "identity_source",
         "documentation_source",
+        "reference_match_data",
         "material_change",
     }
     revision_pattern = re.compile(r"[a-z0-9][a-z0-9._-]{2,119}")
@@ -1380,7 +1417,7 @@ def _validate_dependency_contracts() -> None:
                 errors.append(f"{job.key} has invalid revision name")
             if successor.condition not in allowed_conditions:
                 errors.append(f"{job.key} has invalid dependency condition")
-            if successor.scope_mode != "inherit":
+            if successor.scope_mode not in {"inherit", "tenant"}:
                 errors.append(f"{job.key} has unsupported dependency scope")
             if successor.coalescing != "definition_scope":
                 errors.append(f"{job.key} has unsupported dependency coalescing")

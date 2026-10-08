@@ -167,3 +167,16 @@ def load_sources() -> list[SourceConfig]:
             )
         )
     return configs
+
+
+def load_source_binding(binding_id: uuid.UUID) -> SourceConfig:
+    """Return one enabled configured source binding.
+
+    A Jobs source-refresh run is scoped to this durable binding identity.  The
+    binding, rather than a platform name or collector category, is the unit of
+    scheduling and exclusion.
+    """
+    for source in load_sources():
+        if source.source_binding_id == binding_id:
+            return source
+    raise ValueError("Configured source binding is unavailable or disabled")

@@ -730,6 +730,12 @@
       {
         "file": "ingest/operator_job_queue.py",
         "owner": "_execute",
+        "key": "source-refresh",
+        "expression": "('Collecting source information', lambda: _run_source_refresh(progress))"
+      },
+      {
+        "file": "ingest/operator_job_queue.py",
+        "owner": "_execute",
         "key": "patch-classify",
         "expression": "('Classifying patch state', lambda: main.patch_classify(tenant_id=1))"
       },

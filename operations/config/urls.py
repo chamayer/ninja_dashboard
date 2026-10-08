@@ -112,6 +112,8 @@ from apps.core.views import (
     software_title_lookup,
     software_user_risk,
     sources_status,
+    source_refresh_run,
+    source_schedule_update,
     targeted_refresh,
 )
 
@@ -260,6 +262,8 @@ urlpatterns = [
     path("inventory/clients/", inventory_clients, name="inventory_clients"),
     path("inventory/computers/", fleet_coverage, name="inventory_computers"),
     path("sources/", sources_status, name="sources_status"),
+    path("sources/<uuid:binding_id>/refresh/", source_refresh_run, name="source_refresh_run"),
+    path("sources/<uuid:binding_id>/schedule/", source_schedule_update, name="source_schedule_update"),
     path("merge-candidates/", merge_candidates_queue, name="merge_candidates_queue"),
     path("clients/candidates/", client_candidates_queue, name="client_candidates_queue"),
     path(
