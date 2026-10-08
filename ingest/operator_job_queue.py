@@ -95,10 +95,15 @@ def register_recovery_policies() -> None:
         with db.transaction() as cur:
             cur.execute("SET LOCAL operations.tenant_id = 1")
             for job_key, evidence_summary in REPLAY_SAFE_RECOVERY_EVIDENCE.items():
-                cur.execute(
-                    "SELECT operations.jobs_register_recovery_policy_v1(%s, %s, %s, %s)",
-                    (1, job_key, definition(job_key).snapshot_digest(), evidence_summary),
-                )
+                try:
+                    cur.execute(
+                        "SELECT operations.jobs_register_recovery_policy_v1(%s, %s, %s, %s)",
+                        (1, job_key, definition(job_key).snapshot_digest(), evidence_summary),
+                    )
+                except Exception as exc:
+                    raise RuntimeError(
+                        f"Jobs recovery policy registration failed for {job_key}"
+                    ) from exc
     except UndefinedFunction:
         return
 
