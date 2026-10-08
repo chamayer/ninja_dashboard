@@ -233,12 +233,6 @@ def test_registry_exposes_the_approved_pool_and_resource_policy():
     assert READY_WINDOW_CAPACITY == 2
     assert EMERGENCY_CHILD_CAPACITY == 5
     assert dict(EXECUTION_POOL_POLICIES) == {
-        "capacity:external-io": {
-            "label": "Data retrieval",
-            "capacity": 2,
-            "minimum": 1,
-            "maximum": 3,
-        },
         "capacity:processing": {
             "label": "Data processing",
             "capacity": 2,
@@ -259,13 +253,9 @@ def test_registry_exposes_the_approved_pool_and_resource_policy():
     assert definition("software-classify-full").supersession_rank == 2
     assert definition("software-classify").supersession_rank == 3
     assert definition("software-classify").supersession_family == "software-classifier"
-    assert definition("patches").capacity_keys == ("capacity:external-io",)
+    assert definition("patches").capacity_keys == ()
     assert definition("patch-classify").capacity_keys == ("capacity:processing",)
-    assert definition("software-classify").capacity_keys == (
-        "capacity:external-io",
-        "capacity:processing",
-    )
-    assert all(definition(key).capacity_keys for key in definition_keys())
+    assert definition("software-classify").capacity_keys == ("capacity:processing",)
     assert all(
         set(definition(key).capacity_keys) <= set(EXECUTION_POOL_POLICIES)
         for key in definition_keys()

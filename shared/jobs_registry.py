@@ -827,12 +827,6 @@ _SCHEDULE_DEFINITIONS = (
 
 EXECUTION_POOL_POLICIES = MappingProxyType(
     {
-        "capacity:external-io": {
-            "label": "Data retrieval",
-            "capacity": 2,
-            "minimum": 1,
-            "maximum": 3,
-        },
         "capacity:processing": {
             "label": "Data processing",
             "capacity": 2,
@@ -844,7 +838,7 @@ EXECUTION_POOL_POLICIES = MappingProxyType(
 )
 READY_WINDOW_CAPACITY = 2
 # A fuse only: ordinary admission remains governed by the separate pools.
-EMERGENCY_CHILD_CAPACITY = sum(policy["capacity"] for policy in EXECUTION_POOL_POLICIES.values())
+EMERGENCY_CHILD_CAPACITY = 5
 
 _GLOBAL_ONLY = frozenset(
     {
@@ -920,10 +914,10 @@ for _key in ("software-classify", "software-classify-only", "software-classify-f
     _RESOURCE_KEYS_BY_DEFINITION[_key] += ("tenant:{tenant_id}:software-findings",)
 
 _CAPACITY_KEYS_BY_DEFINITION: dict[str, tuple[str, ...]] = {
-    "patches": ("capacity:external-io",),
-    "agent-observations": ("capacity:external-io",),
-    "documentation-observations": ("capacity:external-io",),
-    "software-classify": ("capacity:external-io", "capacity:processing"),
+    "patches": (),
+    "agent-observations": (),
+    "documentation-observations": (),
+    "software-classify": ("capacity:processing",),
     "software-classify-only": ("capacity:processing",),
     "software-classify-full": ("capacity:processing",),
     "patch-classify": ("capacity:processing",),
@@ -931,29 +925,29 @@ _CAPACITY_KEYS_BY_DEFINITION: dict[str, tuple[str, ...]] = {
     "cmdb-evaluate": ("capacity:processing",),
     "resolver": ("capacity:processing",),
     "parity-check": ("capacity:processing",),
-    "agent-compliance": ("capacity:external-io", "capacity:processing"),
+    "agent-compliance": ("capacity:processing",),
     "agent-compliance-evaluate": ("capacity:processing",),
-    "agent-compliance-review-digest": ("capacity:external-io", "capacity:control"),
-    "intel-kev": ("capacity:external-io",),
-    "intel-nvd": ("capacity:external-io",),
-    "intel-cpe-dict": ("capacity:external-io",),
-    "intel-epss": ("capacity:external-io",),
+    "agent-compliance-review-digest": ("capacity:control",),
+    "intel-kev": (),
+    "intel-nvd": (),
+    "intel-cpe-dict": (),
+    "intel-epss": (),
     "intel-matcher": ("capacity:processing",),
-    "intel-winget": ("capacity:external-io",),
-    "intel-chocolatey": ("capacity:external-io",),
+    "intel-winget": (),
+    "intel-chocolatey": (),
     "intel-capability": ("capacity:processing",),
-    "intel-lolrmm": ("capacity:external-io",),
-    "intel-otx": ("capacity:external-io",),
-    "intel-abusech": ("capacity:external-io",),
-    "intel-endoflife": ("capacity:external-io",),
+    "intel-lolrmm": (),
+    "intel-otx": (),
+    "intel-abusech": (),
+    "intel-endoflife": (),
     "intel-category": ("capacity:processing",),
-    "notifications-dispatch": ("capacity:external-io", "capacity:control"),
-    "notifications-digest": ("capacity:external-io", "capacity:control"),
+    "notifications-dispatch": ("capacity:control",),
+    "notifications-digest": ("capacity:control",),
     "retention-history": ("capacity:control",),
     "software-enqueue-orgs": ("capacity:control",),
-    "software-queue-drain": ("capacity:external-io",),
-    "source-actions": ("capacity:external-io",),
-    "source-demand": ("capacity:external-io",),
+    "software-queue-drain": (),
+    "source-actions": (),
+    "source-demand": (),
     "source-demand-recovery": ("capacity:control",),
     "run-log-recovery": ("capacity:control",),
     "platform-health-evaluate": ("capacity:processing", "capacity:control"),
@@ -1340,9 +1334,7 @@ def _validate_dependency_contracts() -> None:
             errors.append(f"{job.key} has an unsupported coalescing scope")
         if job.concurrency_scope != "resource_keys":
             errors.append(f"{job.key} has an unsupported concurrency scope")
-        if not job.capacity_keys or any(
-            key not in EXECUTION_POOL_POLICIES for key in job.capacity_keys
-        ):
+        if any(key not in EXECUTION_POOL_POLICIES for key in job.capacity_keys):
             errors.append(f"{job.key} has an invalid capacity policy")
         if any(key.startswith("capacity:") for key in job.resource_keys):
             errors.append(f"{job.key} mixes capacity and domain resources")
