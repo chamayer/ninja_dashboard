@@ -8912,11 +8912,14 @@ def admin_jobs(request: HttpRequest) -> HttpResponse:
             active_by_job.setdefault(catalog_key, []).append(active_run)
 
     running_by_capacity: dict[str, list[dict]] = {}
+    running_by_resource: dict[str, list[dict]] = {}
     for active_run in active_queue:
         if active_run["status"] != "running" or active_run["job_key"] not in definition_keys():
             continue
         for capacity_key in definition(active_run["job_key"]).capacity_keys:
             running_by_capacity.setdefault(capacity_key, []).append(active_run)
+        for resource_key in definition(active_run["job_key"]).resource_keys:
+            running_by_resource.setdefault(resource_key, []).append(active_run)
 
     for active_run in active_queue:
         if active_run.get("wait_category") != "capacity":
@@ -8934,6 +8937,16 @@ def admin_jobs(request: HttpRequest) -> HttpResponse:
             EXECUTION_POOL_POLICIES[key]["label"] for key in capacity_keys
         )
         active_run["capacity_blockers"] = blockers
+    for active_run in active_queue:
+        if active_run.get("wait_category") != "resource":
+            continue
+        blockers: list[dict[str, str]] = []
+        for resource_key in definition(active_run["job_key"]).resource_keys:
+            for running_run in running_by_resource.get(resource_key, []):
+                visible_key = operator_job_key_for_execution(running_run["job_key"])
+                if visible_key and not any(item["id"] == visible_key for item in blockers):
+                    blockers.append({"id": visible_key, "name": operator_job_definition(visible_key).name})
+        active_run["resource_blockers"] = blockers
 
     def active_priority(run: dict) -> tuple[int, float]:
         rank = 0 if run["status"] == "running" else 1
@@ -8990,6 +9003,7 @@ def admin_jobs(request: HttpRequest) -> HttpResponse:
                 status_detail = active_run["status_detail"]
             latest_run_id = active_run["id"]
             latest_at = active_run["started_at"] or active_run["requested_at"]
+            latest_at_label = "Running since" if state == "running" else "Waiting since"
             rows_touched = active_run["rows_touched"]
             error = active_run["error"]
         elif latest:
@@ -9010,12 +9024,14 @@ def admin_jobs(request: HttpRequest) -> HttpResponse:
             )
             latest_run_id = latest["id"]
             latest_at = latest["completed_at"] or latest["started_at"] or latest["requested_at"]
+            latest_at_label = "Completed at" if state == "completed" else "Finished at"
         else:
             state = "not_run"
             status_label = "Not run yet"
             status_detail = ""
             latest_run_id = None
             latest_at = None
+            latest_at_label = ""
             rows_touched = None
             error = ""
 
@@ -9042,7 +9058,9 @@ def admin_jobs(request: HttpRequest) -> HttpResponse:
                 "status_detail": status_detail,
                 "capacity_label": active_run.get("capacity_label", "") if active_run else "",
                 "capacity_blockers": active_run.get("capacity_blockers", []) if active_run else [],
+                "resource_blockers": active_run.get("resource_blockers", []) if active_run else [],
                 "latest_at": latest_at,
+                "latest_at_label": latest_at_label,
                 "last_result": last_result if active_run else "",
                 "last_result_at": last_result_at if active_run else None,
                 "latest_run_id": latest_run_id,
