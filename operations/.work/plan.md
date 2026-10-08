@@ -1,9 +1,9 @@
-# Administration status correction (2026-10-08)
+# Operator-surface completion (2026-10-08)
 
 ## Status
 
-Complete — Jobs, Sources, and Services distinguish current operational state
-from historical deployment records and source-run transition history.
+Complete — Admin boundaries, actionable Jobs attention, and the simplified
+operator Dashboard are implemented as one coherent surface model.
 
 ## Goal and fixed decisions
 
@@ -14,6 +14,8 @@ Disabled notification Jobs remain visible as disabled configuration, and real
 failed Jobs remain visible for recovery.
 Services reports only live Scheduler and Worker runtimes; historical deployment
 instances belong to history, not current health.
+Because Services has no independent controls or operator workflow, its health
+signal belongs on Jobs and its old URL must remain safe for bookmarks.
 
 ## Scope, affected areas, and validation
 
@@ -24,6 +26,10 @@ instances belong to history, not current health.
 - Collapse Services to current runtime health and use operator-readable health
   messages; do not surface historical runtime rows as live failures.
 - Repair the Admin overview's AuditLog aggregation failure.
+- Remove Services from Admin navigation, redirect its legacy route to Jobs,
+  and add a compact Jobs system-health strip with direct diagnostic links.
+- Make Admin → Data use every enabled source binding, not the five-platform
+  aggregate used for high-level health roll-ups.
 - Validate focused Jobs tests, Django checks, template loading, compilation,
   and diff hygiene.
 
@@ -39,6 +45,13 @@ Jobs/Dashboard tests, Django checks, template loading, compilation, and diff
 hygiene pass.
 Services now displays one aggregate row for each current Scheduler and Worker
 rather than obsolete runtime instances.
+Services is now folded into Jobs and `/admin/services/` redirects safely. The
+Jobs status strip shows Scheduler/Worker state and routes specific schedule or
+recovery attention to its diagnostic section. Admin → Data lists every enabled
+source binding. The Dashboard has three distinct entry metrics (Estate, Issues,
+Data status), one actionable attention list, and the client map; the ambiguous
+change/activity briefing was removed. Focused Jobs/Dashboard tests, Django
+checks, template loading, compilation, and diff hygiene pass.
 
 ## Dashboard data snapshot expansion (2026-10-08)
 

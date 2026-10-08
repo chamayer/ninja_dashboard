@@ -1548,11 +1548,6 @@ def home(request: HttpRequest) -> HttpResponse:  # noqa: PLR0912, PLR0915
         ).count()
     )
     critical_issue_count = Finding.objects.filter(active_issue_filter, severity="critical").count()
-    changes_today = (
-        recent_patch_activity["installed"]
-        + recent_patch_activity["failed"]
-        + global_domain_stats["software"]["new_total"]
-    )
     kpis = [
         {
             "name": "Estate",
@@ -1565,16 +1560,6 @@ def home(request: HttpRequest) -> HttpResponse:  # noqa: PLR0912, PLR0915
             "value": f"{open_issue_count:,} open Issues",
             "detail": f"{critical_issue_count} critical · {attention_count} clients need attention",
             "href": reverse("findings_queue"),
-        },
-        {
-            "name": "Changes today",
-            "value": f"{changes_today:,}",
-            "detail": (
-                f"{recent_patch_activity['installed']:,} patches installed · "
-                f"{recent_patch_activity['failed']:,} patch failures · "
-                f"{global_domain_stats['software']['new_total']:,} new software reviews"
-            ),
-            "href": reverse("patching_queue"),
         },
         {
             "name": "Data status",
@@ -1623,11 +1608,6 @@ def home(request: HttpRequest) -> HttpResponse:  # noqa: PLR0912, PLR0915
             }
         )
     attention_items.sort(key=lambda item: ({"critical": 0, "high": 1, "medium": 2}.get(item["severity"], 3), item["label"]))
-    recent_changes = [
-        {"label": "Patches installed", "value": recent_patch_activity["installed"], "href": reverse("patching_queue")},
-        {"label": "Patch failures", "value": recent_patch_activity["failed"], "href": f"{reverse('patching_queue')}?type=patch_failing_repeatedly"},
-        {"label": "New software reviews", "value": global_domain_stats["software"]["new_total"], "href": f"{reverse('findings_queue')}?category=software"},
-    ]
 
     return render(
         request,
@@ -1642,7 +1622,6 @@ def home(request: HttpRequest) -> HttpResponse:  # noqa: PLR0912, PLR0915
             "clients_connected": clients_connected,
             "kpis": kpis,
             "attention_items": attention_items[:5],
-            "recent_changes": recent_changes,
             "client_rows": client_rows,
             "priority_counts": priority_counts,
             "attention_count": attention_count,
@@ -8802,7 +8781,21 @@ def _jobs_control_health() -> dict:
         and row.get("definition_digest") != definition(key).snapshot_digest()
     )
     if stale_schedules:
-        issues.append("Some schedules need to be brought up to date.")
+        labels = []
+        for key in stale_schedules:
+            visible_key = operator_job_key_for_execution(key)
+            if visible_key:
+                try:
+                    labels.append(operator_job_definition(visible_key).name)
+                    continue
+                except Exception:
+                    pass
+            labels.append(key.replace("-", " ").title())
+        issues.append(
+            f"{len(labels)} saved schedule{'s' if len(labels) != 1 else ''} use older Job settings: "
+            + ", ".join(labels)
+            + "."
+        )
 
     pool_rows = {
         row.get("resource_template"): row
@@ -8839,7 +8832,11 @@ def _jobs_control_health() -> dict:
             issues.append(f"No current Jobs {required_kind} heartbeat.")
 
     if int(result["summary"].get("contained_claims") or 0):
-        issues.append("A previous Job may still be using protected data. Review recovery.")
+        contained = int(result["summary"].get("contained_claims") or 0)
+        issues.append(
+            f"{contained} interrupted Job run{'s' if contained != 1 else ''} still hold protected data. "
+            "Review recovery before dependent Jobs can continue."
+        )
 
     result["issues"] = list(dict.fromkeys(issues))
     result["ok"] = not result["issues"]
@@ -9274,7 +9271,8 @@ def admin_jobs(request: HttpRequest) -> HttpResponse:
     }
     # Admin Health uses the Jobs diagnostic lifecycle totals.  Use those same
     # totals in this page header so the two pages describe the same Job runs.
-    control_summary = _jobs_control_health().get("summary", {})
+    jobs_health = _jobs_control_health()
+    control_summary = jobs_health.get("summary", {})
     for state, diagnostic_key in (
         ("running", "running_runs"),
         ("waiting", "waiting_runs"),
@@ -9282,6 +9280,23 @@ def admin_jobs(request: HttpRequest) -> HttpResponse:
     ):
         if diagnostic_key in control_summary:
             summary[state] = int(control_summary[diagnostic_key] or 0)
+    live_kinds = {
+        str(runtime.get("runtime_kind"))
+        for runtime in jobs_health["runtimes"]
+        if not runtime.get("stopped_at")
+        and (heartbeat := parse_datetime(str(runtime.get("heartbeat_at") or "")))
+        and timezone.now() - heartbeat <= timedelta(minutes=3)
+    }
+    job_system_attention = []
+    for issue in jobs_health["issues"]:
+        section = "coverage"
+        if "saved schedule" in issue:
+            section = "schedules"
+        elif "hold protected data" in issue:
+            section = "recovery_assessments"
+        job_system_attention.append(
+            {"detail": issue, "url": f"{reverse('admin_jobs_control_plane')}?section={section}"}
+        )
     if search_filter:
         jobs = [
             item
@@ -9321,6 +9336,9 @@ def admin_jobs(request: HttpRequest) -> HttpResponse:
             "active_refresh": refresh_setting,
             "refresh_seconds": refresh_seconds,
             "job_summary": summary,
+            "scheduler_current": "scheduler" in live_kinds,
+            "worker_current": "worker" in live_kinds,
+            "job_system_attention": job_system_attention,
             "refreshed_at": timezone.now(),
         },
     )
@@ -16387,49 +16405,8 @@ def device_merge(
 @login_required
 @require_admin
 def admin_services(request: HttpRequest) -> HttpResponse:
-    """Show deployment-owned Jobs services without exposing lifecycle controls."""
-    jobs_health = _jobs_control_health()
-    now = timezone.now()
-    live_by_kind: dict[str, list[dict]] = {}
-    for runtime in jobs_health["runtimes"]:
-        heartbeat = parse_datetime(str(runtime.get("heartbeat_at") or ""))
-        is_current = bool(
-            heartbeat
-            and not runtime.get("stopped_at")
-            and now - heartbeat <= timedelta(minutes=3)
-        )
-        if is_current:
-            live_by_kind.setdefault(str(runtime.get("runtime_kind") or "service"), []).append(
-                {**runtime, "heartbeat": heartbeat}
-            )
-
-    services = []
-    for kind in ("scheduler", "worker"):
-        current = sorted(
-            live_by_kind.get(kind, []), key=lambda runtime: runtime["heartbeat"], reverse=True
-        )
-        latest = current[0] if current else None
-        services.append(
-            {
-                "name": "Scheduler" if kind == "scheduler" else "Worker",
-                "instance_count": len(current),
-                "heartbeat_at": latest["heartbeat"] if latest else None,
-                "current": bool(latest),
-                "current_revision": bool(
-                    latest and latest.get("registry_digest") == registry_digest()
-                ),
-            }
-        )
-    return render(
-        request,
-        "admin_services.html",
-        {
-            "admin_group": "services",
-            "admin_tab": "services",
-            "jobs_health": jobs_health,
-            "services": services,
-        },
-    )
+    """Preserve the old Services URL after its health moved into Jobs."""
+    return redirect("admin_jobs")
 
 
 @login_required
@@ -16475,6 +16452,48 @@ def _admin_health_sources(now: datetime) -> tuple[list[dict], bool]:
         log.exception("Admin overview source-health query failed")
         sources_available = False
     return sources, sources_available
+
+
+def _configured_source_data_status(now: datetime) -> tuple[list[dict], bool]:
+    """Return binding-level source evidence for the administrative Data page."""
+    try:
+        with transaction.atomic(), connection.cursor() as cur:
+            cur.execute("SET LOCAL operations.tenant_id = 1")
+            cur.execute(
+                """
+                SELECT source.name, client.display_name, health.last_observed_at,
+                       health.last_success_at, health.last_run_ok, binding.schedule
+                  FROM operations.v_source_instance_health health
+                  JOIN operations.source_bindings binding
+                    ON binding.source_instance_id = health.id
+                   AND binding.tenant_id = health.tenant_id
+                  JOIN operations.source_instances instance ON instance.id = health.id
+                  JOIN operations.sources source ON source.id = instance.source_id
+             LEFT JOIN operations.clients client ON client.id = instance.client_id
+                 WHERE health.tenant_id = 1 AND binding.enabled AND instance.enabled
+                 ORDER BY source.name, client.display_name NULLS FIRST
+                """
+            )
+            rows = cur.fetchall()
+    except DatabaseError:
+        log.exception("Admin Data source-status query failed")
+        return [], False
+
+    sources = []
+    for source_name, client_name, observed_at, success_at, last_run_ok, schedule in rows:
+        received_at = success_at or observed_at
+        schedule_minutes = _source_schedule_minutes(schedule or "")
+        sources.append(
+            {
+                "name": source_name,
+                "client_name": client_name or "",
+                "observed_at": received_at,
+                "needs_attention": bool(
+                    last_run_ok is False or _source_is_stale(received_at, schedule_minutes, now)
+                ),
+            }
+        )
+    return sources, True
 
 
 def _admin_health_attention_items(
@@ -16528,15 +16547,6 @@ def _admin_health_attention_items(
                     "url_label": "Review sources",
                 }
             )
-    if not services_current:
-        attention_items.append(
-            {
-                "area": "Services",
-                "detail": "Scheduler or worker check-ins need review.",
-                "url_name": "admin_services",
-                "url_label": "Review services",
-            }
-        )
     if not system_health_available:
         attention_items.append(
             {
@@ -16611,11 +16621,7 @@ def _admin_health_snapshot(now=None) -> dict:
         if heartbeat and not runtime.get("stopped_at") and now - heartbeat <= timedelta(minutes=3):
             live_runtime_kinds.add(str(runtime.get("runtime_kind")))
     services_current = {"scheduler", "worker"}.issubset(live_runtime_kinds)
-    jobs_issues = [
-        issue
-        for issue in jobs_health["issues"]
-        if not issue.startswith("No current Jobs ")
-    ]
+    jobs_issues = jobs_health["issues"]
     system_health_available, system_health_count, system_findings = (
         _admin_health_system_findings()
     )
@@ -16634,7 +16640,6 @@ def _admin_health_snapshot(now=None) -> dict:
     domain_counts = (
         source_attention_count,
         len(jobs_issues),
-        0 if services_current else 1,
         system_health_count,
     )
     condition_count = sum(domain_counts)
@@ -16678,22 +16683,10 @@ def _admin_health_snapshot(now=None) -> dict:
             "url_label": "Review sources",
         },
         {
-            "label": "Services",
-            "count": 0 if services_current else 1,
-            "available": True,
-            "detail": (
-                "Scheduler and workers checking in."
-                if services_current
-                else "Scheduler or worker check-ins need review."
-            ),
-            "url_name": "admin_services",
-            "url_label": "Review services",
-        },
-        {
             "label": "System checks",
             "count": system_health_count,
             "available": system_health_available,
-            "detail": "Conditions not owned by Jobs, Sources, or Services.",
+            "detail": "Conditions not owned by Jobs or Sources.",
             "url_name": "findings_admin_health",
             "url_label": "Review Admin Health",
         },
@@ -16761,7 +16754,7 @@ def admin_data(request: HttpRequest) -> HttpResponse:
     active_issue_filter = Q(status__in=_FINDING_ACTIVE_STATUSES) & (
         Q(snoozed_until__isnull=True) | Q(snoozed_until__lt=now)
     )
-    sources, sources_available = _admin_health_sources(now)
+    sources, sources_available = _configured_source_data_status(now)
     current_source_count = sum(1 for source in sources if not source["needs_attention"])
     source_issue_count = AdminFinding.objects.filter(
         tenant_id=1,

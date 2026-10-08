@@ -6,7 +6,7 @@
 {% block content %}
 <div class="card">
     <h1>Admin Health</h1>
-    <p class="muted">Is Operations working as intended? This total includes Jobs, Sources, Services, and system checks.</p>
+    <p class="muted">Is Operations working as intended? This total includes Jobs, Sources, and system checks.</p>
     <p><strong>{{ health.overall_label }}.</strong> {{ health.overall_detail }}</p>
     {% if not condition_policy_available %}
     <div class="notice notice-warning" role="status">

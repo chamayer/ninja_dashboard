@@ -1,5 +1,20 @@
 # Operations deferred work backlog
 
+## Current operator-surface task list
+
+1. **Finish the Admin boundary correction** — completed in the active
+   Operator-surface completion plan.
+2. **Redesign the Operations Dashboard** — completed in the active
+   Operator-surface completion plan: Estate, Issues, Data status, attention,
+   and the client map are its only briefing elements.
+3. **Make Jobs attention actionable** — completed in the active
+   Operator-surface completion plan. Schedule and recovery attention now
+   identifies its affected schedules or held-run count and routes to the
+   matching diagnostic.
+
+The Dashboard task is intentionally separate from Dashboard maturity below;
+it is an information-architecture reset, not a business-metric enhancement.
+
 ## Conditions enforcement after shadow validation
 
 - Foundation/shadow is implemented under `apps/core/conditions/`; runbook:

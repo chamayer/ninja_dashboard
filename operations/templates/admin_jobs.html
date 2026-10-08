@@ -18,6 +18,8 @@
   .jobs-tools { display:flex; gap:.6rem; align-items:center; flex-wrap:wrap; }
   .jobs-tools a,.jobs-tools button,.jobs-action { padding:.4rem .65rem; border:1px solid var(--border); border-radius:4px; background:#fff; color:inherit; text-decoration:none; cursor:pointer; font-size:.82rem; line-height:1.25; }
   .jobs-summary { display:grid; grid-template-columns:repeat(4,minmax(9rem,1fr)); gap:.65rem; margin-bottom:1rem; }
+  .job-system { display:flex; gap:.8rem; align-items:center; flex-wrap:wrap; margin-bottom:.8rem; padding:.7rem .85rem; border:1px solid var(--border); border-radius:6px; background:var(--surface); font-size:.85rem; }
+  .job-system strong { margin-right:.15rem; }.job-system-ok { color:#15803d; font-weight:700; }.job-system-bad { color:#b91c1c; font-weight:700; }.job-system-attention { width:100%; margin:0; padding-left:1.1rem; color:var(--muted); }
   .jobs-summary a { display:block; padding:.7rem .8rem; border:1px solid var(--border); border-radius:6px; background:var(--surface); color:inherit; text-decoration:none; }
   .jobs-summary strong { display:block; font-size:1.35rem; }
   .jobs-summary span { color:var(--muted); font-size:.78rem; }
@@ -54,6 +56,13 @@
     <a href="{% url 'admin_jobs_control_plane' %}">Job settings</a>
   </div>
 </div>
+
+<section class="job-system" aria-label="Job system status">
+  <strong>Job system</strong>
+  <span class="{% if scheduler_current %}job-system-ok{% else %}job-system-bad{% endif %}">Scheduler {% if scheduler_current %}running{% else %}not checking in{% endif %}</span>
+  <span class="{% if worker_current %}job-system-ok{% else %}job-system-bad{% endif %}">Worker {% if worker_current %}running{% else %}not checking in{% endif %}</span>
+  {% if job_system_attention %}<ul class="job-system-attention">{% for item in job_system_attention %}<li><a href="{{ item.url }}">{{ item.detail }}</a></li>{% endfor %}</ul>{% endif %}
+</section>
 
 <div class="jobs-summary" aria-label="Latest Job summary">
   <a href="?status=attention"><strong>{{ job_summary.attention }}</strong><span>Failed</span></a>

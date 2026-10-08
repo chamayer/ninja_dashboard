@@ -15,7 +15,7 @@
   .dashboard-scope span { display: block; margin-top: 0.15rem; color: var(--muted); }
 
   .dashboard-fleet {
-    display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
+    display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
     margin-bottom: 0.8rem; overflow: hidden; background: var(--surface);
     border: 1px solid var(--border); border-radius: 7px;
   }
@@ -32,7 +32,7 @@
   .fleet-stat-note { margin-left: 0.3rem; color: var(--muted); font-size: 0.72rem; }
   .fleet-stat-detail { display: block; margin-top: 0.25rem; color: var(--muted); font-size: 0.68rem; line-height: 1.35; }
 
-  .dashboard-briefing { display:grid; grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr); gap:.65rem; margin-bottom:1rem; }
+  .dashboard-briefing { margin-bottom:1rem; }
   .briefing-card { padding:0; overflow:hidden; }
   .briefing-head { display:flex; justify-content:space-between; align-items:baseline; gap:1rem; padding:.8rem 1rem .6rem; border-bottom:1px solid var(--border); }
   .briefing-head h2 { margin:0; font-size:.95rem; }
@@ -149,7 +149,7 @@
 <div class="dashboard-heading">
   <div>
     <h1>Operations overview</h1>
-    <p>What needs attention, what changed, and where to go next.</p>
+    <p>Your current clients, Issues, and data status.</p>
   </div>
   <div class="dashboard-scope">
     <strong>Across all {{ total_clients }} clients</strong>
@@ -178,14 +178,6 @@
       {% for item in attention_items %}
       <li><span class="briefing-severity briefing-severity-{{ item.severity }}"></span><a href="{{ item.href }}">{{ item.label }}</a><span class="muted">{{ item.client }}{% if item.updated_at %} · {{ item.updated_at|timesince }} ago{% endif %}</span></li>
       {% empty %}<li class="muted">No current Issues need review.</li>{% endfor %}
-    </ul>
-  </article>
-  <article class="card briefing-card">
-    <div class="briefing-head"><h2>Since yesterday</h2><a href="{% url 'patching_queue' %}">Open patching →</a></div>
-    <ul class="briefing-list">
-      {% for item in recent_changes %}
-      <li><a href="{{ item.href }}">{{ item.label }}</a><span class="change-value">{{ item.value }}</span></li>
-      {% endfor %}
     </ul>
   </article>
 </section>

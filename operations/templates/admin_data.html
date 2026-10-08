@@ -69,7 +69,7 @@
         <tbody>
           {% for source in source_rows %}
           <tr>
-            <td>{{ source.name }}</td>
+            <td>{{ source.name }}{% if source.client_name %}<span class="muted"> · {{ source.client_name }}</span>{% endif %}</td>
             <td>{% if source.needs_attention %}<span class="data-state attention">Needs attention</span>{% else %}<span class="data-state current">Current</span>{% endif %}</td>
             <td>{% if source.observed_at %}{{ source.observed_at|date:"M j, Y, g:i A" }} ({{ source.observed_at|timesince }} ago){% else %}No data received{% endif %}</td>
             <td>{% if source.needs_attention %}<a href="{% url 'findings_queue' %}?category=data_collection&amp;type=collection_failures">Review Issue</a>{% else %}<a href="{% url 'sources_status' %}">Inspect source</a>{% endif %}</td>

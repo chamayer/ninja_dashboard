@@ -75,7 +75,7 @@ def test_jobs_use_safe_existing_controls():
     assert "Retry" in detail_template
 
 
-def test_admin_navigation_separates_jobs_services_health_and_settings():
+def test_admin_navigation_folds_services_into_jobs():
     base_template = Path("templates/base.html").read_text(encoding="utf-8")
     views = Path("apps/core/views.py").read_text(encoding="utf-8")
     overview_template = Path("templates/operations_admin_overview.html").read_text(
@@ -85,13 +85,13 @@ def test_admin_navigation_separates_jobs_services_health_and_settings():
     health_template = Path("templates/findings_admin_health.html").read_text(
         encoding="utf-8"
     )
-    services_template = Path("templates/admin_services.html").read_text(encoding="utf-8")
     settings_template = Path("templates/admin_settings.html").read_text(encoding="utf-8")
     data_template = Path("templates/admin_data.html").read_text(encoding="utf-8")
     urls = Path("config/urls.py").read_text(encoding="utf-8")
 
-    for label in ("Overview", "Data", "Sources", "Jobs", "Services", "Health", "Settings"):
+    for label in ("Overview", "Data", "Sources", "Jobs", "Health", "Settings"):
         assert f">{label}</a>" in base_template
+    assert ">Services</a>" not in base_template
     assert "Software decisions" not in base_template
     assert "admin_services" in urls
     assert "admin_settings" in urls
@@ -117,15 +117,13 @@ def test_admin_navigation_separates_jobs_services_health_and_settings():
     assert '"source-refresh:{binding_id}"' not in views
     assert views.count("health = _admin_health_snapshot") == 2
     assert 'finding_type__category__name="platform_health"' in views
-    assert "Deployment owns their lifecycle" in services_template
-    assert "Previous deployment instances are recorded as history" in services_template
-    assert 'for kind in ("scheduler", "worker")' in views
-    assert "Some schedules need to be brought up to date." in views
-    assert "A previous Job may still be using protected data." in views
+    assert 'return redirect("admin_jobs")' in views
+    assert "Job system" in jobs_template
+    assert "saved schedule" in views
+    assert "hold protected data" in views
     assert "Django Admin" in settings_template
     assert "What Operations has received" in data_template
     assert "Inspect sources" in data_template
     assert "Review Issues" in data_template
     assert "def admin_data" in views
-    get_template("admin_services.html")
     get_template("admin_settings.html")
