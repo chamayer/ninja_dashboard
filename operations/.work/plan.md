@@ -1,3 +1,57 @@
+# Jobs stabilization and design reconciliation (2026-10-09)
+
+## Status
+
+Complete — the current execution model, its checked inventory, and the
+post-collection contracts now agree for the tenant-1 Jobs boundary.
+
+## Goal and fixed decisions
+
+Jobs is complete for the intentionally single-tenant deployment boundary when
+its durable design, implementation map, and operator health signals agree.
+This is a stabilization pass, not another Jobs redesign or broad test program.
+
+- ADR-0027 will describe the implemented source-refresh presentation: Sources
+  owns configuration and schedules; Jobs shows independently controllable,
+  source-bound refresh Runs alongside Jobs without treating each as a new
+  definition.
+- The checked inventory is the current executable-path map. Retired
+  source-demand paths must not remain as required Jobs behavior.
+- A post-collection projection is either required for the source result or
+  optional with a durable administrator health signal. It may not be only a
+  container-log exception.
+- The tenant-1 execution boundary remains intentional and out of scope.
+
+## Scope
+
+- Reconcile ADR-0027 and the execution inventory with the current source model.
+- Replace the obsolete source-demand assertion and restore inventory coverage.
+- Make optional derived-projection failures durable and visible to Admin Health
+  without falsely failing successful source collection.
+- Run a small focused contract suite and inspect live Jobs health after GitOps.
+
+## Current checkpoint
+
+The source-to-tenant workflow fix is live (`0272`) and has produced no
+workflow-admission errors or worker interruptions in the most recent 45-minute
+log window. Review found the execution inventory is stale, one test still
+asserts retired source-demand behavior, and optional projection failures in
+`ingest/derived.py` are only logged. Next: trace the existing Admin Health
+condition authority and implement the smallest durable projection-failure
+signal.
+
+The inventory has been regenerated from its checked discovery routine and the
+obsolete source-demand assertion now verifies that the retired worker path is
+absent. Migration `0273` repairs the two current derived-projection defects:
+relationship validation no longer reads a `status` column from tables that do
+not have one, and candidate attachment cannot retain a referenced entity of
+the wrong class. Focused inventory, source-workflow, migration, and
+retired-path tests passed (11), as did Django checks and diff hygiene. Next:
+commit and push, let GitOps apply `0273`, then confirm the source refresh and
+Jobs worker no longer report those projection or workflow failures.
+
+---
+
 # Source-to-analysis workflow scope correction (2026-10-09)
 
 ## Status

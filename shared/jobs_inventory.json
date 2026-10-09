@@ -100,30 +100,6 @@
         "file": "ingest/main.py",
         "owner": "_Handler.do_GET",
         "route": "/run/sources",
-        "match": "comparison"
-      },
-      {
-        "file": "ingest/main.py",
-        "owner": "_Handler.do_GET",
-        "route": "/run/sources/enqueue",
-        "match": "comparison"
-      },
-      {
-        "file": "ingest/main.py",
-        "owner": "_Handler.do_GET",
-        "route": "/run/sources/enqueue?",
-        "match": "startswith"
-      },
-      {
-        "file": "ingest/main.py",
-        "owner": "_Handler.do_GET",
-        "route": "/run/sources/queue",
-        "match": "comparison"
-      },
-      {
-        "file": "ingest/main.py",
-        "owner": "_Handler.do_GET",
-        "route": "/run/sources/demand/",
         "match": "startswith"
       },
       {
@@ -165,13 +141,7 @@
       {
         "file": "ingest/main.py",
         "owner": "_Handler.do_POST",
-        "route": "/run/sources/enqueue",
-        "match": "comparison"
-      },
-      {
-        "file": "ingest/main.py",
-        "owner": "_Handler.do_POST",
-        "route": "/run/sources/enqueue?",
+        "route": "/run/sources",
         "match": "startswith"
       },
       {
@@ -291,6 +261,18 @@
       {
         "file": "operations/apps/core/views.py",
         "owner": "",
+        "id": "source-refresh",
+        "name": "Source refresh",
+        "category": "source ingest",
+        "endpoint": "",
+        "status_key": "source.refresh",
+        "status_source": "run_log_like",
+        "description": "Collect current data from one configured source.",
+        "run_all": false
+      },
+      {
+        "file": "operations/apps/core/views.py",
+        "owner": "",
         "id": "patches",
         "name": "Ninja source cycle",
         "category": "source ingest",
@@ -314,12 +296,12 @@
         "file": "operations/apps/core/views.py",
         "owner": "",
         "id": "documentation-observations",
-        "name": "Documentation observations",
+        "name": "Hudu records",
         "category": "source ingest",
         "endpoint": "run/sources/enqueue",
         "status_key": "source.Hudu",
         "status_source": "run_log_like",
-        "description": "Refresh documentation records from Hudu.",
+        "description": "Refresh Hudu CMDB records.",
         "run_all": false
       },
       {
@@ -713,7 +695,7 @@
         "file": "ingest/operator_job_queue.py",
         "owner": "_execute",
         "key": "patch-classify",
-        "expression": "('Classifying patch state', lambda: main.patch_classify(tenant_id=1))"
+        "expression": "('Classifying changed patch state', lambda: main.patch_classify(tenant_id=1, incremental=True))"
       },
       {
         "file": "ingest/operator_job_queue.py",
@@ -767,7 +749,7 @@
         "file": "ingest/operator_job_queue.py",
         "owner": "_execute",
         "key": "documentation-observations",
-        "expression": "('Collecting documentation observations', lambda: main.run_documentation_observations_once())"
+        "expression": "('Collecting Hudu records', lambda: main.run_documentation_observations_once())"
       },
       {
         "file": "ingest/operator_job_queue.py",
@@ -1053,6 +1035,21 @@
         "file": "ingest/main.py",
         "owner": "_Handler._handle_agent_compliance_action._respond_with_refresh",
         "expression": "schedule_agent_compliance_evaluate(reason)"
+      },
+      {
+        "file": "ingest/operator_job_queue.py",
+        "owner": "_run_source_refresh",
+        "expression": "main.refresh_after_collection(f'{source_label} source refresh')"
+      },
+      {
+        "file": "ingest/source_run_queue.py",
+        "owner": "process_entry",
+        "expression": "refresh_after_collection(f'on-demand {df} collection')"
+      },
+      {
+        "file": "ingest/source_run_queue.py",
+        "owner": "enqueue_and_run",
+        "expression": "enqueue(source, reason)"
       }
     ],
     "queues": [
@@ -1077,7 +1074,9 @@
       {
         "relation": "operations.operator_job_runs",
         "files": [
+          "ingest/operator_job_queue.py",
           "ingest/platform_findings.py",
+          "ingest/source_health.py",
           "operations/apps/core/views.py"
         ]
       },
@@ -1094,6 +1093,12 @@
           "ingest/source_actions.py",
           "operations/apps/core/conditions/reader.py",
           "operations/apps/core/views.py"
+        ]
+      },
+      {
+        "relation": "operations.source_run_queue",
+        "files": [
+          "ingest/source_run_queue.py"
         ]
       }
     ],
@@ -1140,6 +1145,7 @@
       {
         "file": "ingest/operator_job_queue.py",
         "relations": [
+          "operations.operator_job_runs",
           "operations.source_action_requests"
         ]
       },
@@ -1159,7 +1165,6 @@
       {
         "file": "ingest/platform_findings.py",
         "relations": [
-          "ninja_core.run_log",
           "operations.operator_job_runs",
           "operations.queue_registry"
         ]
@@ -1183,9 +1188,21 @@
         ]
       },
       {
+        "file": "ingest/source_health.py",
+        "relations": [
+          "operations.operator_job_runs"
+        ]
+      },
+      {
         "file": "ingest/source_observations.py",
         "relations": [
           "operations.run_log"
+        ]
+      },
+      {
+        "file": "ingest/source_run_queue.py",
+        "relations": [
+          "operations.source_run_queue"
         ]
       },
       {
@@ -1197,9 +1214,7 @@
       {
         "file": "operations/apps/core/views.py",
         "relations": [
-          "operations.operator_job_events",
           "operations.operator_job_runs",
-          "operations.run_log",
           "operations.source_action_requests"
         ]
       }
@@ -1219,7 +1234,7 @@
       },
       {
         "file": "ingest/patch_findings.py",
-        "sql": "INSERT INTO operations.run_log (id, tenant_id, kind, subject_ref, started_at, ended_at, ok, rows, error) VALUES (gen_random_uuid(), %s, 'patch_findings', '{}'::jsonb, %s, NOW(), %s, %s, %s)"
+        "sql": "INSERT INTO operations.run_log (id, tenant_id, kind, subject_ref, started_at, ended_at, ok, rows, error) VALUES (gen_random_uuid(), %s, 'patch_findings', jsonb_build_object('mode', %s), %s, NOW(), %s, %s, %s)"
       },
       {
         "file": "ingest/software_findings.py",

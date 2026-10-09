@@ -40,6 +40,12 @@ Consequences:
   services; and
 - a client/source/device selection is Run scope, not a new Job.
 
+Configured sources share the `source-refresh` Job definition, but each binding
+has its own schedule, Run scope, result, and safe control. Sources owns that
+configuration and evidence; Jobs may show each current source-bound Run so an
+operator can see and control all collection happening now. This is execution
+presentation, not a separate definition for every source.
+
 ## Durable model
 
 The minimum durable model is:
@@ -93,6 +99,11 @@ Waiting has one durable cause and one plain explanation:
 | Capacity | `The system is busy with this type of task.` |
 
 The interface never repeats the same fact as status, Stage, and detail.
+
+A completed source Run confirms its required collection contract. A projection
+that is required to make collected records usable fails that Run; an optional
+projection must have its own durable administrator health condition rather
+than being only a runtime-log exception.
 
 ## Requests, scheduling, and prerequisites
 
