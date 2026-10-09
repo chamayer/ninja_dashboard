@@ -2139,13 +2139,9 @@ def main() -> None:
     scheduler.start()
     log.info("Durable Jobs producer and control maintenance started")
 
-    if metabase_bootstrap_enabled():
-        try:
-            operator_job_queue.request_system_job("metabase-bootstrap", "startup")
-        except Exception:
-            log.exception("Could not admit the configured Metabase bootstrap Job")
-    else:
-        log.info("Metabase bootstrap capability is disabled")
+    # Metabase provisioning can change an external service. It is available
+    # only through the explicit governed endpoint, never at service startup.
+    log.info("Metabase bootstrap is manual-only")
 
     _READY.set()
     log.info("Ingest service ready")

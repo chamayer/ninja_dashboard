@@ -632,7 +632,7 @@ _RAW_DEFINITIONS = (
     JobDefinition(
         "metabase-bootstrap",
         "Metabase dashboard bootstrap",
-        "Provision the configured Metabase dashboards after service startup or an explicit request.",
+        "Provision the configured Metabase dashboards after an explicit request.",
         "maintenance",
         "service",
         "",

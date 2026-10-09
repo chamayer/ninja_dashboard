@@ -205,6 +205,7 @@ def test_registered_http_jobs_use_governed_admission_before_legacy_routes():
     assert "operator_job_queue.request_system_job(governed_job, self.path)" in main
     assert "SELECT {request_api}" in queue
     assert '"/bootstrap-metabase": "metabase-bootstrap"' in main
+    assert 'request_system_job("metabase-bootstrap", "startup")' not in main
     assert "threading.Thread(target=bootstrap_metabase" not in main
 
 
