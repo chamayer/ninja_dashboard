@@ -257,6 +257,9 @@ def test_registry_exposes_the_approved_pool_and_resource_policy():
     assert definition("software-classify-full").supersession_rank == 2
     assert definition("software-classify").supersession_rank == 3
     assert definition("software-classify").supersession_family == "software-classifier"
+    assert definition("resolver").snapshot_metadata()["recovery_mode"] == "replay_safe"
+    assert definition("patch-classify").snapshot_metadata()["recovery_mode"] == "replay_safe"
+    assert definition("platform-evaluate").snapshot_metadata()["recovery_mode"] == "replay_safe"
     assert definition("patches").capacity_keys == ()
     assert definition("patch-classify").capacity_keys == ("capacity:processing",)
     assert definition("software-classify").capacity_keys == ("capacity:processing",)

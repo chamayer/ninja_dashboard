@@ -704,6 +704,19 @@ REPLAY_SAFE_RECOVERY_EVIDENCE = MappingProxyType(
             "findings, and a read model from current source data. A later replay "
             "converges to the current installation and policy state and has no external mutation."
         ),
+        "resolver": (
+            "Record matching drains local Operations observations into canonical identity "
+            "links. A later replay converges to the current evidence and does not mutate "
+            "an external system."
+        ),
+        "patch-classify": (
+            "Patch-status evaluation reads local Ninja evidence and convergently updates "
+            "local findings. A later replay has no external mutation."
+        ),
+        "platform-evaluate": (
+            "Client-status evaluation reads local Operations evidence and convergently "
+            "updates local findings. A later replay has no external mutation."
+        ),
         "patches": (
             "The Ninja collection cycle only reads the vendor API and reconciles local "
             "source projections from the current response. A later replay converges to "
