@@ -949,21 +949,22 @@ _WORKFLOW_SUCCESSORS = MappingProxyType(
     {
         "source-refresh": (
             DependencyDefinition(
-                "patch-classify", "ninja.patch-snapshot", "ninja_source"
+                "patch-classify", "ninja.patch-snapshot", "ninja_source", "tenant"
             ),
             DependencyDefinition(
-                "resolver", "source.identity-observations", "identity_source"
+                "resolver", "source.identity-observations", "identity_source", "tenant"
             ),
             DependencyDefinition(
-                "cmdb-evaluate", "source.documentation-observations", "documentation_source"
+                "cmdb-evaluate", "source.documentation-observations", "documentation_source", "tenant"
             ),
             DependencyDefinition(
-                "intel-matcher", "source.reference-match-data", "reference_match_data"
+                "intel-matcher", "source.reference-match-data", "reference_match_data", "tenant"
             ),
             DependencyDefinition(
                 "software-classify-only",
                 "source.reference-software-data",
                 "reference_software_data",
+                "tenant",
             ),
         ),
         "patches": (

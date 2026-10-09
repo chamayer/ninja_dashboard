@@ -360,7 +360,11 @@ def _admit_workflow(
         request_identity = hashlib.sha256(
             f"workflow:{root_run_id}:{edge.dependent}:{edge.revision_name}".encode()
         ).hexdigest()
-        dependent_scope = root_scope_identity if edge.scope_mode == "inherit" else "tenant:1"
+        dependent_scope = (
+            root_scope_identity
+            if edge.scope_mode == "inherit"
+            else "tenant:1"
+        )
         cur.execute(
             f"SELECT {request_api}(%s, %s, %s, %s, %s, %s, NULL, %s::jsonb, %s::jsonb, %s)",
             (

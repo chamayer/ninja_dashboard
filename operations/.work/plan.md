@@ -1,3 +1,53 @@
+# Source-to-analysis workflow scope correction (2026-10-09)
+
+## Status
+
+Complete — declared source-to-tenant follow-up is now admitted and coalesced
+without falsely failing completed source collection.
+
+## Goal and fixed decisions
+
+Source refreshes are scoped to a configured source binding. Analysis and
+matching Jobs process tenant-wide data. A source refresh must be able to
+publish a declared tenant-wide follow-up without making the collection result
+look failed.
+
+- A source-refresh successor is explicitly tenant-scoped in the registry;
+  its later transitive successors inherit that tenant scope.
+- The dependency API permits this one declared source-binding-to-tenant
+  transition, while retaining exact same-scope enforcement for inherited
+  edges. It never permits an undeclared cross-scope dependency.
+- A coalesced tenant-wide successor receives every relevant source revision,
+  so collection is complete and analysis runs once after its inputs are ready.
+
+## Scope and validation
+
+- Update the immutable workflow definition metadata and admission scope
+  calculation.
+- Add a forward-only migration that validates the declared tenant transition.
+- Add registry/migration coverage, run focused Jobs tests and standard Django
+  checks, then commit and push for the automatic rollout. No manual deployment
+  or direct production queue mutation.
+
+## Current checkpoint and validation
+
+Production worker logs confirmed `Jobs revision dependency context is invalid`
+from source refresh completion. The active source-binding root attempted to
+attach to a coalesced tenant-wide successor; the existing API only permitted
+inherited same-scope edges.
+
+The source-refresh registry successors now explicitly use tenant scope. The
+new migration permits only that declared transition, checks the dependent is
+in the tenant scope, and leaves inherited edges exact-scope-only. Focused
+registry, worker, and migration tests passed (19); Django system checks,
+compilation, focused lint, and diff hygiene passed. `migrate --plan` could not
+complete locally because the workstation's SQLite migration history is far
+behind PostgreSQL and its console cannot render an older migration label.
+Next: commit and push, then let GitOps apply the forward-only migration and
+verify new source completions do not fail workflow admission.
+
+---
+
 # Jobs operator-status correction (2026-10-09)
 
 ## Status

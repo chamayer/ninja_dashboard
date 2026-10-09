@@ -171,6 +171,10 @@ def test_initial_workflow_edges_are_registered_and_acyclic():
             "reference_software_data",
         ),
     )
+    assert {
+        successor.scope_mode
+        for successor in definition("source-refresh").successors
+    } == {"tenant"}
     for item in definitions():
         for successor in item.successors:
             assert successor.scope_mode in {"inherit", "tenant"}
