@@ -1,4 +1,51 @@
-# Complete Jobs execution view (2026-10-08)
+# Jobs operator-status correction (2026-10-09)
+
+## Status
+
+Complete — the Jobs list now communicates only operator-relevant status and
+does not mislabel service restarts as source failures.
+
+## Goal and fixed decisions
+
+The Jobs list describes the current state and required action for an operator.
+It must not expose healthy Scheduler/Worker noise or internal recovery terms.
+
+- Scheduler/Worker are silent while healthy. A processing-service failure is
+  shown only when it prevents Jobs from starting, in plain language with its
+  diagnostic link.
+- Old saved schedule definitions and protected-claim recovery are administrator
+  diagnostics, not top-of-page operator alerts. Keep them in Jobs settings.
+- A worker restart that interrupts a handler is recorded as a durable failed
+  run, but rendered as “Will retry automatically” when its scheduled source
+  refresh can safely be requested again. It is not presented as a Hudu,
+  LogMeIn, or source failure and does not inflate the action-required count.
+- The technical error remains in run history; the list shows only the
+  operator-facing explanation and an optional immediate refresh action.
+
+## Scope and validation
+
+- Normalize interrupted-run presentation centrally for both registered Jobs
+  and source-refresh rows.
+- Hide the normal Job system strip; render a plain-language service warning
+  only when Jobs cannot be processed.
+- Update focused Jobs tests and validate the live Jobs page after GitOps.
+
+## Current checkpoint and validation
+
+The healthy Scheduler/Worker strip is gone. A service warning appears only
+when either required runtime is absent, with a direct link to its diagnostic.
+Saved-definition and protected-claim details remain in administrator settings.
+The durable run keeps its actual failed status in history, while the Jobs list
+recognizes a worker-restart interruption as “Will retry automatically” with a
+plain-language explanation and no action-required count.
+
+Validation passed: focused Jobs and Dashboard tests (21), Django checks,
+Python compilation, focused Ruff undefined/unused-symbol checks, and diff
+hygiene. Next: commit and push, then verify the live Jobs page after GitOps.
+
+---
+
+# Completed Jobs execution view (2026-10-08)
 
 ## Status
 

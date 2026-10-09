@@ -37,7 +37,7 @@
   .jobs-state { font-weight:700; }
   .jobs-state.running { color:#7c3aed; } .jobs-state.waiting { color:#a16207; }
   .jobs-state.ready { color:#1d4ed8; } .jobs-state.completed { color:#15803d; }
-  .jobs-state.failed { color:#b91c1c; } .jobs-state.cancelled,.jobs-state.not_run { color:#64748b; }
+  .jobs-state.failed { color:#b91c1c; } .jobs-state.cancelled,.jobs-state.not_run,.jobs-state.interrupted { color:#64748b; }
   .jobs-bulk { display:none; gap:.6rem; align-items:center; margin:.7rem 0; }
   .jobs-bulk.visible { display:flex; }
   .jobs-bulk button { padding:.4rem .65rem; border:1px solid var(--border); border-radius:4px; background:#fff; cursor:pointer; }
@@ -57,12 +57,12 @@
   </div>
 </div>
 
-<section class="job-system" aria-label="Job system status">
-  <strong>Job system</strong>
-  <span class="{% if scheduler_current %}job-system-ok{% else %}job-system-bad{% endif %}">Scheduler {% if scheduler_current %}running{% else %}not checking in{% endif %}</span>
-  <span class="{% if worker_current %}job-system-ok{% else %}job-system-bad{% endif %}">Worker {% if worker_current %}running{% else %}not checking in{% endif %}</span>
-  {% if job_system_attention %}<ul class="job-system-attention">{% for item in job_system_attention %}<li><a href="{{ item.url }}">{{ item.detail }}</a></li>{% endfor %}</ul>{% endif %}
+{% if job_system_attention %}
+<section class="job-system" aria-label="Job processing status">
+  <strong>Job processing needs attention</strong>
+  <ul class="job-system-attention">{% for item in job_system_attention %}<li><a href="{{ item.url }}">{{ item.detail }}</a></li>{% endfor %}</ul>
 </section>
+{% endif %}
 
 <div class="jobs-summary" aria-label="Latest Job summary">
   <a href="?status=attention"><strong>{{ job_summary.attention }}</strong><span>Failed</span></a>

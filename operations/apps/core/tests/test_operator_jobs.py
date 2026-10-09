@@ -2,6 +2,8 @@ from pathlib import Path
 
 from django.template.loader import get_template
 
+from apps.core.views import _interrupted_run_presentation
+
 
 def test_jobs_keep_durable_queue_and_terminal_step_contracts():
     queue = Path("../ingest/operator_job_queue.py").read_text(encoding="utf-8")
@@ -19,6 +21,18 @@ def test_jobs_keep_durable_queue_and_terminal_step_contracts():
     assert '"scope_identity": row[3]' in queue
     assert "child.scope_identity" in worker
     assert "Required follow-up work could not be scheduled" in worker
+
+
+def test_worker_restart_is_not_presented_as_a_source_failure():
+    assert _interrupted_run_presentation(
+        "failed",
+        "Jobs worker shutdown interrupted the handler; verify external and database effects.",
+    ) == (
+        "interrupted",
+        "Will retry automatically",
+        "The Jobs service restarted before this run finished. It will run again automatically.",
+    )
+    assert _interrupted_run_presentation("failed", "Hudu rejected the request") is None
 
 
 def test_jobs_present_one_list_detail_and_configuration_surface():
@@ -122,7 +136,8 @@ def test_admin_navigation_folds_services_into_jobs():
     assert views.count("health = _admin_health_snapshot") == 2
     assert 'finding_type__category__name="platform_health"' in views
     assert 'return redirect("admin_jobs")' in views
-    assert "Job system" in jobs_template
+    assert "Job processing needs attention" in jobs_template
+    assert "Scheduler {% if scheduler_current %}running" not in jobs_template
     assert "saved schedule" in views
     assert "hold protected data" in views
     assert "Django Admin" in settings_template

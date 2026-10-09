@@ -8826,6 +8826,7 @@ _JOBS_RECOVERY_DIAGNOSTIC_KEYS = frozenset(
 
 _MANAGED_SCHEDULE_REASON = "Managed by its operation entry point."
 _NO_MEASURABLE_TOTAL = "This job does not publish a measurable work total."
+_WORKER_RESTART_INTERRUPTION = "Jobs worker shutdown interrupted the handler"
 
 
 def _job_has_upstream_trigger(execution_keys: tuple[str, ...]) -> bool:
@@ -8854,6 +8855,17 @@ def _schedule_cadence_label(cadence: dict | None) -> str:
     if minutes % 60 == 0:
         return f"Every {minutes // 60} hours"
     return f"Every {minutes} minutes"
+
+
+def _interrupted_run_presentation(status: str, error: str) -> tuple[str, str, str] | None:
+    """Render a deployment interruption without calling the underlying work failed."""
+    if status not in {"failed", "stalled"} or _WORKER_RESTART_INTERRUPTION not in error:
+        return None
+    return (
+        "interrupted",
+        "Will retry automatically",
+        "The Jobs service restarted before this run finished. It will run again automatically.",
+    )
 
 
 def _job_schedule_presentation(
@@ -9060,6 +9072,11 @@ def _source_job_rows() -> list[dict]:
                 "",
                 "",
             )
+
+        interruption = _interrupted_run_presentation(status or "", error or "")
+        if interruption:
+            state, status_label, status_detail = interruption
+            latest_at_label = "Stopped at"
 
         schedule_minutes = _source_schedule_minutes(schedule or "")
         schedule_label = (
@@ -9649,6 +9666,12 @@ def admin_jobs(request: HttpRequest) -> HttpResponse:
             available=available,
             availability_label=availability_label,
         )
+        interruption = _interrupted_run_presentation(
+            latest["status"] if latest else "", error
+        )
+        if interruption:
+            state, status_label, status_detail = interruption
+            latest_at_label = "Stopped at"
         needs_attention = state == "failed"
         jobs.append(
             {
@@ -9723,14 +9746,21 @@ def admin_jobs(request: HttpRequest) -> HttpResponse:
         and timezone.now() - heartbeat <= timedelta(minutes=3)
     }
     job_system_attention = []
-    for issue in jobs_health["issues"]:
-        section = "coverage"
-        if "saved schedule" in issue:
-            section = "schedules"
-        elif "hold protected data" in issue:
-            section = "recovery_assessments"
+    missing_runtime_kinds = [
+        label
+        for kind, label in (("scheduler", "the Scheduler"), ("worker", "a Worker"))
+        if kind not in live_kinds
+    ]
+    if missing_runtime_kinds:
         job_system_attention.append(
-            {"detail": issue, "url": f"{reverse('admin_jobs_control_plane')}?section={section}"}
+            {
+                "detail": (
+                    "Jobs cannot start because "
+                    + " and ".join(missing_runtime_kinds)
+                    + " is not checking in."
+                ),
+                "url": f"{reverse('admin_jobs_control_plane')}?section=runtimes",
+            }
         )
     if search_filter:
         jobs = [
