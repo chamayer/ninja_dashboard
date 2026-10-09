@@ -15364,7 +15364,9 @@ def source_refresh_run(request: HttpRequest, binding_id: uuid.UUID) -> HttpRespo
         messages.success(request, f"{row[0]} refresh was requested.")
     else:
         messages.info(request, f"{row[0]} already has an active refresh.")
-    return redirect("sources_status")
+    # A source refresh is a Job Run, but source configuration lives on Sources.
+    # Keep the operator on the surface where the action was initiated.
+    return redirect("admin_jobs" if request.POST.get("return_to") == "jobs" else "sources_status")
 
 
 @login_required

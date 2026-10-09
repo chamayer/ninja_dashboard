@@ -132,6 +132,7 @@ def test_admin_navigation_folds_services_into_jobs():
     assert '"id": f"source-refresh:{binding_id}"' in views
     assert '"source_job_count": len(source_jobs)' in views
     assert "source_refresh_run" in jobs_template
+    assert 'name="return_to" value="jobs"' in jobs_template
     assert "job.detail_url" in jobs_template
     assert views.count("health = _admin_health_snapshot") == 2
     assert 'finding_type__category__name="platform_health"' in views

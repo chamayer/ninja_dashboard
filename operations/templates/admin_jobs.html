@@ -123,7 +123,7 @@
         {% if job.active_run %}
           <form method="post" action="{% url 'admin_job_cancel' job.active_run.id %}">{% csrf_token %}<button class="jobs-action" type="submit">{% if job.state == 'running' %}Request stop{% else %}Cancel{% endif %}</button></form>
         {% elif job.is_source %}
-          <form method="post" action="{% url 'source_refresh_run' job.binding_id %}">{% csrf_token %}<button class="jobs-action" type="submit">{% if job.needs_attention %}Retry{% else %}Refresh now{% endif %}</button></form>
+          <form method="post" action="{% url 'source_refresh_run' job.binding_id %}">{% csrf_token %}<input type="hidden" name="return_to" value="jobs"><button class="jobs-action" type="submit">{% if job.needs_attention %}Retry{% else %}Refresh now{% endif %}</button></form>
         {% elif job.needs_attention and job.latest_run_id %}
           <form method="post" action="{% url 'admin_job_retry' job.latest_run_id %}">{% csrf_token %}<button class="jobs-action" type="submit">Retry</button></form>
         {% elif job.schedule_label != 'Disabled' %}
