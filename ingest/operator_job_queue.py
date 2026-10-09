@@ -22,6 +22,7 @@ from ingest.config import settings
 from shared.jobs_registry import (
     REPLAY_SAFE_RECOVERY_EVIDENCE,
     definition,
+    definition_keys,
     definitions,
     legacy_job_definition_keys,
     registry_digest,
@@ -50,27 +51,9 @@ class JobExecutionResult:
     signals: tuple[str, ...] = ()
     result: dict[str, object] | None = None
 
-# Keep this independent from the registry so an omitted or extra dispatcher
-# handler prevents readiness instead of becoming an unreviewed live path.
-EXECUTABLE_JOB_KEYS = frozenset(
-    {
-        "patch-classify", "platform-evaluate", "cmdb-evaluate", "parity-check", "software-classify-only",
-        "software-classify-full", "resolver", "patches", "agent-observations",
-        "source-refresh",
-        "documentation-observations", "agent-compliance", "agent-compliance-evaluate",
-        "retention-history", "software-enqueue-orgs", "software-queue-drain",
-        "notifications-dispatch", "notifications-digest", "intel-nvd", "intel-cpe-dict",
-        "intel-kev", "intel-epss", "intel-matcher", "intel-winget", "intel-chocolatey",
-        "intel-capability", "intel-lolrmm", "intel-otx", "intel-abusech",
-        "intel-endoflife", "intel-category", "software-classify",
-        "source-actions",
-        "agent-compliance-review-digest",
-        "run-log-recovery",
-        "platform-health-evaluate",
-        "metabase-bootstrap",
-    }
-)
-validate_registry(executable_keys=EXECUTABLE_JOB_KEYS)
+# The registry is the executable catalog. `_execute` below is the one handler
+# resolver, and focused tests verify that every registry definition has one.
+validate_registry(executable_keys=definition_keys())
 
 
 def register_definition_snapshots() -> None:

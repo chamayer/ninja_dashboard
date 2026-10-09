@@ -51,36 +51,11 @@ def test_registry_rejects_missing_duplicate_and_unregistered_consumer_keys():
         validate_registry(scheduled_keys=(*scheduled_definition_keys(), "not-a-job"))
 
 
-def test_checked_scheduler_source_matches_registry_schedule_keys():
-    inventory = json.loads((ROOT / "shared" / "jobs_inventory.json").read_text(encoding="utf-8"))
-    scheduled = {
-        ast.literal_eval(record["options"]["args"])[0]
-        for record in inventory["evidence"]["schedules"]
-        if record["callable"] == "operator_job_queue.enqueue_automatic"
-    }
-    assert scheduled <= scheduled_definition_keys()
-    assert not scheduled
-    assert "source-demand" not in scheduled_definition_keys()
-
-
-def test_scheduler_parity_constant_exactly_matches_registered_schedules():
+def test_scheduler_has_no_second_schedule_catalog():
     main = (ROOT / "ingest" / "main.py").read_text(encoding="utf-8")
-    tree = ast.parse(main)
-    assigned = next(
-        node.value
-        for node in ast.walk(tree)
-        if isinstance(node, ast.Assign)
-        and any(
-            isinstance(target, ast.Name) and target.id == "SCHEDULED_OPERATOR_JOB_KEYS"
-            for target in node.targets
-        )
-    )
-
-    assert isinstance(assigned, ast.Call)
-    assert isinstance(assigned.args[0], ast.Set)
-    assert {
-        ast.literal_eval(element) for element in assigned.args[0].elts
-    } == scheduled_definition_keys()
+    assert "SCHEDULED_OPERATOR_JOB_KEYS" not in main
+    assert "reconcile_schedule_catalog()" in main
+    assert "source-demand" not in scheduled_definition_keys()
 
 
 def test_every_declared_automatic_schedule_has_one_cadence_contract():
@@ -183,24 +158,22 @@ def test_initial_workflow_edges_are_registered_and_acyclic():
 
 
 def test_checked_dispatcher_source_matches_registry_handler_keys():
-    inventory = json.loads((ROOT / "shared" / "jobs_inventory.json").read_text(encoding="utf-8"))
-    handlers = {record["key"] for record in inventory["evidence"]["handlers"]}
     queue = (ROOT / "ingest" / "operator_job_queue.py").read_text(encoding="utf-8")
     tree = ast.parse(queue)
-    assigned = next(
+    jobs = next(
         node.value
         for node in ast.walk(tree)
         if isinstance(node, ast.Assign)
         and any(
-            isinstance(target, ast.Name) and target.id == "EXECUTABLE_JOB_KEYS"
+            isinstance(target, ast.Name) and target.id == "jobs"
             for target in node.targets
         )
     )
 
-    assert isinstance(assigned, ast.Call)
-    assert isinstance(assigned.args[0], ast.Set)
-    executable = {ast.literal_eval(element) for element in assigned.args[0].elts}
-    assert handlers == executable == definition_keys()
+    assert isinstance(jobs, ast.Dict)
+    handler_keys = {ast.literal_eval(key) for key in jobs.keys}
+    assert handler_keys | {"software-classify"} == definition_keys()
+    assert "EXECUTABLE_JOB_KEYS" not in queue
 
 
 def test_both_runtime_consumers_validate_the_shared_registry():
@@ -208,10 +181,10 @@ def test_both_runtime_consumers_validate_the_shared_registry():
     main = (ROOT / "ingest" / "main.py").read_text(encoding="utf-8")
     views = (ROOT / "operations" / "apps" / "core" / "views.py").read_text(encoding="utf-8")
 
-    assert "validate_registry(executable_keys=EXECUTABLE_JOB_KEYS)" in queue
-    assert "scheduled_keys=SCHEDULED_OPERATOR_JOB_KEYS" in main
-    assert "_JOB_CATALOG: list[dict] = list(catalog_entries())" in views
-    assert 'validate_registry(catalog_keys=(entry["id"] for entry in _JOB_CATALOG))' in views
+    assert "validate_registry(executable_keys=definition_keys())" in queue
+    assert "SCHEDULED_OPERATOR_JOB_KEYS" not in main
+    assert "\n_JOB_CATALOG:" not in views
+    assert "validate_registry(catalog_keys=(item.key for item in definitions()))" in views
 
 
 def test_definition_registration_happens_after_database_initialization():

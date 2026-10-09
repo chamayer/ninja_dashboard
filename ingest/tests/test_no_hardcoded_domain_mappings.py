@@ -121,7 +121,6 @@ KNOWN: dict[str, str] = {
     "_ISSUE_PARAM_MAPPINGS": "BASELINE 2026-08-05 - not individually reviewed",
     "_ISSUE_TAGS": "EXEMPT UI/dashboard definition",
     "_ISSUE_TYPE_OPTIONS": "EXEMPT UI/dashboard definition",
-    "_JOB_CATALOG": "BASELINE 2026-08-05 - not individually reviewed",
     "_JUNK_MACS": "MIGRATE placeholder MAC detection; operator-tunable",
     "_LABELS": "EXEMPT UI/dashboard definition",
     "_LIFECYCLE_DIRECT_MODES": "BASELINE 2026-08-05 - not individually reviewed",

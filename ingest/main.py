@@ -85,25 +85,11 @@ from ingest.identity.resolver import drain_resolution as _drain_resolution
 from ingest import scope_selector as _scope_selector
 from ingest.patches import ingest as patches_ingest
 from ingest.summary_views import refresh_device_troubleshooting_signal
-from shared.jobs_registry import validate_registry
+from shared.jobs_registry import definition_keys, validate_registry
 
 log = logging.getLogger("ingest.main")
 _AGENT_COMPLIANCE_LOCK = threading.Lock()
 _PATCH_CYCLE_LOCK_ID = 6_803_904_731_027_441
-
-# Independent schedule declarations keep readiness fail-closed if a registry
-# schedule is added or removed without updating this producer.
-SCHEDULED_OPERATOR_JOB_KEYS = frozenset(
-    {
-        "agent-compliance", "agent-compliance-evaluate", "notifications-dispatch", "notifications-digest",
-        "retention-history", "software-enqueue-orgs", "software-queue-drain",
-        "intel-capability", "intel-category",
-        "software-classify-full",
-        "source-actions",
-        "run-log-recovery", "platform-health-evaluate",
-    }
-)
-
 
 def run_once() -> None:
     run_patching_once()
@@ -2107,10 +2093,9 @@ def main() -> None:
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
     )
     install_log_safety()
-    validate_registry(
-        executable_keys=operator_job_queue.EXECUTABLE_JOB_KEYS,
-        scheduled_keys=SCHEDULED_OPERATOR_JOB_KEYS,
-    )
+    # Schedules are declared by the registry and reconciled into the durable
+    # schedule catalog below. There is no second scheduler key list.
+    validate_registry(executable_keys=definition_keys())
 
     # Bind HTTP server FIRST so /healthz is reachable before any
     # potentially-slow startup work. Keeps the Docker HEALTHCHECK
@@ -2128,7 +2113,7 @@ def main() -> None:
         "scheduler",
         operator_job_queue.SCHEDULER_RUNTIME_ID,
         {
-            "definition_count": len(operator_job_queue.EXECUTABLE_JOB_KEYS),
+            "definition_count": len(definition_keys()),
             "leader_mode": "short_lived_advisory",
             "poll_seconds": 60,
         },

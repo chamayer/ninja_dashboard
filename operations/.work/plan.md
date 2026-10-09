@@ -1,54 +1,57 @@
-# Jobs stabilization and design reconciliation (2026-10-09)
+# Jobs catalog consolidation (2026-10-09)
 
 ## Status
 
-Complete — the current execution model, its checked inventory, and the
-post-collection contracts now agree for the tenant-1 Jobs boundary.
+In progress — consolidate the Jobs control plane around one registry and
+validate the deployed scheduler, worker, and active Runs without a manual
+deployment.
 
-## Goal and fixed decisions
+## Goal, scope, and fixed decisions
 
-Jobs is complete for the intentionally single-tenant deployment boundary when
-its durable design, implementation map, and operator health signals agree.
-This is a stabilization pass, not another Jobs redesign or broad test program.
+The Jobs registry is the only definition authority. A configured source is a
+scoped target of the one `source-refresh` Job, never another Job definition.
+Runs are factual execution history, and Issues are the existing actionable
+exception mechanism. Health is derived from those facts; it is not a separate
+catalog or page-owned status model.
 
-- ADR-0027 will describe the implemented source-refresh presentation: Sources
-  owns configuration and schedules; Jobs shows independently controllable,
-  source-bound refresh Runs alongside Jobs without treating each as a new
-  definition.
-- The checked inventory is the current executable-path map. Retired
-  source-demand paths must not remain as required Jobs behavior.
-- A post-collection projection is either required for the source result or
-  optional with a durable administrator health signal. It may not be only a
-  container-log exception.
-- The tenant-1 execution boundary remains intentional and out of scope.
+- Remove worker and scheduler key catalogs that duplicate the registry.
+- Remove the checked JSON inventory as an input/authority; retain focused
+  discovery only as a guard against unregistered execution paths.
+- Keep source bindings as source-specific configuration and show `Refresh
+  <source>` as the scoped execution of `source-refresh`.
+- Do not add a migration, alter production data, or manually deploy. Tenant 1
+  remains the intentionally current boundary.
 
-## Scope
+## Affected files and validation
 
-- Reconcile ADR-0027 and the execution inventory with the current source model.
-- Replace the obsolete source-demand assertion and restore inventory coverage.
-- Make optional derived-projection failures durable and visible to Admin Health
-  without falsely failing successful source collection.
-- Run a small focused contract suite and inspect live Jobs health after GitOps.
+- `shared/jobs_registry.py`, `ingest/operator_job_queue.py`, and
+  `ingest/main.py`: remove competing execution/schedule key lists.
+- `operations/apps/core/views.py`: consume registry definitions directly for
+  labels; preserve the existing one-row-per-configured-source presentation.
+- Jobs registry/inventory tests and ADR-0027: prove one catalog and document
+  the actual model.
+- Run focused registry, worker, inventory, and Operations Jobs tests plus
+  Django checks and diff hygiene. After an approved commit/push, verify
+  deployed scheduler/worker heartbeats, migration state, active Runs, and
+  recent worker errors through the read-only helper.
 
 ## Current checkpoint
 
-The source-to-tenant workflow fix is live (`0272`) and has produced no
-workflow-admission errors or worker interruptions in the most recent 45-minute
-log window. Review found the execution inventory is stale, one test still
-asserts retired source-demand behavior, and optional projection failures in
-`ingest/derived.py` are only logged. Next: trace the existing Admin Health
-condition authority and implement the smallest durable projection-failure
-signal.
+Confirmed duplicate authorities: `EXECUTABLE_JOB_KEYS` in the worker,
+`SCHEDULED_OPERATOR_JOB_KEYS` in the scheduler, and `jobs_inventory.json`.
+The current source-row projection already produces one operator-facing
+`Refresh Hudu`/`Refresh Ninja` row from a binding-scoped `source-refresh` Run;
+it must be retained rather than replaced by a second generic row. Next:
+remove the duplicate lists and replace inventory equality with registry-backed
+execution-path discovery.
 
-The inventory has been regenerated from its checked discovery routine and the
-obsolete source-demand assertion now verifies that the retired worker path is
-absent. Migration `0273` repairs the two current derived-projection defects:
-relationship validation no longer reads a `status` column from tables that do
-not have one, and candidate attachment cannot retain a referenced entity of
-the wrong class. Focused inventory, source-workflow, migration, and
-retired-path tests passed (11), as did Django checks and diff hygiene. Next:
-commit and push, let GitOps apply `0273`, then confirm the source refresh and
-Jobs worker no longer report those projection or workflow failures.
+The worker and scheduler key lists have been removed, and the static inventory
+has been deleted. Jobs detail labels now come straight from registry definitions;
+source bindings still project as one visible `Refresh <source>` scoped Run.
+Focused registry, discovery, and Jobs UI tests passed (22); Django checks,
+Python compilation, and diff hygiene passed. Next: commit and push the
+non-migration change, then use the read-only host helper to verify the deployed
+scheduler and worker and inspect current Jobs execution evidence.
 
 ---
 

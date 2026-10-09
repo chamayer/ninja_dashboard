@@ -42,7 +42,6 @@ from django.views.decorators.http import require_GET, require_POST
 from shared.jobs_registry import (
     EXECUTION_POOL_POLICIES,
     capability_state,
-    catalog_entries,
     definition,
     definition_keys,
     definitions,
@@ -8777,13 +8776,8 @@ def software_user_risk(request: HttpRequest) -> HttpResponse:
 
 _INGEST_BASE_URL = os.environ.get("INGEST_BASE_URL", "http://ingest:8090")
 
-# Static catalog of jobs surfaced on /admin/jobs/. Each row maps to an
-# existing /run/<slug> HTTP endpoint on the ingest container. Categories
-# keep the UI groupable; last-run status is looked up per-category with
-# a small helper query (intel jobs use intel_ingest_status; everything
-# else uses run_log).
-_JOB_CATALOG: list[dict] = list(catalog_entries())
-validate_registry(catalog_keys=(entry["id"] for entry in _JOB_CATALOG))
+# The shared registry is the catalog. Views only project it with live Runs.
+validate_registry(catalog_keys=(item.key for item in definitions()))
 
 _OPERATOR_JOB_CATALOG: list[dict] = [
     {
@@ -10292,7 +10286,7 @@ def _operator_job_runs(
                     "parent_run_id": detail[6],
                     "root_run_id": detail[7],
                 }
-    labels = {entry["id"]: entry["name"] for entry in _JOB_CATALOG}
+    labels = {item.key: item.display_name for item in definitions()}
     now = timezone.now()
 
     def result_label(status: str, rows_touched, error: str) -> str:

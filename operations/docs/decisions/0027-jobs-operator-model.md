@@ -23,6 +23,13 @@ ADR-0024 and ADR-0026 remain authoritative where they provide stricter
 durability, fencing, isolation, capacity, data-safety, and RLS guarantees.
 This record supersedes their operator terminology and organization model.
 
+`shared/jobs_registry.py` is the sole catalog authority for Jobs. It declares
+every executable definition, handler identity, lifecycle contract, scheduling
+policy, prerequisite, capacity boundary, data lock, and operator presentation.
+The scheduler, worker, and user interface consume that catalog; none retains a
+second list of Job keys. Discovery tests may inspect code for unregistered
+execution paths, but an inventory report is evidence, never another catalog.
+
 ## Job boundary
 
 Create a separate Job only when the task has an independently useful result,
@@ -46,6 +53,10 @@ configuration and evidence; Jobs may show each current source-bound Run so an
 operator can see and control all collection happening now. This is execution
 presentation, not a separate definition for every source.
 
+For example, `Refresh Hudu` is one source-bound Run of the internal
+`source-refresh` definition. Operators see and control `Refresh Hudu`; they do
+not see a second generic source-refresh Run alongside it.
+
 ## Durable model
 
 The minimum durable model is:
@@ -59,6 +70,12 @@ The minimum durable model is:
 | Run event | Append-only lifecycle and Stage evidence |
 | Capacity claim | Execution capacity held by a running Run |
 | Data lock | Protected data identity held by a running or contained Run |
+
+There is no independent health or source-status authority. The current source
+view is derived from source configuration and its scoped Runs. An actionable
+Jobs, source, or service problem is represented through the existing Issue
+mechanism. Dashboard, Jobs, Sources, and Admin Health project the same catalog,
+source configuration, Run facts, and Issues at different levels of detail.
 
 Executable handlers and safety constraints are code-owned. Tenant enablement,
 schedules, and reviewed capacity limits are data. Every editable value has an

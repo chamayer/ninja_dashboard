@@ -5,15 +5,12 @@ certify retry safety or prove the behavior of dynamic dispatch.
 """
 
 import ast
-import copy
-import json
 import re
 from pathlib import Path
 
-import pytest
+from shared.jobs_registry import definition_keys
 
 ROOT = Path(__file__).resolve().parents[4]
-INVENTORY_PATH = ROOT / "shared" / "jobs_inventory.json"
 RELATION = re.compile(r"\b(?:operations|ninja_core)\.[a-z_][a-z_0-9]*\b")
 EXCLUDED = {"tests", "migrations", "__pycache__"}
 
@@ -250,31 +247,17 @@ def discover(sources):
     return records
 
 
-def _assert_inventory_complete(inventory, expected):
-    assert inventory["evidence"] == expected
-    catalog = [entry["id"] for entry in expected["catalog"]]
-    handlers = [entry["key"] for entry in expected["handlers"]]
-    assert len(catalog) == len(set(catalog))
-    assert len(handlers) == len(set(handlers))
-    assert set(catalog) == set(handlers)
+def test_discovered_execution_paths_are_governed_by_the_registry():
+    """Discovery is a guardrail, not a second checked-in catalog."""
+    evidence = discover(_runtime_sources())
+    handlers = {entry["key"] for entry in evidence["handlers"]}
 
-
-@pytest.fixture(scope="module")
-def evidence():
-    return discover(_runtime_sources())
-
-
-def test_jobs_inventory_is_machine_checked(evidence):
-    _assert_inventory_complete(json.loads(INVENTORY_PATH.read_text(encoding="utf-8")), evidence)
-
-
-def test_each_inventory_category_rejects_omission(evidence):
-    for category, entries in evidence.items():
-        assert entries, category
-        omitted = copy.deepcopy(evidence)
-        omitted[category].pop()
-        with pytest.raises(AssertionError):
-            _assert_inventory_complete({"evidence": omitted}, evidence)
+    assert handlers == definition_keys()
+    assert not (ROOT / "shared" / "jobs_inventory.json").exists()
+    assert evidence["schedules"]
+    assert evidence["http_routes"]
+    assert evidence["threads"]
+    assert evidence["consumers"]
 
 
 def test_discovery_detects_independent_new_paths():
@@ -302,8 +285,7 @@ def work():
     )
     assert result["queues"][0]["relation"] == "operations.unseen_queue"
     assert result["startup_calls"] and result["admission_and_followup_calls"]
-    with pytest.raises(AssertionError):
-        _assert_inventory_complete({"evidence": discover({})}, result)
+    assert result["schedules"] and result["admission_and_followup_calls"]
 
 
 def test_comments_and_docstrings_are_not_executors():
