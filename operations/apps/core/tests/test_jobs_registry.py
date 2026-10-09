@@ -55,6 +55,8 @@ def test_scheduler_has_no_second_schedule_catalog():
     main = (ROOT / "ingest" / "main.py").read_text(encoding="utf-8")
     assert "SCHEDULED_OPERATOR_JOB_KEYS" not in main
     assert "reconcile_schedule_catalog()" in main
+    queue = (ROOT / "ingest" / "operator_job_queue.py").read_text(encoding="utf-8")
+    assert "jobs_disable_retired_tenant_schedules_v1" in queue
     assert "source-demand" not in scheduled_definition_keys()
 
 

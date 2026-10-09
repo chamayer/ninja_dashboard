@@ -211,11 +211,12 @@ def _schedule_enabled(job_key: str) -> tuple[bool, str]:
 
 
 def reconcile_schedule_catalog() -> bool:
-    """Reconcile every declared cadence before the durable producer runs."""
+    """Make durable tenant schedules exactly match the catalog declaration."""
     try:
         with db.transaction() as cur:
             cur.execute("SET LOCAL operations.tenant_id = 1")
-            for schedule in schedule_definitions():
+            schedules = schedule_definitions()
+            for schedule in schedules:
                 job = definition(schedule.job_key)
                 cadence = _schedule_cadence(schedule)
                 enabled, capability_reason = _schedule_enabled(job.key)
@@ -229,6 +230,14 @@ def reconcile_schedule_catalog() -> bool:
                     "SELECT operations.jobs_reconcile_schedule_v2(%s, %s, %s, %s, %s, %s::jsonb, %s, %s)",
                     (1, job.key, job.snapshot_digest(), "tenant:1", revision, json.dumps(cadence), enabled, capability_reason),
                 )
+            # A Job that now starts only after its prerequisite must not retain
+            # an old independent tenant schedule. The registry owns this
+            # lifecycle too; otherwise an obsolete schedule can both mislead
+            # health and create duplicate work.
+            cur.execute(
+                "SELECT operations.jobs_disable_retired_tenant_schedules_v1(%s, %s::text[])",
+                (1, [schedule.job_key for schedule in schedules]),
+            )
     except UndefinedFunction:
         # Operations owns Django migrations and can become ready after ingest.
         # The producer retries this idempotent registration before admission.

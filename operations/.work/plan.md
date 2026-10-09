@@ -53,6 +53,17 @@ Python compilation, and diff hygiene passed. Next: commit and push the
 non-migration change, then use the read-only host helper to verify the deployed
 scheduler and worker and inspect current Jobs execution evidence.
 
+The deployed catalog consolidation is live (`ed1a02d`): scheduler and worker
+are current and no Run created after rollout failed or stalled. Live health
+also exposed four obsolete enabled tenant schedules for Jobs that now start
+only from prerequisites. This is a catalog-lifecycle defect, not a valid
+operator warning, and can create duplicate admission. A forward-only `0274`
+migration now provides a restricted reconciliation API; the scheduler disables
+only undeclared tenant schedules. Focused checks passed (23) plus Django
+checks and diff hygiene. Next: commit/push `0274`, wait for automatic rollout,
+then confirm those schedules no longer affect Jobs health and inspect remaining
+contained data claims through the restricted diagnostics API.
+
 ---
 
 # Source-to-analysis workflow scope correction (2026-10-09)
