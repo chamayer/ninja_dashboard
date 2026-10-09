@@ -9213,6 +9213,7 @@ def _jobs_control_health() -> dict:
         key
         for key, row in schedules_by_key.items()
         if key in definition_keys()
+        and row.get("enabled")
         and row.get("definition_digest") != definition(key).snapshot_digest()
     )
     if stale_schedules:

@@ -139,6 +139,7 @@ def test_admin_navigation_folds_services_into_jobs():
     assert "Job processing needs attention" in jobs_template
     assert "Scheduler {% if scheduler_current %}running" not in jobs_template
     assert "saved schedule" in views
+    assert 'and row.get("enabled")' in views
     assert "hold protected data" in views
     assert "Django Admin" in settings_template
     assert "What Operations has received" in data_template

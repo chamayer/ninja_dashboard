@@ -64,6 +64,13 @@ checks and diff hygiene. Next: commit/push `0274`, wait for automatic rollout,
 then confirm those schedules no longer affect Jobs health and inspect remaining
 contained data claims through the restricted diagnostics API.
 
+`0274` is live and correctly disabled the four obsolete schedules. Admin Health
+was still counting disabled historical schedules as current, so the final
+read-model correction limits its revision warning to enabled schedules. Focused
+Jobs checks passed (19) plus Django checks and diff hygiene. Next: commit/push
+this display-only correction, verify Jobs health after automatic rollout, and
+report any remaining contained data claims as a separate safety condition.
+
 ---
 
 # Source-to-analysis workflow scope correction (2026-10-09)
