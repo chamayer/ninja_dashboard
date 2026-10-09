@@ -1,3 +1,118 @@
+# Jobs execution stabilization (2026-10-09)
+
+## Status
+
+In progress — complete the remaining live Jobs recovery and remove stale work
+that can no longer run under the accepted Jobs model. The Metabase reporting
+parity audit below is paused at the user's direction while Jobs is completed.
+
+## Goal, scope, and fixed decisions
+
+- A worker replacement is not a Job or source failure. Interrupted safe work
+  must recover through its reviewed recovery policy; ordinary later schedule
+  ticks must not be represented as a completed retry until they actually run.
+- The legacy queued `metabase-bootstrap` Run must be cancelled: bootstrap is
+  manual-only and it must never consume normal Jobs capacity.
+- Investigate workflow-admission failures from before the current worker
+  incarnation and verify that current definition snapshots and later workflow
+  admissions are healthy before considering the framework complete.
+- Do not use direct row updates, manual deployment, or manual Portainer
+  actions. Use only restricted Jobs APIs for any required live transition.
+
+## Current checkpoint and next action
+
+The current worker started cleanly at 2026-10-09 15:37 UTC after a deployment
+replacement and has no restart count or runtime error. It immediately
+reconciled four reviewed replay-safe contained Runs. Current definition
+snapshots for source refresh, matcher, classifier, patch classification,
+resolver, and platform evaluation are registered.
+
+An obsolete queued `metabase-bootstrap` Run from 2026-10-08 was cancelled via
+`operations.jobs_cancel_v1` with an administrator audit identity; it had never
+started and therefore caused no Metabase effect. One `software-classify-only`
+Run is actively progressing with a current heartbeat while another coalesced
+request properly waits for its protected write scope. A live, binding-scoped
+AlienVault OTX refresh then completed and admitted its required classifier
+follow-up successfully, proving the current source workflow is healthy.
+
+Retrying the historical matcher failure exposed a real API defect: retry
+lineage rejects a new Run when its immutable definition digest differs from
+the old failed Run. That makes the visible Retry control fail whenever a
+registry change repaired the underlying problem. The correction will retain
+the immutable prior digest, require the same tenant, Job key, and scope, and
+link the retry to the old Run while allowing the retry to execute the current
+registered definition. Forward-only migration `0276` now makes that correction
+and preserves the original same-Job/same-scope restrictions. Focused retry
+migration/Jobs checks passed (7), Django checks passed, and diff hygiene
+passed. Next: commit/push the migration, let GitOps apply it, retry the
+historical failure through the repaired path, and verify current execution
+health.
+
+---
+
+# Metabase-to-Operations reporting parity audit (2026-10-09)
+
+## Status
+
+In progress — establish card-level reporting parity for the live Metabase
+catalog before deciding which Operations displays to refine and which legacy
+surfaces to retire.
+
+## Goal, scope, and fixed decisions
+
+The audit proves where every live dashboard card is visibly available in
+Operations. It does not recreate Metabase card-for-card, change data models,
+or remove any dashboard while the evidence is incomplete.
+
+- Classify every card as **Displayed**, **Consolidated**, **Missing**, or
+  **Retire**; record its precise Operations destination where one exists.
+- Audit domains in order: Patching, Agent Compliance, then Inventory.
+- Patching goes first because it remains an active operator-facing collection
+  and Operations now has dedicated overview, evidence, trend, and activity
+  pages to verify.
+- Agent Compliance is second because it is legacy and disabled; the audit
+  establishes what must remain visible before its final retirement.
+- Inventory is last because all five live dashboards are already archived;
+  confirm that retirement rather than rebuilding it.
+- Treat data, execution, and Issue state as Operations authorities. Do not
+  add a parallel reporting calculation merely to imitate a legacy card.
+
+## Checklist
+
+- [ ] **Patching:** Ninja Command Center, Client Patch Review, Patch Evidence,
+  Device Detail, Device Work Queue, Patch Trends, and Activity Search; include
+  archived overall/device-status/utilities cards as explicit retirements.
+- [ ] **Agent Compliance:** Command Center, Devices, Org Review, Source
+  Health, Debug, Today, Review, Health, Customers, Device Drilldown, Alerts,
+  and Setup.
+- [ ] **Inventory:** Overview, Devices, Identity Review, Serial Quality, and
+  Source Records (all currently archived).
+- [ ] Produce a decision-ready matrix: live card, operator intent, exact
+  Operations page/URL, classification, and required follow-up.
+- [ ] Propose the smallest cohesive Operations refinements only for confirmed
+  Missing or insufficiently Consolidated cards.
+- [ ] Update the parity audit and retirement decision records after the owner
+  accepts the conclusions; implementation requires a separate approved scope.
+
+## Affected files and validation
+
+- `operations/docs/metabase-parity-audit.md` and a new compact card-level
+  matrix if needed; no product code in this audit phase.
+- Validate against the live Metabase API (dashboard/card metadata only) and
+  current Operations routes/templates. Never export dashboard query text,
+  credentials, or customer data.
+
+## Current checkpoint and next action
+
+Live inspection found 12 active Agent Compliance dashboards, seven active
+Ninja/Patching dashboards, and five archived Inventory dashboards. The
+existing repository audit is dashboard-level and stale: Operations now has
+native Patch Evidence, Patch Trends, and Patch Activity pages. Next: start the
+Patching card matrix, mapping every live card to a visible Operations surface
+or a justified retirement/gap.
+
+---
+
 # Jobs catalog consolidation (2026-10-09)
 
 ## Status
