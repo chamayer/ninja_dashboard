@@ -21,32 +21,30 @@ parity audit below is paused at the user's direction while Jobs is completed.
 
 ## Current checkpoint and next action
 
-The current worker started cleanly at 2026-10-09 15:37 UTC after a deployment
-replacement and has no restart count or runtime error. It immediately
-reconciled four reviewed replay-safe contained Runs. Current definition
-snapshots for source refresh, matcher, classifier, patch classification,
-resolver, and platform evaluation are registered.
+The retry-lineage correction is deployed in `417d56b`: a Retry now preserves
+the immutable old Run and uses the current registered definition when its Job
+key and scope still match. The obsolete queued `metabase-bootstrap` Run was
+cancelled through the restricted Jobs API; it had never started and caused no
+Metabase effect.
 
-An obsolete queued `metabase-bootstrap` Run from 2026-10-08 was cancelled via
-`operations.jobs_cancel_v1` with an administrator audit identity; it had never
-started and therefore caused no Metabase effect. One `software-classify-only`
-Run is actively progressing with a current heartbeat while another coalesced
-request properly waits for its protected write scope. A live, binding-scoped
-AlienVault OTX refresh then completed and admitted its required classifier
-follow-up successfully, proving the current source workflow is healthy.
+Live evidence on 2026-10-11 identified the remaining execution defect.
+Normal source collection finishes in minutes, but the worker restarted every
+time one contained child lost its durable claim, interrupting unrelated
+source Runs. The routine classifier also attempted an estate-wide first pass
+(585,138 installations across 4,759 devices) under one 90-minute Run; its
+existing device slicing was bypassed by broad intelligence targets. Historical
+full classifier Runs had the same unbounded shape.
 
-Retrying the historical matcher failure exposed a real API defect: retry
-lineage rejects a new Run when its immutable definition digest differs from
-the old failed Run. That makes the visible Retry control fail whenever a
-registry change repaired the underlying problem. The correction will retain
-the immutable prior digest, require the same tenant, Job key, and scope, and
-link the retry to the old Run while allowing the retry to execute the current
-registered definition. Forward-only migration `0276` now makes that correction
-and preserves the original same-Job/same-scope restrictions. Focused retry
-migration/Jobs checks passed (7), Django checks passed, and diff hygiene
-passed. Next: commit/push the migration, let GitOps apply it, retry the
-historical failure through the repaired path, and verify current execution
-health.
+The pending implementation isolates an ownership-lost child rather than
+restarting the supervisor; it keeps that Run contained while other claimed
+Jobs continue. It selects 25 complete device scopes per classifier Run,
+stores target and full-rebuild cursors durably, and requests exactly one
+coalesced continuation only after a batch commits. Migration `0277` adds the
+cursor state with tenant/RLS enforcement. Focused slicing, worker, registry,
+and topology checks passed (20); Django checks, lint, compilation, and diff
+hygiene passed. Next: commit/push, verify `0277` applied through GitOps, then
+inspect worker restarts, active Run durations, queue drain, and the first
+completed classifier batches with the read-only host helper.
 
 ---
 

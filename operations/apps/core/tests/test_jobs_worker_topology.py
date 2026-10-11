@@ -38,7 +38,8 @@ def test_worker_uses_only_fenced_v1_queue_apis():
     assert "record_runtime_heartbeat" in worker
     assert "stop_runtime" in worker
     assert "JobProgressRejected" in worker
-    assert "restarting supervisor" in worker
+    assert "isolating contained run" in worker
+    assert "ownership_lost" in worker
     assert "JobProgressRejected" in queue
 
 

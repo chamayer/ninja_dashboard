@@ -42,7 +42,11 @@ from shared.conditions.contracts import (
 log = logging.getLogger(__name__)
 
 _TENANT_ID = 1
-_INCREMENTAL_DEVICE_BATCH_SIZE = 250
+# A routine classification Run holds its finding scope for one complete device
+# batch.  This must remain small enough to commit well inside the Jobs timeout;
+# a broad source or intelligence change can legitimately make every device
+# eligible at once.
+_INCREMENTAL_DEVICE_BATCH_SIZE = 25
 
 # Fallback defaults for the software classifier. Every knob can be
 # overridden per-tenant via operations.evaluator_config rows keyed on
@@ -111,26 +115,21 @@ def classify(tenant_id: int = _TENANT_ID, *, incremental: bool = False) -> int:
     try:
         with db.pool.connection() as conn, conn.cursor() as cur:
             cur.execute(f"SET LOCAL operations.tenant_id = {tenant_id}")
-            incremental_scope = _incremental_scope(cur, tenant_id) if incremental else None
-            targeted_scope, target_ids = (
-                _reclassification_target_scope(cur, tenant_id) if incremental else ([], [])
-            )
-            if incremental and incremental_scope is not None:
-                incremental_scope = _merge_scopes(
-                    _bounded_incremental_scope(incremental_scope), targeted_scope
-                )
-            if incremental and incremental_scope == []:
+            selection = _incremental_selection(cur, tenant_id) if incremental else None
+            full_selection = _full_reconciliation_selection(cur, tenant_id) if not incremental else None
+            if incremental and selection == ([], [], []):
                 log.info("software_findings: no changed installations to classify")
                 return 0
             # An older schema can briefly be visible while Operations applies
             # this release's migration.  Full reconciliation is safe; claiming
             # an empty incremental scope would silently skip work.
-            if incremental and incremental_scope is None:
+            if incremental and selection is None:
                 log.warning("software_findings: incremental marker unavailable; running full reconciliation")
                 incremental = False
-            marker_scope = (
-                incremental_scope if incremental else _full_reconciliation_scope(cur, tenant_id)
+            incremental_scope, target_cursor_updates, consumed_target_ids = (
+                selection if incremental else (full_selection[0], [], [])
             )
+            marker_scope = incremental_scope
             scoped_device_ids = sorted({row[1] for row in incremental_scope or []})
             rules = _load_rules(cur)
             catalog = _load_catalog(cur, tenant_id)
@@ -492,12 +491,18 @@ def classify(tenant_id: int = _TENANT_ID, *, incremental: bool = False) -> int:
                 preserve_types.add("capability_review_candidate")
             _auto_resolve(
                 cur, tenant_id, emitted_keys, now, preserve_types,
-                device_ids=scoped_device_ids if incremental else None,
+                device_ids=scoped_device_ids,
             )
             if marker_scope is not None:
                 _mark_incremental_scope(cur, marker_scope)
-            if target_ids:
-                _consume_reclassification_targets(cur, tenant_id, target_ids)
+            if target_cursor_updates or consumed_target_ids:
+                _advance_reclassification_targets(
+                    cur, tenant_id, target_cursor_updates, consumed_target_ids
+                )
+            if not incremental and full_selection is not None:
+                _advance_full_reclassification(
+                    cur, tenant_id, full_selection[1], full_selection[2]
+                )
 
     except Exception as exc:
         error = str(exc)[:2000]
@@ -524,87 +529,133 @@ def classify(tenant_id: int = _TENANT_ID, *, incremental: bool = False) -> int:
 
 
 def incremental_pending_count(tenant_id: int = _TENANT_ID) -> int | None:
-    """Return the number of installations awaiting routine classification.
+    """Return the number of devices awaiting routine classification.
 
     ``None`` means the reviewed marker migration is not available yet, so the
     caller must describe the run as a safe full reconciliation instead.
     """
     with db.pool.connection() as conn, conn.cursor() as cur:
         cur.execute(f"SET LOCAL operations.tenant_id = {tenant_id}")
-        scope = _incremental_scope(cur, tenant_id)
-        if scope is None:
+        if not _incremental_markers_ready(cur):
             return None
-        targeted_scope, _target_ids = _reclassification_target_scope(cur, tenant_id)
-        return len(_merge_scopes(scope, targeted_scope))
+        target_cte = ""
+        params: tuple[object, ...] = (tenant_id,)
+        if _table_exists(cur, "operations.software_reclassification_targets") and _column_exists(
+            cur, "operations.software_reclassification_targets", "cursor_device_id"
+        ):
+            target_cte = """
+                UNION
+                SELECT DISTINCT installation.device_id
+                  FROM operations.software_reclassification_targets target
+                  JOIN operations.software_installations_current installation
+                    ON installation.tenant_id = target.tenant_id
+                   AND (installation.software_version_id = target.software_version_id
+                        OR (target.software_version_id IS NULL
+                            AND LOWER(installation.canonical_name) = target.canonical_name))
+                 WHERE target.tenant_id = %s AND target.consumed_at IS NULL
+                   AND (target.cursor_device_id IS NULL
+                        OR installation.device_id > target.cursor_device_id)
+            """
+            params = (tenant_id, tenant_id)
+        cur.execute(
+            f"""
+            SELECT count(*) FROM (
+                SELECT DISTINCT device_id
+                  FROM operations.software_installations_current
+                 WHERE tenant_id = %s
+                   AND (classifier_material_hash IS DISTINCT FROM material_hash
+                        OR classifier_active IS DISTINCT FROM
+                           (stale_since IS NULL AND deleted_at IS NULL))
+                {target_cte}
+            ) AS pending_devices
+            """,
+            params,
+        )
+        return int(cur.fetchone()[0])
 
 
-def _incremental_scope(cur, tenant_id: int) -> list[tuple] | None:
-    """Return immutable installation state requiring routine reconciliation."""
+def _incremental_markers_ready(cur) -> bool:
     required = ("classifier_material_hash", "classifier_active")
-    if not all(_column_exists(cur, "operations.software_installations_current", column)
-               for column in required):
-        return None
-    return _installation_scope(cur, tenant_id, changed_only=True)
-
-
-def _reclassification_target_scope(cur, tenant_id: int) -> tuple[list[tuple], list[uuid.UUID]]:
-    """Return installations affected by durable intelligence-change targets."""
-    if not _table_exists(cur, "operations.software_reclassification_targets"):
-        return [], []
-    cur.execute(
-        """
-        SELECT id, software_version_id, canonical_name
-          FROM operations.software_reclassification_targets
-         WHERE tenant_id = %s AND consumed_at IS NULL
-         ORDER BY queued_at, id
-        """,
-        (tenant_id,),
+    return all(
+        _column_exists(cur, "operations.software_installations_current", column)
+        for column in required
     )
-    targets = cur.fetchall()
-    if not targets:
-        return [], []
-    target_ids = [row[0] for row in targets]
-    version_ids = [row[1] for row in targets if row[1] is not None]
-    names = [row[2] for row in targets if row[1] is None]
-    cur.execute(
-        """
-        SELECT installation_uuid, device_id, material_hash,
-               (stale_since IS NULL AND deleted_at IS NULL) AS active
-          FROM operations.software_installations_current
-         WHERE tenant_id = %s
-           AND (software_version_id = ANY(%s::bigint[])
-                OR LOWER(canonical_name) = ANY(%s::text[]))
-        """,
-        (tenant_id, version_ids or [-1], names or ["__no_reclassification_target__"]),
-    )
-    return list(cur.fetchall()), target_ids
 
 
-def _merge_scopes(*scopes: list[tuple]) -> list[tuple]:
-    """Deduplicate installation scopes while preserving their current snapshot."""
-    return list({row[0]: row for scope in scopes for row in scope}.values())
+def _incremental_selection(
+    cur, tenant_id: int
+) -> tuple[list[tuple], list[tuple[uuid.UUID, uuid.UUID]], list[uuid.UUID]] | None:
+    """Select one durable device batch for changed and targeted software.
 
-
-def _bounded_incremental_scope(scope: list[tuple]) -> list[tuple]:
-    """Return complete device slices so routine reconciliation yields promptly.
-
-    A classifier finding can depend on every installed product on one device,
-    so a slice never separates installations from the same device.  Changed
-    rows outside the slice retain their marker mismatch and are selected by the
-    next coalesced incremental run.  Intelligence-triggered targets are not
-    sliced: they are explicit follow-up work and must be consumed together.
+    Material changes and intelligence targets share the same device-sized
+    boundary.  A target advances only after its selected devices commit, so a
+    broad intelligence update becomes successive short Runs rather than one
+    unbounded transaction.
     """
-    selected_devices: set[uuid.UUID] = set()
-    selected: list[tuple] = []
-    for row in scope:
-        device_id = row[1]
-        if device_id not in selected_devices:
-            if len(selected_devices) >= _INCREMENTAL_DEVICE_BATCH_SIZE:
-                continue
-            selected_devices.add(device_id)
-        if device_id in selected_devices:
-            selected.append(row)
-    return selected
+    if not _incremental_markers_ready(cur):
+        return None
+    target_table_ready = _table_exists(
+        cur, "operations.software_reclassification_targets"
+    ) and _column_exists(cur, "operations.software_reclassification_targets", "cursor_device_id")
+    target_cte = ""
+    if target_table_ready:
+        target_cte = """
+        UNION
+        SELECT DISTINCT installation.device_id
+          FROM operations.software_reclassification_targets target
+          JOIN operations.software_installations_current installation
+            ON installation.tenant_id = target.tenant_id
+           AND (installation.software_version_id = target.software_version_id
+                OR (target.software_version_id IS NULL
+                    AND LOWER(installation.canonical_name) = target.canonical_name))
+         WHERE target.tenant_id = %s AND target.consumed_at IS NULL
+           AND (target.cursor_device_id IS NULL
+                OR installation.device_id > target.cursor_device_id)
+        """
+    cur.execute(
+        f"""
+        WITH candidate_devices AS (
+            SELECT DISTINCT device_id
+              FROM operations.software_installations_current
+             WHERE tenant_id = %s
+               AND (classifier_material_hash IS DISTINCT FROM material_hash
+                    OR classifier_active IS DISTINCT FROM
+                       (stale_since IS NULL AND deleted_at IS NULL))
+            {target_cte}
+        )
+        SELECT device_id FROM candidate_devices ORDER BY device_id LIMIT %s
+        """,
+        (tenant_id, *( (tenant_id,) if target_table_ready else () ), _INCREMENTAL_DEVICE_BATCH_SIZE),
+    )
+    device_ids = [row[0] for row in cur.fetchall()]
+    if not device_ids:
+        return [], [], _empty_reclassification_targets(cur, tenant_id) if target_table_ready else []
+    # Classifying one selected device requires its complete installation set,
+    # not merely the changed row that put it in the batch.  Advancing the
+    # exact-state marker for unchanged rows is harmless and means a target-only
+    # batch has the same complete device boundary.
+    marker_scope = _installation_scope(cur, tenant_id, changed_only=False, device_ids=device_ids)
+    target_updates: list[tuple[uuid.UUID, uuid.UUID]] = []
+    if target_table_ready:
+        cursor = max(device_ids)
+        cur.execute(
+            """
+            SELECT DISTINCT target.id
+              FROM operations.software_reclassification_targets target
+              JOIN operations.software_installations_current installation
+                ON installation.tenant_id = target.tenant_id
+               AND (installation.software_version_id = target.software_version_id
+                    OR (target.software_version_id IS NULL
+                        AND LOWER(installation.canonical_name) = target.canonical_name))
+             WHERE target.tenant_id = %s AND target.consumed_at IS NULL
+               AND (target.cursor_device_id IS NULL
+                    OR installation.device_id > target.cursor_device_id)
+               AND installation.device_id = ANY(%s::uuid[])
+            """,
+            (tenant_id, device_ids),
+        )
+        target_updates = [(row[0], cursor) for row in cur.fetchall()]
+    return marker_scope, target_updates, []
 
 
 def _table_exists(cur, qualified_name: str) -> bool:
@@ -612,15 +663,160 @@ def _table_exists(cur, qualified_name: str) -> bool:
     return bool(cur.fetchone()[0])
 
 
-def _consume_reclassification_targets(cur, tenant_id: int, target_ids: list[uuid.UUID]) -> None:
+def _empty_reclassification_targets(cur, tenant_id: int) -> list[uuid.UUID]:
     cur.execute(
         """
-        UPDATE operations.software_reclassification_targets
-           SET consumed_at = now()
-         WHERE tenant_id = %s AND id = ANY(%s::uuid[]) AND consumed_at IS NULL
+        SELECT target.id
+          FROM operations.software_reclassification_targets target
+         WHERE target.tenant_id = %s AND target.consumed_at IS NULL
+           AND NOT EXISTS (
+               SELECT 1
+                 FROM operations.software_installations_current installation
+                WHERE installation.tenant_id = target.tenant_id
+                  AND (installation.software_version_id = target.software_version_id
+                       OR (target.software_version_id IS NULL
+                           AND LOWER(installation.canonical_name) = target.canonical_name))
+           )
         """,
-        (tenant_id, target_ids),
+        (tenant_id,),
     )
+    return [row[0] for row in cur.fetchall()]
+
+
+def _advance_reclassification_targets(
+    cur,
+    tenant_id: int,
+    cursor_updates: list[tuple[uuid.UUID, uuid.UUID]],
+    empty_target_ids: list[uuid.UUID],
+) -> None:
+    for target_id, cursor_device_id in cursor_updates:
+        cur.execute(
+            """
+            UPDATE operations.software_reclassification_targets
+               SET cursor_device_id = %s
+             WHERE tenant_id = %s AND id = %s AND consumed_at IS NULL
+               AND (cursor_device_id IS NULL OR cursor_device_id < %s)
+            """,
+            (cursor_device_id, tenant_id, target_id, cursor_device_id),
+        )
+    if empty_target_ids:
+        cur.execute(
+            """
+            UPDATE operations.software_reclassification_targets
+               SET consumed_at = now()
+             WHERE tenant_id = %s AND id = ANY(%s::uuid[]) AND consumed_at IS NULL
+            """,
+            (tenant_id, empty_target_ids),
+        )
+    cur.execute(
+        """
+        UPDATE operations.software_reclassification_targets target
+           SET consumed_at = now()
+         WHERE target.tenant_id = %s AND target.consumed_at IS NULL
+           AND target.cursor_device_id IS NOT NULL
+           AND NOT EXISTS (
+               SELECT 1
+                 FROM operations.software_installations_current installation
+                WHERE installation.tenant_id = target.tenant_id
+                  AND (installation.software_version_id = target.software_version_id
+                       OR (target.software_version_id IS NULL
+                           AND LOWER(installation.canonical_name) = target.canonical_name))
+                  AND installation.device_id > target.cursor_device_id
+           )
+        """,
+        (tenant_id,),
+    )
+
+
+def full_reclassification_pending(tenant_id: int = _TENANT_ID) -> bool:
+    """Return whether a bounded full reconciliation has another device batch."""
+    with db.pool.connection() as conn, conn.cursor() as cur:
+        cur.execute(f"SET LOCAL operations.tenant_id = {tenant_id}")
+        if not _table_exists(cur, "operations.software_full_reclassification_state"):
+            return False
+        cur.execute(
+            """
+            SELECT in_progress
+              FROM operations.software_full_reclassification_state
+             WHERE tenant_id = %s
+            """,
+            (tenant_id,),
+        )
+        row = cur.fetchone()
+        return bool(row and row[0])
+
+
+def _full_reconciliation_selection(
+    cur, tenant_id: int
+) -> tuple[list[tuple], uuid.UUID | None, bool]:
+    """Start or continue one bounded full-reconciliation device batch."""
+    if not _table_exists(cur, "operations.software_full_reclassification_state"):
+        # The migration and worker can overlap during a rollout.  Preserve the
+        # prior safe behavior for that brief window; later Runs use the durable
+        # cursor once the table is present.
+        return _full_reconciliation_scope(cur, tenant_id) or [], None, False
+    cur.execute(
+        """
+        INSERT INTO operations.software_full_reclassification_state (tenant_id, in_progress)
+        VALUES (%s, TRUE)
+        ON CONFLICT (tenant_id) DO UPDATE
+            SET in_progress = CASE
+                    WHEN operations.software_full_reclassification_state.in_progress THEN TRUE
+                    ELSE TRUE
+                END,
+                cursor_device_id = CASE
+                    WHEN operations.software_full_reclassification_state.in_progress
+                    THEN operations.software_full_reclassification_state.cursor_device_id
+                    ELSE NULL
+                END,
+                updated_at = now()
+        RETURNING cursor_device_id
+        """,
+        (tenant_id,),
+    )
+    cursor = cur.fetchone()[0]
+    cur.execute(
+        """
+        SELECT DISTINCT device_id
+          FROM operations.software_installations_current
+         WHERE tenant_id = %s
+           AND (%s::uuid IS NULL OR device_id > %s::uuid)
+         ORDER BY device_id
+         LIMIT %s
+        """,
+        (tenant_id, cursor, cursor, _INCREMENTAL_DEVICE_BATCH_SIZE),
+    )
+    device_ids = [row[0] for row in cur.fetchall()]
+    if not device_ids:
+        return [], None, True
+    return (
+        _installation_scope(cur, tenant_id, changed_only=False, device_ids=device_ids),
+        max(device_ids),
+        False,
+    )
+
+
+def _advance_full_reclassification(
+    cur, tenant_id: int, cursor_device_id: uuid.UUID | None, complete: bool
+) -> None:
+    if cursor_device_id is not None:
+        cur.execute(
+            """
+            UPDATE operations.software_full_reclassification_state
+               SET cursor_device_id = %s, in_progress = TRUE, updated_at = now()
+             WHERE tenant_id = %s
+            """,
+            (cursor_device_id, tenant_id),
+        )
+    elif complete:
+        cur.execute(
+            """
+            UPDATE operations.software_full_reclassification_state
+               SET cursor_device_id = NULL, in_progress = FALSE, updated_at = now()
+             WHERE tenant_id = %s
+            """,
+            (tenant_id,),
+        )
 
 
 def _full_reconciliation_scope(cur, tenant_id: int) -> list[tuple] | None:
@@ -632,7 +828,9 @@ def _full_reconciliation_scope(cur, tenant_id: int) -> list[tuple] | None:
     return _installation_scope(cur, tenant_id, changed_only=False)
 
 
-def _installation_scope(cur, tenant_id: int, *, changed_only: bool) -> list[tuple]:
+def _installation_scope(
+    cur, tenant_id: int, *, changed_only: bool, device_ids: list[uuid.UUID] | None = None
+) -> list[tuple]:
     where = """
            AND (
                classifier_material_hash IS DISTINCT FROM material_hash
@@ -646,8 +844,9 @@ def _installation_scope(cur, tenant_id: int, *, changed_only: bool) -> list[tupl
                (stale_since IS NULL AND deleted_at IS NULL) AS active
           FROM operations.software_installations_current
          WHERE tenant_id = %s {where}
+           AND (%s::uuid[] IS NULL OR device_id = ANY(%s::uuid[]))
         """,
-        (tenant_id,),
+        (tenant_id, device_ids, device_ids),
     )
     return list(cur.fetchall())
 

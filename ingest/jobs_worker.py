@@ -39,6 +39,7 @@ class _Child:
     scope_identity: str
     process: subprocess.Popen[str]
     progress: operator_job_queue.V1JobProgress
+    ownership_lost: bool = False
 
 
 def _request_stop(_signum: int, _frame: object) -> None:
@@ -113,6 +114,14 @@ def _shutdown_children(children: dict[uuid.UUID, _Child]) -> None:
     """
     for child in children.values():
         try:
+            if child.ownership_lost:
+                # The Jobs ledger already fenced this Run.  Do not let an
+                # orderly worker shutdown turn one contained Run into a
+                # second, misleading interruption.
+                if child.process.poll() is not None:
+                    child.process.stdout.read() if child.process.stdout is not None else ""
+                    child.process.wait()
+                continue
             if child.process.poll() is not None:
                 try:
                     _finish_child(child)
@@ -175,15 +184,26 @@ def run() -> int:
                 )
                 next_runtime_heartbeat = now + _HEARTBEAT_SECONDS
             for run_id, child in tuple(children.items()):
+                if child.ownership_lost:
+                    if child.process.poll() is not None:
+                        # A contained child may no longer finish its durable
+                        # Run.  Its result is deliberately discarded; the
+                        # durable containment record is the authoritative
+                        # recovery boundary.
+                        child.process.stdout.read() if child.process.stdout is not None else ""
+                        child.process.wait()
+                        log.warning("Jobs contained child exited: run=%s", child.run_id)
+                        del children[run_id]
+                    continue
                 try:
                     child.progress.heartbeat()
                 except operator_job_queue.JobProgressRejected:
-                    log.error(
-                        "Jobs child lost durable ownership; restarting supervisor: run=%s",
+                    child.ownership_lost = True
+                    log.warning(
+                        "Jobs child lost durable ownership; isolating contained run: run=%s",
                         child.run_id,
                     )
-                    _stopping = True
-                    break
+                    continue
                 except Exception:
                     log.exception("Jobs child heartbeat failed: run=%s", child.run_id)
                 if child.process.poll() is not None:

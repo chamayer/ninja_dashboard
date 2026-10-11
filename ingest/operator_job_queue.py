@@ -712,7 +712,10 @@ def _execute(job_key: str, progress: V1JobProgress) -> int | JobExecutionResult 
         otx,
         winget,
     )
-    from ingest.software_findings import incremental_pending_count
+    from ingest.software_findings import (
+        full_reclassification_pending,
+        incremental_pending_count,
+    )
 
     jobs = {
         "source-refresh": ("Collecting source information", lambda: _run_source_refresh(progress)),
@@ -813,10 +816,24 @@ def _execute(job_key: str, progress: V1JobProgress) -> int | JobExecutionResult 
         detail = (
             "Evaluating changed software installations only."
             if pending is None
-            else f"Evaluating {pending} changed software installation(s)."
+            else f"Evaluating changed software on {pending} device(s)."
         )
         progress.update("Classifying changed software", detail)
-        return int(jobs[job_key][1]())
+        rows = int(jobs[job_key][1]())
+        remaining = incremental_pending_count(tenant_id=1)
+        if remaining:
+            request_system_job("software-classify-only", "incremental classifier continuation")
+        return JobExecutionResult(
+            rows=rows,
+            result={"remaining_devices": remaining or 0, "continued": bool(remaining)},
+        )
+    if job_key == "software-classify-full":
+        progress.update("Rebuilding software status", "Processing the next device batch.")
+        rows = int(jobs[job_key][1]())
+        remaining = full_reclassification_pending(tenant_id=1)
+        if remaining:
+            request_system_job("software-classify-full", "full classifier continuation")
+        return JobExecutionResult(rows=rows, result={"continued": remaining})
     if job_key not in jobs:
         raise ValueError(f"Unknown registered job: {job_key}")
     stage, job = jobs[job_key]
