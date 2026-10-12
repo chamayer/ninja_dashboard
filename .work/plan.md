@@ -71,15 +71,15 @@ read model. Do not create a second source authority.
 The first release, `fa3ccf5`, is deployed: Dashboard warm server rendering
 fell from 6.9 s to 1.38 s, and the representative client overview fell from
 28.4 s to 4.08 s. The latter now has three bounded/single-pass reads rather
-than the previous repeated per-device exposure scan. Release `487e290` is
-also deployed: Dashboard/Admin Data source status now reads the durable
-source-refresh Run history, with platform health only as a legacy fallback.
-This retains the full 15-binding operator meaning without scanning current
-observations; the live Dashboard renders in 1.50 s warm and reports 5 of 15
-current. The five-current result is supported by current lifecycle data
-(queued/running refreshes and overdue successful runs), not a count mismatch.
-Next: restructure the Computer and user-exposure first views at their data
-boundaries, then remeasure every navigation destination.
+than the previous repeated per-device exposure scan. A post-release review
+found that `source_health_current` has five platform rows while 15 enabled
+source bindings use the generic `source-refresh` lifecycle; it is therefore
+not the authority for the Dashboard's binding count. The next local change
+uses the durable source-refresh Run history (with platform health only as a
+legacy fallback) for Dashboard/Admin Data source status, retaining the full
+15-binding operator meaning without scanning current observations. Next:
+release and measure that source-status change, then restructure the Computer
+and user-exposure first views at their data boundaries.
 
 ---
 

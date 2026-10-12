@@ -8548,17 +8548,6 @@ def software_user_risk(request: HttpRequest) -> HttpResponse:
     elif client_slugs:
         client_where = "AND FALSE"
 
-    try:
-        page = max(1, int(request.GET.get("page") or "1"))
-    except ValueError:
-        page = 1
-    page_size = 100
-    export_all = wants_csv(request)
-    result_limit = 1_000_000 if export_all else page_size
-    result_offset = 0 if export_all else (page - 1) * page_size
-    q_like = f"%{q_filter}%"
-    kind_like = f"%{kind_filter}%"
-
     sql = f"""
         WITH latest_user AS (
             SELECT ds.device_id AS ninja_device_id,
@@ -8651,49 +8640,26 @@ def software_user_risk(request: HttpRequest) -> HttpResponse:
             SELECT device_id, client_id, canonical_name, kind FROM finding_items
             UNION ALL
             SELECT device_id, client_id, canonical_name, kind FROM decision_items
-        ), filtered_items AS (
-            SELECT du.last_user,
-                   d.id AS device_id,
-                   d.canonical_hostname,
-                   c.slug AS client_slug,
-                   c.display_name AS client_name,
-                   ai.canonical_name,
-                   ai.kind
-            FROM device_user du
-            JOIN operations.devices d ON d.id = du.ops_device_id AND d.deleted_at IS NULL
-            JOIN operations.clients c ON c.id = d.client_id AND c.deleted_at IS NULL
-            JOIN all_items ai ON ai.device_id = d.id
-            WHERE d.tenant_id = 1
-              {client_where}
-              AND (%s = '' OR LOWER(du.last_user) LIKE %s)
-              AND (%s = '' OR LOWER(ai.kind) LIKE %s)
-        ), ranked_users AS (
-            SELECT last_user,
-                   COUNT(DISTINCT (device_id, LOWER(COALESCE(canonical_name, '')), kind))
-                       AS item_count
-            FROM filtered_items
-            GROUP BY last_user
-        ), paged_users AS (
-            SELECT last_user, item_count,
-                   COUNT(*) OVER () AS total_users,
-                   COALESCE(SUM(item_count) OVER (), 0) AS total_items
-            FROM ranked_users
-            ORDER BY item_count DESC, last_user
-            LIMIT %s OFFSET %s
         )
-        SELECT item.last_user, item.device_id, item.canonical_hostname,
-               item.client_slug, item.client_name, item.canonical_name,
-               item.kind, page.item_count, page.total_users, page.total_items
-        FROM filtered_items item
-        JOIN paged_users page ON page.last_user = item.last_user
-        ORDER BY page.item_count DESC, item.last_user, item.canonical_hostname,
-                 item.kind, item.canonical_name
+        SELECT du.last_user,
+               d.id AS device_id,
+               d.canonical_hostname,
+               c.slug AS client_slug,
+               c.display_name AS client_name,
+               ai.canonical_name,
+               ai.kind
+        FROM device_user du
+        JOIN operations.devices d ON d.id = du.ops_device_id AND d.deleted_at IS NULL
+        JOIN operations.clients c ON c.id = d.client_id AND c.deleted_at IS NULL
+        JOIN all_items ai ON ai.device_id = d.id
+        WHERE d.tenant_id = 1
+          {client_where}
+        ORDER BY du.last_user, d.canonical_hostname, ai.kind, ai.canonical_name
     """
 
-    # client_where appears 4× in the SQL (finding_items, both decision-items
-    # branches, and filtered_items) — client_params must repeat.
+    # client_where appears 4× in the SQL (finding_items, both decision_items
+    # branches, the final WHERE) — client_params must repeat.
     run_params = client_params * 4 if client_params else []
-    run_params.extend([q_filter, q_like, kind_filter, kind_like, result_limit, result_offset])
 
     with transaction.atomic(), connection.cursor() as cur:
         cur.execute("SET LOCAL operations.tenant_id = 1")
@@ -8701,22 +8667,7 @@ def software_user_risk(request: HttpRequest) -> HttpResponse:
         rows = cur.fetchall()
 
     per_user: dict = {}
-    user_count = 0
-    total_items = 0
-    for (
-        last_user,
-        device_id,
-        hostname,
-        client_slug,
-        client_name,
-        canonical,
-        kind,
-        _item_count,
-        total_users,
-        all_total_items,
-    ) in rows:
-        user_count = int(total_users)
-        total_items = int(all_total_items)
+    for last_user, device_id, hostname, client_slug, client_name, canonical, kind in rows:
         entry = per_user.setdefault(
             last_user,
             {
@@ -8752,6 +8703,8 @@ def software_user_risk(request: HttpRequest) -> HttpResponse:
         entry["device_list"] = sorted(entry["devices"].values(), key=lambda d: d["hostname"] or "")
         entry.pop("devices", None)
         users.append(entry)
+    users.sort(key=lambda u: (-u["item_count"], u["last_user"]))
+
     # Enrich items with category from SoftwareCatalog.
     all_ur_canonicals = {
         i["canonical_name"].lower()
@@ -8772,6 +8725,16 @@ def software_user_risk(request: HttpRequest) -> HttpResponse:
         for d in u["device_list"]:
             for item in d["items"]:
                 item["category"] = ur_catalog_cats.get((item["canonical_name"] or "").lower(), "")
+
+    # Apply user search and kind filter (post-fetch, small result set).
+    if q_filter:
+        users = [u for u in users if q_filter in (u["last_user"] or "").lower()]
+    if kind_filter:
+        for u in users:
+            for d in u["device_list"]:
+                d["items"] = [i for i in d["items"] if kind_filter in (i["kind"] or "").lower()]
+            u["device_list"] = [d for d in u["device_list"] if d["items"]]
+        users = [u for u in users if u["device_list"]]
 
     clients = Client.objects.filter(tenant_id=1, deleted_at__isnull=True).order_by("display_name")
 
@@ -8805,23 +8768,13 @@ def software_user_risk(request: HttpRequest) -> HttpResponse:
         request,
         "software_user_risk.html",
         {
-            "users": users,
-            "user_count": user_count,
-            "total_items": total_items,
+            "users": users[:500],
+            "user_count": len(users),
+            "total_items": sum(u["item_count"] for u in users),
             "clients": clients,
             "active_clients": client_slugs,
             "active_q": q_filter,
             "active_kind": kind_filter,
-            "page": page,
-            "has_previous": page > 1,
-            "has_next": not export_all and page * page_size < user_count,
-            "previous_page": page - 1,
-            "next_page": page + 1,
-            "page_query": urlencode(
-                [("client", slug) for slug in client_slugs]
-                + ([ ("q", q_filter) ] if q_filter else [])
-                + ([ ("kind", kind_filter) ] if kind_filter else [])
-            ),
             "software_tab": "user-risk",
         },
     )
