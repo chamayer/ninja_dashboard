@@ -15224,13 +15224,15 @@ def sources_status(request: HttpRequest) -> HttpResponse:
                        last_observed_at, current_record_count, active_record_count,
                        last_run_ok, last_run_ended_at, last_run_rows,
                        last_run_error, last_success_at, last_success_rows,
-                       binding.id, binding.schedule, source.kind, source.entity_type, source.capabilities
+                       binding.id, binding.schedule, source.kind, source.entity_type, source.capabilities,
+                       entity_type.entity_class_id
                   FROM operations.v_source_instance_health health
                   JOIN operations.source_bindings binding
                     ON binding.source_instance_id = health.id
                    AND binding.tenant_id = health.tenant_id AND binding.enabled
                   JOIN operations.source_instances instance ON instance.id = health.id
                   JOIN operations.sources source ON source.id = instance.source_id
+                  LEFT JOIN operations.entity_types entity_type ON entity_type.name = source.entity_type
                  WHERE health.tenant_id = %s
                  ORDER BY health.source_name, health.client_display_name NULLS FIRST, health.id
                 """,
@@ -15393,6 +15395,7 @@ def sources_status(request: HttpRequest) -> HttpResponse:
             last_run_error,
             last_success,
             last_success_rows, binding_id, schedule, source_kind, entity_type, source_capabilities,
+            entity_class,
         ) = row
         act = active.get(binding_id)
         latest = latest_refresh.get(binding_id)
@@ -15430,6 +15433,7 @@ def sources_status(request: HttpRequest) -> HttpResponse:
                 "schedule_minutes": schedule_minutes,
                 "source_kind": source_kind,
                 "entity_type": entity_type,
+                "entity_class": entity_class or "",
                 "purpose": (
                     source_capabilities.get("purpose", "")
                     if isinstance(source_capabilities, dict)
@@ -15472,7 +15476,7 @@ def sources_status(request: HttpRequest) -> HttpResponse:
         if group is None:
             group = (
                 "Device and client systems"
-                if source["entity_type"] in {"agent.rmm", "agent.edr", "agent.remote_access", "cmdb.asset"}
+                if source["entity_class"] in {"device", "asset"}
                 else "Other sources"
             )
         source_groups[group].append(source)
@@ -17624,11 +17628,14 @@ def _client_service_requirement_rows(client: Client) -> list[dict]:
         }
     # Make every supported service independently configurable, even when it
     # is not part of the inherited baseline.
+    # Each service can be required everywhere or on servers only; the
+    # evaluator applies a role-scoped override on top of an "all" one.
     for agent in Agent.objects.all().order_by("name"):
-        candidates.setdefault(
-            (agent.id, "all"),
-            {"agent": agent, "scope": "all", "baseline_required": False},
-        )
+        for scope in ("all", "server"):
+            candidates.setdefault(
+                (agent.id, scope),
+                {"agent": agent, "scope": scope, "baseline_required": False},
+            )
     for key, override in overrides.items():
         if key not in candidates and override.agent_id is not None:
             candidates[key] = {

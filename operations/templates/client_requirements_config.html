@@ -27,7 +27,7 @@
     {% for row in service_rows %}
       <tr>
         <td><strong>{{ row.agent.name }}</strong><br><span class="muted">{{ row.agent.entity_type }}</span></td>
-        <td>{% if row.scope == "all" %}All eligible devices{% else %}{{ row.scope|title }}{% endif %}</td>
+        <td>{% if row.scope == "all" %}All eligible devices{% elif row.scope == "server" %}Servers only{% else %}{{ row.scope|title }}{% endif %}</td>
         <td>{% if row.required %}<span class="badge badge-info">Required</span>{% else %}<span class="muted">Not required</span>{% endif %}</td>
         <td><form method="post" style="display:flex; gap:.45rem; align-items:center;">
             {% csrf_token %}<input type="hidden" name="action" value="override"><input type="hidden" name="agent_id" value="{{ row.agent.id }}"><input type="hidden" name="device_scope" value="{{ row.scope }}">

@@ -35,7 +35,7 @@ from typing import Any
 from psycopg.types.json import Json
 
 from ingest import db
-from ingest.connectors import hudu, logmein, screenconnect, sentinelone
+from ingest.connectors import hudu, logmein, ruon, screenconnect, sentinelone
 from ingest.identity import identity_entity_types
 from ingest.identity.fast_path import resolve_device_fast
 from ingest.identity.matching import load_identity_match_policies
@@ -58,6 +58,7 @@ _FETCHERS = {
     "SentinelOne": sentinelone.fetch,
     "ScreenConnect": screenconnect.fetch,
     "LogMeIn": logmein.fetch,
+    "R-U-ON": ruon.fetch,
     "Hudu": hudu.fetch,
 }
 

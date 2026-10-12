@@ -1,5 +1,71 @@
 # Active root implementation plan
 
+## Active plan — R-U-ON as an agent source
+
+**Status:** in implementation (started 2026-10-12). The navigation-performance
+plan below is a separate in-flight effort and is untouched by this work.
+
+**Goal:** register R-U-ON (agent-based uptime/performance monitoring) as an
+`agent.monitoring` source alongside LogMeIn and ScreenConnect, so it can be
+listed as a required agent in client requirement profiles, scoped to servers.
+
+**Scope:** a read-only collector; seed data for the source, entity type,
+platform alias, and `agents` row; labels. Out of scope: any R-U-ON delete or
+cleanup action (Operations does not write back to source platforms); choosing
+which clients require it (operator data, set in requirement profiles).
+
+**Affected files:** `ingest/connectors/ruon.py` (new),
+`ingest/source_observations.py`, `.env.example`,
+`operations/apps/core/templatetags/human_labels.py`,
+`operations/apps/core/views.py` (Sources grouping now reads entity class from
+`entity_types`; per-client Requirements page offers a "Servers only" row per
+service) and `operations/templates/client_requirements_config.html`, a new Operations
+migration after `0277`, `ingest/tests/test_ruon_connector.py` (new).
+
+**Decisions:**
+- Entity type `agent.monitoring`, identity signal, lifecycle `direct_contact`;
+  the agent installs on the machine, so it counts toward the agent universe.
+- Source kind `monitoring`; entity type lives on `operations.sources`, so no
+  per-kind code is needed beyond the fetcher (0092 rule).
+- Binding schedule `interval:240`, matching the other agent sources (0263).
+- Credentials: username/password come from env-var refs in the instance
+  config (`client_id_ref`, `client_secret_ref`); values never enter the repo.
+- R-U-ON group names have no stable id in the markup, so the normalized group
+  name is the container id (documented limitation).
+- Display times carry no timezone. `last_seen_at` stays null and the raw text
+  is preserved in `raw_data`. No guessing. A `SourceConfig.config` field for a
+  configurable timezone was proposed and put on hold by the operator.
+- Only `ServerOn` (machine) agents become observations; `ProcessOn` agents are
+  counted and logged per run (deferred: `.work/backlog.md`). Unmatched R-U-ON
+  groups surface through the existing `client_unattached_group` finding.
+- Source instance is seeded enabled; credentials come from `RUON_USERNAME` /
+  `RUON_PASSWORD` in the host `.env`. Bootstrap fallbacks are not extended
+  (they apply only before migration 0092).
+- Online state is taken from the State column only when it literally says
+  online or offline; any other value is kept raw with `is_online` null.
+
+**Validation plan:** parser unit tests on a synthetic overview fixture;
+`ruff`; `python manage.py check`; migration plan review; `git diff --check`.
+Live collection and requirement behavior are not verifiable locally.
+
+**Checkpoint:** implemented and locally validated, uncommitted. Migration is
+`0278_register_ruon_agent_source` (also sets entity class `device`,
+`requirement_eligible`, `consumes_license=false`, per 0101).
+
+**Validation performed:** `test_ruon_connector.py` 10 passed; related ingest
+tests 89 passed / 5 skipped; `manage.py check` clean; `makemigrations --check`
+no drift; ruff clean on new code (4 pre-existing findings in
+`human_labels.py` unchanged). Ingest/operations Dockerfiles copy whole
+directories, so no packaging change.
+
+**Not validated:** migration execution (no local Postgres); live login and
+overview parsing against the real console (fixture is built from the
+reference script's regexes, not a captured page); requirement-evaluation
+behavior for `agent.monitoring`.
+
+**Next action:** operator inputs (see response), then commit/push approval,
+which includes migration 0278 per repository rules.
+
 ## Active plan — Dashboard navigation performance
 
 **Status:** navigation baseline and first query attribution complete; focused

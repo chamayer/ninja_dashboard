@@ -1050,3 +1050,13 @@ class; that is separate work and carries no unscoped-entity requirement.
 - Do not retain completed milestone checklists.
 - Move an item into `.work/plan.md` only when approved as active cross-service
   work.
+
+## R-U-ON process monitors (ProcessOn)
+
+- **Context:** the R-U-ON collector (`ingest/connectors/ruon.py`) turns only
+  `ServerOn` agents (machine monitoring) into observations. `ProcessOn` agents
+  (process monitoring; 4 of 655 on 2026-10-12) are counted and logged each run
+  but not stored, because a process monitor is not a device.
+- **Gap:** no operator-visible surface for them yet (nothing-hidden rule). Needs
+  a non-identity entity type and its own stream or source.
+- **Revisit when:** someone needs process-monitor coverage in Operations.
