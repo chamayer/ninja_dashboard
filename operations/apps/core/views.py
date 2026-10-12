@@ -56,6 +56,7 @@ from shared.jobs_registry import (
     validate_registry,
     workflow_edges,
 )
+from shared.patch_compliance import COMPLIANCE_MISSING_STATUSES, excluded_patch_categories
 
 from . import capability as capability_evidence
 from . import category as category_evidence
@@ -11383,9 +11384,14 @@ def patching_queue(request: HttpRequest) -> HttpResponse:
     status_filter = request.GET.get("status", "active")
     client_filter = _multi("client")
     role_filter = request.GET.get("role", "")
+    device_type_filter = request.GET.get("device_type", "").strip()
+    os_family_filter = request.GET.get("os_family", "").strip()
     _ROLE_CHOICES = ("server", "workstation", "unknown")
     if role_filter and role_filter not in _ROLE_CHOICES:
         role_filter = ""
+    valid_device_types = {value for value, _label in Device.DeviceType.choices}
+    if device_type_filter not in valid_device_types:
+        device_type_filter = ""
 
     # Resolve client slugs → ids for downstream population + drilldown
     # SQL. Multi-select supported (comma-separated).
@@ -11474,6 +11480,12 @@ def patching_queue(request: HttpRequest) -> HttpResponse:
     if role_filter:
         pop_where.append("device_role = %s")
         pop_params.append(role_filter)
+    if device_type_filter:
+        pop_where.append("device_type = %s")
+        pop_params.append(device_type_filter)
+    if os_family_filter:
+        pop_where.append("os_family = %s")
+        pop_params.append(os_family_filter)
     pop_sql = (
         "SELECT COUNT(*) AS total,\n"
         "       COUNT(*) FILTER (WHERE effective_patching_scope = 'Included') AS in_scope,\n"
@@ -11506,12 +11518,18 @@ def patching_queue(request: HttpRequest) -> HttpResponse:
     if role_filter:
         posture_where.append("v.device_role = %s")
         posture_params.append(role_filter)
+    if device_type_filter:
+        posture_where.append("v.device_type = %s")
+        posture_params.append(device_type_filter)
+    if os_family_filter:
+        posture_where.append("v.os_family = %s")
+        posture_params.append(os_family_filter)
     posture_where_sql = " AND ".join(posture_where)
 
     posture_cte = f"""
         WITH scoped_devices AS (
             SELECT v.device_id, v.client_id, v.canonical_hostname,
-                   v.device_role, v.os_group, v.last_contact_at,
+                   v.device_role, v.device_type, v.os_family, v.os_group, v.last_contact_at,
                    v.needs_reboot, v.effective_patching_scope
             FROM operations.v_device v
             WHERE {posture_where_sql}
@@ -11637,6 +11655,89 @@ def patching_queue(request: HttpRequest) -> HttpResponse:
                     "reboot_pending": reboot_pending,
                 }
             )
+
+    # Client Patch Review previously showed these two percentages in Metabase.
+    # Keep the definition in Operations: an active, in-scope device with
+    # current patch activity is fully patched when it has no current missing
+    # operating-system patch.  The shared contract keeps this semantic aligned
+    # with the temporary legacy reporting surface during retirement.
+    compliance_breakdowns: dict[str, list[dict]] = {
+        "device_type": [],
+        "os_family": [],
+    }
+    active_client_name = ""
+    excluded_categories = list(
+        excluded_patch_categories(
+            os.environ.get("DASHBOARD_PATCH_CATEGORIES_EXCLUDE", "DRIVER_UPDATES")
+        )
+    )
+    if len(filtered_client_ids) == 1:
+        active_client_name = (
+            Client.objects.filter(tenant_id=1, id=filtered_client_ids[0])
+            .values_list("display_name", flat=True)
+            .first()
+            or ""
+        )
+        with transaction.atomic(), connection.cursor() as cur:
+            cur.execute("SET LOCAL operations.tenant_id = 1")
+            cur.execute(
+                posture_cte
+                + """
+                , patching_devices AS (
+                    SELECT dp.*,
+                           NOT EXISTS (
+                               SELECT 1
+                               FROM ninja_links nl
+                               JOIN ninja_patches.current_patch_state cs
+                                 ON cs.device_id = nl.ninja_device_id
+                               WHERE nl.device_id = dp.device_id
+                                 AND cs.status = ANY(%s::text[])
+                                 AND COALESCE(cs.patch_category, 'UNKNOWN') <> ALL(%s::text[])
+                           ) AS fully_patched
+                    FROM device_posture dp
+                    WHERE dp.is_active
+                      AND dp.effective_patching_scope = 'Included'
+                      AND dp.ever_installed
+                      AND dp.has_recent_patch_activity
+                ), dimensions AS (
+                    SELECT 'device_type'::text AS dimension,
+                           COALESCE(NULLIF(device_type, ''), 'Unknown') AS label,
+                           fully_patched
+                    FROM patching_devices
+                    UNION ALL
+                    SELECT 'os_family'::text AS dimension,
+                           COALESCE(NULLIF(os_family, ''), 'Unknown') AS label,
+                           fully_patched
+                    FROM patching_devices
+                )
+                SELECT dimension, label, COUNT(*)::int AS devices,
+                       COUNT(*) FILTER (WHERE fully_patched)::int AS fully_patched_devices,
+                       ROUND(
+                           100.0 * COUNT(*) FILTER (WHERE fully_patched) / NULLIF(COUNT(*), 0),
+                           1
+                       ) AS fully_patched_pct
+                FROM dimensions
+                GROUP BY dimension, label
+                ORDER BY dimension, fully_patched_pct ASC NULLS LAST, label
+                """,
+                posture_params + [list(COMPLIANCE_MISSING_STATUSES), excluded_categories],
+            )
+            for dimension, label, devices, fully_patched_devices, fully_patched_pct in cur.fetchall():
+                compliance_breakdowns[dimension].append(
+                    {
+                        "label": label,
+                        "devices": devices,
+                        "fully_patched_devices": fully_patched_devices,
+                        "fully_patched_pct": fully_patched_pct,
+                        "drilldown": urlencode(
+                            {
+                                "client": client_filter[0],
+                                "posture": "fully-patched",
+                                dimension: label,
+                            }
+                        ),
+                    }
+                )
     # Device population by scope (drilldown from the summary tiles).
     # Optional "scope" query param drills into a specific bucket.
     scope_filter = request.GET.get("scope", "")
@@ -11649,6 +11750,7 @@ def patching_queue(request: HttpRequest) -> HttpResponse:
         "quiet",
         "never-patched",
         "reboot-pending",
+        "fully-patched",
     ):
         with transaction.atomic(), connection.cursor() as cur:
             cur.execute("SET LOCAL operations.tenant_id = 1")
@@ -11683,6 +11785,19 @@ def patching_queue(request: HttpRequest) -> HttpResponse:
                 base_where.extend(
                     ("is_active", "effective_patching_scope = 'Included'", "needs_reboot")
                 )
+            elif posture_filter == "fully-patched":
+                base_where.extend(
+                    (
+                        "is_active",
+                        "effective_patching_scope = 'Included'",
+                        "ever_installed",
+                        "has_recent_patch_activity",
+                        "NOT EXISTS (SELECT 1 FROM ninja_links nl JOIN ninja_patches.current_patch_state cs ON cs.device_id = nl.ninja_device_id WHERE nl.device_id = device_posture.device_id AND cs.status = ANY(%s::text[]) AND COALESCE(cs.patch_category, 'UNKNOWN') <> ALL(%s::text[]))",
+                    )
+                )
+            device_row_params = posture_params + ([scope_filter] if scope_filter else [])
+            if posture_filter == "fully-patched":
+                device_row_params += [list(COMPLIANCE_MISSING_STATUSES), excluded_categories]
             cur.execute(
                 posture_cte
                 + f"""
@@ -11696,7 +11811,7 @@ def patching_queue(request: HttpRequest) -> HttpResponse:
                 ORDER BY canonical_hostname
                 LIMIT 500
                 """,
-                posture_params + ([scope_filter] if scope_filter else []),
+                device_row_params,
             )
             device_rows = cur.fetchall()
 
@@ -11833,6 +11948,10 @@ def patching_queue(request: HttpRequest) -> HttpResponse:
         filter_qs_parts.append(f"status={status_filter}")
     if role_filter:
         filter_qs_parts.append(f"role={role_filter}")
+    if device_type_filter:
+        filter_qs_parts.append(f"device_type={device_type_filter}")
+    if os_family_filter:
+        filter_qs_parts.append(f"os_family={os_family_filter}")
     filter_qs = "&".join(filter_qs_parts)
 
     # Population summary tiles (clickthrough drills into scope bucket).
@@ -11876,12 +11995,16 @@ def patching_queue(request: HttpRequest) -> HttpResponse:
             "active_status": status_filter,
             "active_client": client_filter,
             "active_role": role_filter,
+            "active_device_type": device_type_filter,
+            "active_os_family": os_family_filter,
             "role_choices": _ROLE_CHOICES,
             "active_scope": scope_filter,
             "total_active": sum(tile_counts.values()),
             "population": population,
             "patch_status": patch_status,
             "client_posture": client_posture,
+            "compliance_breakdowns": compliance_breakdowns,
+            "active_client_name": active_client_name,
             "active_device_days": active_device_days,
             "patch_activity_days": patch_activity_days,
             "active_posture": posture_filter,
@@ -12295,7 +12418,11 @@ def findings_admin_health(request: HttpRequest) -> HttpResponse:
         finding.client_name = ref.get("client_display_name") or ""
         finding.observed_name = ref.get("observed_name") or ""
         finding.source_name = source_names.get(str(ref.get("source_id")), "")
-        finding.source_url = reverse("sources_status") if finding.source_name else ""
+        finding.source_url = (
+            reverse("sources_status") + "?" + urlencode({"source": finding.source_name})
+            if finding.source_name
+            else ""
+        )
         if details.get("job_run_id") or details.get("dependent_job_run_id"):
             finding.job_status_url = (
                 reverse("admin_job_status")
@@ -12317,6 +12444,7 @@ def findings_admin_health(request: HttpRequest) -> HttpResponse:
             if details.get("control_section")
             else ""
         )
+        finding.health_presentation = _admin_health_finding_presentation(finding)
 
     finding_types = FindingType.objects.filter(finding_class="admin").order_by("name")
     condition_profile = None
@@ -12346,6 +12474,60 @@ def findings_admin_health(request: HttpRequest) -> HttpResponse:
             "health": health,
         },
     )
+
+
+def _admin_health_finding_presentation(finding: AdminFinding) -> dict:
+    """Present one existing AdminFinding as an administrator intervention.
+
+    The finding and its evidence remain authoritative.  This small read-model
+    adapter prevents the Health list from requiring an administrator to infer
+    impact and next steps from condition keys, policy digests, or raw payloads.
+    """
+    finding_type = finding.finding_type.name
+    title = finding.finding_type.description or finding_type.replace("_", " ").capitalize()
+    impact = "This platform condition needs administrator review."
+    action = "Review the related evidence and address the underlying condition."
+    if finding_type == "source_failure":
+        impact = "Information from this source may be out of date."
+        action = "Review the source connection and retry its collection when it is ready."
+    elif finding_type in {"jobs_schedule_failure", "jobs_required_disabled"}:
+        impact = "Scheduled processing may not run when it is needed."
+        action = "Review the Job schedule and correct its configuration."
+    elif finding_type == "jobs_queue_backlog":
+        impact = "Some processing is taking longer than the configured expectation."
+        action = "Review waiting Jobs and the reason they cannot start."
+    elif finding_type in {"jobs_repeated_failure", "jobs_timeout"}:
+        impact = "Related data may not be current until the Job completes successfully."
+        action = "Review the failed Job, its result, and retry safety before retrying."
+    elif finding_type == "jobs_unmet_dependency":
+        impact = "A Job is waiting for required earlier processing."
+        action = "Open the Job to review the required result and its current state."
+    elif finding_type == "jobs_registry_mismatch":
+        impact = "Jobs configuration and the running service do not agree."
+        action = "Review Jobs configuration and current service evidence before changing settings."
+    elif finding_type == "software_queue_stalled":
+        impact = "Software processing may be behind the current collected data."
+        action = "Review the affected Job queue and its waiting or failed Runs."
+
+    links = []
+    if getattr(finding, "source_url", ""):
+        links.append({"label": "Open source", "url": finding.source_url})
+    if getattr(finding, "job_status_url", ""):
+        links.append({"label": "Open Job", "url": finding.job_status_url})
+    if getattr(finding, "control_plane_url", ""):
+        links.append({"label": "Open Job configuration", "url": finding.control_plane_url})
+    if finding_type == "source_failure":
+        links.append(
+            {
+                "label": "Open related Issues",
+                "url": reverse("findings_queue")
+                + "?"
+                + urlencode({"category": "data_collection", "type": "collection_failures"}),
+            }
+        )
+    if not links:
+        links.append({"label": "Open Health evidence", "url": reverse("findings_admin_health")})
+    return {"title": title, "impact": impact, "action": action, "links": links}
 
 
 def _condition_coverage_summary(profile) -> list[dict]:

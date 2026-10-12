@@ -1,3 +1,69 @@
+# Admin Health intervention experience (2026-10-12)
+
+## Status
+
+Implementation complete locally — awaiting normal commit/deployment approval.
+The change refactors the existing Admin Health page into the administrator
+intervention list without creating a second diagnostics product, changing the
+Admin navigation, or introducing another health authority.
+
+## Goal, scope, and fixed decisions
+
+- Keep the deployed Admin navigation: Overview, Data, Sources, Jobs, Health,
+  and Settings.
+- Preserve all existing health evidence, history, technical detail, and
+  controls. The normal presentation becomes plain-language; technical
+  condition/policy/run data remains available in expandable detail.
+- Admin Overview remains the short cross-system summary. Admin Health becomes
+  the detailed intervention list. Sources, Jobs, Data, Issues, and entity
+  pages remain their existing authorities.
+- Reuse the current `AdminFinding`, source-health, Jobs, and service-health
+  projections. Do not add a diagnostics store, schema migration, or a new
+  primary page.
+- Give each Health item a human summary, impact, recommended next action, and
+  direct links to the exact related Source, Job/run, Issues, or settings view
+  where the current facts and controls live.
+- Close the accepted Patching reporting-parity gap with two client-filtered
+  fully-patched percentage breakdowns: device type and operating system. They
+  use the existing patching population and fully-patched definition; no new
+  dashboard, reporting model, or Metabase calculation is introduced.
+
+## Affected files and validation
+
+- `apps/core/views.py`: normalize presentation metadata for existing Health
+  findings and cross-system attention records; add Patching client breakdown
+  read data from the existing posture authority.
+- `templates/findings_admin_health.html`: replace the raw technical table with
+  the intervention list and retained expandable technical evidence.
+- Existing Patching view/template and focused tests for client posture
+  breakdowns.
+- Focused Admin Health/Overview view tests, Django checks, focused lint, and
+  `git diff --check`.
+
+## Checkpoint and validation
+
+The deployed navigation and current code were revalidated. Sources owns
+collection details and controls; Jobs/Job detail owns run, dependency,
+recovery, and technical evidence; Issues and device detail provide
+operator/source context. Admin Health now gives every existing `AdminFinding`
+a plain-language title, impact, recommended action, and direct contextual
+links, while retaining the condition key, policy assessment, and raw evidence
+under expandable technical details.
+
+The Patching client view now supplies the two audited missing views: fully
+patched percentages by device type and operating system, with direct device
+drill-through. The definition is shared with the temporary Metabase bootstrap
+contract in `shared/patch_compliance.py`, so the two surfaces cannot silently
+use different missing-patch status/category rules.
+
+Validated locally: focused Jobs/findings tests (65 passed), Django system
+checks, template loading, focused lint, Dockerfile packaging review, and diff
+hygiene. No schema migration, production deployment, commit, or push was
+performed. Next: obtain separate commit/push authorization if the user wants
+this production-affecting change released.
+
+---
+
 # Jobs execution stabilization (2026-10-09)
 
 ## Status

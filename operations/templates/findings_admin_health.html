@@ -4,6 +4,17 @@
 {% block title %}Admin Health{% endblock %}
 
 {% block content %}
+<style>
+  .health-item { border-top:1px solid var(--border); padding:1rem 0; }
+  .health-item:first-child { border-top:0; padding-top:0; }
+  .health-item h3 { margin:0; font-size:1rem; }
+  .health-item p { margin:.35rem 0; line-height:1.45; }
+  .health-label { color:var(--muted); font-size:.78rem; font-weight:700; text-transform:uppercase; letter-spacing:.04em; }
+  .health-actions { display:flex; gap:.5rem; flex-wrap:wrap; align-items:center; margin-top:.75rem; }
+  .health-actions a, .health-actions button { font-size:.84rem; }
+  .health-technical { margin-top:.7rem; color:var(--muted); font-size:.8rem; }
+  .health-technical pre { white-space:pre-wrap; overflow-wrap:anywhere; }
+</style>
 <div class="card">
     <h1>Admin Health</h1>
     <p class="muted">Is Operations working as intended? This total includes Jobs, Sources, and system checks.</p>
@@ -19,38 +30,10 @@
 
 <div class="card">
     <h2>Health by area</h2>
-    <table class="ops-table">
-        <thead><tr><th>Area</th><th>Status</th><th>Current state</th><th></th></tr></thead>
-        <tbody>{% for domain in health.domains %}<tr>
-            <td><strong>{{ domain.label }}</strong></td>
-            <td>{% if not domain.available %}Unavailable{% elif domain.count %}{{ domain.count }} need attention{% else %}Healthy{% endif %}</td>
-            <td>{{ domain.detail }}</td>
-            <td><a href="{% url domain.url_name %}">{{ domain.url_label }}</a></td>
-        </tr>{% endfor %}</tbody>
-    </table>
+    <table class="ops-table"><thead><tr><th>Area</th><th>Current state</th><th></th></tr></thead><tbody>
+    {% for domain in health.domains %}<tr><td><strong>{{ domain.label }}</strong></td><td>{% if not domain.available %}Health cannot be checked{% elif domain.count %}{{ domain.count }} need attention · {{ domain.detail }}{% else %}Healthy · {{ domain.detail }}{% endif %}</td><td><a href="{% url domain.url_name %}">{{ domain.url_label }}</a></td></tr>{% endfor %}
+    </tbody></table>
 </div>
-
-{% if condition_coverage %}
-<div class="card">
-    <h2>Condition assessment coverage</h2>
-    <p class="muted">Fresh active-policy assessments for retained findings. Missing rows remain visible in Issues and are not treated as cleared.</p>
-    <table class="ops-table">
-        <thead><tr><th>Category</th><th>Type</th><th>Issue</th><th class="num">Retained</th><th class="num">Fresh assessments</th><th class="num">Missing</th></tr></thead>
-        <tbody>
-        {% for row in condition_coverage %}
-            <tr>
-                <td>{{ row.category }}</td>
-                <td>{{ row.type }}</td>
-                <td><a href="{% url 'findings_queue' %}?category={{ row.category_key|urlencode }}&type={{ row.type_key|urlencode }}&issue={{ row.name|urlencode }}">{{ row.label }}</a></td>
-                <td class="num">{{ row.retained }}</td>
-                <td class="num">{{ row.assessed }}</td>
-                <td class="num">{{ row.missing }}</td>
-            </tr>
-        {% endfor %}
-        </tbody>
-    </table>
-</div>
-{% endif %}
 
 <div class="card">
     <form action="" method="get" style="display: flex; gap: 1rem; flex-wrap: wrap; align-items: end;">
@@ -90,63 +73,42 @@
 </div>
 
 <div class="card">
+    <h2>Needs attention</h2>
     {% if findings %}
-    <table data-sortable style="width: 100%; border-collapse: collapse;">
-        <thead>
-            <tr style="text-align: left; border-bottom: 1px solid var(--border);">
-                <th style="padding: 0.5rem;">Severity</th>
-                <th style="padding: 0.5rem;">Type</th>
-                <th style="padding: 0.5rem;">Condition key</th>
-                <th style="padding: 0.5rem;">Status</th>
-                <th style="padding: 0.5rem;">Assessment</th>
-                <th style="padding: 0.5rem;">First detected</th>
-                <th style="padding: 0.5rem;">Last detected</th>
-                <th style="padding: 0.5rem;"></th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for f in findings %}
-            <tr style="border-bottom: 1px solid var(--border);">
-                <td style="padding: 0.5rem;"><strong>{{ f.get_severity_display }}</strong></td>
-                <td style="padding: 0.5rem;">{{ f.finding_type.name }}</td>
-                <td style="padding: 0.5rem;"><code class="muted" style="font-size: 0.8rem;">{{ f.condition_key|truncatechars:40 }}</code></td>
-                <td style="padding: 0.5rem;">{{ f.status }}</td>
-                <td style="padding: 0.5rem; font-size: 0.8rem;">
-                    {% if f.assessment %}
-                        <strong>{{ f.assessment.disposition }}</strong>
-                        <br>Policy: {{ f.assessment.policy_version }} · {{ f.assessment.policy_digest|slice:":12" }}
-                        <br>Scope: {{ f.assessment.scopes|join:", " }}
-                        {% if f.assessment.reasons %}<br>Reason: {% for reason in f.assessment.reasons %}{{ reason|humanize_label }}{% if not forloop.last %}, {% endif %}{% endfor %}{% endif %}
-                        {% if f.assessment.blockers %}<br>Blocker: {% for blocker in f.assessment.blockers %}{{ blocker|humanize_label }}{% if not forloop.last %}, {% endif %}{% endfor %}{% endif %}
-                    {% else %}
-                        <span class="muted">Assessment pending</span>
-                    {% endif %}
-                </td>
-                <td style="padding: 0.5rem;" class="muted">{{ f.first_detected_at }}</td>
-                <td style="padding: 0.5rem;" class="muted">{{ f.last_detected_at }}</td>
-                <td style="padding: 0.5rem;">
-                    {% if f.job_status_url %}
-                    <a href="{{ f.job_status_url }}">Open Job status</a>
-                    {% endif %}
-                    {% if f.control_plane_url %}
-                    {% if f.job_status_url %}<br>{% endif %}
-                    <a href="{{ f.control_plane_url }}">Open Job configuration evidence</a>
-                    {% endif %}
-                    {% if f.status == "open" %}
-                    <form method="post" action="{% url 'admin_finding_acknowledge' f.id %}" style="display: inline;">
-                        {% csrf_token %}
-                        <button type="submit" style="padding: 0.25rem 0.6rem; font-size: 0.8rem;">Ack</button>
-                    </form>
-                    {% endif %}
-                </td>
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
+      {% for f in findings %}
+      <article class="health-item">
+        <div class="health-label">{{ f.get_severity_display }} · {{ f.get_status_display }} · last checked {{ f.last_detected_at|date:"M j, Y, g:i A" }} ({{ f.last_detected_at|timesince }} ago)</div>
+        <h3>{{ f.health_presentation.title }}</h3>
+        <p><strong>Impact:</strong> {{ f.health_presentation.impact }}</p>
+        <p><strong>Recommended action:</strong> {{ f.health_presentation.action }}</p>
+        <div class="health-actions">
+          {% for link in f.health_presentation.links %}{% if link.label == "Open Job configuration" %}<a href="{{ link.url }}">Open Job configuration</a>{% else %}<a href="{{ link.url }}">{{ link.label }}</a>{% endif %}{% endfor %}
+          {% if f.status == "open" %}<form method="post" action="{% url 'admin_finding_acknowledge' f.id %}">{% csrf_token %}<button type="submit">Acknowledge</button></form>{% endif %}
+        </div>
+        <details class="health-technical"><summary>Technical details</summary>
+          <p>Condition key: <code>{{ f.condition_key }}</code></p>
+          {% if f.assessment %}<p>Assessment: {{ f.assessment.disposition }} · policy {{ f.assessment.policy_version }} · {{ f.assessment.policy_digest|slice:":12" }}</p>
+          <p>Scope: {{ f.assessment.scopes|join:", " }}</p>
+          {% if f.assessment.reasons %}<p>Reason: {% for reason in f.assessment.reasons %}{{ reason|humanize_label }}{% if not forloop.last %}, {% endif %}{% endfor %}</p>{% endif %}
+          {% if f.assessment.blockers %}<p>Blocker: {% for blocker in f.assessment.blockers %}{{ blocker|humanize_label }}{% if not forloop.last %}, {% endif %}{% endfor %}</p>{% endif %}{% else %}<p>Assessment pending.</p>{% endif %}
+          <pre>{{ f.details }}</pre>
+        </details>
+      </article>
+      {% endfor %}
     {% else %}
     <p class="muted">No admin items match the current filters.</p>
     {% endif %}
 </div>
+
+{% if condition_coverage %}
+<details class="card">
+    <summary><strong>Health coverage details</strong> <span class="muted">— condition assessment evidence</span></summary>
+    <p class="muted">Fresh active-policy assessments for retained findings. Missing rows remain visible in Issues and are not treated as cleared.</p>
+    <table class="ops-table"><thead><tr><th>Category</th><th>Type</th><th>Issue</th><th class="num">Retained</th><th class="num">Fresh assessments</th><th class="num">Missing</th></tr></thead><tbody>
+    {% for row in condition_coverage %}<tr><td>{{ row.category }}</td><td>{{ row.type }}</td><td><a href="{% url 'findings_queue' %}?category={{ row.category_key|urlencode }}&type={{ row.type_key|urlencode }}&issue={{ row.name|urlencode }}">{{ row.label }}</a></td><td class="num">{{ row.retained }}</td><td class="num">{{ row.assessed }}</td><td class="num">{{ row.missing }}</td></tr>{% endfor %}
+    </tbody></table>
+</details>
+{% endif %}
 
 <div style="margin-top: 1rem;">
     <a href="{% url 'findings_queue' %}" style="font-size: 0.85rem;">&larr; Back to issues</a>

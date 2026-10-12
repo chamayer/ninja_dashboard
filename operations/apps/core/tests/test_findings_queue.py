@@ -336,6 +336,17 @@ def test_patching_scope_labels_explain_the_three_operator_choices():
     assert "means no patching service is assigned" in template
 
 
+def test_client_patching_compliance_breakdowns_use_the_shared_definition():
+    source = Path("apps/core/views.py").read_text(encoding="utf-8")
+    template = Path("templates/patching_queue.html").read_text(encoding="utf-8")
+
+    assert "COMPLIANCE_MISSING_STATUSES" in source
+    assert '"fully-patched"' in source
+    assert "Fully patched devices" in template
+    assert "By device type" in template
+    assert "By operating system" in template
+
+
 def test_patching_workflows_use_human_labels_and_actions():
     assert humanize_label("device_never_patched") == "No patch installed yet"
     assert humanize_label("patching_stalled") == "No recent patch activity"

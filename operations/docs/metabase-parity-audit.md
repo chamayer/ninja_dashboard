@@ -1,7 +1,8 @@
 # Metabase-to-Operations parity audit
 
-**Status:** Decision-ready audit, 2026-10-12. This is an evidence inventory,
-not a change to Metabase or Operations.
+**Status:** Operations implementation complete locally, pending normal
+deployment validation, 2026-10-12. This remains an evidence inventory; it
+does not change Metabase.
 
 ## Scope and method
 
@@ -35,7 +36,7 @@ This follows root [ADR-0005](../../docs/decisions/0005-operations-first-metabase
 | Ninja — Command Center | Clients Needing Attention — which clients require patch follow-up | [`/patching/`](/patching/) client posture table | Displayed |
 | Ninja — Client Patch Review | Approved Windows Devices; Active Windows Devices; Included Devices; Devices Scanned Successfully (30d); Devices Installed Recently (30d); Devices Needing Action; Patch Failures; Approved Patches; Patches Awaiting Manual Approval; Delayed Patches; Stalled Devices; Never-Patched Devices; Patching Devices; Current Patch State; Devices Needing Reboot — one client's current patch posture | [`/patching/?client=<client-slug>`](/patching/) | Displayed |
 | Ninja — Client Patch Review | Client Patch Status; Failed Patch Devices; Manual or Delayed Patch Devices; Warnings (30d); Failures (30d); Top Problem Devices — client triage summary | [`/patching/?client=<client-slug>`](/patching/) plus [`/findings/?category=patching&client=<client-slug>`](/findings/?category=patching) | Consolidated |
-| Ninja — Client Patch Review | Fully patched % (patching devices) by Device Type; Fully patched % (patching devices) by Operating System — percentage breakdowns for a client | No native percentage-breakdown display | **Missing** |
+| Ninja — Client Patch Review | Fully patched % (patching devices) by Device Type; Fully patched % (patching devices) by Operating System — percentage breakdowns for a client | [`/patching/?client=<client-slug>`](/patching/) client-only fully-patched breakdowns with device drill-through | Displayed |
 | Ninja — Device Detail | Device Summary; Current Patch State; Install Results Over Time; Recent Patch & Reboot Activity; Patch State History; Install History; Recent OS Patch Warnings (30d); Recent OS Patch Failures (30d) — one device's patch evidence and history | [`/orgs/<client>/devices/<device>/` patching tab](/devices/) | Displayed |
 | Ninja — Device Work Queue | Devices Needing Action; Never Patched; Stalled; Offline; Failed Installs; Reboot Pending; With Warnings; With Failures; Device Work Queue; Devices Needing Action by Client; Devices Needing Action by Problem; Scan Gaps; Devices Blocked by Reboot; Devices Blocked by Approval; Stalled or Never Patched — triage queue and reason | [`/patching/`](/patching/) | Displayed |
 | Ninja — Device Work Queue | Warnings by Category (30d); Top Devices by Warnings (30d); Top Devices by Failures (30d); Failures by Error Code (30d); Devices Matching Warning Category (30d); Devices Matching Failure Error Type (30d) — filterable problem analysis | [`/patching/`](/patching/) and [`/patching/activity/`](/patching/activity/) | Consolidated |
@@ -45,13 +46,12 @@ This follows root [ADR-0005](../../docs/decisions/0005-operations-first-metabase
 
 ### Patching conclusion
 
-The operational patching surface is present. The only confirmed missing
-capability is a *client-filtered fully-patched percentage* with two breakdowns
-(device type and operating system). It is reporting context, not a separate
-workflow or new authority. A future, bounded refinement should add that
-breakdown to the existing Patching page's client posture section, using the
-same patching population denominator already visible there. No Metabase work
-is justified.
+The operational patching surface is present. Client-filtered fully-patched
+percentages by device type and operating system are now shown in the existing
+Patching client view, with drill-through to the matching devices. They use the
+same active, in-scope, current-activity population and missing-patch definition
+as the temporary legacy report. It is reporting context, not a separate
+workflow or authority. No Metabase work is justified.
 
 ## Agent Compliance — twelve active legacy dashboards
 
@@ -103,9 +103,9 @@ Their individual cards are retained here so the audit is complete.
 
 ## Recommendation
 
-1. **Accept Patching parity with one bounded follow-up:** add the two missing
-   fully-patched percentage breakdowns to the existing Patching client posture
-   view. Do not add a Patching dashboard or duplicate calculations.
+1. **Accept Patching parity:** the two client fully-patched percentage
+   breakdowns are implemented in the existing Patching view. Do not add a
+   Patching dashboard or duplicate calculations.
 2. **Accept Agent Compliance retirement:** archive the 12 remaining active
    dashboards after the owner accepts retirement of the legacy delivery and
    debug cards. No AC-specific replacement is recommended.

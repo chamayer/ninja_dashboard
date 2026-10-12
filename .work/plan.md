@@ -1,5 +1,125 @@
 # Active root implementation plan
 
+## Active plan — Metabase retirement
+
+**Status:** local recovery archive created and verified — no dashboard
+archival, service disablement, live deletion, commit, or push has occurred.
+
+**Goal:** retire Metabase as an active Operations surface without deleting its
+application data, historical reporting data, or rollback option. Operations is
+the sole operator surface after the Patching parity release is live and
+accepted.
+
+**Why now:** the 2026-10-12 parity audit accounts for the active Patching,
+Agent Compliance, and Inventory dashboards. Inventory is already retired;
+Agent Compliance is an accepted legacy-retirement candidate; Patching's two
+remaining client fully-patched breakdowns are implemented locally in
+Operations and awaiting normal deployment validation. This follows ADR-0005;
+it does not reopen the Operations-first decision.
+
+**Scope:** dashboard archival, a local-only recovery archive under
+`archive/metabase/`, Metabase bootstrap retirement, removal of the Metabase
+Compose service and public port, associated configuration/job/API/UI cleanup,
+documentation, and a bounded rollback record. Preserve Postgres reporting
+schemas, materialized views, `metabase_ro`, and the existing Metabase
+persistent volume in this scope.
+
+**Non-goals:** no report-data deletion, schema/materialized-view cleanup,
+database-role removal, historical-run deletion, new reporting dashboard, or
+manual Portainer deployment. Those are separate decisions after the rollback
+window.
+
+**Fixed design:**
+
+- Archive content before disabling its service. Archival is a reversible
+  metadata state; service removal is a reversible deployment state while the
+  retained volume exists. Neither is deletion.
+- Retire the `metabase-bootstrap` capability in the same approved release as
+  service removal: registry definition, worker dispatch, HTTP route, settings,
+  Jobs capability state, and tests move together so no service can request a
+  dashboard provision that no longer exists.
+- Keep `metabase_ro`, historical source/reporting relations, and grants in
+  place. They are not evidence that the Metabase application is active, and
+  removing them would turn a safe service retirement into an unbounded schema
+  migration.
+- Before removing the live service, create a verified local-only archive under
+  `archive/metabase/`: dashboard JSON export, Metabase application-database
+  dump, mounted-volume archive, a manifest of file hashes and source details,
+  and the tracked `RESTORE.md` runbook. The artifact files are Git-ignored and
+  excluded from image builds; only restoration instructions are tracked.
+- Do not run a volume-removal command or stack deletion with volumes until the
+  local archive is present, its manifest verifies, and the owner confirms the
+  archive is readable. The live named volume may then be removed as part of the
+  approved cutover because the local archive is the rollback authority.
+- Git remains the deployment authority. Do not trigger Portainer manually.
+
+**Implementation and approval gates:**
+
+1. **Parity release and acceptance.** Commit/push the pending Admin Health and
+   Patching parity work; allow normal GitOps rollout; read-only verify the
+   client Patching breakdowns, Admin Health links, Operations health, and the
+   absence of a capability regression. This is a separate approved production
+   release.
+2. **Create and verify the local archive.** With explicit production
+   authorization, inventory and export dashboard metadata, produce the
+   application-database dump and mounted-volume archive, transfer them to the
+   local `archive/metabase/` directory, then generate and verify the manifest.
+   Record dashboard identifiers, archive time, database/volume identity, and
+   restoration instructions without recording credentials or customer data.
+3. **Archive dashboard content.** Archive the remaining active Patching and
+   Agent Compliance dashboards through the supported Metabase API. Verify
+   archived content is no longer presented as active while its local archive
+   remains recoverable.
+4. **Code retirement release.** Remove the bootstrap configuration and
+   capability from `ingest/config.py`, `ingest/main.py`,
+   `ingest/operator_job_queue.py`, `shared/jobs_registry.py`, Operations Jobs
+   capability display, related tests, and documentation. Remove the Metabase
+   Compose service and port `3001`, while retaining the named-volume
+   declaration/rollback record. Add explicit legacy handling for any
+   historical `metabase-bootstrap` Job so it remains readable but can neither
+   be scheduled nor retried.
+5. **Configuration cutover.** With separate production configuration approval,
+   remove or blank the `MB_BOOTSTRAP_*` values in the mounted environment. This
+   is not a Git change and must be verified without exposing secrets.
+6. **Post-cutover observation.** Through read-only health/Jobs/Sources checks,
+   verify Operations, ingest, scheduler, and worker health; verify no callers
+   resolve `http://metabase:3000`, no bootstrap Runs can be admitted, port
+   3001 is absent, and routine data collection/analysis continues normally.
+   Verify that the live Metabase container, port, and named volume are absent,
+   while the local archive remains readable. Retain historical reporting data
+   for an owner-approved rollback window.
+7. **Later destruction decision.** Only after the observation window, make a
+   new plan and obtain explicit approval before deleting the local archive,
+   historical application database, obsolete materializations, or
+   `metabase_ro` grants.
+
+**Validation plan:** targeted registry/HTTP/configuration tests; Compose
+configuration review; Python import/syntax checks; `git diff --check`; and,
+only after the separately approved releases, read-only production verification
+of archive integrity, service/port/volume absence, and Operations/Jobs health.
+No local file or container state is accepted as proof of production retirement.
+
+**Current checkpoint and next action:** a verified local-only recovery archive
+now exists at `archive/metabase/metabase-retirement-20261012/`. It contains a
+custom-format `metabase` application-database dump, the `metabase-data` volume
+archive, seven active Patching-dashboard JSON exports, integrity manifest, and
+non-secret archive details. Its 11 files total 35,923,621 bytes. The temporary
+remote staging directory was removed after local checksum verification. The
+immediate prerequisite remains the currently uncommitted Operations parity
+change; it must be committed, deployed through normal GitOps, and validated
+before any dashboard archive or service removal. Next action, if approved:
+prepare the parity commit only. Do not archive, stop, or remove Metabase yet.
+
+**Read-only sizing evidence (2026-10-12):** the live Metabase application
+database is 170 MB; the `ninja-dashboard_metabase-data` volume is currently
+0 B. The local archive therefore needs roughly 200 MB of free space before
+compression/metadata overhead, not the 57 GB Operations `ninja` database. The
+Metabase image itself is 1.08 GB and is not archived; its exact image identity
+is recorded in archive details so it can be pulled again if restoration is
+ever approved.
+
+---
+
 ## Active plan — source-driven collection
 
 **Status:** in progress — post-release execution-recovery correction.

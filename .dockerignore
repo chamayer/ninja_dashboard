@@ -33,6 +33,7 @@ postgres-data/
 metabase-data/
 backups/
 test-data/
+archive/
 
 # Editor / OS
 .vscode/

@@ -24,6 +24,13 @@ metabase-data/
 backups/
 test-data/
 
+# ── Retired Metabase recovery archive (local-only) ───────────────────
+# Dashboard definitions and Metabase application data can contain production
+# configuration. Keep the restoration instructions, but never commit the
+# archive artifacts themselves.
+/archive/metabase/*
+!/archive/metabase/RESTORE.md
+
 # ── Reference data (not code) ────────────────────────────────────────
 # NinjaRMM OpenAPI spec — large reference file used to design the
 # schema. Re-download from Ninja docs if needed for future domains.

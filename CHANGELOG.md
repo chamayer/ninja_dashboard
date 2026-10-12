@@ -2,6 +2,23 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.126.17] — 2026-10-12 — Operations reporting parity
+
+### Added
+
+- Added client Patching breakdowns for fully patched devices by device type and
+  operating system, with drill-through to the matching devices.
+- Added a local-only Metabase recovery archive contract and restoration guide
+  ahead of the separately approved service retirement.
+
+### Changed
+
+- Reworked Admin Health into a plain-language intervention list with impact,
+  recommended action, contextual links, and retained expandable technical
+  evidence.
+- Made Operations and the temporary Metabase bootstrap share one patch
+  compliance definition while Metabase remains active.
+
 ## [0.126.16] — 2026-09-23 — Jobs status accuracy
 
 ### Fixed

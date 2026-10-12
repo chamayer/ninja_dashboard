@@ -114,6 +114,31 @@
 </div>
 {% endif %}
 
+{% if compliance_breakdowns.device_type or compliance_breakdowns.os_family %}
+<div class="card">
+    <h2 class="section-label">Fully patched devices{% if active_client_name %} — {{ active_client_name }}{% endif %}</h2>
+    <p class="muted" style="font-size:.84rem; margin-top:0;">Active, in-scope devices with current patch activity. A device is fully patched when Ninja reports no current approved, manual, failed, or pending operating-system patch.</p>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(20rem,1fr));gap:1rem;">
+      {% if compliance_breakdowns.device_type %}
+      <div>
+        <h3 style="margin:.1rem 0 .5rem;font-size:.95rem;">By device type</h3>
+        <table class="ops-table patch-posture-table"><thead><tr><th>Device type</th><th class="num">Fully patched</th><th class="num">Devices</th></tr></thead><tbody>
+        {% for row in compliance_breakdowns.device_type %}<tr><td><a href="?{{ row.drilldown }}">{{ row.label|humanize_label }}</a></td><td class="num">{{ row.fully_patched_pct }}%</td><td class="num">{{ row.fully_patched_devices }} of {{ row.devices }}</td></tr>{% endfor %}
+        </tbody></table>
+      </div>
+      {% endif %}
+      {% if compliance_breakdowns.os_family %}
+      <div>
+        <h3 style="margin:.1rem 0 .5rem;font-size:.95rem;">By operating system</h3>
+        <table class="ops-table patch-posture-table"><thead><tr><th>Operating system</th><th class="num">Fully patched</th><th class="num">Devices</th></tr></thead><tbody>
+        {% for row in compliance_breakdowns.os_family %}<tr><td><a href="?{{ row.drilldown }}">{{ row.label }}</a></td><td class="num">{{ row.fully_patched_pct }}%</td><td class="num">{{ row.fully_patched_devices }} of {{ row.devices }}</td></tr>{% endfor %}
+        </tbody></table>
+      </div>
+      {% endif %}
+    </div>
+</div>
+{% endif %}
+
 {# Policy scope is context, not the page's primary status. #}
 <div class="card">
     <h2 class="section-label">
@@ -146,6 +171,8 @@
 <div class="card">
     <h2 class="section-label">
         Devices — {% if active_posture %}{{ active_posture|humanize_label }}{% else %}{{ active_scope|humanize_label }}{% endif %}
+        {% if active_device_type %}<span style="font-weight:400;">— {{ active_device_type|humanize_label }}</span>{% endif %}
+        {% if active_os_family %}<span style="font-weight:400;">— {{ active_os_family }}</span>{% endif %}
         <span style="font-weight:400;">({{ device_rows|length }}{% if device_rows|length == 500 %}+{% endif %})</span>
     </h2>
     <table data-sortable class="ops-table">

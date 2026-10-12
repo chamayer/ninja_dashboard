@@ -50,6 +50,7 @@ from typing import Any
 from urllib.parse import quote_plus
 
 import httpx
+from shared.patch_compliance import COMPLIANCE_MISSING_STATUSES, excluded_patch_categories
 
 from ingest import db
 from ingest.config import settings
@@ -215,7 +216,7 @@ COLOR_ALERT_AMBER = "#f9a825"
 # Every "Fully patched devices %" card across all dashboards uses the
 # universe CTE pattern below (see _COMPLIANCE_CTES) so the formula
 # stays consistent.
-COMPLIANCE_MISSING_STATES = ("APPROVED", "MANUAL", "FAILED", "PENDING")
+COMPLIANCE_MISSING_STATES = COMPLIANCE_MISSING_STATUSES
 COMPLIANCE_MISSING_SQL = ", ".join(
     f"'{s}'" for s in COMPLIANCE_MISSING_STATES
 )
@@ -225,7 +226,7 @@ COMPLIANCE_MISSING_SQL = ", ".join(
 # DRIVER_UPDATES. Rendered into _PATCH_TYPE_EXCLUDE below and appended
 # to every patch-context WHERE clause. Empty tuple = no exclusion (the
 # fragment becomes the empty string, no-op).
-EXCLUDE_PATCH_TYPES = settings.dashboard_patch_categories_exclude
+EXCLUDE_PATCH_TYPES = excluded_patch_categories(settings.DASHBOARD_PATCH_CATEGORIES_EXCLUDE)
 _EXCLUDE_PATCH_TYPES_SQL = ", ".join(f"'{t}'" for t in EXCLUDE_PATCH_TYPES)
 # For CTEs reading the materialized views (current_patch_state /
 # latest_install_outcome — column renamed `patch_category`).
