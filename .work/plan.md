@@ -1,13 +1,84 @@
 # Active root implementation plan
 
-## Active plan — Metabase retirement
+## Active plan — Dashboard navigation performance
 
-**Status:** local recovery archive is created and hash-verified; parity release
-`7b11501` is deployed through normal GitOps; all previously active Metabase
-dashboards are archived. The final code-retirement release is being validated.
+**Status:** navigation baseline and first query attribution complete; focused
+implementation in progress.
+
+**Goal:** make the Operations Dashboard and every page reachable from its
+cards, the primary navigation, or contextual sub-navigation feel responsive in
+ordinary operator use, based on measured request/query time rather than
+subjective changes alone.
+
+**Scope:** the Dashboard route; every destination reached from its visible
+cards, the primary navigation, and contextual sub-navigation; shared query
+helpers/read models on those routes; and the navigation shell only where
+measurements identify it as a contributor. Preserve card meaning, tenant/RLS
+scoping, counts, URLs, and existing operator behavior.
+
+**Non-goals:** visual redesign, broad caching infrastructure, data rebuilds,
+schema redesign, or unrelated page optimization.
+
+**Steps:**
+
+1. Inventory Dashboard cards, primary navigation, and contextual
+   sub-navigation destinations from current code; establish authenticated/live
+   timing where safely available and a reproducible request-level baseline
+   where it is not.
+2. Attribute slow time to SQL, Python aggregation, template rendering, or
+   browser/navigation overhead. Record only aggregate timing and query-shape
+   evidence; do not capture customer data.
+3. Implement the smallest focused improvements, preferring existing compact
+   read models and indexes over duplicate authorities or request-time estate
+   aggregation.
+4. Compare the same Dashboard/card path measurements, run focused regression
+   checks, and document any route that remains externally constrained.
+
+**Success measures:** on a warm live stack, reduce Dashboard server rendering
+from the measured ~6 seconds to under 1.5 seconds and make every measured
+primary or sub-navigation landing page responsive on its first view. A normal
+landing page should render under 2 seconds server-side; a data-dense page must
+use a bounded/paginated first view rather than construct an estate-wide result
+before rendering. Any remaining exception needs measured evidence and an
+explicit follow-up decision. Validate with repeated server-side handler timing
+and then an authenticated browser/navigation measurement before declaring the
+goal complete.
+
+**Validation:** representative request/query timing before and after; focused
+Dashboard/destination tests; Django checks; lint/diff hygiene; deployed
+read-only confirmation only if a release is approved.
+
+**Checkpoint / next action:** the authenticated live handler baseline covers
+Dashboard cards, all primary/sub-navigation pages, and client contextual
+pages (server/view/render only; browser/network excluded). Responsive routes
+include Patching summary (0.89 s), Patching evidence/trends (1.33/1.28 s),
+Software activity (0.53 s), Admin overview/jobs/health/settings (0.69/0.44/
+0.68/0.10 s), and the lighter client pages (0.12–1.37 s). The slowest routes
+are client overview (28.4 s), Software user exposure (19.5 s), Computers
+(13.9 s), Clients (9.5 s), Dashboard (6.9 s), Cleanup (6.9 s), Issues
+(6.2 s), and Sources (6.3 s). Attribution confirms: Dashboard's 3.31 s
+binding-detail aggregation duplicates its already-loaded compact source-health
+projection; client overview runs a software-exposure subquery per offline
+device; Issues computes fleet condition state at request time; user exposure
+constructs and renders an unbounded user/item set; Computers and Sources load
+unbounded estate evidence/detail. The Dashboard summary now reuses the compact
+projection, and client overview now aggregates direct/software severity once
+for its offline population. Next: validate those changes in a deployed build,
+then bound the Computers and user-exposure first views and replace request-time
+Sources detail aggregation with an existing or explicitly approved compact
+read model. Do not create a second source authority.
+
+---
+
+## Completed plan — Metabase retirement
+
+**Status:** code-retirement release `af9bb4d` is deployed through normal
+GitOps. The local archive is hash-verified, all previously active dashboards
+are archived, and all live Metabase runtime/data resources and bootstrap
+configuration are removed.
 
 **Goal:** retire Metabase as an active Operations surface without deleting its
-application data without a local rollback option. Operations is the sole
+application data before a local rollback option exists. Operations is the sole
 operator surface after the Patching parity release is live and accepted.
 
 **Why now:** the 2026-10-12 parity audit accounts for the active Patching,
@@ -110,10 +181,15 @@ remote staging directory was removed after local checksum verification.
 Release `7b11501` completed normal GitOps rollout and the Patching/Admin
 Health routes are healthy. All 20 previously active Metabase dashboards are
 archived through the supported API; the list endpoint now reports zero active
-dashboards. Next: validate and commit the final code-retirement release, then
-allow normal GitOps to remove the service before removing the exact verified
-live application database, application role, volume, and obsolete bootstrap
-environment keys.
+dashboards. Release `af9bb4d` then removed the runtime from code and Compose
+and was pushed to `origin` and `a-m-rose`. The replacement ingest, Operations,
+Jobs worker, and Postgres containers are healthy; there is no Metabase
+container or port 3001. The verified live `metabase` application database,
+its `metabase` application role, and `ninja-dashboard_metabase-data` volume
+were removed. `metabase_ro` and historical reporting relations remain by
+design. The local archive's 11 files still verify. The two root-owned
+`MB_BOOTSTRAP_*` entries were removed through the approved host-root path and
+their count now verifies as zero.
 
 **Read-only sizing evidence (2026-10-12):** the live Metabase application
 database is 170 MB; the `ninja-dashboard_metabase-data` volume is currently

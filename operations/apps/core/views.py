@@ -1737,13 +1737,14 @@ def home(request: HttpRequest) -> HttpResponse:  # noqa: PLR0912, PLR0915
             summary["value"] = f"{_percent(patch_clear_count, total_devices)}%"
             summary["value_label"] = "computers without patch Issues"
 
-    configured_sources, configured_sources_available = _configured_source_data_status(now)
-    configured_sources_current = sum(
-        not source["needs_attention"] for source in configured_sources
-    )
-    configured_updates = [
-        source["observed_at"] for source in configured_sources if source["observed_at"]
-    ]
+    # `source_rows` above is the compact, current platform-health projection
+    # used by the Dashboard cards. Do not re-read the binding-level admin
+    # detail view just to render this one-line status: that view aggregates
+    # every current observation and made the Dashboard slower without adding
+    # information to this summary.
+    configured_sources_available = True
+    configured_sources_current = sources_ok
+    configured_updates = observed_updates
     jobs_health = _jobs_control_health()
     jobs_summary = jobs_health.get("summary", {})
     current_runtime_kinds = {
@@ -1764,7 +1765,7 @@ def home(request: HttpRequest) -> HttpResponse:  # noqa: PLR0912, PLR0915
     system_status = {
         "sources_available": configured_sources_available,
         "sources_current": configured_sources_current,
-        "sources_total": len(configured_sources),
+        "sources_total": len(registered_sources),
         "source_problems": source_problem_count,
         "jobs_label": jobs_label,
         "jobs_running": int(jobs_summary.get("running_runs") or 0),
@@ -2120,33 +2121,45 @@ def org_index(request: HttpRequest, org_slug: str) -> HttpResponse:
             ]
 
             # Offline offenders — top 10 most-severe or longest-offline.
+            # Build each severity rollup once for this client's offline
+            # population. The prior form ran the software-exposure view as a
+            # correlated subquery for every candidate device before sorting;
+            # that made an otherwise ten-row panel proportional to the whole
+            # client's inventory many times over.
             cur.execute(
                 """
-                SELECT v.device_id, v.canonical_hostname, v.device_role, v.os_group,
-                       v.last_contact_at,
-                       COALESCE((
-                           SELECT COUNT(*)::int FROM operations.findings f
-                           WHERE f.tenant_id = 1
-                             AND f.subject_type = 'device'
-                             AND f.subject_id = v.device_id
-                             AND f.status IN ('open', 'acknowledged', 'investigating')
-                             AND f.severity IN ('critical', 'high')
-                       ), 0)
-                       -- Software findings are no longer device subjects, so
-                       -- they are inherited through the installation link.
-                       -- Without this the count silently drops them.
-                       + COALESCE((
-                           SELECT COUNT(DISTINCT e.finding_id)::int
-                           FROM operations.v_device_software_exposure e
-                           WHERE e.tenant_id = 1
-                             AND e.device_id = v.device_id
-                             AND e.status IN ('open', 'acknowledged', 'investigating')
-                             AND e.severity IN ('critical', 'high')
-                       ), 0) AS severe
-                FROM operations.v_device v
-                WHERE v.tenant_id = 1 AND v.client_id = %s
-                  AND NOT v.is_online_any
-                ORDER BY severe DESC, v.last_contact_at ASC NULLS FIRST
+                WITH offline_devices AS MATERIALIZED (
+                    SELECT v.device_id, v.canonical_hostname, v.device_role,
+                           v.os_group, v.last_contact_at
+                      FROM operations.v_device v
+                     WHERE v.tenant_id = 1 AND v.client_id = %s
+                       AND NOT v.is_online_any
+                ), direct_severe AS (
+                    SELECT f.subject_id AS device_id, COUNT(*)::int AS severe
+                      FROM operations.findings f
+                      JOIN offline_devices d ON d.device_id = f.subject_id
+                     WHERE f.tenant_id = 1
+                       AND f.subject_type = 'device'
+                       AND f.status IN ('open', 'acknowledged', 'investigating')
+                       AND f.severity IN ('critical', 'high')
+                     GROUP BY f.subject_id
+                ), software_severe AS (
+                    SELECT e.device_id, COUNT(DISTINCT e.finding_id)::int AS severe
+                      FROM operations.v_device_software_exposure e
+                      JOIN offline_devices d ON d.device_id = e.device_id
+                     WHERE e.tenant_id = 1
+                       AND e.status IN ('open', 'acknowledged', 'investigating')
+                       AND e.severity IN ('critical', 'high')
+                     GROUP BY e.device_id
+                )
+                SELECT d.device_id, d.canonical_hostname, d.device_role, d.os_group,
+                       d.last_contact_at,
+                       COALESCE(direct_severe.severe, 0)
+                       + COALESCE(software_severe.severe, 0) AS severe
+                  FROM offline_devices d
+             LEFT JOIN direct_severe ON direct_severe.device_id = d.device_id
+             LEFT JOIN software_severe ON software_severe.device_id = d.device_id
+                 ORDER BY severe DESC, d.last_contact_at ASC NULLS FIRST
                 LIMIT 10
                 """,
                 [str(client.id)],
