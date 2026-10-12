@@ -90,8 +90,14 @@
     {% endfor %}
 </div>
 {% endfor %}
-{% if user_count > 500 %}
-<p class="muted">Showing top 500 users (of {{ user_count }}). Filter by client to narrow.</p>
+{% if has_previous or has_next %}
+<div class="pager">
+    <p class="muted" style="margin:0;">Page {{ page }} · {{ user_count }} users with items</p>
+    <div class="pager-links">
+        {% if has_previous %}<a class="pager-link" href="?{% if page_query %}{{ page_query }}&amp;{% endif %}page={{ previous_page }}">Previous</a>{% endif %}
+        {% if has_next %}<a class="pager-link" href="?{% if page_query %}{{ page_query }}&amp;{% endif %}page={{ next_page }}">Next</a>{% endif %}
+    </div>
+</div>
 {% endif %}
 {% else %}
 <p class="muted">Nothing on the user-risk queue for the current filter.</p>
