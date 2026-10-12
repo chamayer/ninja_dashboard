@@ -21,13 +21,12 @@ version: "3.8"
 # at startup:
 #   - ingest    → python-dotenv reads /app/.env (config.py).
 #   - postgres  → entrypoint wrapper sources /etc/secrets.env.
-#   - metabase  → entrypoint wrapper sources /etc/secrets.env.
 # Init script for postgres ships baked into the custom image.
 # Single source of truth for secrets: /amr-ch-01_data/ninja-dashboard/.env.
 
 services:
   # ───────────────────────────────────────────────────────────────────
-  # postgres — main data store (ninja DB) + metabase app DB
+  # postgres — main Operations data store
   # Built from postgres.Dockerfile so the init script is in the image.
   # ───────────────────────────────────────────────────────────────────
   postgres:
@@ -52,8 +51,8 @@ services:
       # the container then never sees the edit.
       - /amr-ch-01_data/ninja-dashboard:/etc/secretsdir:ro
       - postgres-data:/var/lib/postgresql/data
-    # No public port — Metabase and ingest reach Postgres on the
-    # internal docker network. For ad-hoc psql:
+    # No public port — application services reach Postgres on the internal
+    # docker network. For ad-hoc psql:
     #   docker exec -it ninja-postgres psql -U ninja -d ninja
     healthcheck:
       # Route through the unix socket so we hit pg_hba's `local all all
@@ -66,38 +65,6 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
-
-  # ───────────────────────────────────────────────────────────────────
-  # metabase — dashboards
-  # ───────────────────────────────────────────────────────────────────
-  metabase:
-    image: metabase/metabase:latest
-    container_name: ninja-metabase
-    restart: unless-stopped
-    # Same wrapper trick. metabase's real entrypoint is /app/run_metabase.sh.
-    entrypoint:
-      - /bin/sh
-      - -c
-      - "set -a; if [ -f /etc/secretsdir/.env ]; then . /etc/secretsdir/.env; else . /etc/secrets.env; fi; set +a; exec /app/run_metabase.sh"
-    environment:
-      # Static — never overridden, not in the .env file.
-      MB_DB_TYPE: postgres
-      MB_DB_HOST: postgres
-      MB_DB_PORT: 5432
-    volumes:
-      - /amr-ch-01_data/ninja-dashboard:/etc/secretsdir:ro
-      - metabase-data:/metabase-data
-    ports:
-      - "3001:3000"
-    depends_on:
-      postgres:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://localhost:3000/api/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
-      start_period: 60s
 
   # ───────────────────────────────────────────────────────────────────
   # ingest — Python service, pulls Ninja API on schedule into Postgres
@@ -151,7 +118,7 @@ services:
 
   # ───────────────────────────────────────────────────────────────────
   # operations — Django + DRF service, write-side operator console.
-  # Companion to Metabase. Built from operations.Dockerfile.
+  # Built from operations.Dockerfile.
   # See operations/BLUEPRINT.md.
   # ───────────────────────────────────────────────────────────────────
   operations:
@@ -193,4 +160,3 @@ services:
 # real data to protect (see TODO.md).
 volumes:
   postgres-data:
-  metabase-data:

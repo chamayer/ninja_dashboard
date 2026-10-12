@@ -10,16 +10,14 @@ Operations Ingest Engine
         │ raw/source schemas + migrations
         ▼
 Postgres
-   ├── Metabase dashboards
    └── Operations Django application
-            ├── canonical entities
-            ├── identity and client resolution
-            ├── findings and notification workflows
-            └── operator decisions
+         ├── canonical entities
+         ├── identity and client resolution
+         ├── findings and notification workflows
+         └── operator decisions
 ```
 
-The repository builds custom Postgres, ingest, and Operations images and runs
-Metabase as an upstream image.
+The repository builds custom Postgres, ingest, and Operations images.
 
 ## Repository layers
 
@@ -28,7 +26,6 @@ Metabase as an upstream image.
 | `ingest/` | Schedulers, source connectors, migrations, domain processing |
 | `sql/init/` | First-boot database initialization |
 | `sql/migrations/` | Ingest-managed SQL schema evolution |
-| `ingest/metabase_bootstrap.py` and module bootstraps | Dashboard definitions |
 | `operations/` | Django/DRF/HTMX operator control plane |
 | `docker-compose.yml` and `*.Dockerfile` | Runtime packaging and orchestration |
 
@@ -70,19 +67,15 @@ Metabase as an upstream image.
 
 - Operations is the destination for operational reporting, administration,
   workflow, and operator decisions.
-- Metabase is a legacy surface being retired by domain under decision 0005;
-  do not add or optimize Metabase reporting pipelines.
 - New reporting reads generic current evidence, canonical state, findings, and
   compact rollups through tenant-safe Operations read models.
-- A Metabase domain is disconnected only after its required Operations
-  capability is accepted or explicitly retired, and legacy storage remains
-  available for a bounded rollback window.
 
 ## Deployment boundary
 
 - Repository files required at runtime must be baked into images.
 - Secrets and persistent configuration are mounted from outside Git.
-- Postgres and Metabase persistent data use managed Docker storage.
+- Postgres persistent data uses managed Docker storage. The retired Metabase
+  application archive is stored locally outside the live stack.
 - A push can cause an automatic production redeploy.
 
 ## Module boundary

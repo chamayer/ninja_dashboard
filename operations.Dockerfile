@@ -2,7 +2,7 @@
 # =============================================================================
 # ninja-dashboard / operations
 # Django service: write-side operator console (decisions, merge review,
-# policy edits, findings triage, ad-hoc queries). Companion to Metabase.
+# policy edits, findings triage, ad-hoc queries).
 # See operations/BLUEPRINT.md.
 # =============================================================================
 FROM python:3.12-slim

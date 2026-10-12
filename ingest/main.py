@@ -20,35 +20,21 @@ Boot sequence:
 
 from __future__ import annotations
 
-from html import escape
 import http.server
 import logging
 import socketserver
 import threading
-import time
-from urllib.parse import parse_qs, quote, urlparse
 from datetime import datetime, timedelta, timezone
+from html import escape
+from urllib.parse import parse_qs, quote, urlparse
 
-import httpx
 from apscheduler.schedulers.background import BackgroundScheduler
 
-from ingest import db, migrations, retention_observations
-from ingest.derived import refresh_after_collection
-from ingest.config import settings
-from ingest.logging_utils import install_log_safety
+from ingest import db, migrations, operator_job_queue, retention_observations
+from ingest import scope_selector as _scope_selector
 from ingest.activities import ingest as activities_ingest
 from ingest.agent_compliance import ingest as agent_compliance_ingest
 from ingest.agent_compliance import review_digest
-from ingest.source_observations import (
-    SourceObservationFailure,
-    is_identity_source,
-    run_source_observations,
-)
-from ingest import operator_job_queue
-from ingest.inventory import software as software_ingest
-from ingest.inventory import queue as software_queue
-from ingest.runlog import run_log
-from ingest.sources import load_sources
 from ingest.agent_compliance.config_loader import (
     add_device_ignore,
     add_device_merge_decision,
@@ -57,13 +43,13 @@ from ingest.agent_compliance.config_loader import (
     approve_customer_name,
     bulk_ignore_devices,
     promote_alignment_aliases,
-    remove_org_exclude,
     remove_device_ignore,
+    remove_org_exclude,
     set_customer_max_age,
     set_customer_requirement,
     toggle_customer_required_platform,
 )
-from ingest.url_utils import redact_url
+from ingest.config import settings
 from ingest.core import (
     custom_fields,
     device_health,
@@ -72,18 +58,30 @@ from ingest.core import (
     organizations,
     policies,
 )
-from ingest.policy_scope import sync_patching_enabled_policies
-from ingest.ninja_client import NinjaClient
+from ingest.derived import refresh_after_collection
 from ingest.evaluator import evaluate as platform_evaluate
+from ingest.identity.client_resolver import (
+    drain_client_resolution as _drain_client_resolution,
+)
+from ingest.identity.resolver import drain_resolution as _drain_resolution
+from ingest.inventory import queue as software_queue
+from ingest.inventory import software as software_ingest
+from ingest.logging_utils import install_log_safety
+from ingest.ninja_client import NinjaClient
 from ingest.notifications import dispatch as notify_dispatch
 from ingest.notifications_digest import send_digest as notify_send_digest
-from ingest.patch_findings import classify as patch_classify
 from ingest.parity_check import run as parity_check_run
-from ingest.software_findings import classify as software_classify
-from ingest.identity.client_resolver import drain_client_resolution as _drain_client_resolution
-from ingest.identity.resolver import drain_resolution as _drain_resolution
-from ingest import scope_selector as _scope_selector
+from ingest.patch_findings import classify as patch_classify
 from ingest.patches import ingest as patches_ingest
+from ingest.policy_scope import sync_patching_enabled_policies
+from ingest.runlog import run_log
+from ingest.software_findings import classify as software_classify
+from ingest.source_observations import (
+    SourceObservationFailure,
+    is_identity_source,
+    run_source_observations,
+)
+from ingest.sources import load_sources
 from ingest.summary_views import refresh_device_troubleshooting_signal
 from shared.jobs_registry import definition_keys, validate_registry
 
@@ -775,86 +773,6 @@ def _raise_step_failures(context: str, failures: list[tuple[str, Exception]]) ->
         raise RuntimeError(f"{context} had {len(failures)} failed required step(s): {names}")
 
 
-# ── Metabase auto-bootstrap ─────────────────────────────────────────
-
-def _wait_for_metabase(url: str, timeout: int = 300) -> bool:
-    """Poll /api/health every 5s until reachable or timeout (seconds)."""
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        try:
-            r = httpx.get(f"{url.rstrip('/')}/api/health", timeout=5)
-            if r.status_code == 200:
-                return True
-        except Exception:
-            pass
-        time.sleep(5)
-    return False
-
-
-def _metabase_setup_complete(url: str) -> bool:
-    """True if Metabase's first-run wizard has been completed."""
-    try:
-        r = httpx.get(f"{url.rstrip('/')}/api/session/properties", timeout=10)
-        if r.status_code != 200:
-            return False
-        return bool(r.json().get("has-user-setup"))
-    except Exception:
-        return False
-
-
-def metabase_bootstrap_enabled() -> bool:
-    """Whether the configured bootstrap can safely be admitted as a Job."""
-    return bool(settings.MB_BOOTSTRAP_USER and settings.MB_BOOTSTRAP_PASS.get_secret_value())
-
-
-def bootstrap_metabase() -> int:
-    """Provision dashboards and return the number of published dashboard URLs.
-
-    This runs only through the governed maintenance Job.  A configured but
-    unavailable or incomplete Metabase instance is a factual Job failure,
-    rather than a successful row backed only by a log message.
-    """
-    user = settings.MB_BOOTSTRAP_USER
-    password = settings.MB_BOOTSTRAP_PASS.get_secret_value()
-    url = settings.MB_BOOTSTRAP_URL
-
-    if not user or not password:
-        raise RuntimeError("Metabase bootstrap capability is not configured")
-
-    log.info("Waiting for Metabase at %s", redact_url(url))
-    if not _wait_for_metabase(url, timeout=300):
-        raise RuntimeError("Metabase was not reachable within the five-minute bootstrap window")
-
-    if not _metabase_setup_complete(url):
-        raise RuntimeError(
-            "Metabase first-run setup is incomplete; finish setup before retrying the bootstrap Job"
-        )
-        return
-
-    log.info("Running Metabase dashboard bootstrap")
-    from ingest.inventory.metabase_retirement import retire_inventory_metabase
-    from ingest.metabase_bootstrap import run_bootstrap
-    from ingest.agent_compliance.metabase_bootstrap import (
-        run_bootstrap as run_agent_compliance_bootstrap,
-    )
-
-    retired = retire_inventory_metabase(url=url, user=user, password=password)
-    log.info(
-        "Inventory Metabase retirement complete: dashboards=%d cards=%d collections=%d",
-        retired["dashboards"], retired["cards"], retired["collections"],
-    )
-    urls = run_bootstrap(
-        url=url, user=user, password=password, db_name=settings.MB_BOOTSTRAP_DB_NAME,
-    )
-    if settings.AGENT_COMPLIANCE_ENABLED:
-        urls.extend(run_agent_compliance_bootstrap(
-            url=url, user=user, password=password, db_name=settings.MB_BOOTSTRAP_DB_NAME,
-        ))
-    for dashboard_url in urls:
-        log.info("Dashboard ready: %s", dashboard_url)
-    return len(urls)
-
-
 def last_successful_run_at(domain: str | None = None) -> datetime | None:
     with db.transaction() as cur:
         if domain:
@@ -908,7 +826,6 @@ _HTTP_JOB_PATHS = {
     "/run/intel-matcher": "intel-matcher", "/run/intel-winget": "intel-winget",
     "/run/intel-chocolatey": "intel-chocolatey", "/run/intel-otx": "intel-otx",
     "/run/intel-abusech": "intel-abusech", "/run/intel-endoflife": "intel-endoflife",
-    "/bootstrap-metabase": "metabase-bootstrap",
 }
 
 
@@ -946,9 +863,6 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         if governed_job is not None:
             if not _READY.is_set():
                 self._respond(503, b"still starting - try again shortly\n")
-                return
-            if governed_job == "metabase-bootstrap" and not metabase_bootstrap_enabled():
-                self._respond(409, b"metabase bootstrap is not configured\n")
                 return
             try:
                 run_id = operator_job_queue.request_system_job(governed_job, self.path)
@@ -2081,7 +1995,7 @@ def _start_http_server() -> _ThreadingServer:
         "/run/agent-compliance, /run/agent-compliance-evaluate, "
         "/run/resolver, "
             "/run/software/enqueue, /run/software/scoped, /run/software/queue, "
-            "/run/software/demand/<id>, /bootstrap-metabase)",
+            "/run/software/demand/<id>)",
         *addr,
     )
     return httpd
@@ -2138,10 +2052,6 @@ def main() -> None:
     )
     scheduler.start()
     log.info("Durable Jobs producer and control maintenance started")
-
-    # Metabase provisioning can change an external service. It is available
-    # only through the explicit governed endpoint, never at service startup.
-    log.info("Metabase bootstrap is manual-only")
 
     _READY.set()
     log.info("Ingest service ready")

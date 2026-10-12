@@ -2,6 +2,23 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.126.18] — 2026-10-12 — Metabase retirement
+
+### Removed
+
+- Retired the live Metabase Compose service, public port `3001`, bootstrap
+  endpoint, Job definition, worker dispatch, settings, generated dashboard
+  modules, and related Jobs capability display.
+- Stopped provisioning a Metabase application database for new stacks.
+
+### Changed
+
+- Archived all previously active Metabase dashboards after creating and
+  verifying a local-only recovery archive. Operations remains the sole
+  operator-facing reporting surface.
+- Preserved reporting schemas, materialized views, and the `metabase_ro`
+  read-only compatibility role for the separately governed rollback window.
+
 ## [0.126.17] — 2026-10-12 — Operations reporting parity
 
 ### Added

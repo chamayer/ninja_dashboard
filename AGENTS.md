@@ -1,13 +1,12 @@
 # Ninja Dashboard development instructions
 
-Ninja Dashboard ingests operational data into Postgres and provides Metabase
-dashboards plus the Django-based Operations application.
+Ninja Dashboard ingests operational data into Postgres and provides the
+Django-based Operations application.
 
 ## Runtime and layout
 
 - Python ingest service under `ingest/`.
 - SQL initialization and migrations under `sql/`.
-- Metabase dashboards are provisioned by ingest/bootstrap code.
 - The Django Operations module is under `operations/` and has more specific
   instructions.
 - The stack runs through Docker Compose and is deployed through Portainer.
@@ -108,7 +107,7 @@ Report any check that cannot run locally.
 
 - Read `README.md` for project setup and primary commands.
 - Read `docs/requirements.md` for platform scope and acceptance criteria.
-- Read `docs/architecture.md` for ingest, database, Metabase, or service design.
+- Read `docs/architecture.md` for ingest, database, or service design.
 - Read `docs/current-state.md` for the currently supported domains and known
   incomplete areas.
 - Read `docs/operations.md` only for deployment, recovery, host, or maintenance

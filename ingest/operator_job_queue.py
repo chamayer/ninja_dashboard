@@ -435,7 +435,15 @@ def _run_source_refresh(progress: "V1JobProgress") -> JobExecutionResult:
         signals = ("ninja_source", "identity_source")
     elif source.source_key.startswith("reference."):
         from ingest.intel import (
-            abusech, chocolatey, cisa_kev, cpe_dict, epss, lolrmm, nvd, otx, winget,
+            abusech,
+            chocolatey,
+            cisa_kev,
+            cpe_dict,
+            epss,
+            lolrmm,
+            nvd,
+            otx,
+            winget,
         )
 
         handlers = {
@@ -779,10 +787,6 @@ def _execute(job_key: str, progress: V1JobProgress) -> int | JobExecutionResult 
         "platform-health-evaluate": (
             "Evaluating platform health",
             lambda: sum(platform_findings.evaluate(dry_run=False).values()),
-        ),
-        "metabase-bootstrap": (
-            "Provisioning Metabase dashboards",
-            main.bootstrap_metabase,
         ),
         "notifications-dispatch": (
             "Sending notifications",

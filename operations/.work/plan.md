@@ -2,8 +2,7 @@
 
 ## Status
 
-Implementation complete locally — awaiting normal commit/deployment approval.
-The change refactors the existing Admin Health page into the administrator
+Release `7b11501` is deployed through normal GitOps. The change refactors the existing Admin Health page into the administrator
 intervention list without creating a second diagnostics product, changing the
 Admin navigation, or introducing another health authority.
 
@@ -58,9 +57,11 @@ use different missing-patch status/category rules.
 
 Validated locally: focused Jobs/findings tests (65 passed), Django system
 checks, template loading, focused lint, Dockerfile packaging review, and diff
-hygiene. No schema migration, production deployment, commit, or push was
-performed. Next: obtain separate commit/push authorization if the user wants
-this production-affecting change released.
+hygiene. No schema migration was included. Commit `7b11501` is pushed to
+`origin` and `a-m-rose`; normal GitOps deployed it, and protected Patching and
+Admin Health routes return their expected authentication redirect rather than
+an error. The separate Metabase retirement release removes its retired Jobs
+capability without changing Operations data models or navigation.
 
 ---
 

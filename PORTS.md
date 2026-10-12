@@ -4,10 +4,9 @@
 
 | Host port | Bind         | Service     | Why published                                    |
 | --------- | ------------ | ----------- | ------------------------------------------------ |
-| **3001**  | `0.0.0.0`    | Metabase    | LAN users hit it from browsers                   |
 | **8090**  | `127.0.0.1`  | ingest      | Loopback only — operator `/healthz` and `/run`   |
 
-`postgres` is **not** published. Metabase + ingest reach it on the
+`postgres` is **not** published. Application services reach it on the
 internal Docker network. For ad-hoc shell access:
 
 ```bash
@@ -43,7 +42,6 @@ stacks land.
 
 ### Free / claimed by us
 
-- **3001** — Metabase (this stack).
 - **8090** — ingest, loopback only (this stack).
 - 5432 — Postgres (this stack, **not published**).
 

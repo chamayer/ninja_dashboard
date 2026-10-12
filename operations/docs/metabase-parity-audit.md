@@ -1,8 +1,9 @@
 # Metabase-to-Operations parity audit
 
-**Status:** Operations implementation complete locally, pending normal
-deployment validation, 2026-10-12. This remains an evidence inventory; it
-does not change Metabase.
+**Status:** complete, 2026-10-12. The Operations Patching parity release is
+deployed, and all 20 formerly active Metabase dashboards are archived after a
+verified local recovery archive was created. This remains the evidence
+inventory for that completed cutover.
 
 ## Scope and method
 
@@ -50,8 +51,8 @@ The operational patching surface is present. Client-filtered fully-patched
 percentages by device type and operating system are now shown in the existing
 Patching client view, with drill-through to the matching devices. They use the
 same active, in-scope, current-activity population and missing-patch definition
-as the temporary legacy report. It is reporting context, not a separate
-workflow or authority. No Metabase work is justified.
+as the former legacy report. It is reporting context, not a separate workflow
+or authority. No Metabase work is justified.
 
 ## Agent Compliance — twelve active legacy dashboards
 
@@ -81,7 +82,7 @@ not missing Operations features.
 
 ### Agent Compliance conclusion
 
-No new Agent Compliance-specific page should be built. Its active dashboards
+No new Agent Compliance-specific page should be built. Its former dashboards
 are legacy read models; the live operator paths are already consolidated in
 Operations. Before archiving the remaining dashboards, the owner only needs
 to accept retirement of the legacy notification-delivery and debug cards—not
@@ -101,25 +102,27 @@ Their individual cards are retained here so the audit is complete.
 | Inventory - Serial Quality | Serial quality by platform; Total matching serial records; Serial quality details (top 500) | Explicitly deferred generic data-quality capability; does not gate retirement | Retire |
 | Inventory - Source Records | Total unresolved / excluded records; Unresolved / excluded source records (top 500); Total matching source observations; Current source observations (top 500) | Explicitly deferred generic source-evidence administration capability; does not gate retirement | Retire |
 
-## Recommendation
+## Completed decision
 
-1. **Accept Patching parity:** the two client fully-patched percentage
+1. **Patching parity accepted:** the two client fully-patched percentage
    breakdowns are implemented in the existing Patching view. Do not add a
    Patching dashboard or duplicate calculations.
-2. **Accept Agent Compliance retirement:** archive the 12 remaining active
-   dashboards after the owner accepts retirement of the legacy delivery and
-   debug cards. No AC-specific replacement is recommended.
-3. **Keep Inventory retired:** its five archived dashboards remain outside the
+2. **Agent Compliance retired:** the 12 remaining dashboards, including the
+   legacy delivery and debug cards, are archived. No AC-specific replacement
+   is recommended.
+3. **Inventory remains retired:** its five archived dashboards remain outside the
    parity gate, as already accepted. Serial quality and generic source evidence
    remain separately prioritized Operations work, not Metabase recreation.
-4. **Only after those decisions:** perform a separate, explicitly approved
-   cutover that archives/disconnects the accepted Metabase domains while
-   preserving legacy data for rollback. This audit makes no production change.
+4. **Cutover complete:** the approved local archive preserves rollback data;
+   the separate service-removal release disconnects the accepted domains.
 
 ## Evidence and limits
 
-- Live metadata on 2026-10-12: 7 active Patching dashboards, 12 active Agent
-  Compliance dashboards, and 5 archived Inventory dashboards.
+- Live metadata before archival on 2026-10-12: 7 active Patching dashboards,
+  12 active Agent Compliance dashboards, and 5 archived Inventory dashboards.
+- After archival, the supported dashboard-list endpoint reported zero active
+  dashboards. The archive's application-database dump is the authority for
+  both active-at-cutover and previously archived dashboard metadata.
 - The live card inventory is the source for the rows above. The older
   [`metabase-parity-audit-full.md`](./metabase-parity-audit-full.md) is useful
   historical bootstrap evidence but is not authoritative for live card counts

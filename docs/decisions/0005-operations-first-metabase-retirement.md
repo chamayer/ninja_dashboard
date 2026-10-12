@@ -86,6 +86,21 @@ to remain an active production dependency.
   request-time aggregation and duplicate collection entry, still require
   correction even when a Metabase refresh is removed.
 
+## Implementation amendment — 2026-10-12
+
+The owner approved final Metabase retirement after Operations parity was
+deployed and a hash-verified local recovery archive was created. All remaining
+active dashboards were archived before service removal. The live Metabase
+application database, its application role, its named Docker volume, and its
+bootstrap-only configuration may be removed after the Compose cutover has
+stopped the service and verified that nothing mounts the volume. This is a
+bounded exception to retaining the application metadata in the live stack:
+the verified local application-database dump is now the rollback authority.
+
+This amendment does not authorize deletion of historical reporting schemas,
+materialized views, or the `metabase_ro` compatibility role. Those remain
+separate, future operational decisions.
+
 ## Supersedes or superseded by
 
 Supersedes decision 0002.

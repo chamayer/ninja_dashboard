@@ -88,16 +88,6 @@ class Settings(BaseSettings):
     # currently installing drivers.
     DASHBOARD_PATCH_CATEGORIES_EXCLUDE: str = "DRIVER_UPDATES"
 
-    # ── Metabase auto-bootstrap (optional) ───────────────────────────
-    # If MB_BOOTSTRAP_USER and MB_BOOTSTRAP_PASS are both set, ingest
-    # runs the dashboard bootstrap script on startup in a background
-    # thread. Failures are logged but don't crash ingest. Empty values
-    # disable the auto-run (script can still be triggered manually via
-    # `docker exec operations-ingest python -m ingest.metabase_bootstrap`).
-    MB_BOOTSTRAP_URL: str = "http://metabase:3000"
-    MB_BOOTSTRAP_USER: str = ""
-    MB_BOOTSTRAP_PASS: SecretStr = SecretStr("")
-    MB_BOOTSTRAP_DB_NAME: str = "Ninja"
     AGENT_COMPLIANCE_ACTION_BASE_URL: str = "http://10.61.50.28:8090"
 
     # ── Agent compliance alerts ──────────────────────────────────────

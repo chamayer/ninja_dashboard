@@ -629,19 +629,6 @@ _RAW_DEFINITIONS = (
         run_all=False,
         schedule_ids=("platform_health_evaluate_cycle",),
     ),
-    JobDefinition(
-        "metabase-bootstrap",
-        "Metabase dashboard bootstrap",
-        "Provision the configured Metabase dashboards after an explicit request.",
-        "maintenance",
-        "service",
-        "",
-        "metabase_bootstrap",
-        "run_log",
-        "ingest.main.bootstrap_metabase",
-        capability="metabase_bootstrap",
-        run_all=False,
-    ),
 )
 
 # Recovery policy is deliberately separate from execution snapshots: it is an
@@ -887,7 +874,6 @@ _RESOURCE_KEYS_BY_DEFINITION: dict[str, tuple[str, ...]] = {
     "source-actions": ("tenant:{tenant_id}:source-actions",),
     "run-log-recovery": ("tenant:{tenant_id}:run-history",),
     "platform-health-evaluate": ("tenant:{tenant_id}:platform-health",),
-    "metabase-bootstrap": ("tenant:{tenant_id}:reporting",),
 }
 for _key in ("intel-nvd", "intel-cpe-dict", "intel-kev", "intel-epss", "intel-matcher"):
     _RESOURCE_KEYS_BY_DEFINITION[_key] += ("global:intel-cve-corpus",)
@@ -945,7 +931,6 @@ _CAPACITY_KEYS_BY_DEFINITION: dict[str, tuple[str, ...]] = {
     "source-actions": (),
     "run-log-recovery": ("capacity:control",),
     "platform-health-evaluate": ("capacity:processing", "capacity:control"),
-    "metabase-bootstrap": ("capacity:control",),
 }
 
 _SUPERSESSION_RANKS = MappingProxyType(
@@ -1123,7 +1108,6 @@ _SYSTEM_SERVICE_KEYS = frozenset(
         "source-actions",
         "run-log-recovery",
         "platform-health-evaluate",
-        "metabase-bootstrap",
         "software-enqueue-orgs",
     }
 )

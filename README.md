@@ -1,15 +1,14 @@
 # Ninja Dashboard
 
 Ninja Dashboard is an internal operations stack that ingests source data into
-Postgres, serves reporting through Metabase, and provides write-side operator
-workflows through the Django Operations application.
+Postgres and provides reporting, operator workflows, and administration
+through the Django Operations application.
 
 ## Services
 
-- `postgres` — durable source, reporting, and Operations data
+- `postgres` — durable source and Operations data
 - `ingest` — scheduled source collection, migrations, derived refresh, and
   manual operator endpoints
-- `metabase` — read-oriented dashboards and exploration
 - `operations` — tenant-aware findings, decisions, configuration, and workflow
   UI
 
@@ -70,7 +69,6 @@ Validation depends on the changed layer:
 
 - Python syntax/import checks for ingest
 - SQL and migration-order review
-- Generated dashboard inspection for Metabase changes
 - Django, Ruff, focused tests, and request/template checks for Operations
 - Dockerfile and Compose packaging review
 

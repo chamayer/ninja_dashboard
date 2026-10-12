@@ -5,7 +5,7 @@ Date: 2026-10-06
 
 ## Purpose
 
-The current registry contains 37 executable entries. This inventory records
+The current registry contains 36 executable entries. This inventory records
 how those entries map toward ADR-0027; it does not define the product model.
 Any entry that is only scheduler, dispatcher, worker, or recovery machinery
 must be removed from the Job model during implementation while retaining its
@@ -63,7 +63,6 @@ second execution path.
 | --- | --- |
 | `run-log-recovery` | Admin Health / technical diagnostics |
 | `platform-health-evaluate` | Admin Health |
-| `metabase-bootstrap` | Service diagnostics |
 | Scheduler, dispatcher, workers, heartbeats, timeout containment | Admin Health / technical diagnostics |
 | HTTP server, migrations, and application startup | Service diagnostics |
 

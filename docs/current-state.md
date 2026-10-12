@@ -8,7 +8,6 @@ Repository version observed: 0.50.5
 The Compose stack currently contains:
 
 - Custom Postgres image
-- Metabase
 - Python ingest service
 - Django Operations service
 
@@ -23,7 +22,7 @@ operator access; Postgres is not directly published.
 - Agent/compliance connectors and legacy schema
 - Cross-source identity and client resolution
 - Inventory and software refresh queues
-- Metabase bootstrap and reporting materializations
+- Operations reporting and current-state read models
 
 ## Implemented Operations capabilities
 

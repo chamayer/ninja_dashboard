@@ -11,7 +11,6 @@ host values, credentials, tokens, and customer data remain outside Git.
   approved commit there after `origin`; it is not the repository Portainer
   watches.
 - Postgres, ingest, and Operations use repository-built images.
-- Metabase uses its upstream image.
 - Runtime configuration and secrets are mounted from external files.
 - Repository-relative runtime bind mounts are not reliable in repository-mode
   deployment; runtime files must be baked into images or mounted from approved
