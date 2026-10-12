@@ -1,5 +1,63 @@
 # Active root implementation plan
 
+## Active plan — Source-refresh hangs (OS-installation projection)
+
+**Status:** cause validated 2026-10-12; fix in implementation, uncommitted.
+
+**Goal:** stop `source-refresh` runs for Ninja, LogMeIn, ScreenConnect,
+SentinelOne, and Hudu from hanging until the 90-minute deadline and holding
+the two source-connection slots, which starves every other queued job.
+
+**Cause (validated):** every non-reference source refresh calls
+`refresh_after_collection`, which calls `os_installations.project_all()`.
+That projection handles ~17.7k agent observations in ONE transaction, and its
+tables (`entity_relationship_evidence_*`, `operating_system_installation*`) are
+empty and never analyzed, because the transaction never commits. With no
+statistics the planner picks a nested loop that rescans every row of the
+tenant per statement, so cost grows quadratically per statement. Rolled-back
+experiment with the production index definitions: one `UPDATE` took 0.5 s at
+1,000 rows, 13.8 s at 4,000 rows, and 0.26 ms once analyzed. The run therefore
+cannot finish, rolls back at the deadline, leaves the tables empty, and the
+next run repeats it. Live evidence: a session ran the statement for 25+ minutes
+CPU-bound with no lock waits; 128M sequential scans on the evidence table.
+
+**Scope:** `ingest/os_installations.py` only (plus tests). Behavior-preserving.
+
+**Steps:**
+1. Commit in batches (small first batch) so rows become visible and statistics
+   can form; run `ANALYZE` on the four tables after the early batches.
+2. Key the per-row current/history `UPDATE`s by the evidence id that
+   `write_current_evidence` already returns, removing the plan-sensitive join.
+3. Per-batch `statement_timeout` so a runaway statement fails fast.
+4. Session advisory lock so concurrent refreshes skip instead of duplicating.
+5. Unit tests with a recording cursor; no Postgres is available locally.
+
+**Not in scope / deferred:** Postgres memory tuning (`shared_buffers` is the
+128 MB default; cache hit 75%) needs host RAM and a restart; clearing the
+current backlog; `platform-health-evaluate` queued since Oct 9 (blocker not
+found); `refresh_after_collection` swallowing projection failures.
+
+**Validation plan:** unit tests, ruff, diff check locally; after an approved
+deploy, compare source-refresh durations and the projection log line, and
+confirm the relationship tables fill.
+
+**Checkpoint:** fix implemented in `ingest/os_installations.py` with
+`ingest/tests/test_os_installations_projection.py`; uncommitted. No migration.
+
+**Validation performed:** 9 new tests pass; 55 related ingest tests pass (5
+skipped); ruff check and format clean on both files. Old vs fixed `project_all`
+against the same recording fake with 2,500 rows: old = 1 transaction, 2,500
+history updates joined on the external key, no ANALYZE; fixed = 10
+transactions, 0 external-key joins, analyze after early batches, identical
+2,500 relationships written.
+
+**Not validated:** runtime on production (no local Postgres; the fakes check
+structure, not speed); that no other contributor to the hangs remains (the
+software-classify timeouts and `platform-health-evaluate` are separate).
+
+**Next action:** commit and push approval; then compare source-refresh
+durations and confirm the relationship tables fill (~17.7k rows).
+
 ## Active plan — R-U-ON as an agent source
 
 **Status:** in implementation (started 2026-10-12). The navigation-performance

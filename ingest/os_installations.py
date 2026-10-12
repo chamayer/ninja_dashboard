@@ -15,7 +15,11 @@ from __future__ import annotations
 import hashlib
 import logging
 import uuid
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import datetime, timezone
+
+from psycopg import sql
 
 from ingest import db, relationships
 
@@ -25,6 +29,26 @@ TENANT_ID = 1
 RELATIONSHIP_TYPE = "os_installation_runs_on_computer"
 NATIVE_RECORD_TYPE = "agent_observation"
 OS_ENDPOINT_NAMESPACE = "os_installation"
+
+# The projection used to run as ONE transaction over every agent observation.
+# Its tables were therefore empty and never analyzed while it ran, so the
+# planner chose a nested loop that rescanned the whole tenant for every row:
+# cost per statement grew with the square of the row count and the run could
+# not finish before its deadline (measured: 0.5 s per UPDATE at 1,000 rows,
+# 13.8 s at 4,000, 0.26 ms once analyzed). Commit in batches so rows become
+# visible and statistics can form, and analyze the tables early.
+FIRST_BATCH_SIZE = 100
+BATCH_SIZE = 1000
+ANALYZE_BATCHES = 5
+BATCH_STATEMENT_TIMEOUT = "60s"
+WITHDRAW_STATEMENT_TIMEOUT = "300s"
+_LOCK_NAME = "operations.os_installation_projection"
+_STATISTICS_TABLES = (
+    "entity_relationship_evidence_current",
+    "entity_relationship_evidence_history",
+    "operating_system_installation_source_identities",
+    "operating_system_installations",
+)
 
 
 def _relation_id(row: tuple) -> str:
@@ -97,23 +121,69 @@ def _find_installation_for_computer(
     return cur.fetchone()
 
 
-def project_all() -> dict[str, int | str]:
-    """Build OS-installation source identities and their active host evidence."""
-    totals: dict[str, int | str] = {
-        "status": "complete",
-        "installations_created": 0,
-        "source_identities_created": 0,
-        "relationships_written": 0,
-        "relationships_withdrawn": 0,
-    }
+@contextmanager
+def _single_flight() -> Iterator[bool]:
+    """Hold a session advisory lock so concurrent refreshes do not duplicate the pass.
+
+    Every source refresh triggers this projection; several can finish together.
+    The pass is idempotent but heavy, so a second caller skips instead.
+    """
+    with db.pool.connection() as conn:
+        conn.autocommit = True
+        try:
+            acquired = bool(
+                conn.execute(
+                    "SELECT pg_try_advisory_lock(hashtext(%s))", (_LOCK_NAME,)
+                ).fetchone()[0]
+            )
+            try:
+                yield acquired
+            finally:
+                if acquired:
+                    conn.execute(
+                        "SELECT pg_advisory_unlock(hashtext(%s))", (_LOCK_NAME,)
+                    )
+        finally:
+            conn.autocommit = False
+
+
+def _begin_batch(cur, statement_timeout: str) -> None:
+    cur.execute(
+        "SELECT set_config('operations.tenant_id', %s, TRUE)", (str(TENANT_ID),)
+    )
+    # SET LOCAL cannot take a bind parameter; the value is a module constant.
+    cur.execute(f"SET LOCAL statement_timeout = '{statement_timeout}'")
+
+
+def _analyze_tables() -> None:
+    """Give the planner real statistics once committed rows exist.
+
+    Best effort: a failure here must not fail the projection, which is correct
+    (only slower) without it.
+    """
+    try:
+        with db.transaction() as cur:
+            for table in _STATISTICS_TABLES:
+                cur.execute(
+                    sql.SQL("ANALYZE {}").format(sql.Identifier("operations", table))
+                )
+    except Exception:
+        log.warning(
+            "OS-installation projection: ANALYZE failed; continuing", exc_info=True
+        )
+
+
+def _load_agent_observations() -> list[tuple] | None:
+    """Active agent observations to project, or None while the migration is pending."""
     with db.transaction() as cur:
-        cur.execute("SELECT set_config('operations.tenant_id', %s, TRUE)", (str(TENANT_ID),))
+        cur.execute(
+            "SELECT set_config('operations.tenant_id', %s, TRUE)", (str(TENANT_ID),)
+        )
         cur.execute(
             "SELECT to_regclass('operations.operating_system_installations') IS NOT NULL"
         )
         if not cur.fetchone()[0]:
-            totals["status"] = "migration_pending"
-            return totals
+            return None
         cur.execute(
             """
             SELECT observation.source_instance_id, observation.external_namespace,
@@ -137,172 +207,172 @@ def project_all() -> dict[str, int | str]:
             """,
             (TENANT_ID,),
         )
-        rows = cur.fetchall()
-        for row in rows:
+        return cur.fetchall()
+
+
+def _project_row(cur, row: tuple, totals: dict[str, int | str]) -> None:
+    (
+        source_instance_id,
+        namespace,
+        parent_namespace,
+        parent_id,
+        external_id,
+        device_id,
+        client_id,
+        observed_at,
+        last_seen_at,
+        computer_entity_id,
+    ) = row
+    cur.execute(
+        """
+        SELECT identity.installation_id, installation.entity_id,
+               installation.client_id
+          FROM operations.operating_system_installation_source_identities identity
+          JOIN operations.operating_system_installations installation
+            ON installation.tenant_id = identity.tenant_id
+           AND installation.id = identity.installation_id
+         WHERE identity.tenant_id = %s
+           AND identity.source_instance_id = %s
+           AND identity.external_namespace = %s
+           AND identity.parent_external_namespace = %s
+           AND identity.parent_external_id = %s
+           AND identity.external_id = %s
+         FOR UPDATE
+        """,
+        (
+            TENANT_ID,
+            source_instance_id,
+            namespace,
+            parent_namespace,
+            parent_id,
+            external_id,
+        ),
+    )
+    identity = cur.fetchone()
+    if identity is None:
+        existing = _find_installation_for_computer(cur, device_id=device_id)
+        if existing is None:
+            installation_id, installation_entity_id = _create_installation(
+                cur, client_id=client_id, observed_at=observed_at
+            )
+            totals["installations_created"] += 1
+        else:
+            installation_id, installation_entity_id = existing
+        cur.execute(
+            """
+            INSERT INTO operations.operating_system_installation_source_identities (
+                id, tenant_id, version, installation_id, source_instance_id,
+                external_namespace, parent_external_namespace, parent_external_id,
+                external_id, first_observed_at, last_observed_at
+            ) VALUES (
+                %s, %s, 1, %s, %s, %s, %s, %s, %s, %s, %s
+            )
+            """,
             (
+                uuid.uuid4(),
+                TENANT_ID,
+                installation_id,
                 source_instance_id,
                 namespace,
                 parent_namespace,
                 parent_id,
                 external_id,
-                device_id,
-                client_id,
                 observed_at,
                 last_seen_at,
-                computer_entity_id,
-            ) = row
-            cur.execute(
-                """
-                SELECT identity.installation_id, installation.entity_id,
-                       installation.client_id
-                  FROM operations.operating_system_installation_source_identities identity
-                  JOIN operations.operating_system_installations installation
-                    ON installation.tenant_id = identity.tenant_id
-                   AND installation.id = identity.installation_id
-                 WHERE identity.tenant_id = %s
-                   AND identity.source_instance_id = %s
-                   AND identity.external_namespace = %s
-                   AND identity.parent_external_namespace = %s
-                   AND identity.parent_external_id = %s
-                   AND identity.external_id = %s
-                 FOR UPDATE
-                """,
-                (
-                    TENANT_ID,
-                    source_instance_id,
-                    namespace,
-                    parent_namespace,
-                    parent_id,
-                    external_id,
-                ),
-            )
-            identity = cur.fetchone()
-            if identity is None:
-                existing = _find_installation_for_computer(cur, device_id=device_id)
-                if existing is None:
-                    installation_id, installation_entity_id = _create_installation(
-                        cur, client_id=client_id, observed_at=observed_at
-                    )
-                    totals["installations_created"] += 1
-                else:
-                    installation_id, installation_entity_id = existing
-                cur.execute(
-                    """
-                    INSERT INTO operations.operating_system_installation_source_identities (
-                        id, tenant_id, version, installation_id, source_instance_id,
-                        external_namespace, parent_external_namespace, parent_external_id,
-                        external_id, first_observed_at, last_observed_at
-                    ) VALUES (
-                        %s, %s, 1, %s, %s, %s, %s, %s, %s, %s, %s
-                    )
-                    """,
-                    (
-                        uuid.uuid4(),
-                        TENANT_ID,
-                        installation_id,
-                        source_instance_id,
-                        namespace,
-                        parent_namespace,
-                        parent_id,
-                        external_id,
-                        observed_at,
-                        last_seen_at,
-                    ),
-                )
-                totals["source_identities_created"] += 1
-            else:
-                installation_id, installation_entity_id, installation_client_id = (
-                    identity
-                )
-                if installation_client_id != client_id:
-                    # A source record changing client scope is not evidence that an OS
-                    # installation moved across customers. Leave it for identity review.
-                    continue
-                cur.execute(
-                    """
-                    UPDATE operations.operating_system_installation_source_identities
-                       SET last_observed_at = GREATEST(last_observed_at, %s),
-                           version = version + 1
-                     WHERE tenant_id = %s AND source_instance_id = %s
-                       AND external_namespace = %s
-                       AND parent_external_namespace = %s
-                       AND parent_external_id = %s AND external_id = %s
-                    """,
-                    (
-                        last_seen_at,
-                        TENANT_ID,
-                        source_instance_id,
-                        namespace,
-                        parent_namespace,
-                        parent_id,
-                        external_id,
-                    ),
-                )
+            ),
+        )
+        totals["source_identities_created"] += 1
+    else:
+        installation_id, installation_entity_id, installation_client_id = identity
+        if installation_client_id != client_id:
+            # A source record changing client scope is not evidence that an OS
+            # installation moved across customers. Leave it for identity review.
+            return
+        cur.execute(
+            """
+            UPDATE operations.operating_system_installation_source_identities
+               SET last_observed_at = GREATEST(last_observed_at, %s),
+                   version = version + 1
+             WHERE tenant_id = %s AND source_instance_id = %s
+               AND external_namespace = %s
+               AND parent_external_namespace = %s
+               AND parent_external_id = %s AND external_id = %s
+            """,
+            (
+                last_seen_at,
+                TENANT_ID,
+                source_instance_id,
+                namespace,
+                parent_namespace,
+                parent_id,
+                external_id,
+            ),
+        )
 
-            relation_key = _relation_id(row)
-            relationships.write_current_evidence(
-                cur,
-                tenant_id=TENANT_ID,
-                source_instance_id=source_instance_id,
-                native_record_type=NATIVE_RECORD_TYPE,
-                external_relationship_id=relation_key,
-                relationship_type=RELATIONSHIP_TYPE,
-                source_endpoint={
-                    "source_instance_id": source_instance_id,
-                    "external_namespace": OS_ENDPOINT_NAMESPACE,
-                    "external_id": external_id,
-                    "parent_external_namespace": parent_namespace,
-                    "parent_external_id": parent_id,
-                },
-                target_endpoint={
-                    "source_instance_id": source_instance_id,
-                    "external_namespace": namespace,
-                    "external_id": external_id,
-                    "parent_external_namespace": parent_namespace,
-                    "parent_external_id": parent_id,
-                },
-                material_hash=hashlib.sha256(
-                    f"{installation_entity_id}:{computer_entity_id}".encode()
-                ).digest(),
-                observed_at=last_seen_at,
-            )
-            cur.execute(
-                """
-                UPDATE operations.entity_relationship_evidence_current
-                   SET source_entity_id = %s, target_entity_id = %s,
-                       version = version + 1
-                 WHERE tenant_id = %s AND source_instance_id = %s
-                   AND external_relationship_id = %s
-                """,
-                (
-                    installation_entity_id,
-                    computer_entity_id,
-                    TENANT_ID,
-                    source_instance_id,
-                    relation_key,
-                ),
-            )
-            cur.execute(
-                """
-                UPDATE operations.entity_relationship_evidence_history history
-                   SET source_entity_id = current.source_entity_id,
-                       target_entity_id = current.target_entity_id,
-                       resolution_status = current.resolution_status,
-                       authority_eligible = current.authority_eligible,
-                       authority_tier = current.authority_tier,
-                       authority_priority = current.authority_priority
-                  FROM operations.entity_relationship_evidence_current current
-                 WHERE history.tenant_id = current.tenant_id
-                   AND history.evidence_current_id = current.id
-                   AND current.tenant_id = %s
-                   AND current.source_instance_id = %s
-                   AND current.external_relationship_id = %s
-                   AND history.effective_to IS NULL
-                """,
-                (TENANT_ID, source_instance_id, relation_key),
-            )
-            totals["relationships_written"] += 1
+    relation_key = _relation_id(row)
+    evidence_id = relationships.write_current_evidence(
+        cur,
+        tenant_id=TENANT_ID,
+        source_instance_id=source_instance_id,
+        native_record_type=NATIVE_RECORD_TYPE,
+        external_relationship_id=relation_key,
+        relationship_type=RELATIONSHIP_TYPE,
+        source_endpoint={
+            "source_instance_id": source_instance_id,
+            "external_namespace": OS_ENDPOINT_NAMESPACE,
+            "external_id": external_id,
+            "parent_external_namespace": parent_namespace,
+            "parent_external_id": parent_id,
+        },
+        target_endpoint={
+            "source_instance_id": source_instance_id,
+            "external_namespace": namespace,
+            "external_id": external_id,
+            "parent_external_namespace": parent_namespace,
+            "parent_external_id": parent_id,
+        },
+        material_hash=hashlib.sha256(
+            f"{installation_entity_id}:{computer_entity_id}".encode()
+        ).digest(),
+        observed_at=last_seen_at,
+    )
+    # Key both updates by the evidence id the upsert just returned. The previous
+    # form joined history to current through (source_instance, external id)
+    # and relied on the planner to start from the unique index; without
+    # statistics it did not, and rescanned the tenant for every row.
+    cur.execute(
+        """
+        UPDATE operations.entity_relationship_evidence_current
+           SET source_entity_id = %s, target_entity_id = %s,
+               version = version + 1
+         WHERE tenant_id = %s AND id = %s
+        """,
+        (installation_entity_id, computer_entity_id, TENANT_ID, evidence_id),
+    )
+    cur.execute(
+        """
+        UPDATE operations.entity_relationship_evidence_history history
+           SET source_entity_id = current.source_entity_id,
+               target_entity_id = current.target_entity_id,
+               resolution_status = current.resolution_status,
+               authority_eligible = current.authority_eligible,
+               authority_tier = current.authority_tier,
+               authority_priority = current.authority_priority
+          FROM operations.entity_relationship_evidence_current current
+         WHERE history.tenant_id = %s
+           AND history.evidence_current_id = %s
+           AND history.effective_to IS NULL
+           AND current.tenant_id = %s
+           AND current.id = %s
+        """,
+        (TENANT_ID, evidence_id, TENANT_ID, evidence_id),
+    )
+    totals["relationships_written"] += 1
 
+
+def _withdraw_missing(totals: dict[str, int | str]) -> None:
+    with db.transaction() as cur:
+        _begin_batch(cur, WITHDRAW_STATEMENT_TIMEOUT)
         withdrawn_at = datetime.now(timezone.utc)
         cur.execute(
             """
@@ -340,5 +410,39 @@ def project_all() -> dict[str, int | str]:
                 (withdrawn_at, TENANT_ID, withdrawn_ids, withdrawn_at),
             )
             totals["relationships_withdrawn"] = len(withdrawn_ids)
+
+
+def project_all() -> dict[str, int | str]:
+    """Build OS-installation source identities and their active host evidence."""
+    totals: dict[str, int | str] = {
+        "status": "complete",
+        "installations_created": 0,
+        "source_identities_created": 0,
+        "relationships_written": 0,
+        "relationships_withdrawn": 0,
+    }
+    with _single_flight() as acquired:
+        if not acquired:
+            totals["status"] = "skipped_busy"
+            log.info("OS-installation projection already running; skipping this pass")
+            return totals
+        rows = _load_agent_observations()
+        if rows is None:
+            totals["status"] = "migration_pending"
+            return totals
+        position = 0
+        batch_number = 0
+        while position < len(rows):
+            size = FIRST_BATCH_SIZE if batch_number == 0 else BATCH_SIZE
+            batch = rows[position : position + size]
+            with db.transaction() as cur:
+                _begin_batch(cur, BATCH_STATEMENT_TIMEOUT)
+                for row in batch:
+                    _project_row(cur, row, totals)
+            position += len(batch)
+            batch_number += 1
+            if batch_number <= ANALYZE_BATCHES:
+                _analyze_tables()
+        _withdraw_missing(totals)
     log.info("OS-installation projection: %s", totals)
     return totals
