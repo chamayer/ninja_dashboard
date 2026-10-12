@@ -1,179 +1,128 @@
-# Metabase parity audit
+# Metabase-to-Operations parity audit
 
-**Purpose:** Inventory of every dashboard the stack bootstraps into Metabase,
-classified against current Operations coverage, to support phased Metabase
-retirement under root decision 0005. This is a retirement audit, not a plan to
-improve Metabase.
+**Status:** Decision-ready audit, 2026-10-12. This is an evidence inventory,
+not a change to Metabase or Operations.
 
-**Method:** Metabase content authored by this stack is defined in
-three bootstrap modules under `ingest/`. Those files are the
-authoritative "what we produce" inventory. Before a domain cutover, an
-aggregate-only production audit must also enumerate operator-authored
-questions in the Metabase backing store without exposing query text, result
-data, or customer identifiers. Each required capability receives an accepted
-Operations path or an explicit retirement decision; pixel-for-pixel parity is
-not required.
+## Scope and method
 
-**Sources:**
+This audit covers every card on the live Patching, Agent Compliance, and
+Inventory dashboards. Live Metabase API metadata was inspected for active
+dashboards and cards; archived Inventory dashboard/card metadata was inspected
+read-only in the Metabase application database. Query text, results, customer
+data, and credentials were not retrieved.
 
-- `ingest/metabase_bootstrap.py` (~246 named specs, ~9 dashboards) —
-  Ninja patching surface.
-- `ingest/inventory/metabase_bootstrap.py` (~13 named specs,
-  5 dashboards) — inventory surface.
-- `ingest/agent_compliance/metabase_bootstrap.py` (~24 named specs,
-  8 dashboards) — legacy AC surface.
+Operations routes and templates were inspected to identify the actual operator
+surface, not a merely plausible data source. A semicolon-separated cell below
+lists individual cards that share the same intent, destination, and outcome;
+every live card name appears exactly once.
 
-**Classification key:**
+| Outcome | Meaning |
+|---|---|
+| **Displayed** | The card's operator question is shown directly on the linked Operations page. |
+| **Consolidated** | Operations answers it in a combined operational view rather than a dedicated card. |
+| **Missing** | The exact operator question has no native display and needs a scoped Operations refinement before that capability is retired. |
+| **Retire** | The card belongs to an explicitly retired domain or disabled legacy workflow; no replacement is required. |
 
-- **COVERED** — Operations has a native equivalent that operators use
-  today. Retiring the Metabase dashboard removes duplication only.
-- **PARTIAL** — Operations covers the intent but the specific
-  presentation / slice differs. Retiring the Metabase dashboard
-  requires a small Operations extension to close the gap.
-- **GAP** — no Operations equivalent. Retiring the Metabase dashboard
-  requires a real Operations build-out.
-- **RETIRED** — already marked retired in the bootstrap; not part of
-  the parity requirement.
+This follows root [ADR-0005](../../docs/decisions/0005-operations-first-metabase-retirement.md): Operations is the operator authority, Metabase is not reproduced card-for-card, and any future replacement must use generic Operations contracts rather than copied Metabase SQL.
 
----
+## Patching — seven active dashboards
 
-## Ninja patching (`ingest/metabase_bootstrap.py`)
+| Live dashboard | Card(s) and operator intent | Operations surface | Outcome |
+|---|---|---|---|
+| Ninja — Command Center | Fleet Approved Windows Devices; Fleet Active Windows Devices; Fleet Included Devices; Stalled Devices; Never-Patched Devices; Included Devices Actively Patching; Devices Awaiting Reboot; Recent Patch Activity (Fleet) — current fleet patch posture | [`/patching/`](/patching/) | Displayed |
+| Ninja — Command Center | Approved Patches; Patches Awaiting Manual Approval; Delayed Patches; Patch Failures; OS Patch Warnings (24h); OS Patch Failures (24h); Failed Patch Devices; Manual or Delayed Patch Devices — work that needs attention | [`/patching/`](/patching/) and [`/findings/?category=patching`](/findings/?category=patching) | Consolidated |
+| Ninja — Command Center | Data Freshness; Ingest Pipeline Status — whether the underlying Ninja evidence is current | [`/sources/`](/sources/) | Displayed |
+| Ninja — Command Center | Clients Needing Attention — which clients require patch follow-up | [`/patching/`](/patching/) client posture table | Displayed |
+| Ninja — Client Patch Review | Approved Windows Devices; Active Windows Devices; Included Devices; Devices Scanned Successfully (30d); Devices Installed Recently (30d); Devices Needing Action; Patch Failures; Approved Patches; Patches Awaiting Manual Approval; Delayed Patches; Stalled Devices; Never-Patched Devices; Patching Devices; Current Patch State; Devices Needing Reboot — one client's current patch posture | [`/patching/?client=<client-slug>`](/patching/) | Displayed |
+| Ninja — Client Patch Review | Client Patch Status; Failed Patch Devices; Manual or Delayed Patch Devices; Warnings (30d); Failures (30d); Top Problem Devices — client triage summary | [`/patching/?client=<client-slug>`](/patching/) plus [`/findings/?category=patching&client=<client-slug>`](/findings/?category=patching) | Consolidated |
+| Ninja — Client Patch Review | Fully patched % (patching devices) by Device Type; Fully patched % (patching devices) by Operating System — percentage breakdowns for a client | No native percentage-breakdown display | **Missing** |
+| Ninja — Device Detail | Device Summary; Current Patch State; Install Results Over Time; Recent Patch & Reboot Activity; Patch State History; Install History; Recent OS Patch Warnings (30d); Recent OS Patch Failures (30d) — one device's patch evidence and history | [`/orgs/<client>/devices/<device>/` patching tab](/devices/) | Displayed |
+| Ninja — Device Work Queue | Devices Needing Action; Never Patched; Stalled; Offline; Failed Installs; Reboot Pending; With Warnings; With Failures; Device Work Queue; Devices Needing Action by Client; Devices Needing Action by Problem; Scan Gaps; Devices Blocked by Reboot; Devices Blocked by Approval; Stalled or Never Patched — triage queue and reason | [`/patching/`](/patching/) | Displayed |
+| Ninja — Device Work Queue | Warnings by Category (30d); Top Devices by Warnings (30d); Top Devices by Failures (30d); Failures by Error Code (30d); Devices Matching Warning Category (30d); Devices Matching Failure Error Type (30d) — filterable problem analysis | [`/patching/`](/patching/) and [`/patching/activity/`](/patching/activity/) | Consolidated |
+| Ninja — Patch Evidence | Patch State; Patch Severity; Devices with Matching Patches; KBs with Matching Patches; Patch Install Results Over Time; All Devices with Matching Patches; All Matching KBs; Matching Patch Rows; Patch Evidence Table (top 500); Patch Types — filtered device/KB evidence | [`/patching/evidence/`](/patching/evidence/) | Displayed |
+| Ninja — Patch Trends | Patch Installs per Day; Failed Install Attempts per Day; System Reboots per Day; Patching Devices per Day; Currently-MANUAL Patches by Age; OS Patch Warnings per Day; OS Patch Operational Failures per Day — trend and age analysis | [`/patching/trends/`](/patching/trends/) | Displayed |
+| Ninja — Activity Search | Activity Search — find individual patch/install activity | [`/patching/activity/`](/patching/activity/) | Displayed |
 
-The largest surface. Nine dashboards, of which two are already
-marked retired in `_RETIRED_DASHBOARD_NAMES`.
+### Patching conclusion
 
-| Dashboard | Classification | Notes |
-|---|---|---|
-| `Ninja — Command Center` | **PARTIAL** | Operations Home + Findings queue + Devices fleet cover most of the intent. Command-center layout ("triage from one screen") isn't reproduced 1:1. Gap: a patching-focused command view. |
-| `Ninja — Overall Patching Status` | **RETIRED** | Not part of the parity requirement. |
-| `Ninja — Client Patch Review` | **PARTIAL** | Client detail scoreboard exists but doesn't have a patch-focused rollup. Gap: patching tab on Client detail summarizing approved / stalled / never-patched counts. |
-| `Ninja — Patch Evidence` | **GAP** | Per-patch evidence tables (which KBs, which devices) have no Operations equivalent. Building this needs a new surface — probably a `/patches/` route with filter + detail. |
-| `Ninja — Device Detail` | **COVERED** | Device detail 5-tab (0.55.0) has a Patching tab. Coverage is close; verify field-for-field if the tab renders everything operators referenced from Metabase. |
-| `Ninja — Device Patching Status` | **RETIRED** | Not part of the parity requirement. |
-| `Ninja — Device Work Queue` | **COVERED** | Operations Findings queue with `category=patching` filter is the native surface. Already in prod. |
-| `Ninja — Patch Trends` | **GAP** | Time-series trend dashboards (per-day installs / failures / reboots / patching-devices) — no Operations equivalent. Requires building trend views (client_health_trend_current landed in 0.49.0 gives a pattern to follow). |
-| `Ninja — Activity Search` | **GAP** | Free-text search across patch activity events. No Operations equivalent. Small standalone slice — a search view over a fact table. |
+The operational patching surface is present. The only confirmed missing
+capability is a *client-filtered fully-patched percentage* with two breakdowns
+(device type and operating system). It is reporting context, not a separate
+workflow or new authority. A future, bounded refinement should add that
+breakdown to the existing Patching page's client posture section, using the
+same patching population denominator already visible there. No Metabase work
+is justified.
 
-**Ninja patching gap summary:** ~5 gaps ranging from small (Activity Search) to
-Track-sized (Patch Trends, Patch Evidence). Client Patch Review closes with a
-Client-detail extension.
+## Agent Compliance — twelve active legacy dashboards
 
----
+Agent Compliance is disabled and must not regain a parallel authority. The
+operator questions that remain meaningful are represented by Operations'
+coverage, issues, client mapping, sources, and notification configuration
+surfaces. Legacy alert delivery/debug mechanics are retirement candidates,
+not missing Operations features.
 
-## Inventory (`ingest/inventory/metabase_bootstrap.py`)
+| Live dashboard | Card(s) and operator intent | Operations surface | Outcome |
+|---|---|---|---|
+| Agent Compliance - Command Center | Compliant %; Devices to fix; Degraded devices; Services down — current coverage posture | [`/coverage/`](/coverage/) and [`/findings/?category=coverage`](/findings/?category=coverage) | Consolidated |
+| Agent Compliance - Command Center | Names to map; Unmatched names — identity/mapping review backlog | [`/admin/integrations/client-mappings/`](/admin/integrations/client-mappings/) and [`/clients/candidates/`](/clients/candidates/) | Displayed |
+| Agent Compliance - Alerts | First notifications ready to send; Alertable issues not sending a first notification; Recently notified; Open alertable device issues — legacy delivery queue/history | Open issues: [`/findings/?category=coverage`](/findings/?category=coverage); legacy delivery mechanics: none | Retire |
+| Agent Compliance - Customers | Customers and platform names; Customer names to review; Platform names by customer; Ignored customer names — client mapping and coverage configuration | [`/inventory/clients/`](/inventory/clients/), [`/admin/integrations/client-mappings/`](/admin/integrations/client-mappings/), and client configuration | Consolidated |
+| Agent Compliance - Debug | Raw observations; Same name across customers; Notification decision details; Recent device renames — legacy diagnostics | Generic source evidence/admin audit remains available; AC-specific diagnostic dashboard is not an operator surface | Retire |
+| Agent Compliance - Device drilldown | Platform status; Recent state history; Open and recent issues; Ignores for this device — one device's coverage state | [`/orgs/<client>/devices/<device>/`](/devices/) and its linked Issues | Consolidated |
+| Agent Compliance - Devices | Needs attention by customer; Needs attention by issue type; Needs attention by OS family; Needs attention by device type; Devices needing action; Missing but online somewhere else; Devices by missing platform; Suggested device name merges; Stale devices by customer; Ignored devices; All devices — filterable fleet coverage work | [`/devices/`](/devices/), [`/coverage/`](/coverage/), [`/findings/?category=coverage`](/findings/?category=coverage), and [`/merge-candidates/`](/merge-candidates/) | Consolidated |
+| Agent Compliance - Health | Collection and delivery problems; All sources — source collection health | [`/sources/`](/sources/) and [`/admin/overview/`](/admin/overview/) | Consolidated |
+| Agent Compliance - Health | Device issues by platform; Names needing review by platform — coverage/mapping workload by source/platform | [`/coverage/`](/coverage/) and [`/admin/integrations/client-mappings/`](/admin/integrations/client-mappings/) | Consolidated |
+| Agent Compliance - Org Review | Names to map; Unmatched names; Ignored names — client/source mapping work | [`/admin/integrations/client-mappings/`](/admin/integrations/client-mappings/) | Displayed |
+| Agent Compliance - Review | Names to map; Unmatched names; Ignored names; New Names — mapping/candidate review | [`/admin/integrations/client-mappings/`](/admin/integrations/client-mappings/) and [`/clients/candidates/`](/clients/candidates/) | Displayed |
+| Agent Compliance - Setup | Required platforms; Customer alert setup; Alert rules; Notification routes; Sources; Add a per-customer ScreenConnect source — legacy configuration | [`/admin/requirement-profiles/`](/admin/requirement-profiles/), [`/admin/notifications/`](/admin/notifications/), and [`/sources/`](/sources/) | Consolidated |
+| Agent Compliance - Source Health | Missing by platform; All sources — coverage gap/source freshness | [`/coverage/`](/coverage/) and [`/sources/`](/sources/) | Consolidated |
+| Agent Compliance - Today | Total devices; Compliant devices; Compliant %; Missing; Offline; Review; Stale; Names to review; Collection issues; Needs attention by customer; Needs attention by issue type; Needs attention by OS family; Needs attention by device type; Top device issues; Customer names needing review; Collection and delivery problems — today's fleet coverage work | [`/coverage/`](/coverage/), [`/findings/?category=coverage`](/findings/?category=coverage), [`/sources/`](/sources/), and mappings | Consolidated |
+| Agent Compliance - Today | Ready to notify — legacy notification dispatch condition | Notifications are configured in Operations but legacy AC delivery state is intentionally retired | Retire |
 
-Five dashboards.
+### Agent Compliance conclusion
 
-| Dashboard | Classification | Notes |
-|---|---|---|
-| `Inventory - Overview` | **RETIRED** | Owner accepted retirement; Operations Home and Devices already cover the useful intent. |
-| `Inventory - Devices` | **RETIRED** | Owner accepted retirement; Devices is the native Operations surface. |
-| `Inventory - Identity Review` | **RETIRED** | Owner accepted retirement; superseded by `identity_conflict` findings and `device_merge`. |
-| `Inventory - Serial Quality` | **RETIRED** | Owner accepted dashboard retirement without a parity gate. Generic serial evidence/data-quality remains forward Operations work, not a Metabase cutover prerequisite. |
-| `Inventory - Source Records` | **RETIRED** | Owner accepted dashboard retirement without a parity gate. The generic source-evidence administration surface from decision 0010 remains forward Operations work. |
+No new Agent Compliance-specific page should be built. Its active dashboards
+are legacy read models; the live operator paths are already consolidated in
+Operations. Before archiving the remaining dashboards, the owner only needs
+to accept retirement of the legacy notification-delivery and debug cards—not
+an implementation project.
 
-**Inventory retirement summary:** all five dashboards were explicitly accepted
-for retirement on 2026-08-03. Generic Serial Quality and Source Records remain
-Operations design requirements but no longer gate this Metabase disconnect.
+## Inventory — five archived dashboards
 
----
+All five are already archived in live Metabase. The owner accepted their
+retirement on 2026-08-03 in ADR-0005, without an Operations parity gate.
+Their individual cards are retained here so the audit is complete.
 
-## Agent Compliance (`ingest/agent_compliance/metabase_bootstrap.py`)
+| Archived dashboard | Card(s) | Operations surface / decision | Outcome |
+|---|---|---|---|
+| Inventory - Overview | Resolved devices; Managed devices; Missing coverage; Unresolved records; Identity conflicts; Merge candidates; Inventory states; Devices by platform; Inventory attention | Accepted Inventory retirement; useful navigation remains in [`/devices/`](/devices/), [`/coverage/`](/coverage/), and review queues | Retire |
+| Inventory - Devices | Total matching devices; Total matching customers; Device inventory (top 500); Inventory by customer (top 300) | Accepted Inventory retirement; device/client navigation remains in Operations | Retire |
+| Inventory - Identity Review | Total identity conflicts; Identity conflicts (top 300); Total merge candidates; Merge candidates (top 300) | Accepted Inventory retirement; current review paths are [`/merge-candidates/`](/merge-candidates/) and [`/clients/candidates/`](/clients/candidates/) | Retire |
+| Inventory - Serial Quality | Serial quality by platform; Total matching serial records; Serial quality details (top 500) | Explicitly deferred generic data-quality capability; does not gate retirement | Retire |
+| Inventory - Source Records | Total unresolved / excluded records; Unresolved / excluded source records (top 500); Total matching source observations; Current source observations (top 500) | Explicitly deferred generic source-evidence administration capability; does not gate retirement | Retire |
 
-Eight dashboards — the entire legacy AC surface. This is the module
-Operations was rebuilt to replace (per `project_operations_rebuild`
-memory).
+## Recommendation
 
-| Dashboard | Classification | Notes |
-|---|---|---|
-| `Agent Compliance - Today` | **COVERED** | Operations Home + Findings queue with `category=coverage` filter give the same "what's wrong right now" view. |
-| `Agent Compliance - Devices` | **COVERED** | Devices fleet page with coverage-shaped filters. |
-| `Agent Compliance - Device drilldown` | **COVERED** | Device detail 5-tab has coverage state per Agent product. |
-| `Agent Compliance - Alerts` | **COVERED** | Findings queue is the alerts surface. |
-| `Agent Compliance - Customers` | **PARTIAL** | Client detail scoreboard covers the intent. May need a per-client coverage summary table if operators depend on the tabular view. |
-| `Agent Compliance - Setup` | **COVERED** | Requirement profiles + coverage requirements admin (Track C) is the native surface. |
-| `Agent Compliance - Health` | **PARTIAL** | Ingest / evaluator health signals — Operations has some (admin health page) but not the full AC-era view. Gap depends on which specific panels operators still reference. |
-| `Agent Compliance - Debug` | **GAP** | Ad-hoc query surface for AC-internal debugging. Not operator-facing; retire outright rather than parity-build. |
+1. **Accept Patching parity with one bounded follow-up:** add the two missing
+   fully-patched percentage breakdowns to the existing Patching client posture
+   view. Do not add a Patching dashboard or duplicate calculations.
+2. **Accept Agent Compliance retirement:** archive the 12 remaining active
+   dashboards after the owner accepts retirement of the legacy delivery and
+   debug cards. No AC-specific replacement is recommended.
+3. **Keep Inventory retired:** its five archived dashboards remain outside the
+   parity gate, as already accepted. Serial quality and generic source evidence
+   remain separately prioritized Operations work, not Metabase recreation.
+4. **Only after those decisions:** perform a separate, explicitly approved
+   cutover that archives/disconnects the accepted Metabase domains while
+   preserving legacy data for rollback. This audit makes no production change.
 
-**AC gap summary:** 2 partials (Customers, Health) and 1 outright
-retirement (Debug). Broadly, AC is well-covered by Operations — the
-rebuild delivered on parity for the operator-facing surfaces.
+## Evidence and limits
 
----
-
-## Aggregate gap summary
-
-**GAP (needs Operations build-out before Metabase can retire this
-piece):**
-
-- Ninja: Patch Evidence, Patch Trends, Activity Search
-
-**PARTIAL (small Operations extension):**
-
-- Ninja: Command Center layout, Client Patch Review tab
-- AC: Customers tabular summary, Health panels
-
-**COVERED (retire Metabase surface, no Operations work):**
-
-- All the rest.
-
-**RETIRE OUTRIGHT (no Operations equivalent needed):**
-
-- Ninja: Overall Patching Status, Device Patching Status (already
-  retired in bootstrap)
-- Inventory: all five dashboards (owner-accepted retirement on 2026-08-03)
-- AC: Debug
-
----
-
-## Recommended sequencing
-
-Retirement happens by domain, gated on accepted Operations capability or an
-explicit retirement decision. No phase adds Metabase features or performance
-work:
-
-1. **Immediate retirement candidates** (no Operations work needed):
-   AC Alerts, AC Today, Inventory Overview, Inventory Devices,
-   Ninja Device Work Queue, Ninja Device Detail — verify operators
-   are actually using the Operations equivalents in production first.
-2. **Small partials** (bounded Operations extensions):
-   AC Customers tabular view, Ninja Client Patch Review tab.
-3. **Bounded gaps** (single-slice Operations builds):
-   Ninja Activity Search.
-4. **Larger gaps** (their own tracks):
-   Ninja Patch Evidence, Ninja Patch Trends.
-5. **Metabase itself** (final): once every operator-facing Metabase
-   surface has an accepted Operations path or explicit retirement decision.
-
-Inventory is the first domain cutover. All five dashboards are retired by the
-owner's explicit decision. The same approved cutover stops Inventory bootstrap
-and refresh calls while leaving legacy relations unchanged for a bounded
-rollback window. Generic Serial Quality and Source Records continue outside
-the Metabase retirement gate.
-
-This doc is a working plan — update classifications as parity work
-lands.
-
----
-
-## Method notes
-
-- Dashboard-level classification above is the executive view.
-- **Per-metric enumeration** (all named specs, grouped by dashboard,
-  with source-file line numbers) lives in
-  [`metabase-parity-audit-full.md`](./metabase-parity-audit-full.md).
-  Use it to verify no individual KPI or card is lost when a
-  dashboard is classified as COVERED or PARTIAL — walk the list,
-  confirm each metric has a native Operations equivalent, escalate
-  the ones that don't. **234 unique specs enumerated across the
-  three bootstrap modules** (123 Ninja patching + 24 Inventory + 87
-  Agent Compliance).
-- Classifications reflect a best read of Operations state as of
-  version 0.69.0. Operators should validate whether each COVERED /
-  PARTIAL classification matches their actual usage before any
-  Metabase surface is deleted.
-- The audit is intentionally read-only — no Metabase writes, no
-  Operations behavioral changes, no schema changes.
-- The pre-cutover production audit enumerates operator-authored questions only
-  in aggregate. It must not disclose query text, result data, or customer
-  identifiers.
+- Live metadata on 2026-10-12: 7 active Patching dashboards, 12 active Agent
+  Compliance dashboards, and 5 archived Inventory dashboards.
+- The live card inventory is the source for the rows above. The older
+  [`metabase-parity-audit-full.md`](./metabase-parity-audit-full.md) is useful
+  historical bootstrap evidence but is not authoritative for live card counts
+  or names.
+- Exact client/device deep links require a selected client or device. Route
+  placeholders are intentional and do not imply a hard-coded tenant/client.

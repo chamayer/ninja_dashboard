@@ -52,9 +52,9 @@ completed classifier batches with the read-only host helper.
 
 ## Status
 
-In progress — establish card-level reporting parity for the live Metabase
-catalog before deciding which Operations displays to refine and which legacy
-surfaces to retire.
+Complete — live card-level reporting parity is documented for Patching, Agent
+Compliance, and Inventory. The resulting implementation/retirement decisions
+remain deliberately separate from this read-only audit.
 
 ## Goal, scope, and fixed decisions
 
@@ -100,14 +100,24 @@ or remove any dashboard while the evidence is incomplete.
   current Operations routes/templates. Never export dashboard query text,
   credentials, or customer data.
 
-## Current checkpoint and next action
+## Current checkpoint and result
 
-Live inspection found 12 active Agent Compliance dashboards, seven active
-Ninja/Patching dashboards, and five archived Inventory dashboards. The
-existing repository audit is dashboard-level and stale: Operations now has
-native Patch Evidence, Patch Trends, and Patch Activity pages. Next: start the
-Patching card matrix, mapping every live card to a visible Operations surface
-or a justified retirement/gap.
+Live metadata inspection on 2026-10-12 found seven active Patching dashboards
+(89 cards), 12 active Agent Compliance dashboards (69 cards), and five
+archived Inventory dashboards (24 named cards). The live card names—not the
+older bootstrap enumeration—are the audit authority. The card-level matrix is
+now in `operations/docs/metabase-parity-audit.md`, with an operator intent,
+exact Operations route, and Displayed/Consolidated/Missing/Retire outcome for
+every card.
+
+Patching has one bounded native gap: client-filtered fully-patched percentage
+breakdowns by device type and operating system. Patch Evidence, Patch Trends,
+and Activity Search are now native Operations surfaces. Agent Compliance has
+no recommended replacement build: its useful questions are already
+consolidated into coverage, issues, mappings, sources, and configuration; its
+legacy delivery/debug cards are retirement candidates. Inventory remains
+retired under root ADR-0005. The audit changed no runtime behavior, dashboard,
+or production data.
 
 ---
 
