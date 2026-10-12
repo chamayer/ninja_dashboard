@@ -68,6 +68,19 @@ then bound the Computers and user-exposure first views and replace request-time
 Sources detail aggregation with an existing or explicitly approved compact
 read model. Do not create a second source authority.
 
+The first release, `fa3ccf5`, is deployed: Dashboard warm server rendering
+fell from 6.9 s to 1.38 s, and the representative client overview fell from
+28.4 s to 4.08 s. The latter now has three bounded/single-pass reads rather
+than the previous repeated per-device exposure scan. A post-release review
+found that `source_health_current` has five platform rows while 15 enabled
+source bindings use the generic `source-refresh` lifecycle; it is therefore
+not the authority for the Dashboard's binding count. The next local change
+uses the durable source-refresh Run history (with platform health only as a
+legacy fallback) for Dashboard/Admin Data source status, retaining the full
+15-binding operator meaning without scanning current observations. Next:
+release and measure that source-status change, then restructure the Computer
+and user-exposure first views at their data boundaries.
+
 ---
 
 ## Completed plan — Metabase retirement

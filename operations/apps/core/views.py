@@ -1737,14 +1737,13 @@ def home(request: HttpRequest) -> HttpResponse:  # noqa: PLR0912, PLR0915
             summary["value"] = f"{_percent(patch_clear_count, total_devices)}%"
             summary["value_label"] = "computers without patch Issues"
 
-    # `source_rows` above is the compact, current platform-health projection
-    # used by the Dashboard cards. Do not re-read the binding-level admin
-    # detail view just to render this one-line status: that view aggregates
-    # every current observation and made the Dashboard slower without adding
-    # information to this summary.
-    configured_sources_available = True
-    configured_sources_current = sources_ok
-    configured_updates = observed_updates
+    configured_sources, configured_sources_available = _configured_source_data_status(now)
+    configured_sources_current = sum(
+        not source["needs_attention"] for source in configured_sources
+    )
+    configured_updates = [
+        source["observed_at"] for source in configured_sources if source["observed_at"]
+    ]
     jobs_health = _jobs_control_health()
     jobs_summary = jobs_health.get("summary", {})
     current_runtime_kinds = {
@@ -1765,7 +1764,7 @@ def home(request: HttpRequest) -> HttpResponse:  # noqa: PLR0912, PLR0915
     system_status = {
         "sources_available": configured_sources_available,
         "sources_current": configured_sources_current,
-        "sources_total": len(registered_sources),
+        "sources_total": len(configured_sources),
         "source_problems": source_problem_count,
         "jobs_label": jobs_label,
         "jobs_running": int(jobs_summary.get("running_runs") or 0),
@@ -17110,22 +17109,58 @@ def _admin_health_sources(now: datetime) -> tuple[list[dict], bool]:
 
 
 def _configured_source_data_status(now: datetime) -> tuple[list[dict], bool]:
-    """Return binding-level source evidence for the administrative Data page."""
+    """Return binding-level source refresh status for the Dashboard/Admin Data.
+
+    A source binding's current collection lifecycle is the durable
+    ``source-refresh`` Job Run.  Reading that small lifecycle projection is
+    both more direct than re-aggregating source observations and works for
+    reference data sources that do not publish a platform-health row.
+    """
     try:
         with transaction.atomic(), connection.cursor() as cur:
             cur.execute("SET LOCAL operations.tenant_id = 1")
             cur.execute(
                 """
-                SELECT source.name, client.display_name, health.last_observed_at,
-                       health.last_success_at, health.last_run_ok, binding.schedule
-                  FROM operations.v_source_instance_health health
-                  JOIN operations.source_bindings binding
-                    ON binding.source_instance_id = health.id
-                   AND binding.tenant_id = health.tenant_id
-                  JOIN operations.source_instances instance ON instance.id = health.id
+                WITH latest_run AS (
+                    SELECT DISTINCT ON (substring(run.scope_identity FROM 16)::uuid)
+                           substring(run.scope_identity FROM 16)::uuid AS binding_id,
+                           run.status,
+                           COALESCE(run.completed_at, run.started_at, run.requested_at) AS occurred_at
+                      FROM operations.operator_job_runs run
+                     WHERE run.tenant_id = 1
+                       AND run.job_key = 'source-refresh'
+                     ORDER BY substring(run.scope_identity FROM 16)::uuid,
+                              run.requested_at DESC, run.id DESC
+                ), latest_success AS (
+                    SELECT DISTINCT ON (substring(run.scope_identity FROM 16)::uuid)
+                           substring(run.scope_identity FROM 16)::uuid AS binding_id,
+                           COALESCE(run.completed_at, run.started_at, run.requested_at) AS occurred_at
+                      FROM operations.operator_job_runs run
+                     WHERE run.tenant_id = 1
+                       AND run.job_key = 'source-refresh'
+                       AND run.status = 'completed'
+                     ORDER BY substring(run.scope_identity FROM 16)::uuid,
+                              run.requested_at DESC, run.id DESC
+                )
+                SELECT source.name, client.display_name,
+                       COALESCE(success.occurred_at, platform_health.last_success_at),
+                       latest.status, binding.schedule
+                  FROM operations.source_bindings binding
+                  JOIN operations.source_instances instance
+                    ON instance.id = binding.source_instance_id
+                   AND instance.tenant_id = binding.tenant_id
                   JOIN operations.sources source ON source.id = instance.source_id
              LEFT JOIN operations.clients client ON client.id = instance.client_id
-                 WHERE health.tenant_id = 1 AND binding.enabled AND instance.enabled
+             LEFT JOIN latest_run latest ON latest.binding_id = binding.id
+             LEFT JOIN latest_success success ON success.binding_id = binding.id
+             LEFT JOIN operations.source_health_current platform_health
+                    ON platform_health.tenant_id = binding.tenant_id
+                   AND platform_health.platform = COALESCE(
+                       NULLIF(instance.config->>'platform', ''), source.name
+                   )
+                 WHERE binding.tenant_id = 1
+                   AND binding.enabled
+                   AND instance.enabled
                  ORDER BY source.name, client.display_name NULLS FIRST
                 """
             )
@@ -17135,8 +17170,8 @@ def _configured_source_data_status(now: datetime) -> tuple[list[dict], bool]:
         return [], False
 
     sources = []
-    for source_name, client_name, observed_at, success_at, last_run_ok, schedule in rows:
-        received_at = success_at or observed_at
+    for source_name, client_name, success_at, latest_status, schedule in rows:
+        received_at = success_at
         schedule_minutes = _source_schedule_minutes(schedule or "")
         sources.append(
             {
@@ -17144,7 +17179,8 @@ def _configured_source_data_status(now: datetime) -> tuple[list[dict], bool]:
                 "client_name": client_name or "",
                 "observed_at": received_at,
                 "needs_attention": bool(
-                    last_run_ok is False or _source_is_stale(received_at, schedule_minutes, now)
+                    latest_status in {"failed", "stalled"}
+                    or _source_is_stale(received_at, schedule_minutes, now)
                 ),
             }
         )
