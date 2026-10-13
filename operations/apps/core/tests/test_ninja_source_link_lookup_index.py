@@ -26,6 +26,7 @@ def test_user_exposure_uses_selected_last_user_read_model():
     user_risk = view[start : view.index("# Jobs —", start)]
     assert "DROP INDEX CONCURRENTLY IF EXISTS operations.idx_entity_source_links_ninja_numeric" in retirement
     assert "v_device_last_user_current" in user_risk
+    assert "WITH\n        device_user AS" in user_risk
     assert "ninja_links AS MATERIALIZED" not in user_risk
     assert "ninja_device_detail_current_shadow" not in user_risk
 

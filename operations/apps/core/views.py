@@ -8633,6 +8633,7 @@ def software_user_risk(request: HttpRequest) -> HttpResponse:
         client_where = "AND FALSE"
 
     sql = f"""
+        WITH
         device_user AS (
             SELECT last_user_current.device_id AS ops_device_id,
                    last_user_current.last_user,
