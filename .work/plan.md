@@ -468,8 +468,9 @@ which includes migration 0278 per repository rules.
 
 ## Active plan — Dashboard navigation performance
 
-**Status:** navigation baseline and first query attribution complete; shared
-software-exposure read model approved and in implementation.
+**Status:** navigation baseline and current live query attribution complete;
+the software-exposure derived/readiness model is already deployed. Targeted
+active-installation lookup indexes are approved and in implementation.
 
 **Goal:** make the Operations Dashboard and every page reachable from its
 cards, the primary navigation, or contextual sub-navigation feel responsive in
@@ -565,16 +566,28 @@ effective view evaluates those two simple time predicates live, so stale source
 or condition authority disappears on time even if a later classifier run is
 delayed.
 
-**Current checkpoint / next action:** implement the migration, route all
-successful incremental/full classifier paths through one exposure refresh
-helper, add focused contract tests, review the migration plan and measure the
-deployed handler paths after an approved release. The historical architecture
-documents disagree about whether a concurrent materialized refresh may be
-called directly by the ingest role or only by a `SECURITY DEFINER` function;
-PostgreSQL prohibits `REFRESH ... CONCURRENTLY` inside a function. The existing
-reviewed read-model convention uses the direct concurrent refresh. This change
-follows that executable convention while retaining the stronger direct-read
-privilege boundary in ADR-0010.
+**Current checkpoint / next action:** fresh live handler measurements on
+2026-10-13 show Dashboard at 2.36–3.24 s, Computers at 8.62 s, Issues at
+8.67 s, user exposure at 17.06 s, and software cleanup at 17.32 s; the
+remaining light navigation routes are below two seconds. Query tracing shows
+the user-exposure and cleanup decision branches scanning all current software
+installations by title and publisher. Migration 116 adds two partial indexes
+over current, non-deleted installations for those exact predicates. The raw
+SQL migration runner applies a file in one transaction, so these are ordinary
+additive index builds rather than `CONCURRENTLY`; they change no data or result
+semantics. After an approved release, remeasure the same routes, then redesign
+the unbounded user-exposure/cleanup first-view projections and trace Computers
+and Issues before selecting their changes. The source-link CTE has a cardinality
+estimation problem; it requires a query-shape redesign, not a speculative
+index. The migration and its focused source-contract test are locally
+validated (`1 passed`, focused Ruff, compilation, and diff hygiene). User
+exposure now asks PostgreSQL for the same top 500 users and fleet totals,
+instead of grouping the full estate in Python before discarding rows; CSV
+remains a deliberate complete export. Its focused contract test and Django
+system check pass. Next: commit/push this reviewed migration and bounded-view
+change with explicit approval, let normal GitOps apply it, then repeat the
+identical live handler measurements before choosing the next route-level
+change.
 
 **Local validation:** the migration contract and refresh-helper suite passes
 (`4 passed`) with non-secret dummy configuration; Python compilation and ruff

@@ -8610,6 +8610,11 @@ def software_user_risk(request: HttpRequest) -> HttpResponse:
     client_slugs = [s for s in request.GET.getlist("client") if s]
     q_filter = (request.GET.get("q") or "").strip().lower()
     kind_filter = (request.GET.get("kind") or "").strip().lower()
+    is_csv = wants_csv(request)
+    q_pattern = q_filter.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    kind_pattern = (
+        kind_filter.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    )
     filtered_client_ids: list[str] = []
     if client_slugs:
         filtered_client_ids = [
@@ -8720,25 +8725,101 @@ def software_user_risk(request: HttpRequest) -> HttpResponse:
             UNION ALL
             SELECT device_id, client_id, canonical_name, kind FROM decision_items
         )
-        SELECT du.last_user,
-               d.id AS device_id,
-               d.canonical_hostname,
-               c.slug AS client_slug,
-               c.display_name AS client_name,
-               ai.canonical_name,
-               ai.kind
-        FROM device_user du
-        JOIN operations.devices d ON d.id = du.ops_device_id AND d.deleted_at IS NULL
-        JOIN operations.clients c ON c.id = d.client_id AND c.deleted_at IS NULL
-        JOIN all_items ai ON ai.device_id = d.id
-        WHERE d.tenant_id = 1
-          {client_where}
-        ORDER BY du.last_user, d.canonical_hostname, ai.kind, ai.canonical_name
     """
 
-    # client_where appears 4× in the SQL (finding_items, both decision_items
+    if is_csv:
+        # CSV is an explicit export request, so it deliberately retains the
+        # complete filtered result rather than inheriting the HTML first-view
+        # boundary below.
+        result_sql = f"""
+            SELECT du.last_user,
+                   d.id AS device_id,
+                   d.canonical_hostname,
+                   c.slug AS client_slug,
+                   c.display_name AS client_name,
+                   ai.canonical_name,
+                   ai.kind
+            FROM device_user du
+            JOIN operations.devices d ON d.id = du.ops_device_id AND d.deleted_at IS NULL
+            JOIN operations.clients c ON c.id = d.client_id AND c.deleted_at IS NULL
+            JOIN all_items ai ON ai.device_id = d.id
+            WHERE d.tenant_id = 1
+              {client_where}
+              {"AND LOWER(du.last_user) LIKE %s ESCAPE '\\'" if q_filter else ""}
+              {"AND LOWER(ai.kind) LIKE %s ESCAPE '\\'" if kind_filter else ""}
+            ORDER BY du.last_user, d.canonical_hostname, ai.kind, ai.canonical_name
+        """
+    else:
+        # The operator page renders the 500 highest-impact users.  Previously
+        # it fetched and grouped every matching item in Python before slicing
+        # the result.  Materialising the joined items once keeps the existing
+        # meaning and totals, but makes PostgreSQL select the bounded first
+        # view before rows cross the application boundary.
+        result_sql = f"""
+            , joined_items AS MATERIALIZED (
+                SELECT du.last_user,
+                       d.id AS device_id,
+                       d.canonical_hostname,
+                       c.slug AS client_slug,
+                       c.display_name AS client_name,
+                       ai.canonical_name,
+                       ai.kind
+                FROM device_user du
+                JOIN operations.devices d ON d.id = du.ops_device_id AND d.deleted_at IS NULL
+                JOIN operations.clients c ON c.id = d.client_id AND c.deleted_at IS NULL
+                JOIN all_items ai ON ai.device_id = d.id
+                WHERE d.tenant_id = 1
+                  {client_where}
+                  {"AND LOWER(du.last_user) LIKE %s ESCAPE '\\'" if q_filter else ""}
+                  {"AND LOWER(ai.kind) LIKE %s ESCAPE '\\'" if kind_filter else ""}
+            ),
+            deduplicated_items AS MATERIALIZED (
+                SELECT DISTINCT ON (last_user, device_id, canonical_name, kind)
+                       last_user, device_id, canonical_hostname, client_slug,
+                       client_name, canonical_name, kind
+                FROM joined_items
+                ORDER BY last_user, device_id, canonical_name, kind
+            ),
+            ranked_users AS MATERIALIZED (
+                SELECT last_user,
+                       COUNT(*) AS item_count,
+                       COUNT(*) OVER () AS user_count,
+                       SUM(COUNT(*)) OVER () AS total_items,
+                       ROW_NUMBER() OVER (
+                           ORDER BY COUNT(*) DESC, last_user
+                       ) AS user_rank
+                FROM deduplicated_items
+                GROUP BY last_user
+            )
+            SELECT item.last_user,
+                   item.device_id,
+                   item.canonical_hostname,
+                   item.client_slug,
+                   item.client_name,
+                   item.canonical_name,
+                   item.kind,
+                   ranked.item_count,
+                   ranked.user_count,
+                   ranked.total_items
+            FROM deduplicated_items item
+            JOIN ranked_users ranked ON ranked.last_user = item.last_user
+            WHERE ranked.user_rank <= 500
+            ORDER BY ranked.item_count DESC,
+                     item.last_user,
+                     item.canonical_hostname,
+                     item.kind,
+                     item.canonical_name
+        """
+
+    sql += result_sql
+
+    # client_where appears 4x in the SQL (finding_items, both decision_items
     # branches, the final WHERE) — client_params must repeat.
     run_params = client_params * 4 if client_params else []
+    if q_filter:
+        run_params.append(f"%{q_pattern}%")
+    if kind_filter:
+        run_params.append(f"%{kind_pattern}%")
 
     with transaction.atomic(), connection.cursor() as cur:
         cur.execute("SET LOCAL operations.tenant_id = 1")
@@ -8746,22 +8827,41 @@ def software_user_risk(request: HttpRequest) -> HttpResponse:
         rows = cur.fetchall()
 
     per_user: dict = {}
-    for last_user, device_id, hostname, client_slug, client_name, canonical, kind in rows:
+    user_count = 0
+    total_items = 0
+    for row in rows:
+        if is_csv:
+            last_user, device_id, hostname, client_slug, client_name, canonical, kind = row
+            item_count = None
+        else:
+            (
+                last_user,
+                device_id,
+                hostname,
+                client_slug,
+                client_name,
+                canonical,
+                kind,
+                item_count,
+                user_count,
+                total_items,
+            ) = row
         entry = per_user.setdefault(
             last_user,
             {
                 "last_user": last_user,
                 "devices": {},
                 "clients": set(),
-                "item_count": 0,
-                "item_keys": set(),
+                "item_count": item_count or 0,
+                "item_keys": set() if is_csv else None,
             },
         )
         item_key = (device_id, (canonical or "").lower(), kind)
-        if item_key in entry["item_keys"]:
+        if is_csv and item_key in entry["item_keys"]:
             continue
-        entry["item_keys"].add(item_key)
-        entry["item_count"] += 1
+        if is_csv:
+            entry["item_keys"].add(item_key)
+            entry["item_count"] += 1
         entry["clients"].add(client_name)
         dev = entry["devices"].setdefault(
             device_id,
@@ -8784,40 +8884,9 @@ def software_user_risk(request: HttpRequest) -> HttpResponse:
         users.append(entry)
     users.sort(key=lambda u: (-u["item_count"], u["last_user"]))
 
-    # Enrich items with category from SoftwareCatalog.
-    all_ur_canonicals = {
-        i["canonical_name"].lower()
-        for u in users
-        for d in u["device_list"]
-        for i in d["items"]
-        if i["canonical_name"]
-    }
-    ur_catalog_cats = (
-        {
-            c.canonical_name.lower(): ", ".join(c.categories or [])
-            for c in SoftwareCatalog.objects.filter(canonical_name__in=list(all_ur_canonicals))
-        }
-        if all_ur_canonicals
-        else {}
-    )
-    for u in users:
-        for d in u["device_list"]:
-            for item in d["items"]:
-                item["category"] = ur_catalog_cats.get((item["canonical_name"] or "").lower(), "")
-
-    # Apply user search and kind filter (post-fetch, small result set).
-    if q_filter:
-        users = [u for u in users if q_filter in (u["last_user"] or "").lower()]
-    if kind_filter:
-        for u in users:
-            for d in u["device_list"]:
-                d["items"] = [i for i in d["items"] if kind_filter in (i["kind"] or "").lower()]
-            u["device_list"] = [d for d in u["device_list"] if d["items"]]
-        users = [u for u in users if u["device_list"]]
-
     clients = Client.objects.filter(tenant_id=1, deleted_at__isnull=True).order_by("display_name")
 
-    if wants_csv(request):
+    if is_csv:
         flat_rows: list[dict] = []
         for u in users:
             for d in u["device_list"]:
@@ -8843,13 +8912,35 @@ def software_user_risk(request: HttpRequest) -> HttpResponse:
             filename_stem="user_risk",
         )
 
+    # Category is presentational data for the bounded HTML result only.  CSV
+    # does not expose it, so avoid the formerly estate-wide catalog lookup.
+    all_ur_canonicals = {
+        i["canonical_name"].lower()
+        for u in users
+        for d in u["device_list"]
+        for i in d["items"]
+        if i["canonical_name"]
+    }
+    ur_catalog_cats = (
+        {
+            c.canonical_name.lower(): ", ".join(c.categories or [])
+            for c in SoftwareCatalog.objects.filter(canonical_name__in=list(all_ur_canonicals))
+        }
+        if all_ur_canonicals
+        else {}
+    )
+    for u in users:
+        for d in u["device_list"]:
+            for item in d["items"]:
+                item["category"] = ur_catalog_cats.get((item["canonical_name"] or "").lower(), "")
+
     return render(
         request,
         "software_user_risk.html",
         {
-            "users": users[:500],
-            "user_count": len(users),
-            "total_items": sum(u["item_count"] for u in users),
+            "users": users,
+            "user_count": user_count,
+            "total_items": total_items,
             "clients": clients,
             "active_clients": client_slugs,
             "active_q": q_filter,
