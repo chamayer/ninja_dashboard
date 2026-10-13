@@ -8640,18 +8640,23 @@ def software_user_risk(request: HttpRequest) -> HttpResponse:
             FROM operations.ninja_device_detail_current_shadow ds
             WHERE ds.last_user IS NOT NULL AND TRIM(ds.last_user) <> ''
         ),
-        -- The source-link lookup is driven by each Ninja detail ID.  Migration
-        -- 0288 indexes this exact safe numeric conversion on the canonical
-        -- link relation, avoiding the former materialised link scan and its
-        -- badly estimated CTE join without introducing a duplicate mapping.
-        device_user AS (
-            SELECT DISTINCT dl.device_id AS ops_device_id, lu.last_user, lu.snapshot_at
-            FROM latest_user lu
-            JOIN operations.v_device_source_link dl
-              ON {_safe_ninja_external_id_integer_sql("dl")} = lu.ninja_device_id
+        -- Materialising the canonical Ninja link set once is load-bearing.
+        -- Inlining this conversion makes PostgreSQL repeatedly scan source
+        -- links while joining every latest-user row.  The CTE keeps the source
+        -- mapping authoritative and gives the later join one compact input.
+        ninja_links AS MATERIALIZED (
+            SELECT dl.device_id,
+                   {_safe_ninja_external_id_integer_sql("dl")} AS ninja_device_id
+            FROM operations.v_device_source_link dl
             JOIN operations.sources s ON s.id = dl.source_id
             WHERE dl.tenant_id = 1
               AND LOWER(s.name) = 'ninja'
+              AND dl.external_id ~ '^\\d+$'
+        ),
+        device_user AS (
+            SELECT DISTINCT nl.device_id AS ops_device_id, lu.last_user, lu.snapshot_at
+            FROM latest_user lu
+            JOIN ninja_links nl ON nl.ninja_device_id = lu.ninja_device_id
         ),
         finding_items AS (
             SELECT d.id AS device_id, d.client_id,

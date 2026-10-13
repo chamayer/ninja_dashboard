@@ -584,15 +584,16 @@ active-installation indexes. User exposure now asks PostgreSQL for the same
 top 500 users and fleet totals, instead of grouping the full estate in Python
 before discarding rows; CSV remains a deliberate complete export. Its warm
 deployed handler fell from 17.06 s to 13.03 s, with the main SQL down to
-8.19 s. The remaining query bottleneck is the unindexed safe integer join from
-Ninja detail IDs to canonical source links. The pending Operations migration
-0288 adds a concurrent functional index on that existing relation and rewires
-the query to use it directly; the similarly unbounded Tech Checklist first
-view now uses the same bounded SQL ranking while preserving complete CSV. All
+8.19 s. A direct source-link lookup experiment in release `e6e6088` regressed
+the live planner beyond the measurement timeout despite its concurrent
+functional index. The proven materialized canonical-link join is restored and
+migration 0289 removes the unused index concurrently; this is a correction,
+not a second mapping or new authority. The similarly unbounded Tech Checklist
+first view now uses bounded SQL ranking while preserving complete CSV. All
 three focused contracts, Django checks, and migration drift checks pass. Next:
-release the concurrent lookup index and Checklist/User exposure refinements,
-then remeasure the same deployed handler paths before choosing Computers or
-Issues work.
+release the corrective rollback, verify User exposure returns to its known
+post-116 baseline, measure Tech Checklist, then redesign the source-link
+boundary from the evidence model rather than adding another planner hint.
 
 **Local validation:** the migration contract and refresh-helper suite passes
 (`4 passed`) with non-secret dummy configuration; Python compilation and ruff
