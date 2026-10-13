@@ -1,0 +1,102 @@
+{% extends "base.html" %}
+
+{% block title %}Software policy{% endblock %}
+
+{% block content %}
+<style>
+  .sp-section { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 1rem 1.1rem; margin-bottom: 1rem; }
+  .sp-section h2 { margin-top: 0; font-size: 1.05rem; }
+  .sp-table { width: 100%; border-collapse: collapse; font-size: 0.86rem; }
+  .sp-table th, .sp-table td { padding: 0.35rem 0.5rem; border-top: 1px solid var(--border); text-align: left; vertical-align: middle; }
+  .sp-table th { color: var(--muted); font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em; }
+  .sp-table code { font-size: 0.82rem; }
+  .sp-off { color: var(--muted); text-decoration: line-through; }
+  .sp-add { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; margin-top: 0.75rem; }
+</style>
+
+<div class="sp-section">
+    <h1 style="margin-top:0;">Software policy</h1>
+    <p class="muted">
+        The data that decides which software findings exist, how approvals act on them and
+        what each review finding suggests. Changes apply on the next software run and are
+        recorded in the audit log.{% if not can_edit %} Only staff can make changes.{% endif %}
+    </p>
+</div>
+
+<div class="sp-section">
+    <h2>Finding types</h2>
+    <p class="muted" style="margin-top:0;">
+        <strong>Silenced by approval</strong>: an approve decision hides the finding. Leave it off
+        for facts approval cannot change (vulnerability, end of life, install path).
+        <strong>Concern</strong>: the type is a trust or anomaly signal; a publisher approval does
+        not silence other signals on a title that has one.
+        <strong>Decision scope</strong>: the scope a decision made from the finding defaults to.
+    </p>
+    <table class="sp-table">
+        <thead><tr><th>Type</th><th>Severity</th><th>Silenced by approval</th><th>Concern</th><th>Auto-resolve</th><th>Decision scope</th><th></th></tr></thead>
+        <tbody>
+        {% for ft in finding_types %}
+        <tr>
+            <td>{{ ft.name }}</td>
+            <td><select form="type-{{ ft.id }}" name="default_severity" aria-label="Severity for {{ ft.name }}"{% if not can_edit %} disabled{% endif %}>{% for value, label in severity_choices %}<option value="{{ value }}"{% if ft.default_severity == value %} selected{% endif %}>{{ label }}</option>{% endfor %}</select></td>
+            <td><input type="checkbox" form="type-{{ ft.id }}" name="suppressed_by_approval" aria-label="Silenced by approval for {{ ft.name }}"{% if ft.suppressed_by_approval %} checked{% endif %}{% if not can_edit %} disabled{% endif %}></td>
+            <td><input type="checkbox" form="type-{{ ft.id }}" name="concern_signal" aria-label="Concern for {{ ft.name }}"{% if ft.concern_signal %} checked{% endif %}{% if not can_edit %} disabled{% endif %}></td>
+            <td><input type="checkbox" form="type-{{ ft.id }}" name="auto_resolvable" aria-label="Auto-resolve for {{ ft.name }}"{% if ft.auto_resolvable %} checked{% endif %}{% if not can_edit %} disabled{% endif %}></td>
+            <td><select form="type-{{ ft.id }}" name="default_decision_scope" aria-label="Decision scope for {{ ft.name }}"{% if not can_edit %} disabled{% endif %}>{% for value, label in scope_choices %}<option value="{{ value }}"{% if ft.default_decision_scope == value %} selected{% endif %}>{{ label }}</option>{% endfor %}</select></td>
+            <td><form method="post" id="type-{{ ft.id }}">{% csrf_token %}<input type="hidden" name="action" value="type_update"><input type="hidden" name="type_id" value="{{ ft.id }}">{% if can_edit %}<button type="submit">Save</button>{% endif %}</form></td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<div class="sp-section">
+    <h2>Classifier rules</h2>
+    <p class="muted" style="margin-top:0;">Patterns matched against titles (suspicious name, end of life), install locations (install path) and publishers (junk publisher). Regular expressions are case-insensitive; plain text matches anywhere.</p>
+    <table class="sp-table">
+        <thead><tr><th>Type</th><th>Pattern</th><th>Regex</th><th>Note</th><th></th></tr></thead>
+        <tbody>
+        {% for rule in rules %}
+        <tr{% if not rule.enabled %} class="sp-off"{% endif %}>
+            <td>{{ rule.get_rule_type_display }}</td>
+            <td><code>{{ rule.pattern }}</code></td>
+            <td>{% if rule.is_regex %}yes{% else %}no{% endif %}</td>
+            <td>{{ rule.note }}</td>
+            <td>{% if can_edit %}<form method="post">{% csrf_token %}<input type="hidden" name="action" value="rule_toggle"><input type="hidden" name="rule_id" value="{{ rule.id }}"><button type="submit">{% if rule.enabled %}Disable{% else %}Enable{% endif %}</button></form>{% endif %}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    {% if can_edit %}
+    <form method="post" class="sp-add">{% csrf_token %}
+        <input type="hidden" name="action" value="rule_add">
+        <select name="rule_type" aria-label="Rule type">{% for value, label in rule_type_choices %}<option value="{{ value }}">{{ label }}</option>{% endfor %}</select>
+        <input type="text" name="pattern" placeholder="pattern" aria-label="Pattern" required style="min-width:16rem;">
+        <label><input type="checkbox" name="is_regex" checked> Regex</label>
+        <input type="text" name="note" placeholder="why this rule exists" aria-label="Note" style="min-width:14rem;">
+        <button type="submit">Add rule</button>
+    </form>
+    {% endif %}
+</div>
+
+<div class="sp-section">
+    <h2>Suggestion rules</h2>
+    <p class="muted" style="margin-top:0;">Each review finding shows the first rule whose signal is present. Adverse rules always come before favorable ones, then by priority.</p>
+    <table class="sp-table">
+        <thead><tr><th>Priority</th><th>Signal</th><th>Adverse</th><th>Suggestion</th><th>Enabled</th><th>Note</th><th></th></tr></thead>
+        <tbody>
+        {% for rule in suggestion_rules %}
+        <tr>
+            <td><input type="number" form="suggestion-{{ rule.id }}" name="priority" value="{{ rule.priority }}" min="0" max="32767" style="width:5rem;" aria-label="Priority for {{ rule.signal }}"{% if not can_edit %} disabled{% endif %}></td>
+            <td>{{ rule.get_signal_display }}</td>
+            <td><input type="checkbox" form="suggestion-{{ rule.id }}" name="adverse" aria-label="Adverse for {{ rule.signal }}"{% if rule.adverse %} checked{% endif %}{% if not can_edit %} disabled{% endif %}></td>
+            <td><select form="suggestion-{{ rule.id }}" name="suggestion" aria-label="Suggestion for {{ rule.signal }}"{% if not can_edit %} disabled{% endif %}>{% for value, label in suggestion_choices %}<option value="{{ value }}"{% if rule.suggestion == value %} selected{% endif %}>{{ label }}</option>{% endfor %}</select></td>
+            <td><input type="checkbox" form="suggestion-{{ rule.id }}" name="enabled" aria-label="Enabled for {{ rule.signal }}"{% if rule.enabled %} checked{% endif %}{% if not can_edit %} disabled{% endif %}></td>
+            <td>{{ rule.note }}</td>
+            <td><form method="post" id="suggestion-{{ rule.id }}">{% csrf_token %}<input type="hidden" name="action" value="suggestion_update"><input type="hidden" name="rule_id" value="{{ rule.id }}">{% if can_edit %}<button type="submit">Save</button>{% endif %}</form></td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}

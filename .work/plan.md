@@ -63,39 +63,31 @@ commit; DDL reviewed against existing migration patterns (no local Postgres).
 Post-deploy: per-type comparison with previous open sets, 20-finding spot check,
 job timings, approvals effective at every scope.
 
-**Checkpoint (2026-10-13):** Stage 1 shipped (7f4133f, 89e8df7, 2edc5b4,
-0d55c22; SQL 113 and Django 0282/0283 applied 18:2x UTC, services healthy).
+**Checkpoint (2026-10-13 19:0x UTC):**
+- Stage 1 shipped (7f4133f, 89e8df7, 2edc5b4, 0d55c22).
+- Stage 2 engine shipped (6d11c2e, 45176d2, dd44ae4, a0c8b91); SQL 114 and Django
+  0284 applied. First reconcile completed in 267 s (previous classifier: no
+  completion in 14 days): opened rare 9,883, non-approved 3,047, vulnerable 431,
+  unauthorized 254, known-malicious 12, install path 8; resolved 102 regrained +
+  10 no longer detected; exactly the dry-run prediction. Readiness 66,708 rows;
+  software participants 27,531 (was >85k); 26,667 aggregates executable.
+  Exposure read model 59,677 rows, 14,187 findings, 4,570 devices (was empty).
+- Release 2 built locally, not committed: software review page grouped by
+  publisher with two remediation options, suggestions, device-scope default for
+  rare titles, immediate close of prompt findings on a global decision
+  (`operations/apps/core/software_review.py`, `software_decisions.html`); software
+  policy admin page (`software_policy.py`, `software_policy_config.html`, Settings
+  card, admin tab). Tests: 13 new; Operations 300 passed; only the 4
+  pre-existing failures; no new ratchet entries.
 
-Stage 2 engine complete locally, not committed:
-- `ingest/software_reconcile.py`: desired state per type, reconcile with
-  close limit and regrain handling, aggregate assessments from readiness (D1/D4),
-  run-log record. Jobs `software-classify-only/-full/software-classify` and
-  `main.software_classify` run it; registry owner updated.
-- `sql/migrations/114_software_exposure_from_readiness.sql`: exposure read model
-  from aggregate assessment + readiness, staged MATERIALIZED (upper bound 166 s,
-  46,303 rows).
-- Django `0284_rare_software_title_grain`.
-- New settings: per-type switches, close limit, allow-large-close.
-- Read-only dry run on prod (load 98.5 s, compute 3.1 s): keys kept for every
-  unchanged type (eol 165/165, suspicious 6/6, install path 496/496, unauthorized
-  remote access 6,312/6,317, vulnerable 4,180/4,181, whitelist 1,797/1,799);
-  new: rare 9,883 (102 regrained), non-approved +3,047, vulnerable +431.
-- Tests: 20 reconcile tests; ingest 388 passed, Operations 287 passed; only the
-  six pre-existing failures; ratchet entries ACTIVE_STATUSES/RESOLVABLE_STATUSES
-  justified.
+Still to do: rejected_software_installed (policy version first, user approval);
+ADR and changelog; retire the old classify loop and reclassification targets.
 
-Not yet done (Stage 2): Issues grouping by publisher with two remediation
-options and suggestion panel; decision scope defaults in the UI; Operations
-admin pages for finding types and rules; rejected_software_installed (needs a
-policy version that defines the type); ADR and changelog; retire the old
-classify loop and reclassification targets.
+Risk to keep visible: notification schedules are disabled (0 events ever). About
+27k findings now carry fresh notifiable assessments, so a manual dispatch or
+enabling the schedule would send a large burst through the catch-all routes.
 
-Risk to keep visible: notification schedules are disabled (0 events ever). After
-the first reconcile about 25k findings carry fresh notifiable assessments, so a
-manual dispatch or enabling the schedule would send a large burst.
-
-**Next action:** commit/push approval for the Stage 2 engine (SQL 114, Django
-0284); verify the first reconcile run; then UI and admin pages.
+**Next action:** commit/push approval for release 2 (no migrations).
 
 ## Active plan — Source-refresh completion fails at workflow admission
 

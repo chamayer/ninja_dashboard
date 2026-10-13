@@ -21,6 +21,7 @@ from apps.core.generic_admin import (
     entity_candidates_queue,
     entity_observation_reveal,
 )
+from apps.core.software_policy import software_policy_config
 from apps.core.views import (
     admin_data,
     admin_finding_acknowledge,
@@ -350,6 +351,7 @@ urlpatterns = [
         name="entity_candidate_reject",
     ),
     path("admin/classifier/", classifier_config, name="classifier_config"),
+    path("admin/software-policy/", software_policy_config, name="software_policy_config"),
     path("admin/device-status/", device_status_config, name="device_status_config"),
     path("admin/lifecycle/", lifecycle_policy_status, name="lifecycle_policy_status"),
     path("software/decisions/", software_decisions_queue, name="software_decisions_queue"),
