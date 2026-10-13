@@ -609,6 +609,22 @@ completion, the approved production release must apply migration 112 and be
 validated with aggregate-only exposure-key uniqueness and live handler timings
 for User exposure, Computers, Clients, and the client overview.
 
+**Current checkpoint / next action (2026-10-13):** corrective release
+`b3ae224` is deployed and restores the proven Tech Checklist route after the
+SQL-ranking experiment measured 20.58 s versus 17.32 s. The restored live
+route measures 12.51 s through the application handler. A new live trace
+proves User exposure spends 8.78 s of its 13.69 s handler time in its single
+main query; catalog, client, and summary queries are each below 0.25 s. The
+current request joins Ninja compatibility observations to canonical links and
+casts external IDs at request time even though `last_user` is already a
+selected effective device attribute (4,591 selected device values). The next
+change is a narrow read-only `v_device_last_user_current` view: it exposes
+only the existing selected value, device identity, and projection timestamp to
+the existing authenticated presentation path. It does not store data, select
+a source, or expand permissions beyond the existing User exposure page. The
+view replaces the compatibility/source-link CTE; the effective attribute
+projector remains the sole value authority.
+
 ---
 
 ## Completed plan — Metabase retirement
