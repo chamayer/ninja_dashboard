@@ -310,7 +310,7 @@ fully visible:
 See `PORTS.md` for the full host map. This stack publishes:
 
 - **3001** (Metabase) — LAN.
-- **8090** (ingest `/healthz`, `/run`) — loopback only.
+- **8090** (ingest `/healthz`, `/run`) — Compose network only; not published on the host.
 - Postgres is **not** published — use `docker exec` for ad-hoc shells.
 
 ## Local dev

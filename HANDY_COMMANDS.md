@@ -29,31 +29,25 @@ docker ps --format 'table {{.Names}}\t{{.Ports}}' | grep operations-ingest
 Run a full ingest cycle:
 
 ```bash
-curl -X POST http://127.0.0.1:8090/run
+docker exec operations-ingest python -c "import sys,urllib.request as u;print(u.urlopen(u.Request('http://localhost:8090'+sys.argv[2],method=sys.argv[1])).read().decode())" POST /run
 ```
 
 Run patching ingest only:
 
 ```bash
-curl -fsS -X POST http://127.0.0.1:8090/run/patches
-```
-
-Run the Metabase bootstrap:
-
-```bash
-curl -X POST http://127.0.0.1:8090/bootstrap-metabase
+docker exec operations-ingest python -c "import sys,urllib.request as u;print(u.urlopen(u.Request('http://localhost:8090'+sys.argv[2],method=sys.argv[1])).read().decode())" POST /run/patches
 ```
 
 Check ingest liveness:
 
 ```bash
-curl -fsS http://127.0.0.1:8090/healthz
+docker exec operations-ingest python -c "import sys,urllib.request as u;print(u.urlopen(u.Request('http://localhost:8090'+sys.argv[2],method=sys.argv[1])).read().decode())" GET /healthz
 ```
 
 Check ingest readiness:
 
 ```bash
-curl -fsS http://127.0.0.1:8090/readyz
+docker exec operations-ingest python -c "import sys,urllib.request as u;print(u.urlopen(u.Request('http://localhost:8090'+sys.argv[2],method=sys.argv[1])).read().decode())" GET /readyz
 ```
 
 ## Agent Compliance
@@ -63,7 +57,7 @@ LogMeIn, and ScreenConnect, then evaluates compliance and dispatches
 first-time notifications if alerting is enabled:
 
 ```bash
-curl -fsS -X POST http://127.0.0.1:8090/run/agent-compliance
+docker exec operations-ingest python -c "import sys,urllib.request as u;print(u.urlopen(u.Request('http://localhost:8090'+sys.argv[2],method=sys.argv[1])).read().decode())" POST /run/agent-compliance
 ```
 
 Run Agent Compliance evaluate-only. This does not call vendor APIs; it
@@ -72,7 +66,7 @@ observations, applies current customer/alias/config rules, and dispatches
 first-time notifications if alerting is enabled:
 
 ```bash
-curl -fsS -X POST http://127.0.0.1:8090/run/agent-compliance-evaluate
+docker exec operations-ingest python -c "import sys,urllib.request as u;print(u.urlopen(u.Request('http://localhost:8090'+sys.argv[2],method=sys.argv[1])).read().decode())" POST /run/agent-compliance-evaluate
 ```
 
 Check recent Agent Compliance runs:
@@ -234,19 +228,13 @@ docker exec -it ninja-postgres psql -U ninja -d ninja
 Run collection:
 
 ```bash
-curl -fsS -X POST http://127.0.0.1:8090/run/agent-compliance
+docker exec operations-ingest python -c "import sys,urllib.request as u;print(u.urlopen(u.Request('http://localhost:8090'+sys.argv[2],method=sys.argv[1])).read().decode())" POST /run/agent-compliance
 ```
 
 Run evaluation only:
 
 ```bash
-curl -fsS -X POST http://127.0.0.1:8090/run/agent-compliance-evaluate
-```
-
-Refresh Metabase cards:
-
-```bash
-curl -fsS -X POST http://127.0.0.1:8090/bootstrap-metabase
+docker exec operations-ingest python -c "import sys,urllib.request as u;print(u.urlopen(u.Request('http://localhost:8090'+sys.argv[2],method=sys.argv[1])).read().decode())" POST /run/agent-compliance-evaluate
 ```
 
 Check applied device-state migration:
@@ -375,5 +363,6 @@ docker exec -it operations-ingest python -m ingest.probe_fields --records 200 --
 - The ingest container loads `/app/.env` once at startup. If you edit
   the host `.env`, recreate the container or redeploy the stack so it
   rereads the file.
-- The stack publishes ingest only on `127.0.0.1:8090`; use the Docker
-  host or an SSH tunnel from your workstation.
+- The ingest HTTP port is not published on the host (2026-10-13): only
+  Operations (over the Compose network) and the container itself reach it.
+  Run requests with `docker exec operations-ingest python -c ...` as above.

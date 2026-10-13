@@ -3,26 +3,6 @@
 This is the proposed successor to the root-level open-work portion of
 `TODO.md`. Operations-only items belong in `operations/.work/backlog.md`.
 
-## Ingest HTTP server has no authentication
-
-- Found 2026-10-13 during the software inventory rebuild: `ingest/main.py`
-  serves `/run/*` job triggers and `/run/software/device` on host port 8090
-  (`docker-compose.yml`) with no authentication check in code. Network-level
-  restriction (firewall, proxy) was not verified.
-- Required path: verify exposure from the network, then require a shared
-  secret or restrict the bind to the Compose network for Operations calls.
-- Trigger: next ingest HTTP or security review.
-
-## Drop the retired software scheduled and demand queue tables
-
-- `ninja_core.software_scheduled_queue` (never completed an entry) and
-  `ninja_core.software_demand_queue` (2 rows, July 2026) have no producer or
-  consumer since the software inventory rebuild (2026-10). Their
-  `job_domain_attempts` kinds `software.scheduled` / `software.demand` remain
-  for history.
-- Required path: a migration that drops both tables after one release with no
-  reader; keep `software_activity_queue`.
-
 ## EOL/EOS: upstream lifecycle gaps for Adobe and Visual C++
 
 - Reason deferred: Adobe Acrobat/Reader and Microsoft Visual C++

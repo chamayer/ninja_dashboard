@@ -87,9 +87,9 @@ services:
       # replaces the .env inode, and a file bind mount stays pinned to the
       # old one, so the container silently never sees the edit.
       - /amr-ch-01_data/ninja-dashboard:/app/envdir:ro
-    # Publish the operator endpoints on the host so browser links work.
-    ports:
-      - "8090:8090"
+    # The HTTP endpoints (health, job requests, software refresh) are not
+    # published on the host: Operations reaches them as http://ingest:8090 on
+    # the Compose network, and nothing in them authenticates the caller.
     depends_on:
       postgres:
         condition: service_healthy
