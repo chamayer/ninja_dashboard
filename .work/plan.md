@@ -66,8 +66,35 @@ be re-observed.
 **Not in scope:** `platform-health-evaluate` (queued since Oct 9; blocker not
 found).
 
-**Next action:** commit and push approval covering the scope fix and migration
-0279; then confirm identity-source refreshes complete and no new deferrals.
+**Follow-up — restart leaves non-replay-safe runs holding shared data
+(approved by the user, uncommitted):** the 00:40 deploy interrupted
+`software-queue-drain`; its `contained` claim on `tenant:1:software-inventory`
+blocked all later drains and classify-only. Two older holds
+(`platform-health-evaluate` since 18:39, `metabase-bootstrap` since 18:58)
+explain the long-queued platform-health job. Only registry jobs with reviewed
+evidence are auto-released by the worker's reconcile.
+1. Replay-safe policy for 12 jobs with no external effect (registry evidence +
+   migration 0280 authority rows): software-queue-drain, software-enqueue-orgs,
+   software-classify, platform-health-evaluate, cmdb-evaluate, run-log-recovery,
+   parity-check, intel-winget/chocolatey/capability/category/lolrmm. Notifications,
+   source-actions, agent-compliance*, retention-history stay manual review.
+   Weakest evidence: queue-drain (relies on the existing lease reset/retry model,
+   not on a proven mid-entry kill test).
+2. Migration 0281: wait text says "An interrupted update still holds this data
+   and needs review." when the blocker is a contained claim.
+3. `jobs_worker._drain_children`: after a stop request, running children finish
+   for up to 100 s before being fenced; compose `stop_grace_period: 120s`.
+4. Existing holds: the worker reconcile releases replay-safe holds after deploy
+   (drain, platform-health). `metabase-bootstrap` is not a registry job and
+   keeps its `tenant:1:reporting` hold; nothing else waits on that resource.
+   No manual release performed.
+Validation: 5 drain tests, 3 + 3 migration tests, registry tests pass; ruff clean.
+Not validated: SQL of 0281 and the reconcile release have not executed (no local
+Postgres); verify after deploy that the contained claims clear.
+
+**Next action:** commit and push approval for the follow-up (migrations 0280 and
+0281 included); then confirm holds clear, drains run, identity-source refreshes
+complete.
 
 ## Active plan — Source-refresh hangs (OS-installation projection)
 

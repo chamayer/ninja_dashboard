@@ -719,6 +719,67 @@ REPLAY_SAFE_RECOVERY_EVIDENCE = MappingProxyType(
             "current local observations and derived projections. A later replay "
             "converges to current source state and has no source-side mutation."
         ),
+        # Local-only work and read-only external fetches.  Interrupted work is
+        # either rolled back with its database transaction or leased and reset,
+        # so a replay converges and nothing outside Operations is mutated.
+        "software-queue-drain": (
+            "The software queue drain only reads Ninja inventory and writes local "
+            "inventory rows. Queue entries are leased and an expired lease resets "
+            "the entry to pending, so a replay converges and mutates nothing in Ninja."
+        ),
+        "software-enqueue-orgs": (
+            "The scheduled sweep only inserts deduplicated pending queue rows for "
+            "organizations already known locally. A replay adds no duplicates and "
+            "has no external mutation."
+        ),
+        "software-classify": (
+            "Combined software classification only reads public package metadata and "
+            "reconciles local intelligence, findings, and read models. A later replay "
+            "converges to the current installation and policy state and has no "
+            "external mutation."
+        ),
+        "platform-health-evaluate": (
+            "Platform-health evaluation reads local queue and run state and "
+            "convergently updates local health findings. A later replay has no "
+            "external mutation."
+        ),
+        "cmdb-evaluate": (
+            "CMDB evaluation reads local documentation observations and convergently "
+            "updates local findings. A later replay has no external mutation."
+        ),
+        "run-log-recovery": (
+            "Diagnostic recovery only closes stale local run-log rows. A later replay "
+            "finds nothing further to close and has no external mutation."
+        ),
+        "parity-check": (
+            "The parity check reads local state and rewrites local parity and run-log "
+            "records. A later replay converges and has no external mutation."
+        ),
+        "intel-winget": (
+            "The Windows package refresh only reads public package metadata and "
+            "performs transaction-scoped upserts of local safety signals. A later "
+            "replay converges to current feed state and has no external mutation."
+        ),
+        "intel-chocolatey": (
+            "The Chocolatey refresh only reads public package metadata and performs "
+            "transaction-scoped upserts of local safety signals. A later replay "
+            "converges to current feed state and has no external mutation."
+        ),
+        "intel-capability": (
+            "Capability projection derives local catalog assertions from local corpus "
+            "and rules in one database transaction. A later replay converges and has "
+            "no external mutation."
+        ),
+        "intel-category": (
+            "Category projection derives local catalog assertions from local corpus "
+            "and rules in one database transaction. A later replay converges and has "
+            "no external mutation."
+        ),
+        "intel-lolrmm": (
+            "The remote-management catalog refresh only downloads a public archive "
+            "and upserts local catalog rows in one database transaction. A later "
+            "replay converges to the current archive and has no external mutation."
+        ),
     }
 )
 
