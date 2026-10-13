@@ -277,6 +277,12 @@ def test_collapsed_queue_uses_set_based_fleet_state_summary():
     source = Path("apps/core/views.py").read_text(encoding="utf-8")
 
     assert "def _fleet_condition_state_counts()" in source
+    summary = source[
+        source.index("def _fleet_condition_state_counts()") : source.index(
+            "def _condition_operator_states"
+        )
+    ]
+    assert 'cursor.execute("SET LOCAL jit = off")' in summary
     assert "needs_per_finding_states = (" in source
     assert "else _fleet_condition_state_counts()" in source
 

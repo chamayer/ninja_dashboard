@@ -538,6 +538,12 @@ def _fleet_condition_state_counts() -> dict[str, dict[str, int]]:
     """
     empty = {}
     with connection.cursor() as cursor:
+        # This is an interactive, one-shot fleet summary. PostgreSQL's JIT
+        # compiler takes longer than the query itself for the current 33k-row
+        # population (2.95 s compiled versus 2.61 s executed without it).
+        # Keep the setting transaction-local so evaluation and background
+        # workloads retain their normal database configuration.
+        cursor.execute("SET LOCAL jit = off")
         cursor.execute("SELECT to_regclass('operations.condition_assessments')")
         if cursor.fetchone()[0] is None:
             cursor.execute(

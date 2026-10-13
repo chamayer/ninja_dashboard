@@ -623,7 +623,23 @@ only the existing selected value, device identity, and projection timestamp to
 the existing authenticated presentation path. It does not store data, select
 a source, or expand permissions beyond the existing User exposure page. The
 view replaces the compatibility/source-link CTE; the effective attribute
-projector remains the sole value authority.
+projector remains the sole value authority. Release `d730a56` applied
+migration 0290 through normal GitOps, and its immediate syntax repairs
+`4f57b59` and `c0cb179` are also deployed. The final live trace is successful:
+the main query is 5.84 s (from 8.78 s) and the full handler is 11.61 s (from
+13.69 s). Next: trace and redesign the independently slow Computers and
+Issues first-view boundaries; do not make further User exposure query tweaks
+without a new measured cause.
+
+**Issues checkpoint (2026-10-13):** the collapsed queue's governed-state
+summary returns 33,422 active Issues and is semantically required; it is not
+a candidate for a page cache or a weakened policy check. Its live execution
+plan showed PostgreSQL spending 2.95 s compiling JIT code before evaluating
+the one-shot interactive query. With JIT disabled only for that transaction,
+the exact same summary returns in 2.61 s. The next release applies that
+request-local setting and leaves database defaults and background evaluation
+unchanged. Its remaining query cost will be revisited only after measuring the
+deployed first view.
 
 ---
 
