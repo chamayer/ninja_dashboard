@@ -121,7 +121,7 @@ def classify(tenant_id: int = _TENANT_ID, *, incremental: bool = True) -> int:
                         (id, tenant_id, kind, subject_ref, started_at,
                          ended_at, ok, rows, error)
                     VALUES (gen_random_uuid(), %s, 'patch_findings',
-                            jsonb_build_object('mode', %s), %s, NOW(), %s, %s, %s)
+                            jsonb_build_object('mode', %s::text), %s, NOW(), %s, %s, %s)
                     """,
                     (tenant_id, 'incremental' if incremental else 'full', now, error is None, affected, error or ""),
                 )

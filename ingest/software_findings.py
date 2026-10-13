@@ -517,7 +517,7 @@ def classify(tenant_id: int = _TENANT_ID, *, incremental: bool = False) -> int:
                         (id, tenant_id, kind, subject_ref, started_at,
                          ended_at, ok, rows, error)
                     VALUES (gen_random_uuid(), %s, 'software_classifier',
-                            jsonb_build_object('mode', %s), %s, NOW(), %s, %s, %s)
+                            jsonb_build_object('mode', %s::text), %s, NOW(), %s, %s, %s)
                     """,
                     (tenant_id, "incremental" if incremental else "full", now, error is None, affected, error or ""),
                 )
@@ -1451,6 +1451,13 @@ def _emit_scoped(cur, tenant_id, ft_id, client_id, device_id, canonical_key,
         ),
     )
     finding_id = cur.fetchone()[0]
+    if already_emitted and subject_type in ("software_product", "software_version"):
+        # Every installation of a widely deployed title emits the same
+        # product/version finding. Its participants are the title's devices, not
+        # this installation's, so rebuilding and re-assessing them for each
+        # repeat multiplies the work by the install count and keeps a batch
+        # from finishing inside the Jobs timeout.
+        return 0
     participants = []
     if device_id is not None:
         participants.append(Participant("device", str(device_id), "affected", tenant_id))
