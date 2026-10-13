@@ -713,6 +713,7 @@ def _execute(job_key: str, progress: V1JobProgress) -> int | JobExecutionResult 
     functions intentionally raise, allowing the durable record to show failure.
     """
     from ingest import cmdb_findings, main, platform_findings, runlog
+    from ingest.inventory import software as software_inventory
     from ingest.intel import (
         abusech,
         capability_match,
@@ -831,6 +832,11 @@ def _execute(job_key: str, progress: V1JobProgress) -> int | JobExecutionResult 
         )
         progress.update("Classifying changed software", detail)
         rows = int(jobs[job_key][1]())
+        progress.update(
+            "Publishing software status",
+            "Making the completed classification available to operators.",
+        )
+        software_inventory.refresh_exposure_read_model()
         remaining = incremental_pending_count(tenant_id=1)
         if remaining:
             request_system_job("software-classify-only", "incremental classifier continuation")
@@ -841,6 +847,11 @@ def _execute(job_key: str, progress: V1JobProgress) -> int | JobExecutionResult 
     if job_key == "software-classify-full":
         progress.update("Rebuilding software status", "Processing the next device batch.")
         rows = int(jobs[job_key][1]())
+        progress.update(
+            "Publishing software status",
+            "Making the completed classification available to operators.",
+        )
+        software_inventory.refresh_exposure_read_model()
         remaining = full_reclassification_pending(tenant_id=1)
         if remaining:
             request_system_job("software-classify-full", "full classifier continuation")
@@ -883,4 +894,7 @@ def _software_classify_with_intel(
     )
     with db.pool.connection() as conn, conn.cursor() as cur:
         cur.execute("REFRESH MATERIALIZED VIEW operations.v_software_safety")
+    from ingest.inventory import software as software_inventory
+
+    software_inventory.refresh_exposure_read_model()
     return int(result) if isinstance(result, int) else None

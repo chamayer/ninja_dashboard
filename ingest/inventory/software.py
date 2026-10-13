@@ -150,6 +150,21 @@ def refresh_read_models() -> None:
         log.exception("End-of-life projection after software catalog refresh failed")
 
 
+def refresh_exposure_read_model() -> None:
+    """Publish classified device/software exposure eligibility.
+
+    Findings, source evidence, and condition assessments are the inputs.  This
+    must run only after a successful classifier pass; approvals deliberately
+    remain a live filter in ``v_device_software_exposure`` and need no refresh.
+    """
+    with db.pool.connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            "REFRESH MATERIALIZED VIEW CONCURRENTLY "
+            "operations.device_software_exposure_current"
+        )
+    log.info("Refreshed operations.device_software_exposure_current")
+
+
 def _load_device_map() -> dict[str, tuple[uuid.UUID, uuid.UUID]]:
     with db.pool.connection() as conn, conn.cursor() as cur:
         cur.execute(_GUC)

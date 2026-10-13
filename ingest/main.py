@@ -604,14 +604,16 @@ def run_software_classify_once(*, with_intel_pre_steps: bool = True) -> None:
         log.info("Software classifier complete: affected=%d", affected)
     except Exception:
         log.exception("Software classifier failed")
+        return
     # Refresh the software risk matview so the UI reflects fresh
     # findings + decisions. Best-effort — never blocks the classifier.
     try:
         with db.pool.connection() as conn, conn.cursor() as cur:
             cur.execute("REFRESH MATERIALIZED VIEW operations.v_software_safety")
         log.info("Refreshed operations.v_software_safety matview")
+        software_ingest.refresh_exposure_read_model()
     except Exception:
-        log.exception("Failed to refresh v_software_safety matview")
+        log.exception("Failed to publish software read models")
 
 
 def run_software_classify_scheduled() -> None:

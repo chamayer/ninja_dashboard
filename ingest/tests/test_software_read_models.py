@@ -63,3 +63,15 @@ def test_software_read_models_refresh_in_dependency_order(monkeypatch) -> None:
     ]
     assert lifecycle_runs == [True]
     assert catalog_runs == [True]
+
+
+def test_exposure_read_model_refreshes_concurrently(monkeypatch) -> None:
+    pool = _Pool()
+    monkeypatch.setattr(software.db, "pool", pool)
+
+    software.refresh_exposure_read_model()
+
+    assert pool.statements == [
+        "REFRESH MATERIALIZED VIEW CONCURRENTLY "
+        "operations.device_software_exposure_current"
+    ]

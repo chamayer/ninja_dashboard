@@ -222,8 +222,8 @@ which includes migration 0278 per repository rules.
 
 ## Active plan — Dashboard navigation performance
 
-**Status:** navigation baseline and first query attribution complete; focused
-implementation in progress.
+**Status:** navigation baseline and first query attribution complete; shared
+software-exposure read model approved and in implementation.
 
 **Goal:** make the Operations Dashboard and every page reachable from its
 cards, the primary navigation, or contextual sub-navigation feel responsive in
@@ -237,7 +237,9 @@ measurements identify it as a contributor. Preserve card meaning, tenant/RLS
 scoping, counts, URLs, and existing operator behavior.
 
 **Non-goals:** visual redesign, broad caching infrastructure, data rebuilds,
-schema redesign, or unrelated page optimization.
+or unrelated page optimization. The approved exposure read-model migration is
+an intentionally narrow schema change: it restores the established derived /
+live-decision split rather than adding a page cache or a second authority.
 
 **Steps:**
 
@@ -250,7 +252,8 @@ schema redesign, or unrelated page optimization.
    evidence; do not capture customer data.
 3. Implement the smallest focused improvements, preferring existing compact
    read models and indexes over duplicate authorities or request-time estate
-   aggregation.
+   aggregation. Restore the software-exposure derived base with source evidence
+   and evaluation eligibility, then keep approvals as the live effective filter.
 4. Compare the same Dashboard/card path measurements, run focused regression
    checks, and document any route that remains externally constrained.
 
@@ -300,6 +303,45 @@ legacy fallback) for Dashboard/Admin Data source status, retaining the full
 15-binding operator meaning without scanning current observations. Next:
 release and measure that source-status change, then restructure the Computer
 and user-exposure first views at their data boundaries.
+
+**Approved exposure read-model design:** migration 112 will materialize the
+slow, rebuildable device-exposure eligibility set only after current source
+evidence and a fresh executable condition assessment are present. It has one
+owner: successful software classification refreshes it after findings and
+assessments are updated. The public `v_device_software_exposure` remains a
+security-barrier effective view and applies client/device approvals live, so an
+operator approval takes effect immediately. Runtime roles cannot read the base
+directly. This fixes the repeated estate-wide fan-out without creating a
+second software or decision authority. The source/evidence and condition
+predicates are copied from migrations 107/109 into the derived relation, not
+weakened or discarded. The base records their freshness deadlines and the
+effective view evaluates those two simple time predicates live, so stale source
+or condition authority disappears on time even if a later classifier run is
+delayed.
+
+**Current checkpoint / next action:** implement the migration, route all
+successful incremental/full classifier paths through one exposure refresh
+helper, add focused contract tests, review the migration plan and measure the
+deployed handler paths after an approved release. The historical architecture
+documents disagree about whether a concurrent materialized refresh may be
+called directly by the ingest role or only by a `SECURITY DEFINER` function;
+PostgreSQL prohibits `REFRESH ... CONCURRENTLY` inside a function. The existing
+reviewed read-model convention uses the direct concurrent refresh. This change
+follows that executable convention while retaining the stronger direct-read
+privilege boundary in ADR-0010.
+
+**Local validation:** the migration contract and refresh-helper suite passes
+(`4 passed`) with non-secret dummy configuration; Python compilation and ruff
+lint of changed modules pass; `git diff --check` passes. The established
+read-model test requires runtime settings, so the suite is run with process-only
+placeholder settings rather than reading a workstation or production `.env`.
+`ruff format --check` reports pre-existing formatting drift across the three
+large touched legacy modules; applying it would rewrite unrelated code, so it
+is intentionally not part of this focused change. No local PostgreSQL client
+or disposable database is available to execute the SQL migration. Before
+completion, the approved production release must apply migration 112 and be
+validated with aggregate-only exposure-key uniqueness and live handler timings
+for User exposure, Computers, Clients, and the client overview.
 
 ---
 
