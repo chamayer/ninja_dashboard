@@ -1,5 +1,74 @@
 # Active root implementation plan
 
+## Active plan — Source-refresh completion fails at workflow admission
+
+**Status:** both causes validated 2026-10-12; scope fix a122cc9, software merge
+fix in migration 0279; pending post-deploy verification.
+
+**Observed:** after the OS-installation fix (49360cb), identity-source refreshes
+reach their last step and fail: `Jobs workflow admission failed ... Jobs revision
+dependency context is invalid` (ScreenConnect, 609 s, 2026-10-12 22:37).
+
+**Cause (validated):** `_admit_workflow` sends the ROOT run's scope for an
+`inherit` edge. The database function `jobs_add_revision_dependency_v1` (0272)
+requires an `inherit` dependent to share its PREREQUISITE's scope. For
+`source-refresh -> resolver` (tenant-scoped) `-> platform-evaluate` (inherit) the
+prerequisite is the tenant-scoped resolver but Python sends `source-binding:...`,
+so it raises. Registry audit over all 26 workflows: exactly two edges are
+rejected (`resolver -> platform-evaluate` for identity sources and
+`patch-classify -> platform-evaluate` for Ninja); with the proposed logic, zero.
+Data agrees: no source-refresh -> resolver/patch-classify edge has been created
+since before the 2026-10-09 13:47 definition change, because those runs always
+timed out first (see the section below).
+
+**Fix:** in `_admit_workflow`, track the scope each created run holds and give an
+`inherit` dependent its prerequisite's scope. No registry, schema, or digest
+change. Regression test replays every registry workflow against the DB rule.
+
+**Checkpoint:** scope fix implemented in `ingest/operator_job_queue.py`
+(`_admit_workflow`) with `ingest/tests/test_workflow_admission_scopes.py`;
+uncommitted.
+
+**Validation performed:** 22 new tests pass; with the old logic exactly the two
+production chains fail (identity_source and ninja_source) with the production
+error text; ruff clean; 50 related tests pass. One unrelated pre-existing failure:
+`test_scheduler_registers_a_separate_full_rebuild_cadence` reads `ingest/main.py`
+and fails identically on pristine HEAD.
+
+**Second cause (fixed by migration 0279, approved by "fix both"):** the
+`software-queue-drain` deferral. `jobs_request_software_v1` coalesces a request
+into any QUEUED software run of equal or higher rank and returns it; when only a
+queued `software-classify-full` exists, the classify-only request returns that
+run, and `jobs_add_revision_dependency_v1` rejects it because the registry edge
+names `software-classify-only`. Timeline matches: 8 coalesced events 22:00-22:25
+into a queued classify-only; that run was claimed at 22:27:36, leaving only the
+queued classify-full; deferrals began at 22:30. Self-clears when classify-full
+starts.
+
+**Second fix:** `0279_jobs_dependency_accepts_merged_software_run` re-creates
+`jobs_add_revision_dependency_v1` (0272 text, one changed match) so a dependent
+of the same `software-classifier` family with rank >= the declared successor's
+rank is accepted. Scope, revision name, failure rule and grants are unchanged;
+an unknown successor rank never widens the match. Reverse restores the 0272
+function. Files: the migration and
+`operations/apps/core/tests/test_migration_0279_*.py`.
+
+**Second-fix validation:** 3 static migration tests + neighbours pass (6); ruff
+clean. Read-only production check (rolled-back SELECT of the new match against
+real run/definition rows): a `software-classify-full` dependent under the
+`software-queue-drain` edge matches 0 rows with the 0272 logic and 1 with the
+new logic; family ranks are 1/2/3 for classify-only/full/classify. NOT
+validated: executing the function itself (no local Postgres or Docker; the
+function is created only by the deploy). The deferral had already cleared in
+production (classify-full started; drains complete) so the live failure cannot
+be re-observed.
+
+**Not in scope:** `platform-health-evaluate` (queued since Oct 9; blocker not
+found).
+
+**Next action:** commit and push approval covering the scope fix and migration
+0279; then confirm identity-source refreshes complete and no new deferrals.
+
 ## Active plan — Source-refresh hangs (OS-installation projection)
 
 **Status:** cause validated 2026-10-12; fix in implementation, uncommitted.
