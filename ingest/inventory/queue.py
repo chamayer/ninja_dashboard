@@ -11,8 +11,8 @@ The daily fleet check covers everything else, so this queue is only about
 freshness. (The table keeps its historical name, ``software_activity_queue``.)
 
 Failure handling: a failed batch returns its entries to pending until their
-``max_attempts`` is reached, then leaves them failed with the error; a lease
-older than ``_LEASE_MINUTES`` (worker killed mid-batch) returns to pending.
+``max_attempts`` is reached, then leaves them failed with the error; entries a
+killed worker left in processing return to pending when the next run starts.
 """
 
 from __future__ import annotations
@@ -32,7 +32,6 @@ TABLE = "ninja_core.software_activity_queue"
 DOMAIN_KIND = "software.activity"
 BATCH_DEVICES = 100
 MAX_CLAIM = 5000
-_LEASE_MINUTES = 30
 _ERROR_MAX = 2000
 _DEVICE_DF = re.compile(r"^id=(\d+)$")
 
@@ -66,22 +65,43 @@ def enqueue_activity(ninja_device_id: int, reason: str = "") -> bool:
 
 
 def recover_stale_entries() -> int:
-    """Return leased entries whose worker died to pending (not counted as an attempt)."""
+    """Release entries a dead worker left in processing (not counted as an attempt).
+
+    Called before this run claims anything. The Jobs control plane runs one
+    software inventory job at a time (resource ``tenant:<id>:software-inventory``),
+    so every entry still in processing belongs to a run that ended without
+    finishing, typically a deploy restart. Waiting out a lease would only delay
+    the retry. An entry whose computer already has a newer pending request is
+    closed as superseded instead, since only one pending entry per computer may
+    exist.
+    """
     with _tenant_cursor() as cur:
         cur.execute(
             f"""
             UPDATE {TABLE} entry
-               SET status = 'pending', started_at = NULL, worker_id = NULL
+               SET status = 'done', completed_at = NOW(),
+                   error = 'Interrupted; superseded by a newer request for this computer.'
              WHERE status = 'processing'
-               AND started_at < NOW() - INTERVAL '{_LEASE_MINUTES} minutes'
-               AND NOT EXISTS (
+               AND EXISTS (
                    SELECT 1 FROM {TABLE} pending
                     WHERE pending.df = entry.df AND pending.status = 'pending')
             """,
         )
+        superseded = cur.rowcount
+        cur.execute(
+            f"""
+            UPDATE {TABLE}
+               SET status = 'pending', started_at = NULL, worker_id = NULL
+             WHERE status = 'processing'
+            """,
+        )
         recovered = cur.rowcount
-    if recovered:
-        log.warning("Recovered %d stale software queue entries", recovered)
+    if recovered or superseded:
+        log.warning(
+            "Released %d interrupted software queue entries (%d superseded)",
+            recovered,
+            superseded,
+        )
     return recovered
 
 

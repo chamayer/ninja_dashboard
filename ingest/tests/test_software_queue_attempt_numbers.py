@@ -38,6 +38,22 @@ def test_claim_derives_attempt_numbers_from_recorded_history(monkeypatch):
     assert params["kind"] == "software.activity"
 
 
+def test_entries_left_by_an_interrupted_run_are_released_without_a_lease_wait(monkeypatch):
+    cur = _Cursor()
+    cur.rowcount = 4
+
+    @contextmanager
+    def _fake_cursor():
+        yield cur
+
+    monkeypatch.setattr(queue, "_tenant_cursor", _fake_cursor)
+    assert queue.recover_stale_entries() == 4
+    superseded, released = (" ".join(sql.split()) for sql, _ in cur.statements)
+    # A newer pending request for the same computer supersedes the orphan.
+    assert "SET status = 'done'" in superseded and "pending.status = 'pending'" in superseded
+    assert "SET status = 'pending'" in released and "INTERVAL" not in released
+
+
 def test_only_single_computer_requests_are_usable():
     assert queue.Entry(1, "id=12", 0, 3).ninja_device_id == 12
     assert queue.Entry(1, "org=5", 0, 3).ninja_device_id is None

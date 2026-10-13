@@ -113,7 +113,17 @@ backlog, classifier runs only after changes.
   installation; the post-run catalog projection relinks them (loops until none
   are unlinked). Counts as a material change. Tests updated (ingest 412 passed).
 
-**Next action:** commit approval, then push approval (migrations 0285, 0286).
+- Shipped 577d611 (origin and a-m-rose). Portainer stack 16 polls origin
+  every minute and deployed it; the direct git-redeploy call was refused (HTTP
+  400) because `Invoke-DevTool.ps1` cannot send a request body. Migrations
+  0285 and 0286 applied; `conditions-software-inventory-1` active (63
+  definitions, 63 policy rows); retired queues disabled in the registry.
+  Startup race: the jobs worker registered recovery policies at 20:26:00/03,
+  before 0285 restated the evidence at 20:26:05, failed twice and restarted;
+  after that every inventory job version is registered.
+
+**Next action:** verify the first device worker run (claimed 3,674 queued
+computers at 20:27), the first fleet check, and the catalog relink.
 
 ## Active plan — Software findings rebuild (implementation)
 

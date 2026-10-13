@@ -318,17 +318,27 @@ WITH removed AS (
 SELECT (SELECT COUNT(*) FROM removed)
 """
 
+# The stored rows are read for the listed computers first. Joined directly, the
+# planner looks each installation up through the (client, title) index and
+# filters out the client's other computers: 4.3 s and ~1.2M page reads per batch
+# of 100 computers, against 0.36 s this way (measured 2026-10-13).
 DELTA_SQL = """
 CREATE TEMP TABLE inventory_delta ON COMMIT DROP AS
+WITH stored AS MATERIALIZED (
+    SELECT c.client_id, c.device_id, c.canonical_name, c.material_hash, c.stale_since
+      FROM operations.software_installations_current c
+     WHERE c.tenant_id = %(tenant_id)s
+       AND c.device_id IN (SELECT device_id FROM inventory_devices)
+)
 SELECT l.*,
        CASE WHEN c.device_id IS NULL THEN 'new'
             WHEN c.material_hash IS DISTINCT FROM l.material_hash
               OR c.stale_since IS NOT NULL THEN 'changed'
             ELSE 'unchanged' END AS kind
   FROM inventory_listing l
-  LEFT JOIN operations.software_installations_current c
-    ON c.tenant_id = %(tenant_id)s AND c.client_id = l.client_id
-   AND c.device_id = l.device_id AND c.canonical_name = l.canonical_name
+  LEFT JOIN stored c
+    ON c.client_id = l.client_id AND c.device_id = l.device_id
+   AND c.canonical_name = l.canonical_name
 """
 
 KIND_COUNTS_SQL = "SELECT kind, COUNT(*) FROM inventory_delta GROUP BY kind"
@@ -405,9 +415,9 @@ ON CONFLICT (tenant_id, client_id, device_id, canonical_name) DO UPDATE SET
 RELINK_SQL = """
 UPDATE operations.software_installations_current c
    SET software_version_id = NULL
-  FROM inventory_listing l, catalog.software_versions v
- WHERE c.tenant_id = %(tenant_id)s AND c.client_id = l.client_id
-   AND c.device_id = l.device_id AND c.canonical_name = l.canonical_name
+  FROM catalog.software_versions v
+ WHERE c.tenant_id = %(tenant_id)s
+   AND c.device_id IN (SELECT device_id FROM inventory_devices)
    AND v.id = c.software_version_id
    AND v.version IS DISTINCT FROM COALESCE(c.version, '')
 """

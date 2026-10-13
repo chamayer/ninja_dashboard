@@ -118,6 +118,14 @@ def test_removal_is_limited_to_listed_devices_and_records_why():
     assert software.REMOVED_REASON == "ninja.inventory.not_listed"
 
 
+def test_stored_rows_are_read_by_computer_not_by_client_and_title():
+    """The direct join used the (client, title) index: 4.3 s per 100 computers."""
+    sql = software.DELTA_SQL
+    assert "WITH stored AS MATERIALIZED" in sql
+    assert "c.device_id IN (SELECT device_id FROM inventory_devices)" in sql
+    assert "LEFT JOIN operations.software_installations_current" not in sql
+
+
 def test_unchanged_rows_only_refresh_their_open_interval():
     assert "d.kind = 'unchanged'" in software.HISTORY_SQL
     assert "WHERE d.kind <> 'unchanged'" in software.OPEN_INTERVALS_SQL
@@ -177,7 +185,7 @@ def test_a_version_change_clears_the_catalog_link_for_relinking():
     assert "SET software_version_id = NULL" in sql
     assert "v.version IS DISTINCT FROM COALESCE(c.version, '')" in sql
     # Limited to the computers in this response.
-    assert "FROM inventory_listing l" in sql
+    assert "c.device_id IN (SELECT device_id FROM inventory_devices)" in sql
     # The catalog backfill links exactly the unlinked rows, by the same rule.
     from ingest import software_catalog
 
