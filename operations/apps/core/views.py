@@ -8640,29 +8640,18 @@ def software_user_risk(request: HttpRequest) -> HttpResponse:
             FROM operations.ninja_device_detail_current_shadow ds
             WHERE ds.last_user IS NOT NULL AND TRIM(ds.last_user) <> ''
         ),
-        -- MATERIALIZED is load-bearing, not stylistic. Without it PostgreSQL
-        -- inlines this CTE into a Nested Loop run once per latest_user row
-        -- (4,542 times measured), each iteration bitmap-scanning every
-        -- entity_source_links row for the ninja source instance and filtering
-        -- by `external_id::integer = device_id` as a Join Filter rather than
-        -- an index condition, because nothing indexes that cast. Measured
-        -- 2026-08-18: 28.3 million rows removed by that filter, 86 s total.
-        -- Forcing this set to materialise once (~14,788 rows, cast and
-        -- filtered a single time) then hash-joining against latest_user drops
-        -- it to 4.6 s for identical results.
-        ninja_links AS MATERIALIZED (
-            SELECT dl.device_id,
-                   {_safe_ninja_external_id_integer_sql("dl")} AS ninja_device_id
-            FROM operations.v_device_source_link dl
+        -- The source-link lookup is driven by each Ninja detail ID.  Migration
+        -- 0288 indexes this exact safe numeric conversion on the canonical
+        -- link relation, avoiding the former materialised link scan and its
+        -- badly estimated CTE join without introducing a duplicate mapping.
+        device_user AS (
+            SELECT DISTINCT dl.device_id AS ops_device_id, lu.last_user, lu.snapshot_at
+            FROM latest_user lu
+            JOIN operations.v_device_source_link dl
+              ON {_safe_ninja_external_id_integer_sql("dl")} = lu.ninja_device_id
             JOIN operations.sources s ON s.id = dl.source_id
             WHERE dl.tenant_id = 1
               AND LOWER(s.name) = 'ninja'
-              AND dl.external_id ~ '^\\d+$'
-        ),
-        device_user AS (
-            SELECT DISTINCT nl.device_id AS ops_device_id, lu.last_user, lu.snapshot_at
-            FROM latest_user lu
-            JOIN ninja_links nl ON nl.ninja_device_id = lu.ninja_device_id
         ),
         finding_items AS (
             SELECT d.id AS device_id, d.client_id,
@@ -10901,6 +10890,11 @@ def software_tech_checklist(request: HttpRequest) -> HttpResponse:
     role_filter = (request.GET.get("role") or "").strip().lower()
     os_filter = (request.GET.get("os") or "").strip()
     kind_filter = (request.GET.get("kind") or "").strip()
+    is_csv = wants_csv(request)
+    q_pattern = q_filter.lower().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    kind_pattern = (
+        kind_filter.lower().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    )
     filtered_client_ids: list[str] = []
     if client_slugs:
         filtered_client_ids = [
@@ -11013,31 +11007,122 @@ def software_tech_checklist(request: HttpRequest) -> HttpResponse:
           {client_where}
     """
 
+    html_sql = f"""
+        WITH all_items AS MATERIALIZED (
+            SELECT found.*, 0 AS source_order
+            FROM ({findings_sql}) found
+
+            UNION ALL
+
+            SELECT decided.*, 1 AS source_order
+            FROM ({decisions_sql}) decided
+        ),
+        deduplicated_items AS MATERIALIZED (
+            SELECT DISTINCT ON (device_id, finding_type, LOWER(COALESCE(canonical_name, '')))
+                   client_id, slug, display_name, device_id, canonical_hostname,
+                   device_role, os_group, canonical_name, publisher, reason,
+                   finding_type, severity
+            FROM all_items
+            ORDER BY device_id, finding_type, LOWER(COALESCE(canonical_name, '')),
+                     source_order
+        ),
+        eligible_devices AS MATERIALIZED (
+            SELECT device_id,
+                   BOOL_OR(
+                       {"LOWER(COALESCE(canonical_hostname, '')) LIKE %s ESCAPE '\\' OR LOWER(display_name) LIKE %s ESCAPE '\\' OR LOWER(COALESCE(canonical_name, '')) LIKE %s ESCAPE '\\' OR LOWER(COALESCE(publisher, '')) LIKE %s ESCAPE '\\'" if q_filter else "TRUE"}
+                   ) AS matches_q,
+                   BOOL_OR(
+                       {"LOWER(finding_type) LIKE %s ESCAPE '\\'" if kind_filter else "TRUE"}
+                   ) AS matches_kind
+            FROM deduplicated_items
+            GROUP BY device_id
+        ),
+        ranked_devices AS MATERIALIZED (
+            SELECT item.device_id,
+                   COUNT(*) AS item_count,
+                   COUNT(*) OVER () AS device_count,
+                   SUM(COUNT(*)) OVER () AS total_items,
+                   ROW_NUMBER() OVER (
+                       ORDER BY COUNT(*) DESC, MIN(item.display_name),
+                                MIN(item.canonical_hostname)
+                   ) AS device_rank
+            FROM deduplicated_items item
+            JOIN eligible_devices eligible ON eligible.device_id = item.device_id
+            WHERE eligible.matches_q
+              AND eligible.matches_kind
+            GROUP BY item.device_id
+        )
+        SELECT item.client_id, item.slug, item.display_name,
+               item.device_id, item.canonical_hostname, item.device_role,
+               item.os_group, item.canonical_name, item.publisher, item.reason,
+               item.finding_type, item.severity, ranked.item_count,
+               ranked.device_count, ranked.total_items
+        FROM deduplicated_items item
+        JOIN ranked_devices ranked ON ranked.device_id = item.device_id
+        WHERE ranked.device_rank <= 500
+        ORDER BY ranked.item_count DESC, item.display_name,
+                 item.canonical_hostname, item.finding_type, item.canonical_name
+    """
+
     with transaction.atomic(), connection.cursor() as cur:
         cur.execute("SET LOCAL operations.tenant_id = 1")
-        cur.execute(findings_sql, client_params)
-        finding_rows = cur.fetchall()
-        # decisions_sql now has two UNION ALL branches, each carrying its own
-        # {client_where}, so its parameters must repeat once per branch.
-        cur.execute(decisions_sql, client_params * 2)
-        decision_rows = cur.fetchall()
+        if is_csv:
+            cur.execute(findings_sql, client_params)
+            finding_rows = cur.fetchall()
+            # decisions_sql now has two UNION ALL branches, each carrying its own
+            # {client_where}, so its parameters must repeat once per branch.
+            cur.execute(decisions_sql, client_params * 2)
+            decision_rows = cur.fetchall()
+        else:
+            html_params = client_params * 3
+            if q_filter:
+                html_params.extend([f"%{q_pattern}%"] * 4)
+            if kind_filter:
+                html_params.append(f"%{kind_pattern}%")
+            cur.execute(html_sql, html_params)
+            html_rows = cur.fetchall()
+            finding_rows = []
+            decision_rows = []
 
     per_device: dict = {}
-    for row in list(finding_rows) + list(decision_rows):
-        (
-            client_id,
-            slug,
-            client_name,
-            device_id,
-            hostname,
-            device_role,
-            os_group,
-            canonical,
-            publisher,
-            reason,
-            finding_type,
-            severity,
-        ) = row
+    device_count = 0
+    total_items = 0
+    result_rows = list(finding_rows) + list(decision_rows) if is_csv else html_rows
+    for row in result_rows:
+        if is_csv:
+            (
+                client_id,
+                slug,
+                client_name,
+                device_id,
+                hostname,
+                device_role,
+                os_group,
+                canonical,
+                publisher,
+                reason,
+                finding_type,
+                severity,
+            ) = row
+            item_count = None
+        else:
+            (
+                client_id,
+                slug,
+                client_name,
+                device_id,
+                hostname,
+                device_role,
+                os_group,
+                canonical,
+                publisher,
+                reason,
+                finding_type,
+                severity,
+                item_count,
+                device_count,
+                total_items,
+            ) = row
         entry = per_device.setdefault(
             device_id,
             {
@@ -11048,13 +11133,15 @@ def software_tech_checklist(request: HttpRequest) -> HttpResponse:
                 "device_role": device_role,
                 "os_group": os_group,
                 "items": [],
-                "item_keys": set(),
+                "item_keys": set() if is_csv else None,
+                "item_count": item_count or 0,
             },
         )
         item_key = (finding_type, (canonical or "").lower())
-        if item_key in entry["item_keys"]:
+        if is_csv and item_key in entry["item_keys"]:
             continue
-        entry["item_keys"].add(item_key)
+        if is_csv:
+            entry["item_keys"].add(item_key)
         entry["items"].append(
             {
                 "canonical_name": canonical or "",
@@ -11068,30 +11155,15 @@ def software_tech_checklist(request: HttpRequest) -> HttpResponse:
     devices = []
     for entry in per_device.values():
         entry.pop("item_keys", None)
-        entry["item_count"] = len(entry["items"])
+        if is_csv:
+            entry["item_count"] = len(entry["items"])
         entry["items"].sort(key=lambda i: (i["finding_type"], i["canonical_name"]))
         devices.append(entry)
     devices.sort(key=lambda e: (-e["item_count"], e["client_name"], e["hostname"] or ""))
 
-    # Enrich items with category from SoftwareCatalog (canonical lookup).
-    all_canonicals = {
-        i["canonical_name"].lower() for e in devices for i in e["items"] if i["canonical_name"]
-    }
-    catalog_cats = (
-        {
-            c.canonical_name.lower(): ", ".join(c.categories or [])
-            for c in SoftwareCatalog.objects.filter(canonical_name__in=list(all_canonicals))
-        }
-        if all_canonicals
-        else {}
-    )
-    for entry in devices:
-        for item in entry["items"]:
-            item["category"] = catalog_cats.get((item["canonical_name"] or "").lower(), "")
-
     clients = Client.objects.filter(tenant_id=1, deleted_at__isnull=True).order_by("display_name")
 
-    if wants_csv(request):
+    if is_csv:
         flat_rows: list[dict] = []
         for entry in devices:
             for item in entry["items"]:
@@ -11120,36 +11192,30 @@ def software_tech_checklist(request: HttpRequest) -> HttpResponse:
             filename_stem="tech_checklist",
         )
 
-    # Post-fetch filtering for q + kind — filters that don't map
-    # cleanly to the SQL join. Small candidate set → done in Python.
-    def _match_row(entry: dict) -> bool:
-        if q_filter:
-            needle = q_filter.lower()
-            if (
-                needle not in (entry["hostname"] or "").lower()
-                and needle not in (entry["client_name"] or "").lower()
-            ):
-                if not any(
-                    needle in (i.get("canonical_name") or "").lower()
-                    or needle in (i.get("publisher") or "").lower()
-                    for i in entry["items"]
-                ):
-                    return False
-        if kind_filter:
-            if not any(kind_filter in (i.get("finding_type") or "") for i in entry["items"]):
-                return False
-        return True
-
-    if q_filter or kind_filter:
-        devices = [d for d in devices if _match_row(d)]
+    # Category is presentation-only data for the bounded HTML response.  CSV
+    # does not include it, so the explicit export avoids a catalog lookup.
+    all_canonicals = {
+        i["canonical_name"].lower() for e in devices for i in e["items"] if i["canonical_name"]
+    }
+    catalog_cats = (
+        {
+            c.canonical_name.lower(): ", ".join(c.categories or [])
+            for c in SoftwareCatalog.objects.filter(canonical_name__in=list(all_canonicals))
+        }
+        if all_canonicals
+        else {}
+    )
+    for entry in devices:
+        for item in entry["items"]:
+            item["category"] = catalog_cats.get((item["canonical_name"] or "").lower(), "")
 
     return render(
         request,
         "software_tech_checklist.html",
         {
-            "devices": devices[:500],
-            "device_count": len(devices),
-            "total_items": sum(e["item_count"] for e in devices),
+            "devices": devices,
+            "device_count": device_count,
+            "total_items": total_items,
             "clients": clients,
             "active_clients": client_slugs,
             "active_q": q_filter,

@@ -579,15 +579,20 @@ semantics. After an approved release, remeasure the same routes, then redesign
 the unbounded user-exposure/cleanup first-view projections and trace Computers
 and Issues before selecting their changes. The source-link CTE has a cardinality
 estimation problem; it requires a query-shape redesign, not a speculative
-index. The migration and its focused source-contract test are locally
-validated (`1 passed`, focused Ruff, compilation, and diff hygiene). User
-exposure now asks PostgreSQL for the same top 500 users and fleet totals,
-instead of grouping the full estate in Python before discarding rows; CSV
-remains a deliberate complete export. Its focused contract test and Django
-system check pass. Next: commit/push this reviewed migration and bounded-view
-change with explicit approval, let normal GitOps apply it, then repeat the
-identical live handler measurements before choosing the next route-level
-change.
+index. Release `8c3dc5e` is deployed: migration 116 is present with both
+active-installation indexes. User exposure now asks PostgreSQL for the same
+top 500 users and fleet totals, instead of grouping the full estate in Python
+before discarding rows; CSV remains a deliberate complete export. Its warm
+deployed handler fell from 17.06 s to 13.03 s, with the main SQL down to
+8.19 s. The remaining query bottleneck is the unindexed safe integer join from
+Ninja detail IDs to canonical source links. The pending Operations migration
+0288 adds a concurrent functional index on that existing relation and rewires
+the query to use it directly; the similarly unbounded Tech Checklist first
+view now uses the same bounded SQL ranking while preserving complete CSV. All
+three focused contracts, Django checks, and migration drift checks pass. Next:
+release the concurrent lookup index and Checklist/User exposure refinements,
+then remeasure the same deployed handler paths before choosing Computers or
+Issues work.
 
 **Local validation:** the migration contract and refresh-helper suite passes
 (`4 passed`) with non-secret dummy configuration; Python compilation and ruff
