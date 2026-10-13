@@ -302,14 +302,24 @@ def _claim_one(table: str, job_run_id: object) -> dict | None:
         )
         row = cur.fetchone()
         if row:
+            # Lease recovery resets an entry to pending without bumping
+            # ``attempts``, so the recorded history, not the counter, decides
+            # the next attempt number; reusing one aborts the claim every time.
             cur.execute(
                 """
                 INSERT INTO operations.job_domain_attempts (
                     tenant_id, domain_kind, domain_record_id,
                     attempt_number, job_run_id
-                ) VALUES (1, %s, %s, %s, %s)
+                )
+                SELECT 1, %s, %s,
+                       GREATEST(%s, COALESCE(max(attempt_number), 0) + 1), %s
+                  FROM operations.job_domain_attempts
+                 WHERE tenant_id = 1 AND domain_kind = %s AND domain_record_id = %s
                 """,
-                (_DOMAIN_KINDS[table], str(row[0]), int(row[2]) + 1, job_run_id),
+                (
+                    _DOMAIN_KINDS[table], str(row[0]), int(row[2]) + 1, job_run_id,
+                    _DOMAIN_KINDS[table], str(row[0]),
+                ),
             )
     if not row:
         return None
