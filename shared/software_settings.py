@@ -127,6 +127,32 @@ FIELDS: tuple[SettingField, ...] = (
         "severity", "low",
     ),
     SettingField(
+        "suspicious_name_enabled", "Finding switches", "Suspicious-name findings",
+        "Off stops this type without touching its open findings.",
+        "bool", True,
+    ),
+    SettingField(
+        "install_path_enabled", "Finding switches", "Suspicious install-path findings",
+        "Off stops this type without touching its open findings.",
+        "bool", True,
+    ),
+    SettingField(
+        "eol_runtime_enabled", "Finding switches", "End-of-life runtime findings",
+        "Off stops this type without touching its open findings.",
+        "bool", True,
+    ),
+    SettingField(
+        "reconcile_max_close_percent", "Safety", "Close limit (% of a type per run)",
+        "A run that would resolve more than this share of a type's open findings "
+        "resolves none of them and reports it, until an administrator allows it.",
+        "int", 50, 1, 100,
+    ),
+    SettingField(
+        "reconcile_allow_large_close", "Safety", "Allow a large close once",
+        "Lets the next runs exceed the close limit. Turn it off again afterwards.",
+        "bool", False,
+    ),
+    SettingField(
         "suggestion_min_clients", "Suggestions", "Approve-publisher: minimum clients",
         "Suggest approving a publisher only when its software is used by at least "
         "this many clients and nothing concerning is known.",

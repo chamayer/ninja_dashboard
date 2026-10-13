@@ -31,6 +31,7 @@ SCANNED = (REPO / "ingest", REPO / "operations" / "apps")
 # them.
 KNOWN: dict[str, str] = {
     "ACTIVE_FINDING_STATUSES": "BASELINE 2026-08-05 - not individually reviewed",
+    "ACTIVE_STATUSES": "EXEMPT finding lifecycle states the software reconcile refreshes (a state machine, not a domain mapping; ingest/software_reconcile.py)",
     "AV_EXEMPT_VALUES": "EXEMPT UI/dashboard definition",
     "COMMAND_CARDS": "BASELINE 2026-08-05 - not individually reviewed",
     "COMPLIANCE_MISSING_STATES": "BASELINE 2026-08-05 - not individually reviewed",
@@ -60,6 +61,7 @@ KNOWN: dict[str, str] = {
     "PATCH_STATE_COLORS": "EXEMPT UI/dashboard definition",
     "PCOV_CARDS": "BASELINE 2026-08-05 - not individually reviewed",
     "PLATFORM_VALUES": "EXEMPT UI/dashboard definition",
+    "RESOLVABLE_STATUSES": "EXEMPT finding lifecycle states the software reconcile may auto-resolve; investigating and suppressed stay operator-managed (ingest/software_reconcile.py)",
     "POLICY_CATEGORY_CHOICES": "BASELINE 2026-08-05 - not individually reviewed",
     "SERIAL_QUALITY_VALUES": "EXEMPT UI/dashboard definition",
     "SEVERITY_RANK": "BASELINE 2026-08-05 - not individually reviewed",
