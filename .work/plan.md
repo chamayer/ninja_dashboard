@@ -588,12 +588,13 @@ deployed handler fell from 17.06 s to 13.03 s, with the main SQL down to
 the live planner beyond the measurement timeout despite its concurrent
 functional index. The proven materialized canonical-link join is restored and
 migration 0289 removes the unused index concurrently; this is a correction,
-not a second mapping or new authority. The similarly unbounded Tech Checklist
-first view now uses bounded SQL ranking while preserving complete CSV. All
-three focused contracts, Django checks, and migration drift checks pass. Next:
-release the corrective rollback, verify User exposure returns to its known
-post-116 baseline, measure Tech Checklist, then redesign the source-link
-boundary from the evidence model rather than adding another planner hint.
+not a second mapping or new authority. The parallel Tech Checklist SQL-ranking
+experiment also regressed its deployed first view (20.58 s traced versus the
+previous 17.32 s), so it is being restored exactly to the proven bounded
+Python presentation path. This corrective release does not introduce another
+query shape, data store, or authority. Next: release and measure that rollback,
+then redesign the User exposure source-link boundary from the evidence model
+rather than adding planner hints or request-time conversions.
 
 **Local validation:** the migration contract and refresh-helper suite passes
 (`4 passed`) with non-secret dummy configuration; Python compilation and ruff
