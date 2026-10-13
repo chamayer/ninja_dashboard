@@ -41,6 +41,20 @@ FIELDS: tuple[SettingField, ...] = (
         "int", 24, 1, 720,
     ),
     SettingField(
+        "inventory_hold_shrink_percent", "Software inventory", "Hold when a list shrinks by (%)",
+        "If a computer's software list from Ninja is this much shorter than its previous "
+        "list, its removals wait for an administrator instead of being applied. "
+        "Additions and changes still apply.",
+        "int", 50, 10, 100,
+    ),
+    SettingField(
+        "inventory_hold_min_programs", "Software inventory",
+        "Only for computers with at least (programs)",
+        "Small lists change proportionally more, so the hold applies only when the "
+        "previous list had at least this many programs.",
+        "int", 20, 1, 10000,
+    ),
+    SettingField(
         "rare_enabled", "Rare and non-approved software", "Rare software findings",
         "Raise a finding for undecided software on very few devices.",
         "bool", True,
@@ -84,6 +98,12 @@ FIELDS: tuple[SettingField, ...] = (
         "non_approved_severity", "Rare and non-approved software",
         "Severity: non-approved", "Non-approved software seen for longer than the window.",
         "severity", "low",
+    ),
+    SettingField(
+        "rejected_installed_enabled", "Rare and non-approved software",
+        "Rejected software findings",
+        "Raise a finding while a title or publisher an operator rejected is still installed.",
+        "bool", True,
     ),
     SettingField(
         "rejected_installed_severity", "Rare and non-approved software",

@@ -6074,8 +6074,14 @@ def _policy_candidate_state_action_blocked(request: HttpRequest, finding: Findin
     return True
 
 
+def _software_finding_modules() -> frozenset[str]:
+    # The software emitters' registered source modules (code identity, not a
+    # domain mapping).
+    return frozenset({"platform.software_findings", "platform.capability_match"})
+
+
 def _queue_ninja_software_refresh(device_id: uuid.UUID) -> tuple[bool, str]:
-    """Queue the existing Ninja software collector for one linked Computer."""
+    """Fetch one linked Computer's software list from Ninja now."""
     link = (
         DeviceSourceLink.objects.filter(
             tenant_id=1,
@@ -6094,8 +6100,8 @@ def _queue_ninja_software_refresh(device_id: uuid.UUID) -> tuple[bool, str]:
     if not external_id.isascii() or not external_id.isdecimal():
         return False, "The linked Ninja Computer record cannot be refreshed safely."
 
-    query = urlencode({"df": f"id={external_id}", "confirm": "1"})
-    url = f"{_INGEST_BASE_URL.rstrip('/')}/run/software/enqueue?{query}"
+    query = urlencode({"id": external_id})
+    url = f"{_INGEST_BASE_URL.rstrip('/')}/run/software/device?{query}"
     try:
         request_obj = _urllib_request.Request(url, data=b"", method="POST")
         with _urllib_request.urlopen(request_obj, timeout=10) as response:
@@ -6158,13 +6164,19 @@ def _queue_platform_reevaluation() -> tuple[bool, str]:
 
 
 def _queue_refresh_for_finding(finding: Finding, user_id: int) -> tuple[bool, str, str]:
-    """Use the narrowest registered ingest/evaluator path for an Issue."""
-    if finding.subject_type == Finding.SubjectType.DEVICE:
+    """Use the narrowest registered ingest/evaluator path for an Issue.
+
+    Only a software Issue on a Computer refreshes that Computer's software list;
+    any other Issue gains nothing from it.
+    """
+    detail = ""
+    if (
+        finding.subject_type == Finding.SubjectType.DEVICE
+        and finding.finding_type.source_module in _software_finding_modules()
+    ):
         queued, detail = _queue_ninja_software_refresh(finding.subject_id)
         if queued:
             return True, "computer", ""
-    else:
-        detail = ""
 
     if source_binding_id := _source_binding_for_refresh(finding):
         queued, source_detail = _queue_source_refresh(source_binding_id, user_id)

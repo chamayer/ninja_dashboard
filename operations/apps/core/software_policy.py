@@ -13,7 +13,7 @@ import re
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
-from django.db import transaction
+from django.db import connection, transaction
 from django.http import HttpRequest, HttpResponse, HttpResponseForbidden
 from django.shortcuts import get_object_or_404, redirect, render
 
@@ -134,6 +134,68 @@ def _update_suggestion(request: HttpRequest) -> str:
     return ""
 
 
+HELD_SQL = """
+SELECT s.device_id, d.canonical_hostname, c.slug, c.display_name, s.held_at, s.held_reason,
+       s.held_previous_count, s.held_listed_count, s.release_requested_at,
+       s.release_requested_by
+  FROM operations.software_inventory_devices s
+  JOIN operations.devices d ON d.tenant_id = s.tenant_id AND d.id = s.device_id
+  LEFT JOIN operations.clients c ON c.id = d.client_id
+ WHERE s.tenant_id = 1 AND s.held_at IS NOT NULL
+ ORDER BY s.held_at, d.canonical_hostname
+"""
+
+
+def _held_devices() -> list[dict]:
+    """Computers whose software removals wait because their list shrank sharply."""
+    columns = (
+        "device_id", "hostname", "client_slug", "client", "held_at", "reason", "previous",
+        "listed",
+        "release_requested_at", "release_requested_by",
+    )
+    with transaction.atomic(), connection.cursor() as cur:
+        cur.execute("SET LOCAL operations.tenant_id = 1")
+        cur.execute(HELD_SQL)
+        return [dict(zip(columns, row, strict=True)) for row in cur.fetchall()]
+
+
+def _release_hold(request: HttpRequest) -> str:
+    """Let the next software list for a held computer apply its removals."""
+    device_id = request.POST.get("device_id") or ""
+    actor = request.user.get_username()
+    with connection.cursor() as cur:
+        cur.execute("SET LOCAL operations.tenant_id = 1")
+        cur.execute(
+            """
+            UPDATE operations.software_inventory_devices
+               SET release_requested_at = now(), release_requested_by = %s
+             WHERE tenant_id = 1 AND device_id = %s AND held_at IS NOT NULL
+            RETURNING held_reason, held_previous_count, held_listed_count
+            """,
+            (actor, device_id),
+        )
+        row = cur.fetchone()
+    if row is None:
+        return "That computer has no held removals."
+    _audit(request, "software_inventory.release_hold", "device", device_id,
+           {"held_reason": row[0], "previous": row[1], "listed": row[2]},
+           {"release_requested_by": actor})
+    # Apply right away rather than waiting for the next software event or the
+    # daily check, once the release is committed so the worker sees it.
+    # Imported here: views imports this module.
+    from .views import _queue_ninja_software_refresh
+
+    def _refresh_now() -> None:
+        queued, detail = _queue_ninja_software_refresh(device_id)
+        if not queued:
+            messages.warning(
+                request, f"Removals allowed; they apply at the next daily check. ({detail})"
+            )
+
+    transaction.on_commit(_refresh_now)
+    return ""
+
+
 @login_required
 def software_policy_config(request: HttpRequest) -> HttpResponse:
     if request.method == "POST":
@@ -144,6 +206,7 @@ def software_policy_config(request: HttpRequest) -> HttpResponse:
             "rule_add": _add_rule,
             "rule_toggle": _toggle_rule,
             "suggestion_update": _update_suggestion,
+            "release_hold": _release_hold,
         }.get(request.POST.get("action") or "")
         if handler is None:
             messages.error(request, "Unknown action.")
@@ -165,6 +228,7 @@ def software_policy_config(request: HttpRequest) -> HttpResponse:
             "finding_types": _software_types().order_by("name"),
             "rules": SoftwareClassifierRule.objects.order_by("rule_type", "pattern"),
             "suggestion_rules": SoftwareSuggestionRule.objects.order_by("priority", "id"),
+            "held_devices": _held_devices(),
             "severity_choices": FindingType.Severity.choices,
             "scope_choices": FindingType.DecisionScope.choices,
             "rule_type_choices": SoftwareClassifierRule.RuleType.choices,

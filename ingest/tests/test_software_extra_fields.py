@@ -3,86 +3,78 @@
 Two separate properties, both of which fail quietly rather than loudly:
 
 1. The collector must keep the fields. They are returned on every row of
-   `/queries/software` and were discarded for the life of the collector --
-   measured 2026-08-12 across 25,000 rows / 3,112 devices / 4,434 titles:
-   productCode 93.8%, size 40.4%, isSystemComponent 7.6%.
+   `/queries/software` -- measured 2026-08-12 across 25,000 rows / 3,112
+   devices / 4,434 titles: productCode 93.8%, size 40.4%, isSystemComponent
+   7.6%.
 
-2. They must NOT enter the material hash. `_write_installation_current` hashes
-   (publisher, version, location, install_date) to decide whether an
-   installation materially changed. Adding a field to that set changes every
-   hash on the next run and closes/reopens all 490,733 SCD-2 intervals in one
-   cycle. Nothing would error -- the history would simply double overnight,
-   which is why this deserves a test rather than a comment.
+2. They must NOT enter the material hash. The hash of (publisher, version,
+   location, install_date) decides whether an installation materially changed.
+   Changing that set changes every hash on the next run and closes/reopens
+   every SCD-2 interval in one cycle. Nothing would error -- the history would
+   simply double overnight, which is why this deserves a test.
 """
 
 from __future__ import annotations
 
-import re
-from pathlib import Path
+from datetime import UTC, datetime
 
-_SOFTWARE = Path(__file__).resolve().parents[1] / "inventory" / "software.py"
+from ingest.inventory import software
+from ingest.observations import material_hash
 
-_EXTRA_FIELDS = ("product_code", "size_bytes", "is_system_component")
-
-
-def _source() -> str:
-    return _SOFTWARE.read_text(encoding="utf-8")
-
-
-def _material_block() -> str:
-    """The `material = { ... }` literal that feeds material_hash()."""
-    match = re.search(r"material\s*=\s*\{(.*?)\}", _source(), re.DOTALL)
-    assert match is not None, "could not locate the material dict"
-    return match.group(1)
+_ITEM = {
+    "deviceId": 7, "name": "  Acme Tool ", "publisher": " Acme ", "version": "1.2",
+    "location": "C:\\Program Files\\Acme", "installDate": "2026-01-02",
+    "productCode": "{GUID}", "size": 1234, "isSystemComponent": False,
+    "timestamp": 1_760_000_000,
+}
 
 
-def test_collector_reads_the_fields_ninja_returns() -> None:
-    source = _source()
-    assert 'item.get("productCode")' in source
-    assert 'item.get("size")' in source
-    assert 'item.get("isSystemComponent")' in source
+def test_collector_keeps_the_fields_ninja_returns() -> None:
+    row = software.normalize(_ITEM)
+    assert row["product_code"] == "{GUID}"
+    assert row["size_bytes"] == 1234
+    assert row["is_system_component"] is False
+    assert row["canonical_name"] == "acme tool"
 
 
-def test_fields_are_persisted_on_the_current_row() -> None:
-    source = _source()
-    for field in _EXTRA_FIELDS:
-        assert f'"{field}": canonical.get("{field}")' in source, field
+def test_the_hash_is_byte_identical_to_the_previous_collector() -> None:
+    """Same four fields, same normalization (install_date raw), same hash."""
+    expected = material_hash({
+        "publisher": "Acme", "version": "1.2", "location": "C:\\Program Files\\Acme",
+        "install_date": "2026-01-02",
+    })
+    assert software.normalize(_ITEM)["material_hash"] == expected
 
 
-def test_fields_are_in_the_upsert_column_list() -> None:
-    """Present in the row dict but absent from the update list would mean they
-    are written on insert and then never refreshed."""
-    source = _source()
-    upsert = source[source.index("software_installations_current\","):]
-    for field in _EXTRA_FIELDS:
-        assert f'"{field}"' in upsert, field
+def test_a_blank_install_date_hashes_as_before() -> None:
+    item = {**_ITEM, "installDate": ""}
+    expected = material_hash({
+        "publisher": "Acme", "version": "1.2", "location": "C:\\Program Files\\Acme",
+        "install_date": "",
+    })
+    row = software.normalize(item)
+    assert row["material_hash"] == expected
+    assert row["install_date"] is None
 
 
-def test_the_new_fields_are_not_material() -> None:
-    """The 490k-interval trap. See the module docstring."""
-    block = _material_block()
-    for field in _EXTRA_FIELDS:
-        assert field not in block, (
-            f"{field} was added to the material hash. Every installation's "
-            "hash changes on the next run, closing and reopening all ~490k "
-            "SCD-2 intervals in one cycle. These describe the product, not "
-            "the installation event -- see migration 091."
-        )
-    # Also guard the raw Ninja spellings, in case someone maps them directly.
-    for raw in ("productCode", "isSystemComponent"):
-        assert raw not in block, raw
+def test_the_product_fields_are_not_material() -> None:
+    """The every-interval trap. See the module docstring."""
+    changed = {**_ITEM, "productCode": "{OTHER}", "size": 99, "isSystemComponent": True}
+    assert software.normalize(changed)["material_hash"] == software.normalize(_ITEM)["material_hash"]
 
 
-def test_material_still_hashes_what_it_should() -> None:
-    """Guard the other direction: the test above must not be satisfiable by
-    emptying the material dict."""
-    block = _material_block()
-    for field in ("publisher", "version", "location", "install_date"):
-        assert field in block, field
+def test_material_fields_do_change_the_hash() -> None:
+    for key in ("publisher", "version", "location", "installDate"):
+        changed = {**_ITEM, key: "different"}
+        assert software.normalize(changed)["material_hash"] != software.normalize(_ITEM)["material_hash"], key
 
 
-def test_query_timestamp_is_not_stored() -> None:
-    """`timestamp` is the query's own clock; last_observed_at already records
-    when we saw the row. Storing it would imply a fact about the install."""
-    source = _source()
-    assert 'item.get("timestamp")' not in source
+def test_collection_time_is_per_device_not_the_query_clock() -> None:
+    """Measured 2026-10-13 over 20,000 rows / 1,422 devices: the age of
+    `timestamp` ranged from 1.9 h (p10) to 2,580 h (p90), so it is when Ninja
+    collected the device's list, not when the query ran."""
+    expected = datetime.fromtimestamp(1_760_000_000, tz=UTC)
+    assert software.collected_time(1_760_000_000) == expected
+    assert software.collected_time(1_760_000_000_000) == expected
+    assert software.collected_time(None) is None
+    assert software.collected_time("not a time") is None

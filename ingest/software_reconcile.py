@@ -100,7 +100,11 @@ SELECT title_key,
                NOT IN ('approve', 'approve_publisher')) AS has_unapproved,
        bool_or(title_decision IS NULL
                AND publisher_decision IN ('approve', 'approve_publisher'))
-           AS has_publisher_only_approval
+           AS has_publisher_only_approval,
+       count(DISTINCT device_id) FILTER (
+           WHERE COALESCE(title_decision, publisher_decision) = 'reject') AS rejected_devices,
+       count(DISTINCT client_id) FILTER (
+           WHERE COALESCE(title_decision, publisher_decision) = 'reject') AS rejected_clients
   FROM installs
  GROUP BY title_key
 """
@@ -454,6 +458,16 @@ def compute_desired(ctx: Context, report: RunReport) -> dict[str, list[Desired]]
             if not silenced_title("suspicious_name"):
                 product_finding("suspicious_name", types["suspicious_name"].default_severity,
                                 {"reason": "suspicious_name pattern match"})
+
+        # A rejection is a decision, not a signal an approval can silence: the
+        # finding stays while any installation's effective decision is reject.
+        if (facts.get("rejected_devices")
+                and enabled("rejected_software_installed", "rejected_installed_enabled")):
+            product_finding("rejected_software_installed",
+                            str(cfg["rejected_installed_severity"]),
+                            {"rejected_device_count": facts["rejected_devices"],
+                             "rejected_client_count": facts.get("rejected_clients") or 0,
+                             "reason": "rejected software is still installed"})
 
         hits = ctx.threat_hits.get(title_key, 0)
         if (hits >= int(cfg["known_malicious_hint_min_hits"])
@@ -1122,6 +1136,7 @@ def _run(tenant_id: int, progress: Callable[[str, str], None] | None) -> RunRepo
     owned = {
         "suspicious_name", "known_malicious_hint", "rare_recent", "whitelist_suggestion",
         "vulnerable_software", "eol_runtime", "install_path_suspicious",
+        "rejected_software_installed",
     }
     if settings.CAPABILITY_ENFORCEMENT_ENABLED:
         owned |= {"unauthorized_av", "unauthorized_rmm", "unauthorized_remote_access"}

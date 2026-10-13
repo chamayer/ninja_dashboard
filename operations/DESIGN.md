@@ -493,9 +493,9 @@ No per-queue monitoring code required.
 
 | Queue | Trigger(s) | Scope | Status |
 |---|---|---|---|
-| `software_scheduled_queue` | Schedule (every N hours) | Per org | Built |
-| `software_demand_queue` | Operator via HTTP form | Org or device | Built |
-| `software_activity_queue` | SOFTWARE_* activity event | Per device | Built |
+| `software_scheduled_queue` | — | — | Retired 2026-10: replaced by the daily software fleet check (one paged fetch of every computer's list) |
+| `software_demand_queue` | — | — | Retired 2026-10: operator refreshes queue the computer in `software_activity_queue` |
+| `software_activity_queue` | SOFTWARE_* activity event, operator refresh | Per device, fetched 100 per Ninja request | Built |
 | `agent_presence_scheduled_queue` | Schedule | Per org, per source | Planned |
 | `agent_presence_demand_queue` | Operator | Org or device | Planned |
 | `agent_presence_activity_queue` | Agent install/uninstall event | Per device | Planned |

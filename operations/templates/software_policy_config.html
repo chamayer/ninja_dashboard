@@ -24,6 +24,36 @@
 </div>
 
 <div class="sp-section">
+    <h2>Computers with held removals</h2>
+    <p class="muted" style="margin-top:0;">
+        Ninja is trusted for what is installed, so programs a computer no longer lists are
+        marked removed. When a computer's list suddenly shrinks sharply, which usually means
+        an agent problem rather than a wave of uninstalls, its removals wait here. Additions
+        and updates still apply. The thresholds are on the Classifier settings page.
+    </p>
+    {% if held_devices %}
+    <table class="sp-table">
+        <thead><tr><th>Computer</th><th>Client</th><th>Held since</th><th>Programs before</th><th>Programs now</th><th>Why</th><th></th></tr></thead>
+        <tbody>
+        {% for held in held_devices %}
+        <tr>
+            <td>{% if held.client_slug %}<a href="{% url 'device_detail' held.client_slug held.device_id %}">{{ held.hostname|default:"Unnamed Computer" }}</a>{% else %}{{ held.hostname|default:"Unnamed Computer" }}{% endif %}</td>
+            <td>{{ held.client|default:"—" }}</td>
+            <td>{{ held.held_at|date:"Y-m-d H:i" }}</td>
+            <td>{{ held.previous|default:"—" }}</td>
+            <td>{{ held.listed|default:"—" }}</td>
+            <td>{{ held.reason }}</td>
+            <td>{% if held.release_requested_at %}Allowed by {{ held.release_requested_by }} · {{ held.release_requested_at|date:"Y-m-d H:i" }}{% elif can_edit %}<form method="post">{% csrf_token %}<input type="hidden" name="action" value="release_hold"><input type="hidden" name="device_id" value="{{ held.device_id }}"><button type="submit">Allow removals</button></form>{% endif %}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p>No computer has held removals.</p>
+    {% endif %}
+</div>
+
+<div class="sp-section">
     <h2>Finding types</h2>
     <p class="muted" style="margin-top:0;">
         <strong>Silenced by approval</strong>: an approve decision hides the finding. Leave it off

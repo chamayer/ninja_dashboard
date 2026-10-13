@@ -564,8 +564,8 @@ _RAW_DEFINITIONS = (
     ),
     JobDefinition(
         "software-enqueue-orgs",
-        "Software inventory schedule",
-        "Queue the next scheduled Ninja software inventory sweep.",
+        "Software inventory full check",
+        "Fetch every computer's software list from Ninja and apply it.",
         "maintenance",
         "service",
         "",
@@ -579,7 +579,7 @@ _RAW_DEFINITIONS = (
     JobDefinition(
         "software-queue-drain",
         "Software inventory worker",
-        "Process queued Ninja software inventory work.",
+        "Fetch the software lists of computers Ninja reported a software change on.",
         "maintenance",
         "collection",
         "",
@@ -723,14 +723,15 @@ REPLAY_SAFE_RECOVERY_EVIDENCE = MappingProxyType(
         # either rolled back with its database transaction or leased and reset,
         # so a replay converges and nothing outside Operations is mutated.
         "software-queue-drain": (
-            "The software queue drain only reads Ninja inventory and writes local "
-            "inventory rows. Queue entries are leased and an expired lease resets "
-            "the entry to pending, so a replay converges and mutates nothing in Ninja."
+            "The software device worker only reads Ninja software lists and applies them "
+            "to local inventory rows in one transaction per batch. Queue entries are "
+            "leased and an expired lease resets the entry to pending, so a replay "
+            "converges and mutates nothing in Ninja."
         ),
         "software-enqueue-orgs": (
-            "The scheduled sweep only inserts deduplicated pending queue rows for "
-            "organizations already known locally. A replay adds no duplicates and "
-            "has no external mutation."
+            "The software fleet check only reads Ninja software lists for the whole fleet "
+            "and applies them to local inventory rows in one transaction. A later replay "
+            "converges to current source state and has no external mutation."
         ),
         "software-classify": (
             "Combined software classification only reads public package metadata and "
@@ -987,7 +988,7 @@ _CAPACITY_KEYS_BY_DEFINITION: dict[str, tuple[str, ...]] = {
     "notifications-dispatch": ("capacity:control",),
     "notifications-digest": ("capacity:control",),
     "retention-history": ("capacity:control",),
-    "software-enqueue-orgs": ("capacity:control",),
+    "software-enqueue-orgs": (),
     "software-queue-drain": (),
     "source-actions": (),
     "run-log-recovery": ("capacity:control",),
@@ -1041,8 +1042,17 @@ _WORKFLOW_SUCCESSORS = MappingProxyType(
                 "cmdb-evaluate", "source.documentation-observations", "documentation_source"
             ),
         ),
+        # Software findings follow inventory only when a run added, changed or
+        # removed an installation; an unchanged inventory needs no recompute.
         "software-queue-drain": (
-            DependencyDefinition("software-classify-only", "software.inventory-batch"),
+            DependencyDefinition(
+                "software-classify-only", "software.inventory-batch", "material_change"
+            ),
+        ),
+        "software-enqueue-orgs": (
+            DependencyDefinition(
+                "software-classify-only", "software.inventory-fleet", "material_change"
+            ),
         ),
         "agent-compliance": (DependencyDefinition("resolver", "agent-compliance.observations"),),
         "intel-nvd": (DependencyDefinition("intel-matcher", "intel.cves", "material_change"),),
@@ -1205,7 +1215,8 @@ _JOB_PRESENTATION = MappingProxyType(
         ),
         "software-queue-drain": (
             "Refresh software inventory",
-            "Refresh requested and scheduled software inventory.",
+            "Refresh the software lists of computers with a software change or a refresh "
+            "request.",
         ),
         "software-classify-only": (
             "Update software status",

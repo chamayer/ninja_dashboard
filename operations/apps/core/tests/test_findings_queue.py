@@ -567,7 +567,12 @@ def test_issue_actions_use_consistent_controls_and_scoped_refresh():
     assert 'action" value="ack' not in template
     assert 'action" value="resolve' not in template
     assert "def _queue_ninja_software_refresh" in source
-    assert '"df": f"id={external_id}"' in source
+    assert '/run/software/device?{query}' in source
+    assert 'urlencode({"id": external_id})' in source
+    # Only software Issues refresh a Computer's software list.
+    refresh = source[source.index("def _queue_refresh_for_finding") :]
+    refresh = refresh[: refresh.index("\ndef ", 1)]
+    assert "in _software_finding_modules()" in refresh
     assert "finding_refresh" in urls
 
 

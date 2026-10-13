@@ -1,54 +1,48 @@
-"""Software refresh queue — enqueue helpers and background drain worker.
+"""Software device queue: which computers need their software list fetched.
 
-Three queues (all in ninja_core):
-  software_scheduled_queue  Q1  one entry per Ninja org, filled by
-                                enqueue_all_orgs() on a schedule
-  software_demand_queue     Q2  operator-triggered; drained before
-                                background demand
-  software_activity_queue   Q3  device-level, filled by activity
-                                processor on SOFTWARE_* events
+A computer is queued when Ninja reports a software change on it (added,
+removed or updated activity) or when an operator asks for a refresh. Pending
+entries combine per computer. The device worker claims every pending entry,
+fetches the lists in batches with one Ninja request each
+(``df=id in (...)``, about 0.5 s for 20 computers, measured 2026-10-13), and
+applies each batch in one transaction (``inventory.software.apply``).
 
-The governed worker drains Q2 first, then Q3, then Q1.
+The daily fleet check covers everything else, so this queue is only about
+freshness. (The table keeps its historical name, ``software_activity_queue``.)
 
-Failure handling:
-  - Lease expiry: processing entries older than _LEASE_MINUTES are reset
-    to pending (Q1/Q3) or failed (Q2 — no worker to pick up re-pending).
-  - Retry cap: on failure, attempts is incremented; reset to pending until
-    max_attempts is reached, then left as failed permanently.
+Failure handling: a failed batch returns its entries to pending until their
+``max_attempts`` is reached, then leaves them failed with the error; a lease
+older than ``_LEASE_MINUTES`` (worker killed mid-batch) returns to pending.
 """
 
 from __future__ import annotations
 
 import logging
+import re
+from collections.abc import Iterator
 from contextlib import contextmanager
-from typing import Iterator
+from dataclasses import dataclass
 
 from ingest import db
-from ingest.ninja_client import NinjaClient
 from ingest.inventory import software as _sw
 
 log = logging.getLogger(__name__)
 
+TABLE = "ninja_core.software_activity_queue"
+DOMAIN_KIND = "software.activity"
+BATCH_DEVICES = 100
+MAX_CLAIM = 5000
 _LEASE_MINUTES = 30
 _ERROR_MAX = 2000
+_DEVICE_DF = re.compile(r"^id=(\d+)$")
 
-SOFTWARE_ACTIVITY_TYPES: frozenset[str] = frozenset((
-    "SOFTWARE_ADDED",
-    "SOFTWARE_REMOVED",
-    "SOFTWARE_UPDATED",
-))
-
-_BACKGROUND_QUEUES = (
-    "ninja_core.software_activity_queue",   # drained first (higher priority)
-    "ninja_core.software_scheduled_queue",
+SOFTWARE_ACTIVITY_TYPES: frozenset[str] = frozenset(
+    (
+        "SOFTWARE_ADDED",
+        "SOFTWARE_REMOVED",
+        "SOFTWARE_UPDATED",
+    )
 )
-_DEMAND_TABLE = "ninja_core.software_demand_queue"
-
-_DOMAIN_KINDS = {
-    "ninja_core.software_scheduled_queue": "software.scheduled",
-    "ninja_core.software_demand_queue": "software.demand",
-    "ninja_core.software_activity_queue": "software.activity",
-}
 
 
 @contextmanager
@@ -58,315 +52,185 @@ def _tenant_cursor() -> Iterator[object]:
         yield cur
 
 
-# ── Enqueue helpers ─────────────────────────────────────────────────
-
-
-def enqueue_scheduled(ninja_org_id: int, reason: str = "") -> bool:
-    """Insert org into Q1. Returns True if inserted, False if deduped."""
-    return _enqueue("ninja_core.software_scheduled_queue", f"org={ninja_org_id}", reason)
-
-
 def enqueue_activity(ninja_device_id: int, reason: str = "") -> bool:
-    """Insert device into Q3. Returns True if inserted, False if deduped."""
-    return _enqueue("ninja_core.software_activity_queue", f"id={ninja_device_id}", reason)
-
-
-def enqueue_demand(df: str, reason: str = "") -> int:
-    """Insert into Q2. Returns the entry id (existing if already pending)."""
+    """Queue one computer. Returns True if inserted, False if already pending."""
     with _tenant_cursor() as cur:
         cur.execute(
-            "INSERT INTO ninja_core.software_demand_queue (tenant_id, df, reason) "
+            f"INSERT INTO {TABLE} (tenant_id, df, reason) "
             "VALUES (1, %s, %s) "
             "ON CONFLICT (df) WHERE status = 'pending' DO NOTHING "
             "RETURNING id",
-            (df, reason),
-        )
-        row = cur.fetchone()
-        if row:
-            return int(row[0])
-        # Already pending with same df — return existing id.
-        cur.execute(
-            "SELECT id FROM ninja_core.software_demand_queue "
-            "WHERE df = %s AND status = 'pending'",
-            (df,),
-        )
-        row = cur.fetchone()
-        return int(row[0]) if row else 0
-
-
-def get_demand_status(entry_id: int) -> dict | None:
-    """Return the demand queue row as a dict, or None if not found."""
-    with _tenant_cursor() as cur:
-        cur.execute(
-            """
-            SELECT id, df, reason, status, attempts, max_attempts,
-                   queued_at, started_at, completed_at, rows_seen, error
-            FROM ninja_core.software_demand_queue
-            WHERE id = %s
-            """,
-            (entry_id,),
-        )
-        row = cur.fetchone()
-    if not row:
-        return None
-    cols = [
-        "id", "df", "reason", "status", "attempts", "max_attempts",
-        "queued_at", "started_at", "completed_at", "rows_seen", "error",
-    ]
-    return dict(zip(cols, row))
-
-
-def queue_details() -> dict[str, dict]:
-    """Return counts + active + recent rows for all three queues."""
-    tables = {
-        "scheduled": "ninja_core.software_scheduled_queue",
-        "demand":    "ninja_core.software_demand_queue",
-        "activity":  "ninja_core.software_activity_queue",
-    }
-    result: dict[str, dict] = {}
-    with _tenant_cursor() as cur:
-        for name, table in tables.items():
-            cur.execute(f"SELECT status, COUNT(*) FROM {table} GROUP BY status")
-            counts = {row[0]: int(row[1]) for row in cur.fetchall()}
-
-            cur.execute(
-                f"""
-                SELECT id, df, status, attempts, max_attempts, started_at, completed_at, rows_seen, error
-                FROM {table}
-                WHERE status = 'processing'
-                ORDER BY started_at
-                LIMIT 20
-                """
-            )
-            cols = ["id", "df", "status", "attempts", "max_attempts", "started_at", "completed_at", "rows_seen", "error"]
-            active = [dict(zip(cols, row)) for row in cur.fetchall()]
-
-            cur.execute(
-                f"""
-                SELECT id, df, status, attempts, max_attempts, started_at, completed_at, rows_seen, error
-                FROM {table}
-                WHERE status IN ('done', 'failed')
-                ORDER BY completed_at DESC
-                LIMIT 20
-                """
-            )
-            recent = [dict(zip(cols, row)) for row in cur.fetchall()]
-
-            result[name] = {"counts": counts, "active": active, "recent": recent}
-    return result
-
-
-def queue_counts() -> dict[str, dict[str, int]]:
-    """Return {queue_name: {status: count}} for all three queues."""
-    tables = {
-        "scheduled": "ninja_core.software_scheduled_queue",
-        "demand":    "ninja_core.software_demand_queue",
-        "activity":  "ninja_core.software_activity_queue",
-    }
-    result: dict[str, dict[str, int]] = {}
-    with _tenant_cursor() as cur:
-        for name, table in tables.items():
-            cur.execute(
-                f"SELECT status, COUNT(*) FROM {table} GROUP BY status",
-            )
-            result[name] = {row[0]: int(row[1]) for row in cur.fetchall()}
-    return result
-
-
-# ── Background worker (Q1 + Q3) ────────────────────────────────────
-
-
-def recover_stale_entries() -> int:
-    """Reset stale processing entries back to pending (Q1/Q3) or failed (Q2).
-    Called at the start of each background worker tick."""
-    total = 0
-    for table in _BACKGROUND_QUEUES:
-        with _tenant_cursor() as cur:
-            cur.execute(
-                f"""
-                UPDATE {table}
-                SET status = 'pending', started_at = NULL, worker_id = NULL
-                WHERE status = 'processing'
-                  AND started_at < NOW() - INTERVAL '{_LEASE_MINUTES} minutes'
-                  AND NOT EXISTS (
-                      SELECT 1 FROM {table} pending
-                      WHERE pending.df = {table}.df
-                        AND pending.status = 'pending'
-                  )
-                """,
-            )
-            n = cur.rowcount
-            if n:
-                log.warning("Recovered %d stale entries in %s", n, table)
-            total += n
-
-    # Demand entries with no live thread → mark failed so operator sees it.
-    with _tenant_cursor() as cur:
-        cur.execute(
-            f"""
-            UPDATE {_DEMAND_TABLE}
-            SET status = 'failed',
-                completed_at = NOW(),
-                error = CASE
-                    WHEN error IS NOT NULL AND error <> ''
-                    THEN error || ' | lease expired — resubmit'
-                    ELSE 'lease expired — resubmit'
-                END
-            WHERE status = 'processing'
-              AND started_at < NOW() - INTERVAL '{_LEASE_MINUTES} minutes'
-            """,
-        )
-        n = cur.rowcount
-        if n:
-            log.warning("Expired %d stale demand entries (no live thread)", n)
-        total += n
-
-    return total
-
-
-def drain_background(
-    client: NinjaClient, batch_size: int, job_run_id: object
-) -> dict[str, int]:
-    """Drain Q2, Q3, then Q1 up to the shared batch-size limit."""
-    recover_stale_entries()
-
-    demand_drained, demand_failed = _drain_queue(
-        client, _DEMAND_TABLE, batch_size, job_run_id
-    )
-    remaining = batch_size - demand_drained
-    activity_drained, activity_failed = _drain_queue(
-        client, "ninja_core.software_activity_queue", remaining, job_run_id
-    )
-    remaining -= activity_drained
-    scheduled_drained = 0
-    if remaining > 0:
-        scheduled_drained, scheduled_failed = _drain_queue(
-            client, "ninja_core.software_scheduled_queue", remaining, job_run_id
-        )
-    else:
-        scheduled_failed = 0
-    return {
-        "demand": demand_drained,
-        "activity": activity_drained,
-        "scheduled": scheduled_drained,
-        "failed": demand_failed + activity_failed + scheduled_failed,
-    }
-
-
-# ── Internal helpers ───────────────────────────────────────────────
-
-
-def _enqueue(table: str, df: str, reason: str) -> bool:
-    with _tenant_cursor() as cur:
-        cur.execute(
-            f"INSERT INTO {table} (tenant_id, df, reason) "
-            "VALUES (1, %s, %s) "
-            "ON CONFLICT (df) WHERE status = 'pending' DO NOTHING "
-            "RETURNING id",
-            (df, reason),
+            (f"id={int(ninja_device_id)}", reason),
         )
         return cur.fetchone() is not None
 
 
-def _drain_queue(
-    client: NinjaClient, table: str, limit: int, job_run_id: object
-) -> tuple[int, int]:
-    drained = failed = 0
-    for _ in range(limit):
-        entry = _claim_one(table, job_run_id)
-        if entry is None:
-            break
-        if not _process_entry(client, table, entry):
-            failed += 1
-        drained += 1
-    return drained, failed
-
-
-def _claim_one(table: str, job_run_id: object) -> dict | None:
-    """Atomically claim the oldest pending entry. Returns dict or None."""
+def recover_stale_entries() -> int:
+    """Return leased entries whose worker died to pending (not counted as an attempt)."""
     with _tenant_cursor() as cur:
         cur.execute(
             f"""
-            UPDATE {table}
-            SET status = 'processing', started_at = NOW(), job_run_id = %s
-            WHERE id = (
-                SELECT id FROM {table}
-                WHERE status = 'pending'
-                ORDER BY queued_at
-                FOR UPDATE SKIP LOCKED
-                LIMIT 1
-            )
-            RETURNING id, df, attempts, max_attempts
+            UPDATE {TABLE} entry
+               SET status = 'pending', started_at = NULL, worker_id = NULL
+             WHERE status = 'processing'
+               AND started_at < NOW() - INTERVAL '{_LEASE_MINUTES} minutes'
+               AND NOT EXISTS (
+                   SELECT 1 FROM {TABLE} pending
+                    WHERE pending.df = entry.df AND pending.status = 'pending')
             """,
-            (job_run_id,),
         )
-        row = cur.fetchone()
-        if row:
-            # Lease recovery resets an entry to pending without bumping
-            # ``attempts``, so the recorded history, not the counter, decides
-            # the next attempt number; reusing one aborts the claim every time.
-            cur.execute(
-                """
-                INSERT INTO operations.job_domain_attempts (
-                    tenant_id, domain_kind, domain_record_id,
-                    attempt_number, job_run_id
-                )
-                SELECT 1, %s, %s,
-                       GREATEST(%s, COALESCE(max(attempt_number), 0) + 1), %s
-                  FROM operations.job_domain_attempts
-                 WHERE tenant_id = 1 AND domain_kind = %s AND domain_record_id = %s
-                """,
-                (
-                    _DOMAIN_KINDS[table], str(row[0]), int(row[2]) + 1, job_run_id,
-                    _DOMAIN_KINDS[table], str(row[0]),
-                ),
-            )
-    if not row:
-        return None
-    return dict(zip(["id", "df", "attempts", "max_attempts"], row))
+        recovered = cur.rowcount
+    if recovered:
+        log.warning("Recovered %d stale software queue entries", recovered)
+    return recovered
 
 
-def _process_entry(client: NinjaClient, table: str, entry: dict) -> bool:
-    entry_id = entry["id"]
-    df = entry["df"]
-    attempts = entry["attempts"]
-    max_attempts = entry["max_attempts"]
-    try:
-        rows = _sw.run(client, df=df)
-        with _tenant_cursor() as cur:
+CLAIM_SQL = f"""
+UPDATE {TABLE}
+   SET status = 'processing', started_at = NOW(), job_run_id = %(run)s
+ WHERE id IN (
+       SELECT id FROM {TABLE}
+        WHERE status = 'pending'
+        ORDER BY queued_at
+        FOR UPDATE SKIP LOCKED
+        LIMIT %(limit)s)
+RETURNING id, df, attempts, max_attempts
+"""
+
+# Lease recovery resets an entry to pending without bumping ``attempts``, so the
+# recorded history, not the counter, decides the next attempt number; reusing
+# one aborts the claim.
+ATTEMPTS_SQL = """
+INSERT INTO operations.job_domain_attempts (
+    tenant_id, domain_kind, domain_record_id, attempt_number, job_run_id)
+SELECT 1, %(kind)s, claimed.id::text,
+       GREATEST(claimed.attempts + 1, COALESCE(recorded.latest, 0) + 1), %(run)s
+  FROM unnest(%(ids)s::bigint[], %(attempts)s::int[]) AS claimed(id, attempts)
+  LEFT JOIN (
+       SELECT domain_record_id, max(attempt_number) AS latest
+         FROM operations.job_domain_attempts
+        WHERE tenant_id = 1 AND domain_kind = %(kind)s
+          AND domain_record_id = ANY(%(keys)s)
+        GROUP BY domain_record_id) recorded
+    ON recorded.domain_record_id = claimed.id::text
+"""
+
+
+@dataclass
+class Entry:
+    id: int
+    df: str
+    attempts: int
+    max_attempts: int
+
+    @property
+    def ninja_device_id(self) -> int | None:
+        match = _DEVICE_DF.match(self.df or "")
+        return int(match.group(1)) if match else None
+
+
+def claim(job_run_id: object, limit: int = MAX_CLAIM) -> list[Entry]:
+    """Lease every pending entry (oldest first) in one statement."""
+    with _tenant_cursor() as cur:
+        cur.execute(CLAIM_SQL, {"run": job_run_id, "limit": limit})
+        entries = [Entry(int(r[0]), r[1], int(r[2]), int(r[3])) for r in cur.fetchall()]
+        if entries:
             cur.execute(
-                f"UPDATE {table} "
-                "SET status = 'done', completed_at = NOW(), rows_seen = %s "
-                "WHERE id = %s",
-                (rows, entry_id),
+                ATTEMPTS_SQL,
+                {
+                    "kind": DOMAIN_KIND,
+                    "run": job_run_id,
+                    "ids": [entry.id for entry in entries],
+                    "attempts": [entry.attempts for entry in entries],
+                    "keys": [str(entry.id) for entry in entries],
+                },
             )
-        log.info("Queue %s entry %d done: df=%r rows=%d", table, entry_id, df, rows or 0)
-        return True
-    except Exception as exc:
-        new_attempts = attempts + 1
-        err = str(exc)[:_ERROR_MAX]
-        if new_attempts < max_attempts:
-            with _tenant_cursor() as cur:
-                cur.execute(
-                    f"UPDATE {table} "
-                    "SET status = 'pending', attempts = %s, error = %s, started_at = NULL "
-                    "WHERE id = %s",
-                    (new_attempts, err, entry_id),
-                )
-            log.warning(
-                "Queue %s entry %d failed (attempt %d/%d), will retry: %s",
-                table, entry_id, new_attempts, max_attempts, exc,
+    return entries
+
+
+def _finish(entries: list[Entry], error: str = "") -> int:
+    """Mark entries done, or return them to pending / failed after an error."""
+    if not entries:
+        return 0
+    ids = [entry.id for entry in entries]
+    with _tenant_cursor() as cur:
+        if not error:
+            cur.execute(
+                f"UPDATE {TABLE} SET status = 'done', completed_at = NOW(), error = NULL "
+                "WHERE id = ANY(%s)",
+                (ids,),
             )
-        else:
-            with _tenant_cursor() as cur:
-                cur.execute(
-                    f"UPDATE {table} "
-                    "SET status = 'failed', attempts = %s, error = %s, completed_at = NOW() "
-                    "WHERE id = %s",
-                    (new_attempts, err, entry_id),
-                )
-            log.error(
-                "Queue %s entry %d permanently failed after %d attempts: %s",
-                table, entry_id, new_attempts, exc,
+            return 0
+        cur.execute(
+            f"""
+            UPDATE {TABLE}
+               SET attempts = attempts + 1, error = %s,
+                   status = CASE WHEN attempts + 1 < max_attempts THEN 'pending' ELSE 'failed' END,
+                   started_at = CASE WHEN attempts + 1 < max_attempts THEN NULL ELSE started_at END,
+                   completed_at = CASE WHEN attempts + 1 < max_attempts THEN NULL ELSE NOW() END
+             WHERE id = ANY(%s)
+            """,
+            (error[:_ERROR_MAX], ids),
+        )
+    return len(entries)
+
+
+@dataclass
+class DrainResult:
+    entries: int = 0
+    failed: int = 0
+    result: _sw.ApplyResult | None = None
+
+    @property
+    def material_changed(self) -> bool:
+        return bool(self.result and self.result.material_changed)
+
+
+def _add(total: _sw.ApplyResult, part: _sw.ApplyResult) -> None:
+    for name in (
+        "seen",
+        "unresolved",
+        "devices",
+        "new",
+        "changed",
+        "unchanged",
+        "removed",
+        "relinked",
+        "held_devices",
+    ):
+        setattr(total, name, getattr(total, name) + getattr(part, name))
+    total.complete = total.complete and part.complete
+
+
+def drain(client: object, job_run_id: object) -> DrainResult:
+    """Fetch and apply every queued computer, ``BATCH_DEVICES`` per request."""
+    recover_stale_entries()
+    entries = claim(job_run_id)
+    outcome = DrainResult(entries=len(entries), result=_sw.ApplyResult())
+    if not entries:
+        return outcome
+    unusable = [entry for entry in entries if entry.ninja_device_id is None]
+    outcome.failed += _finish(
+        unusable, "Not a single-computer request (expected id=<number>)."
+    )
+    usable = [entry for entry in entries if entry.ninja_device_id is not None]
+    device_map = _sw.load_device_map()
+    for start in range(0, len(usable), BATCH_DEVICES):
+        batch = usable[start : start + BATCH_DEVICES]
+        try:
+            part = _sw.device_refresh(
+                client, [entry.ninja_device_id for entry in batch], device_map
             )
-        return False
+        except Exception as exc:
+            log.warning("Software device batch of %d failed: %s", len(batch), exc)
+            outcome.failed += _finish(batch, str(exc) or exc.__class__.__name__)
+            continue
+        _add(outcome.result, part)
+        _finish(batch)
+    log.info(
+        "Software device worker: entries=%d failed=%d %s",
+        outcome.entries,
+        outcome.failed,
+        outcome.result.summary(),
+    )
+    return outcome

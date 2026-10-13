@@ -775,11 +775,11 @@ def _execute(job_key: str, progress: V1JobProgress) -> int | JobExecutionResult 
             lambda: main.run_observation_history_prune_once(),
         ),
         "software-enqueue-orgs": (
-            "Scheduling software inventory",
-            lambda: main.enqueue_all_orgs_once(),
+            "Checking every computer's software list",
+            lambda: main.run_software_fleet_check_once(),
         ),
         "software-queue-drain": (
-            "Collecting software inventory",
+            "Refreshing changed computers' software lists",
             lambda: main.run_software_queue_once(progress.job_id),
         ),
         "source-actions": (

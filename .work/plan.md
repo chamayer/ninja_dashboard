@@ -1,5 +1,120 @@
 # Active root implementation plan
 
+## Active plan — Software inventory ingest rebuild
+
+**Status:** design agreed 2026-10-13 (`.work/software-inventory-design.md`);
+build starting. Nothing committed for this track yet.
+
+**Goal:** software inventory that is current (event devices within about an
+hour, every reporting device at least daily), records removals with when and
+why, and requests the software findings run only when something changed.
+
+**Decisions (user, 2026-10-13):** events plus a daily fleet check; Ninja is
+authoritative, so removals apply directly, including on the first run; only a
+device whose list suddenly empties or shrinks sharply is held (operator-visible,
+allow action); a device that does not report keeps its inventory; activity
+arrival lag (about an hour) is acceptable; the ingest service's software pages
+are leftovers from the Metabase era and go; the Operations refresh buttons use
+the new device fetch; a refresh on a non-software issue does not refresh
+software.
+
+**Measured:** `/queries/software` one device 0.1 s; `df=id in (...)` 20 devices
+in 0.47 s; full fleet 568,788 rows in 2.5-8 min; events 250-970 devices a day;
+activity queue a week behind; 0 removals ever recorded; 586,287 current rows.
+
+**Affected files:**
+- `ingest/inventory/software.py`: fetch + set-based apply (temp table, removals
+  for covered devices only, per-device guard, history intervals, change counts).
+- `ingest/inventory/queue.py`: device worker claims all pending devices and
+  fetches them in batches; scheduled/demand queue paths retired.
+- `ingest/main.py`: job handlers (fleet check, device worker), HTTP software
+  pages removed; operator device refresh endpoint kept for Operations.
+- `shared/jobs_registry.py`: presentation, recovery evidence, successor
+  condition `material_change` for both inventory jobs.
+- `shared/software_settings.py`: inventory guard settings (data, admin page).
+- Operations: migration for `operations.software_inventory_devices` (per-device
+  collected-at, listed count, hold state); held-device list with allow action;
+  `_queue_ninja_software_refresh` and issue refresh scoped to software types.
+- Tests for every module.
+
+**Steps:**
+1. Per-device state table (migration) and settings fields.
+2. Fetch + apply module with pure helpers (row normalization, guard decision).
+3. Device worker and fleet check handlers; MaterialCount results; successors on
+   material change only; read-model refresh once per run when changed.
+4. Operations: refresh buttons, held-device surface; remove ingest pages.
+5. Validation, dry-run of the apply SQL read-only against production timings.
+
+**Not in this track (next):** incremental software findings reconcile by
+changed title (approved; follows once the change feed exists); dropping the
+unused scheduled/demand queue tables; authentication on the ingest HTTP
+server (backlog).
+
+**Validation plan:** unit tests with fakes; ruff; `manage.py check`; read-only
+production timing of the apply statements on a copy in a temp table; post-deploy:
+first fleet check counts (new/changed/removed/held), device worker drains the
+backlog, classifier runs only after changes.
+
+**Checkpoint (built locally, not committed):**
+- Steps 1-4 done: migration 0285 (`software_inventory_devices`, restated
+  replay-safe evidence for both inventory Jobs); settings
+  `inventory_hold_shrink_percent` (50) and `inventory_hold_min_programs` (20);
+  `ingest/inventory/software.py` rewritten (streamed COPY, completeness-aware
+  pager, set-based apply, per-device hold); `queue.py` rewritten (claim all
+  pending, 100 computers per Ninja request); `main.py` handlers return
+  MaterialCount; both inventory Jobs trigger `software-classify-only` only on
+  material change; ingest software pages and `scope_selector.py` removed;
+  `POST /run/software/device?id=` for Operations; issue Refresh limited to
+  software issues; held computers listed on the Software policy page with an
+  audited "Allow removals".
+- Decisions made while building: removal = `stale_since` +
+  `stale_reason='ninja.inventory.not_listed'` (migration 0011 semantics:
+  stale = absent from the latest list; `deleted_at` stays operator/expiry);
+  history `last_seen_at` is kept at the last time seen when a removal closes
+  the interval; a first-seen computer is never held (no confirmed list); the
+  hold is visible on an admin page rather than a finding (a new finding type
+  needs a policy version; bundle with rejected_software_installed later);
+  the shared pager stops silently at 1,000 x 500 rows (< fleet size), so the
+  inventory uses its own pager at 5,000 rows that reports completeness.
+- Validation so far: ingest 407 passed (2 failures predate this work:
+  ratchet names in other files, full-rebuild schedule test); Operations 304
+  passed (4 known failures); ruff clean on changed files; `manage.py check`
+  clean.
+
+- Added on the user's instruction ("build the new policy version now ...
+  activate when committed"): migration 0286 registers
+  `software_inventory_held` (admin, platform-health evaluator, every 30 min)
+  and `rejected_software_installed` (entity, per title, software reconcile,
+  not silenced by approval, setting `rejected_installed_enabled`), creates and
+  activates `conditions-software-inventory-1` through
+  `create_condition_policy_version`, and disables the retired scheduled/demand
+  queues in `queue_registry`. Verified offline against production's active
+  policy: 63 definitions, parses, digest formula matches the stored digest.
+  Production has 0 software decisions, so the rejected type opens nothing yet.
+  Activation marks earlier-policy assessments not current until each evaluator
+  reruns (software after the first fleet check; patching/client within ~4 h;
+  notifications are off).
+
+- Production dry run of the first fleet check (2026-10-13, read-only temp
+  tables, rolled back): fetch 568,790 rows in 54 s, complete; 3,442 rows on
+  Ninja devices without a computer link (unresolved, counted in the run log);
+  4,629 computers listed, 565,077 installations: unchanged 516,359, new 15,695,
+  changed 33,023; would remove 21,779 installations on 2,278 computers; 15,273
+  live rows on 156 non-reporting computers kept; 7 computers lose half or more
+  of 20+ programs (applied directly on the first run, as decided). Diff
+  queries 0.3-5.5 s each.
+
+- Found while answering "what happens when a version changes?": the catalog
+  link (`software_version_id`) was never cleared on a version change, by the
+  old writer or the new one, and the catalog backfill links only unlinked rows.
+  Measured: 166,310 of 586,435 live installations (4,337 computers; 21,614 on
+  titles with CVE matches) link to a different version than installed. Fix:
+  `RELINK_SQL` clears a link that names another version for every listed
+  installation; the post-run catalog projection relinks them (loops until none
+  are unlinked). Counts as a material change. Tests updated (ingest 412 passed).
+
+**Next action:** commit approval, then push approval (migrations 0285, 0286).
+
 ## Active plan — Software findings rebuild (implementation)
 
 **Status:** design complete (`.work/software-findings-design.md`, decisions
@@ -87,7 +202,10 @@ Risk to keep visible: notification schedules are disabled (0 events ever). About
 27k findings now carry fresh notifiable assessments, so a manual dispatch or
 enabling the schedule would send a large burst through the catch-all routes.
 
-**Next action:** commit/push approval for release 2 (no migrations).
+- Release 2 shipped (3693bd6, df9a42f).
+
+**Next action:** incremental reconcile after the inventory rebuild provides the
+change feed (see the inventory plan above).
 
 ## Active plan — Source-refresh completion fails at workflow admission
 

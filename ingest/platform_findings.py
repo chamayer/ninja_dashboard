@@ -128,6 +128,7 @@ def evaluate(*, dry_run: bool = True) -> dict[str, int]:
         "jobs_timeout": 0,
         "jobs_registry_mismatch": 0,
         "jobs_unmet_dependency": 0,
+        "software_inventory_held": 0,
     }
 
     with db.transaction() as cur:
@@ -150,8 +151,18 @@ def evaluate(*, dry_run: bool = True) -> dict[str, int]:
         failure_keys = _eval_source_failures(cur, ft_failure, now, counts, dry_run)
         queue_keys = _eval_stalled_queues(cur, ft_queue, now, counts, dry_run)
         jobs_keys = _eval_jobs_health(cur, jobs_types, now, counts, dry_run)
+        # Registered by Operations migration 0286; tolerated as absent while a
+        # deploy has started ingest before Operations applied it.
+        cur.execute(
+            "SELECT id FROM operations.finding_types WHERE name = 'software_inventory_held'"
+        )
+        held_row = cur.fetchone()
+        ft_held = held_row[0] if held_row else None
+        held_keys = _eval_inventory_holds(cur, ft_held, now, counts, dry_run)
 
         if not dry_run:
+            # A None type (not registered yet) is a no-op in _resolve_admin_absent.
+            _resolve_admin_absent(cur, ft_held, held_keys, now, assessment_required=True)
             _resolve_admin_absent(
                 cur, ft_failure, failure_keys, now, assessment_required=True
             )
@@ -244,6 +255,68 @@ def _eval_source_failures(
         )
         _record_platform_assessment(
             cur, finding_id, key, "source_failure", subject_id, now, measured=True
+        )
+    return keys
+
+
+INVENTORY_HOLDS_SQL = """
+SELECT s.device_id, d.canonical_hostname, s.held_at, s.held_reason,
+       s.held_previous_count, s.held_listed_count, s.release_requested_at
+  FROM operations.software_inventory_devices s
+  JOIN operations.devices d ON d.tenant_id = s.tenant_id AND d.id = s.device_id
+ WHERE s.tenant_id = %s AND s.held_at IS NOT NULL
+ ORDER BY s.held_at
+"""
+
+
+def _eval_inventory_holds(
+    cur: Any, finding_type_id: int | None, now: datetime, counts: dict[str, int], dry_run: bool
+) -> list[str]:
+    """One finding per computer whose software removals are held.
+
+    The inventory holds a computer's removals when its list from Ninja suddenly
+    shrinks sharply (``ingest.inventory.software.hold_reason``); additions and
+    changes still apply. The finding stays until an administrator allows the
+    removals and the next list applies them.
+    """
+    keys: list[str] = []
+    if finding_type_id is None:
+        return keys
+    cur.execute("SELECT to_regclass('operations.software_inventory_devices') IS NOT NULL")
+    if not cur.fetchone()[0]:
+        return keys
+    cur.execute(INVENTORY_HOLDS_SQL, (TENANT_ID,))
+    for device_id, hostname, held_at, reason, previous, listed, released in cur.fetchall():
+        key = f"software_inventory_held:{device_id}"
+        keys.append(key)
+        counts["software_inventory_held"] += 1
+        if dry_run:
+            continue
+        subject_id = _subject("software_inventory", str(device_id))
+        finding_id = _upsert_admin_finding(
+            cur,
+            finding_type_id=finding_type_id,
+            condition_key=key,
+            severity="medium",
+            now=now,
+            subject_ref={
+                "signal_kind": "software_inventory",
+                "signal_id": str(subject_id),
+                "device_id": str(device_id),
+            },
+            details={
+                "device_id": str(device_id),
+                "hostname": hostname or "",
+                "held_since": held_at.isoformat() if held_at else None,
+                "previous_program_count": previous,
+                "listed_program_count": listed,
+                "reason": reason,
+                "release_requested_at": released.isoformat() if released else None,
+                "action": "Allow removals on the Software policy page.",
+            },
+        )
+        _record_platform_assessment(
+            cur, finding_id, key, "software_inventory_held", subject_id, now, measured=True
         )
     return keys
 

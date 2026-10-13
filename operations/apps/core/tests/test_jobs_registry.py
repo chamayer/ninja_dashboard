@@ -108,8 +108,15 @@ def test_initial_workflow_edges_are_registered_and_acyclic():
         ("patches", "resolver", "ninja.identity-snapshot", "always"),
         ("resolver", "platform-evaluate", "identity.current", "always"),
     )
-    assert shape("software-queue-drain") == (
-        ("software-queue-drain", "software-classify-only", "software.inventory-batch", "always"),
+    # Software findings follow inventory only when inventory changed.
+    assert shape("software-queue-drain") == ()
+    assert shape("software-queue-drain", frozenset({"material_change"})) == (
+        ("software-queue-drain", "software-classify-only", "software.inventory-batch",
+         "material_change"),
+    )
+    assert shape("software-enqueue-orgs", frozenset({"material_change"})) == (
+        ("software-enqueue-orgs", "software-classify-only", "software.inventory-fleet",
+         "material_change"),
     )
     assert shape("agent-compliance") == (
         ("agent-compliance", "resolver", "agent-compliance.observations", "always"),

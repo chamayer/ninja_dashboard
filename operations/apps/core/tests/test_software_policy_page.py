@@ -16,7 +16,7 @@ def test_every_change_is_staff_only_and_audited():
     assert 'if not request.user.is_staff:' in _SOURCE
     assert "HttpResponseForbidden" in _SOURCE
     for action in ("finding_type.policy_update", "software_rule.add", "software_rule.toggle",
-                   "software_suggestion_rule.update"):
+                   "software_suggestion_rule.update", "software_inventory.release_hold"):
         assert f'"{action}"' in _SOURCE
 
 
@@ -37,6 +37,14 @@ def test_table_rows_bind_controls_with_form_attributes_not_nested_forms():
     assert "<tr>\n            <form" not in _TEMPLATE
     assert _TEMPLATE.count('form="type-{{ ft.id }}"') == 5
     assert _TEMPLATE.count('form="suggestion-{{ rule.id }}"') == 4
+
+
+def test_held_computers_are_listed_with_a_release_action():
+    assert "Computers with held removals" in _TEMPLATE
+    assert 'name="action" value="release_hold"' in _TEMPLATE
+    assert "WHERE s.tenant_id = 1 AND s.held_at IS NOT NULL" in software_policy.HELD_SQL
+    # The refresh runs only after the release is committed, so the worker sees it.
+    assert "transaction.on_commit(_refresh_now)" in _SOURCE
 
 
 def test_page_is_reachable_from_settings_and_admin_tabs():

@@ -29,6 +29,7 @@ TYPES = {
             ("vulnerable_software", "software_version", False, False, "high"),
             ("eol_runtime", "software_version", False, False, "high"),
             ("unauthorized_remote_access", "device", True, True, "high"),
+            ("rejected_software_installed", "software_product", False, True, "high"),
         ],
         start=1,
     )
@@ -106,6 +107,26 @@ def test_any_decision_closes_the_review_prompt():
     decided = _title("Decided", 5, undecided=False)
     desired, _ = _desired(_ctx([decided]))
     assert not desired.get("whitelist_suggestion") and not desired.get("rare_recent")
+
+
+def test_rejected_software_stays_a_finding_while_installed():
+    rejected = {**_title("Banned", 4, undecided=False), "rejected_devices": 3,
+                "rejected_clients": 2}
+    desired, _ = _desired(_ctx([rejected, _title("Fine", 4, undecided=False)]))
+    [finding] = desired["rejected_software_installed"]
+    assert finding.details["canonical_name"] == "Banned"
+    assert finding.details["rejected_device_count"] == 3
+    assert finding.severity == "high"
+    assert finding.condition_key == sr.condition_key(
+        1, None, None, TYPES["rejected_software_installed"].id, "Banned"
+    )
+
+
+def test_rejected_software_switch_stops_the_type():
+    rejected = {**_title("Banned", 4, undecided=False), "rejected_devices": 1}
+    desired, report = _desired(_ctx([rejected], cfg={"rejected_installed_enabled": False}))
+    assert not desired.get("rejected_software_installed")
+    assert "rejected_software_installed" in report.disabled
 
 
 def test_title_approval_silences_a_suspicious_name():
