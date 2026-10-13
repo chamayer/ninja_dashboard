@@ -8275,11 +8275,27 @@ def software_product_authorize(request: HttpRequest) -> HttpResponse:
 # ─────────────────────────────────────────────────────────────────────
 
 
+def _publisher_decision_vocabulary() -> list[tuple[str, str, str, str]]:
+    """(stored decision, action verb, state label, filter key) for publishers.
+
+    One vocabulary for every control on the publishers page: the row buttons
+    and the bulk list say the action, the decision column and the filter say
+    the resulting state. A publisher-scope decision is approve_publisher,
+    reject or investigate; a legacy publisher row stored as approve reads as
+    approved.
+    """
+    return [
+        ("approve_publisher", "Approve", "Approved", "approved"),
+        ("reject", "Reject", "Rejected", "rejected"),
+        ("investigate", "Investigate", "Investigating", "investigate"),
+    ]
+
+
 @login_required
 def software_publishers(request: HttpRequest) -> HttpResponse:
     """List publishers with per-publisher install/product counts and
     current publisher-scope decision status. Supports filtering by name
-    and by decision state (approved / rejected / pending)."""
+    and by decision state (approved / rejected / investigating / none)."""
     q_filter = (request.GET.get("q") or "").strip()
     decision_filter = (request.GET.get("decision") or "").strip().lower()
 
@@ -8321,6 +8337,9 @@ def software_publishers(request: HttpRequest) -> HttpResponse:
         ).exclude(publisher="")
     }
 
+    vocabulary = _publisher_decision_vocabulary()
+    state_labels = {value: state for value, _verb, state, _key in vocabulary}
+    state_labels["approve"] = state_labels["approve_publisher"]
     publishers = []
     for pub, installations, titles, devices, clients, last_observed in rollup_rows:
         dec = pub_decisions.get(pub.lower())
@@ -8333,6 +8352,7 @@ def software_publishers(request: HttpRequest) -> HttpResponse:
                 "clients": clients,
                 "last_observed": last_observed,
                 "global_decision": dec.decision if dec else "",
+                "decision_label": state_labels.get(dec.decision, dec.decision) if dec else "",
                 # PublisherCategory is retired as a competing capability path.
                 # Product capability evidence appears on the title detail page,
                 # where the stable product identity and its provenance are
@@ -8375,7 +8395,9 @@ def software_publishers(request: HttpRequest) -> HttpResponse:
             "publishers": publishers,
             "active_q": q_filter,
             "active_decision": decision_filter,
-            "decision_choices": SoftwareDecision.Decision.choices,
+            "decision_choices": [(value, verb) for value, verb, _state, _key in vocabulary],
+            "decision_filters": [(key, state) for _value, _verb, state, key in vocabulary]
+            + [("pending", "No decision")],
             "software_tab": "publishers",
         },
     )

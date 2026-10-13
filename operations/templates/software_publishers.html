@@ -34,10 +34,7 @@
     <label>Decision</label>
     <select name="decision" onchange="this.form.submit()">
         <option value="">Any</option>
-        <option value="approved"    {% if active_decision == 'approved'    %}selected{% endif %}>Approved</option>
-        <option value="rejected"    {% if active_decision == 'rejected'    %}selected{% endif %}>Rejected</option>
-        <option value="investigate" {% if active_decision == 'investigate' %}selected{% endif %}>Investigating</option>
-        <option value="pending"     {% if active_decision == 'pending'     %}selected{% endif %}>No decision yet</option>
+        {% for key, label in decision_filters %}<option value="{{ key }}"{% if active_decision == key %} selected{% endif %}>{{ label }}</option>{% endfor %}
     </select>
     <button type="submit">Apply</button>
     {% if active_q or active_decision %}<a class="clear" href="?">Clear</a>{% endif %}
@@ -100,9 +97,9 @@
                 <td class="num muted">{{ p.last_observed|date:"Y-m-d"|default:"—" }}</td>
                 <td>
                     {% if p.global_decision %}
-                        <span class="decision-pill {{ p.global_decision }}">{{ p.global_decision|humanize_label|default:p.global_decision|title }}</span>
+                        <span class="decision-pill {{ p.global_decision }}">{{ p.decision_label }}</span>
                     {% else %}
-                        <span class="decision-pill none">no decision</span>
+                        <span class="decision-pill none">No decision</span>
                     {% endif %}
                 </td>
                 <td>
@@ -113,7 +110,7 @@
                             <input type="hidden" name="scope" value="global">
                             <input type="hidden" name="next" value="{{ request.get_full_path }}">
                             <input type="hidden" name="decision" value="approve_publisher">
-                            <button type="submit" class="btn-allow" title="Allow all products from this publisher">Allow</button>
+                            <button type="submit" class="btn-allow" title="Approve every product from this publisher">Approve</button>
                         </form>
                         <form method="post" action="{% url 'software_decision_create' %}">
                             {% csrf_token %}
@@ -121,7 +118,7 @@
                             <input type="hidden" name="scope" value="global">
                             <input type="hidden" name="next" value="{{ request.get_full_path }}">
                             <input type="hidden" name="decision" value="reject">
-                            <button type="submit" class="btn-block" title="Block all products from this publisher">Block</button>
+                            <button type="submit" class="btn-block" title="Reject every product from this publisher">Reject</button>
                         </form>
                         <form method="post" action="{% url 'software_decision_create' %}">
                             {% csrf_token %}
@@ -129,7 +126,7 @@
                             <input type="hidden" name="scope" value="global">
                             <input type="hidden" name="next" value="{{ request.get_full_path }}">
                             <input type="hidden" name="decision" value="investigate">
-                            <button type="submit" class="btn-review" title="Flag this publisher for review">Review</button>
+                            <button type="submit" class="btn-review" title="Mark this publisher for investigation">Investigate</button>
                         </form>
                         <a href="{% url 'software_publisher_detail' publisher=p.publisher %}#decision-scopes" class="secondary">Client/device…</a>
                     </div>
