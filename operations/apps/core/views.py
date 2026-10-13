@@ -39,6 +39,7 @@ from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 from django.utils.text import slugify
 from django.views.decorators.http import require_GET, require_POST
+from shared import software_settings
 from shared.jobs_registry import (
     EXECUTION_POOL_POLICIES,
     capability_state,
@@ -17752,90 +17753,58 @@ def client_requirements_config(request: HttpRequest, org_slug: str) -> HttpRespo
 
 # ── Software classifier config (evaluator knobs, admin-editable) ────────
 
-_CLASSIFIER_DEFAULTS = {
-    "rare_recent_enabled": True,
-    "rare_recent_max_age_days": 7,
-    "rare_recent_max_devices": 2,
-    "rare_recent_severity": "medium",
-    "rare_recent_skip_categorized": True,
-    "rare_recent_skip_decided": True,
-    "installation_evidence_max_age_hours": 24,
-}
-
-
 @login_required
 def classifier_config(request: HttpRequest) -> HttpResponse:
+    """Edit the software classifier settings.
+
+    Saving merges the submitted fields into the stored object: keys the form
+    does not show (or does not know yet) are never dropped. Every change is
+    audited with the before and after values.
+    """
     row, _ = EvaluatorConfig.objects.get_or_create(
         tenant_id=1,
         evaluator_name="software_classifier",
         defaults={"config": {}, "updated_by": request.user},
     )
     stored = row.config if isinstance(row.config, dict) else {}
-    effective = dict(_CLASSIFIER_DEFAULTS)
-    effective.update(stored)
 
     if request.method == "POST":
-        new_cfg: dict = {}
-
-        def _bool(name: str) -> bool:
-            return request.POST.get(name) == "on"
-
-        def _int(name: str, lo: int, hi: int, fallback: int) -> int:
-            try:
-                v = int(request.POST.get(name) or fallback)
-            except ValueError:
-                v = fallback
-            return max(lo, min(v, hi))
-
-        new_cfg["rare_recent_enabled"] = _bool("rare_recent_enabled")
-        new_cfg["rare_recent_skip_categorized"] = _bool("rare_recent_skip_categorized")
-        new_cfg["rare_recent_skip_decided"] = _bool("rare_recent_skip_decided")
-        new_cfg["rare_recent_max_age_days"] = _int(
-            "rare_recent_max_age_days",
-            1,
-            90,
-            7,
-        )
-        new_cfg["rare_recent_max_devices"] = _int(
-            "rare_recent_max_devices",
-            1,
-            100,
-            2,
-        )
-        new_cfg["installation_evidence_max_age_hours"] = _int(
-            "installation_evidence_max_age_hours",
-            1,
-            720,
-            24,
-        )
-        sev = (request.POST.get("rare_recent_severity") or "medium").strip()
-        if sev not in {"info", "low", "medium", "high", "critical"}:
-            sev = "medium"
-        new_cfg["rare_recent_severity"] = sev
-
-        row.config = new_cfg
-        row.updated_by = request.user
-        row.save(update_fields=["config", "updated_by", "updated_at"])
-        messages.info(request, "Classifier configuration saved.")
+        merged = software_settings.merge(stored, software_settings.parse_form(request.POST))
+        if merged != stored:
+            row.config = merged
+            row.updated_by = request.user
+            row.save(update_fields=["config", "updated_by", "updated_at"])
+            _audit(
+                request,
+                "evaluator_config.update",
+                row.id,
+                stored,
+                merged,
+                entity_type="evaluator_config",
+            )
+            messages.info(request, "Classifier configuration saved.")
+        else:
+            messages.info(request, "No classifier settings changed.")
         return redirect("classifier_config")
 
+    effective = software_settings.effective(stored)
     return render(
         request,
         "classifier_config.html",
         {
             "admin_group": "config",
             "admin_tab": "classifier",
-            "effective": effective,
-            "stored": stored,
-            "defaults": _CLASSIFIER_DEFAULTS,
+            "sections": [
+                (
+                    title,
+                    [{"field": field, "value": effective[field.key]} for field in fields],
+                )
+                for title, fields in software_settings.sections()
+            ],
             "updated_at": row.updated_at,
             "updated_by": row.updated_by,
             "severity_choices": [
-                ("info", "Info"),
-                ("low", "Low"),
-                ("medium", "Medium"),
-                ("high", "High"),
-                ("critical", "Critical"),
+                (value, value.title()) for value in software_settings.SEVERITIES
             ],
         },
     )

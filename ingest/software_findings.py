@@ -32,6 +32,7 @@ from ingest.condition_evidence import (
 )
 from ingest.conditions import record_assessment
 from ingest.config import settings
+from shared import software_settings
 from shared.conditions.contracts import (
     Condition,
     EvaluationCoverage,
@@ -124,7 +125,9 @@ def _load_config(cur, tenant_id: int) -> dict:
     row = cur.fetchone()
     stored = row[0] if row and isinstance(row[0], dict) else {}
     merged = dict(_DEFAULT_CONFIG)
-    merged.update(stored)
+    # The shared settings resolve canonical keys and mirror them back under the
+    # names this classifier reads, so the admin page is authoritative here too.
+    merged.update(software_settings.effective(stored))
     return merged
 
 

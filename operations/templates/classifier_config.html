@@ -31,7 +31,7 @@
     <h1 style="margin-top:0;">Software classifier</h1>
     <p class="muted">
         Tune what fires as an issue. Changes take effect on the next
-        classifier run.
+        classifier run. Settings not shown here are kept as they are.
     </p>
     <p class="muted" style="font-size:0.82rem;">
         {% if updated_by %}Last saved by {{ updated_by.username }} · {{ updated_at|date:"Y-m-d H:i" }}{% else %}Never customized — running on code defaults.{% endif %}
@@ -41,99 +41,38 @@
 <form method="post">
     {% csrf_token %}
 
+    {% for title, rows in sections %}
     <div class="cc-section">
-        <h2 style="margin-top:0;">Software evidence freshness</h2>
+        <h2 style="margin-top:0;">{{ title }}</h2>
+        {% for row in rows %}
         <div class="cc-row">
-            <div class="lbl">Maximum evidence age (hours)
-                <div class="hint">After this age, a software record remains in inventory but no longer drives an active device finding.</div>
+            <div class="lbl">{{ row.field.label }}
+                <div class="hint">{{ row.field.hint }}</div>
             </div>
             <div>
-                <input type="number" name="installation_evidence_max_age_hours"
-                       min="1" max="720"
-                       value="{{ effective.installation_evidence_max_age_hours }}">
-                <span class="cc-default">default: 24 · range 1–720</span>
-            </div>
-        </div>
-    </div>
-
-    <div class="cc-section">
-        <h2 style="margin-top:0;">Rare + recent installs</h2>
-        <p class="muted" style="margin-top:0;">
-            Flags software that showed up on very few devices in the last
-            few days — the shadow-IT / one-off install signal.
-        </p>
-
-        <div class="cc-row">
-            <div class="lbl">Enabled
-                <div class="hint">Turn the whole rule on or off.</div>
-            </div>
-            <div>
-                <input type="checkbox" name="rare_recent_enabled"
-                       {% if effective.rare_recent_enabled %}checked{% endif %}>
-                <span class="cc-default">default: on</span>
-            </div>
-        </div>
-
-        <div class="cc-row">
-            <div class="lbl">Max age (days)
-                <div class="hint">Only fire if the install is younger than this.</div>
-            </div>
-            <div>
-                <input type="number" name="rare_recent_max_age_days"
-                       min="1" max="90"
-                       value="{{ effective.rare_recent_max_age_days }}">
-                <span class="cc-default">default: 7 · range 1–90</span>
-            </div>
-        </div>
-
-        <div class="cc-row">
-            <div class="lbl">Max devices across fleet
-                <div class="hint">Only fire if the software is on this many devices or fewer.</div>
-            </div>
-            <div>
-                <input type="number" name="rare_recent_max_devices"
-                       min="1" max="100"
-                       value="{{ effective.rare_recent_max_devices }}">
-                <span class="cc-default">default: 2 · range 1–100</span>
-            </div>
-        </div>
-
-        <div class="cc-row">
-            <div class="lbl">Severity
-                <div class="hint">What severity to record when this fires.</div>
-            </div>
-            <div>
-                <select name="rare_recent_severity">
+                {% if row.field.kind == "bool" %}
+                <input type="checkbox" name="{{ row.field.key }}" aria-label="{{ row.field.label }}"
+                       {% if row.value %}checked{% endif %}>
+                <span class="cc-default">default: {% if row.field.default %}on{% else %}off{% endif %}</span>
+                {% elif row.field.kind == "severity" %}
+                <select name="{{ row.field.key }}" aria-label="{{ row.field.label }}">
                     {% for value, label in severity_choices %}
-                        <option value="{{ value }}"{% if effective.rare_recent_severity == value %} selected{% endif %}>{{ label }}</option>
+                    <option value="{{ value }}"{% if row.value == value %} selected{% endif %}>{{ label }}</option>
                     {% endfor %}
                 </select>
-                <span class="cc-default">default: medium</span>
+                <span class="cc-default">default: {{ row.field.default }}</span>
+                {% else %}
+                <input type="number" name="{{ row.field.key }}" aria-label="{{ row.field.label }}"
+                       min="{{ row.field.minimum }}" max="{{ row.field.maximum }}"
+                       {% if row.field.kind == "float" %}step="0.1"{% endif %}
+                       value="{{ row.value }}">
+                <span class="cc-default">default: {{ row.field.default }} · range {{ row.field.minimum }}–{{ row.field.maximum }}</span>
+                {% endif %}
             </div>
         </div>
-
-        <div class="cc-row">
-            <div class="lbl">Skip if categorized
-                <div class="hint">Don't fire when the classifier already knows what class it is (AV / RMM / browser / etc). Other rules cover those cases.</div>
-            </div>
-            <div>
-                <input type="checkbox" name="rare_recent_skip_categorized"
-                       {% if effective.rare_recent_skip_categorized %}checked{% endif %}>
-                <span class="cc-default">default: on</span>
-            </div>
-        </div>
-
-        <div class="cc-row">
-            <div class="lbl">Skip if already decided
-                <div class="hint">Don't fire when an operator already approved / rejected / marked "investigate" for this software.</div>
-            </div>
-            <div>
-                <input type="checkbox" name="rare_recent_skip_decided"
-                       {% if effective.rare_recent_skip_decided %}checked{% endif %}>
-                <span class="cc-default">default: on</span>
-            </div>
-        </div>
+        {% endfor %}
     </div>
+    {% endfor %}
 
     <div style="display:flex; gap:0.6rem; align-items:center;">
         <button type="submit" style="padding:0.55rem 1.2rem; font-size:0.9rem;">Save</button>
