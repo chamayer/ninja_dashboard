@@ -28,6 +28,9 @@ log = logging.getLogger(__name__)
 _READY_PATH = Path("/tmp/ninja-jobs-worker-ready")
 _POLL_SECONDS = 1.0
 _HEARTBEAT_SECONDS = 15.0
+# How long a stop request lets running children finish before they are fenced as
+# interrupted. docker-compose.yml's stop_grace_period must exceed this.
+_SHUTDOWN_GRACE_SECONDS = 100.0
 _stopping = False
 
 
@@ -103,6 +106,39 @@ def _finish_child(child: _Child) -> None:
         )
     else:
         operator_job_queue._finish_v1(child.run_id, child.claim_token, "failed", error=str(result.get("error", "Jobs child failed."))[:2000])
+
+
+def _drain_children(children: dict[uuid.UUID, _Child], grace_seconds: float) -> None:
+    """Let running children finish for a bounded time after a stop request.
+
+    No new work is claimed while draining. Children still running at the
+    deadline are fenced by ``_shutdown_children``, exactly as before; short Jobs
+    that would have finished within the grace period are no longer interrupted
+    by a routine restart.
+    """
+    deadline = time.monotonic() + grace_seconds
+    while time.monotonic() < deadline and any(
+        not child.ownership_lost for child in children.values()
+    ):
+        for run_id, child in tuple(children.items()):
+            if child.ownership_lost:
+                continue
+            try:
+                child.progress.heartbeat()
+            except operator_job_queue.JobProgressRejected:
+                child.ownership_lost = True
+                continue
+            except Exception:
+                log.exception("Jobs child heartbeat failed while draining: run=%s", child.run_id)
+            if child.process.poll() is not None:
+                try:
+                    _finish_child(child)
+                except Exception:
+                    # Leave it for _shutdown_children, which fences the Run.
+                    log.exception("Jobs child finish failed while draining: run=%s", child.run_id)
+                    return
+                del children[run_id]
+        time.sleep(_POLL_SECONDS)
 
 
 def _shutdown_children(children: dict[uuid.UUID, _Child]) -> None:
@@ -230,6 +266,7 @@ def run() -> int:
             time.sleep(_POLL_SECONDS)
     finally:
         _READY_PATH.unlink(missing_ok=True)
+        _drain_children(children, _SHUTDOWN_GRACE_SECONDS)
         _shutdown_children(children)
         operator_job_queue.stop_runtime("worker", worker_incarnation)
     return 0

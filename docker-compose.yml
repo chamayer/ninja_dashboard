@@ -101,6 +101,9 @@ services:
     container_name: ninja-jobs-worker
     restart: unless-stopped
     command: ["python", "-m", "ingest.jobs_worker"]
+    # Must exceed ingest.jobs_worker._SHUTDOWN_GRACE_SECONDS so running Jobs can
+    # finish before the worker fences them as interrupted.
+    stop_grace_period: 120s
     environment:
       POSTGRES_HOST: postgres
       POSTGRES_PORT: 5432
