@@ -8634,10 +8634,10 @@ def software_user_risk(request: HttpRequest) -> HttpResponse:
 
     sql = f"""
         device_user AS (
-            SELECT current.device_id AS ops_device_id,
-                   current.last_user,
-                   current.projected_at AS snapshot_at
-            FROM operations.v_device_last_user_current current
+            SELECT last_user_current.device_id AS ops_device_id,
+                   last_user_current.last_user,
+                   last_user_current.projected_at AS snapshot_at
+            FROM operations.v_device_last_user_current last_user_current
         ),
         finding_items AS (
             SELECT d.id AS device_id, d.client_id,
