@@ -8869,8 +8869,41 @@ _JOBS_RECOVERY_DIAGNOSTIC_KEYS = frozenset(
 )
 
 _MANAGED_SCHEDULE_REASON = "Managed by its operation entry point."
+# Placeholder older runs recorded as their stage detail; never shown.
 _NO_MEASURABLE_TOTAL = "This job does not publish a measurable work total."
 _WORKER_RESTART_INTERRUPTION = "Jobs worker shutdown interrupted the handler"
+
+
+def _run_progress(done, total, unit) -> dict | None:
+    """How far a running Job is, for the progress bar (migration 0287)."""
+    if done is None:
+        return None
+    done = int(done)
+    unit = unit or "items"
+    if total:
+        total = int(total)
+        percent = min(100, round(done * 100 / total))
+        return {"done": done, "total": total, "unit": unit, "percent": percent,
+                "label": f"{done:,} of {total:,} {unit} ({percent}%)"}
+    return {"done": done, "total": None, "unit": unit, "percent": None,
+            "label": f"{done:,} {unit} so far"}
+
+
+def _run_summary(result, rows_touched) -> str:
+    """What a finished Run did: the Job's own summary, else its item count."""
+    if isinstance(result, str):
+        try:
+            result = json.loads(result)
+        except ValueError:
+            result = {}
+    summary = (result or {}).get("summary") if isinstance(result, dict) else None
+    if summary:
+        return str(summary)
+    return f"{rows_touched:,} updated." if rows_touched is not None else ""
+
+
+def _running_detail(stage: str, stage_detail: str) -> str:
+    return stage if stage_detail in ("", _NO_MEASURABLE_TOTAL) else stage_detail
 
 
 def _job_has_upstream_trigger(execution_keys: tuple[str, ...]) -> bool:
@@ -9493,7 +9526,7 @@ def admin_jobs(request: HttpRequest) -> HttpResponse:
                        job_key, id, status, requested_at, started_at,
                        completed_at, rows_touched, error, wait_category,
                        wait_reason, stage, stage_detail,
-                       cancellation_requested_at
+                       cancellation_requested_at, result
                   FROM operations.operator_job_runs
                  WHERE tenant_id = 1
                  ORDER BY job_key, requested_at DESC, id DESC
@@ -9514,11 +9547,12 @@ def admin_jobs(request: HttpRequest) -> HttpResponse:
                     "stage": r[10] or "",
                     "stage_detail": r[11] or "",
                     "cancellation_requested_at": r[12],
+                    "result": r[13],
                 }
             cur.execute(
                 """
                 SELECT DISTINCT ON (job_key)
-                       job_key, status, completed_at, rows_touched, error
+                       job_key, status, completed_at, rows_touched, error, result
                   FROM operations.operator_job_runs
                  WHERE tenant_id = 1
                    AND status IN ('completed', 'failed', 'stalled', 'cancelled')
@@ -9531,6 +9565,7 @@ def admin_jobs(request: HttpRequest) -> HttpResponse:
                     "completed_at": r[2],
                     "rows_touched": r[3],
                     "error": (r[4] or "")[:240],
+                    "result": r[5],
                 }
     except DatabaseError:
         log.exception("Jobs latest-status query failed")
@@ -9641,10 +9676,8 @@ def admin_jobs(request: HttpRequest) -> HttpResponse:
         if latest_terminal:
             last_result_at = latest_terminal["completed_at"]
             if latest_terminal["status"] == "completed":
-                if latest_terminal["rows_touched"] is not None:
-                    last_result = f"Last completed: {latest_terminal['rows_touched']} updated"
-                else:
-                    last_result = "Last completed"
+                summary = _run_summary(latest_terminal["result"], latest_terminal["rows_touched"])
+                last_result = f"Last completed: {summary}" if summary else "Last completed"
             elif latest_terminal["status"] == "cancelled":
                 last_result = "Last stopped"
             else:
@@ -9657,9 +9690,9 @@ def admin_jobs(request: HttpRequest) -> HttpResponse:
                 "ready": "Ready to start",
             }.get(state, active_run["status_label"])
             if state == "running":
-                status_detail = active_run["stage_detail"] or active_run["stage"]
-                if status_detail == _NO_MEASURABLE_TOTAL:
-                    status_detail = active_run["stage"]
+                status_detail = _running_detail(
+                    active_run["stage"] or "", active_run["stage_detail"] or ""
+                )
             else:
                 status_detail = active_run["status_detail"]
             latest_run_id = active_run["id"]
@@ -9677,8 +9710,8 @@ def admin_jobs(request: HttpRequest) -> HttpResponse:
             rows_touched = latest["rows_touched"]
             error = latest["error"]
             status_detail = (
-                f"{rows_touched} updated."
-                if state == "completed" and rows_touched is not None
+                _run_summary(latest.get("result"), rows_touched)
+                if state == "completed"
                 else error
                 if state == "failed" and error
                 else ""
@@ -9724,6 +9757,7 @@ def admin_jobs(request: HttpRequest) -> HttpResponse:
                 "state": state,
                 "status_label": status_label,
                 "status_detail": status_detail,
+                "progress": active_run.get("progress") if active_run else None,
                 "capacity_label": active_run.get("capacity_label", "") if active_run else "",
                 "capacity_blockers": active_run.get("capacity_blockers", []) if active_run else [],
                 "resource_blockers": active_run.get("resource_blockers", []) if active_run else [],
@@ -10267,7 +10301,8 @@ def _operator_job_runs(
                         ) END AS queue_reason,
                         contract_version, trigger_kind, wait_category, wait_reason,
                         cancellation_requested_at, cancellation_reason, deadline_at,
-                        correlation_id, retry_of_run_id, result, terminal_reason
+                        correlation_id, retry_of_run_id, result, terminal_reason,
+                        progress_done, progress_total, progress_unit
                    FROM operations.operator_job_runs
                   AS job
                   WHERE {where_sql}
@@ -10403,6 +10438,7 @@ def _operator_job_runs(
             "retry_of_run_id": row[26],
             "result": row[27] or {},
             "terminal_reason": row[28],
+            "progress": _run_progress(row[29], row[30], row[31]) if row[7] == "running" else None,
             "needs_attention": row[7] in {"failed", "stalled"},
             "owner": definition(row[1]).owner if row[1] in definition_keys() else "",
             "result_label": result_label(row[7], row[9], row[10]),
@@ -10427,13 +10463,13 @@ def _operator_job_runs(
         if run["status"] == "queued":
             run["status_detail"] = _operator_run_wait_explanation(run)
         elif run["status"] == "running":
-            run["status_detail"] = run["stage_detail"] or run["stage"]
+            run["status_detail"] = _running_detail(run["stage"] or "", run["stage_detail"] or "")
         elif run["status"] in {"failed", "stalled"}:
             run["status_detail"] = run["error"] or "The Run did not complete."
-        elif run["rows_touched"] is not None:
-            run["status_detail"] = f"{run['rows_touched']} updated."
         else:
-            run["status_detail"] = run["result_label"]
+            run["status_detail"] = (
+                _run_summary(run["result"], run["rows_touched"]) or run["result_label"]
+            )
         for relationship in (*run["prerequisites"], *run["dependents"]):
             related_key = operator_job_key_for_execution(relationship["job_key"])
             relationship["operator_job_key"] = related_key or ""

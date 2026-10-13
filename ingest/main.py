@@ -64,7 +64,6 @@ from ingest.identity.client_resolver import (
 )
 from ingest.identity.resolver import drain_resolution as _drain_resolution
 from ingest.inventory import queue as software_queue
-from ingest.intel.material import MaterialCount
 from ingest.inventory import software as software_ingest
 from ingest.logging_utils import install_log_safety
 from ingest.ninja_client import NinjaClient
@@ -360,7 +359,7 @@ def _ninja_client() -> NinjaClient:
     )
 
 
-def run_software_fleet_check_once() -> MaterialCount | None:
+def run_software_fleet_check_once(count=None) -> operator_job_queue.JobExecutionResult | None:
     """Fetch every computer's software list and apply it (daily completeness check).
 
     The software findings run follows only when something changed.
@@ -368,18 +367,24 @@ def run_software_fleet_check_once() -> MaterialCount | None:
     if not settings.SOFTWARE_QUEUE_ENABLED:
         return None
     with _ninja_client() as client:
-        result = software_ingest.fleet_check(client)
+        result = software_ingest.fleet_check(client, count)
     if result.material_changed:
         software_ingest.refresh_read_models()
-    return MaterialCount(result.devices, material_changed=result.material_changed)
+    return operator_job_queue.JobExecutionResult(
+        rows=result.devices,
+        signals=("material_change",) if result.material_changed else (),
+        result=result.as_result("Full check"),
+    )
 
 
-def run_software_queue_once(job_run_id: object) -> MaterialCount | None:
+def run_software_queue_once(
+    job_run_id: object, count=None
+) -> operator_job_queue.JobExecutionResult | None:
     """Fetch and apply the software lists of every queued computer."""
     if not settings.SOFTWARE_QUEUE_ENABLED:
         return None
     with _ninja_client() as client:
-        outcome = software_queue.drain(client, job_run_id)
+        outcome = software_queue.drain(client, job_run_id, count)
     if outcome.material_changed:
         software_ingest.refresh_read_models()
     if outcome.failed:
@@ -387,7 +392,14 @@ def run_software_queue_once(job_run_id: object) -> MaterialCount | None:
             f"{outcome.failed} queued computer(s) could not be refreshed; they are retried "
             "until their attempt limit and then kept as failed with the error."
         )
-    return MaterialCount(outcome.entries, material_changed=outcome.material_changed)
+    result = outcome.result.as_result("Changed computers")
+    if not outcome.entries:
+        result["summary"] = "No computer was waiting for a software refresh."
+    return operator_job_queue.JobExecutionResult(
+        rows=outcome.entries,
+        signals=("material_change",) if outcome.material_changed else (),
+        result=result,
+    )
 
 
 def schedule_agent_compliance_evaluate(reason: str) -> bool:

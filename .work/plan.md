@@ -122,8 +122,21 @@ backlog, classifier runs only after changes.
   before 0285 restated the evidence at 20:26:05, failed twice and restarted;
   after that every inventory job version is registered.
 
-**Next action:** verify the first device worker run (claimed 3,674 queued
-computers at 20:27), the first fleet check, and the catalog relink.
+- Backlog cleared by 20:46 (d6e4ca4: batch reads by computer, interrupted
+  entries freed at next run start): 0 waiting, 3,756 computers listed, 19,831
+  programs removed, 0 held. Correction: production has 427 software decisions
+  (31 reject); my earlier "0 decisions" query lacked tenant context. The new
+  rejected type opened 41 findings (4,757 installs; includes CrowdStrike
+  Windows Sensor on 78 computers: user to confirm that rejection).
+- Built locally, not committed: migration 0287 (job progress counts, fenced
+  `jobs_record_v1_count`), progress bars on Jobs list and job detail, plain
+  summaries for inventory and findings runs, placeholder sentence removed;
+  publishers page uses one decision vocabulary (found and fixed locally: the
+  helper insertion had moved `@login_required` off the view; regression test
+  added). Ingest 418 passed; Operations 319 passed (4 known failures).
+
+**Next action:** commit/push approval (includes migration 0287); first fleet
+check and catalog relink verification.
 
 ## Active plan — Software findings rebuild (implementation)
 

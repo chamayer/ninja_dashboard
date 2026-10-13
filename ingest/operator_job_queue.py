@@ -578,6 +578,27 @@ class V1JobProgress:
     def heartbeat(self) -> None:
         self._record(None, None)
 
+    def count(self, done: int, total: int | None, unit: str) -> None:
+        """Record how far the run is (done of total, in ``unit``) for the Jobs pages.
+
+        Also renews the heartbeat. Before Operations migration 0287 exists (a
+        deploy that starts ingest first) the count is skipped, not fatal.
+        """
+        if self.cancel_requested():
+            raise JobCancellationRequested("Cancellation requested by an operator.")
+        try:
+            with db.transaction() as cur:
+                cur.execute("SET LOCAL operations.tenant_id = 1")
+                cur.execute(
+                    "SELECT operations.jobs_record_v1_count(%s, %s, %s, %s, %s, %s)",
+                    (1, self.job_id, self.claim_token, max(0, int(done)),
+                     None if total is None else max(0, int(total)), unit[:40]),
+                )
+        except UndefinedFunction:
+            self.heartbeat()
+        except RaiseException as exc:
+            raise JobProgressRejected("Jobs ledger rejected the progress count.") from exc
+
     def cancel_requested(self) -> bool:
         with db.transaction() as cur:
             cur.execute("SET LOCAL operations.tenant_id = 1")
@@ -776,11 +797,11 @@ def _execute(job_key: str, progress: V1JobProgress) -> int | JobExecutionResult 
         ),
         "software-enqueue-orgs": (
             "Checking every computer's software list",
-            lambda: main.run_software_fleet_check_once(),
+            lambda: main.run_software_fleet_check_once(progress.count),
         ),
         "software-queue-drain": (
             "Refreshing changed computers' software lists",
-            lambda: main.run_software_queue_once(progress.job_id),
+            lambda: main.run_software_queue_once(progress.job_id, progress.count),
         ),
         "source-actions": (
             "Processing approved source actions",
@@ -823,7 +844,7 @@ def _execute(job_key: str, progress: V1JobProgress) -> int | JobExecutionResult 
     if job_key not in jobs:
         raise ValueError(f"Unknown registered job: {job_key}")
     stage, job = jobs[job_key]
-    progress.update(stage, "This job does not publish a measurable work total.")
+    progress.update(stage, "")
     result = job()
     if job_key == "patches" and result is False:
         raise RuntimeError("Patch collection could not acquire its database execution lock")
@@ -847,7 +868,7 @@ def _software_reconcile(progress: V1JobProgress) -> JobExecutionResult:
     from ingest import software_reconcile
     from ingest.inventory import software as software_inventory
 
-    report = software_reconcile.run(1, progress=progress.update)
+    report = software_reconcile.run(1, progress=progress.update, count=progress.count)
     progress.update(
         "Publishing software status",
         "Making the reconciled findings available to operators.",
@@ -872,6 +893,6 @@ def _software_classify_with_intel(
             ("Refreshing Windows package intelligence", winget.run_once),
             ("Refreshing Chocolatey intelligence", chocolatey.run_once),
         ):
-            progress.update(stage, "This stage does not publish a measurable work total.")
+            progress.update(stage, "")
             job()
     return _software_reconcile(progress)

@@ -287,3 +287,16 @@ def test_exposure_read_model_is_staged_and_uses_readiness():
     assert "FROM (SELECT DISTINCT tenant_id, device_id, canonical_name FROM candidates) pair" in sql
     assert "CREATE OR REPLACE VIEW operations.v_device_software_exposure" in sql
     assert "finding_type.suppressed_by_approval" in sql
+
+
+def test_a_findings_run_describes_itself_with_policy_labels():
+    report = sr.RunReport()
+    report.labels = {"rejected_software_installed": "Rejected software is installed"}
+    report.opened["rejected_software_installed"] = 41
+    report.resolved["rare_recent"] = 3
+    report.refreshed["vulnerable_software"] = 400
+    text = report.describe()
+    assert text.startswith("Software findings: 41 opened, 3 resolved, 400 still current.")
+    assert "Rejected software is installed: +41 / -0" in text
+    assert "rare recent: +0 / -3" in text
+    assert report.as_result()["summary"] == text

@@ -191,3 +191,39 @@ def test_a_version_change_clears_the_catalog_link_for_relinking():
 
     assert "install.software_version_id IS NULL" in software_catalog._BACKFILL_LINKS
     assert "version.version = COALESCE(install.version, '')" in software_catalog._BACKFILL_LINKS
+
+
+# ── Progress and summaries ─────────────────────────────────────────
+
+
+def test_paging_reports_rows_received_against_ninjas_total():
+    seen = []
+    client = _Client([_page([{}] * 2, 0, 3), _page([{}], 2, 3)])
+    list(software.pages(client, on_page=lambda received, total: seen.append((received, total))))
+    assert seen == [(2, 3), (3, 3)]
+
+
+def test_the_worker_counts_computers_handled(monkeypatch):
+    entries = [queue.Entry(i, f"id={i}", 0, 3) for i in range(1, 251)]
+    counts = []
+    monkeypatch.setattr(queue, "recover_stale_entries", lambda: 0)
+    monkeypatch.setattr(queue, "claim", lambda run: entries)
+    monkeypatch.setattr(queue, "_finish", lambda batch, error="": 0)
+    monkeypatch.setattr(software, "load_device_map", lambda: {})
+    monkeypatch.setattr(software, "device_refresh",
+                        lambda client, ids, device_map: software.ApplyResult(devices=len(ids)))
+    queue.drain(object(), "run-1", lambda done, total, unit: counts.append((done, total, unit)))
+    assert counts == [(0, 250, "computers"), (100, 250, "computers"), (200, 250, "computers"),
+                      (250, 250, "computers")]
+
+
+def test_a_run_describes_itself_in_plain_english():
+    text = software.ApplyResult(devices=4629, new=15695, changed=33023, removed=21779,
+                                unchanged=516359, relinked=166310).describe("Full check")
+    assert text.startswith("Full check: 4,629 computers refreshed.")
+    assert "21,779 removed" in text and "166,310 version links corrected" in text
+    assert software.ApplyResult().describe("Changed computers") == (
+        "Changed computers: no computer reported a software list."
+    )
+    assert "removals" not in software.ApplyResult(devices=1).describe("x")
+    assert "nothing was removed" in software.ApplyResult(devices=1, complete=False).describe("x")

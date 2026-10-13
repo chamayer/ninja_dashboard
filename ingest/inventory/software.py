@@ -37,7 +37,7 @@ from __future__ import annotations
 
 import logging
 import uuid
-from collections.abc import Iterable, Iterator, Mapping
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
@@ -111,12 +111,46 @@ class ApplyResult:
             f"held_devices={self.held_devices} complete={self.complete}"
         )
 
+    def describe(self, scope: str) -> str:
+        """One plain-English line for the Jobs pages."""
+        if not self.devices:
+            return f"{scope}: no computer reported a software list."
+        text = (
+            f"{scope}: {self.devices:,} computers refreshed. Programs: {self.new:,} new, "
+            f"{self.changed:,} changed, {self.removed:,} removed, {self.unchanged:,} unchanged."
+        )
+        if self.relinked:
+            text += f" {self.relinked:,} version links corrected."
+        if self.held_devices:
+            text += f" {self.held_devices:,} computers held for review."
+        if self.unresolved:
+            text += f" {self.unresolved:,} rows were on Ninja devices not linked to a computer."
+        if not self.complete:
+            text += " Ninja stopped early, so nothing was removed."
+        return text
+
+    def as_result(self, scope: str) -> dict[str, Any]:
+        return {
+            "summary": self.describe(scope),
+            "computers": self.devices,
+            "new": self.new,
+            "changed": self.changed,
+            "removed": self.removed,
+            "unchanged": self.unchanged,
+            "version_links_corrected": self.relinked,
+            "held_computers": self.held_devices,
+            "unlinked_rows": self.unresolved,
+            "complete": self.complete,
+        }
+
 
 # ── Fetch ───────────────────────────────────────────────────────────
 
 
 def pages(
-    client: Any, params: Mapping[str, Any] | None = None
+    client: Any,
+    params: Mapping[str, Any] | None = None,
+    on_page: Callable[[int, int | None], None] | None = None,
 ) -> Iterator[tuple[list, bool]]:
     """Yield ``(results, complete)`` per page of ``/queries/software``.
 
@@ -142,6 +176,8 @@ def pages(
             cursor.get("name"),
         )
         reached = total is None or received >= total
+        if on_page is not None:
+            on_page(received, total)
         if not results or not name:
             yield results, reached
             return
@@ -592,15 +628,27 @@ def load_device_map() -> dict[str, tuple[uuid.UUID, uuid.UUID]]:
         }
 
 
-def fleet_check(client: Any) -> ApplyResult:
-    """Fetch and apply every device's list (the daily completeness check)."""
+def fleet_check(
+    client: Any, count: Callable[[int, int | None, str], None] | None = None
+) -> ApplyResult:
+    """Fetch and apply every device's list (the daily completeness check).
+
+    ``count`` receives (rows received, Ninja's reported total, unit) per page.
+    """
     with run_log("inventory.software") as stats:
         device_map = load_device_map()
         if not device_map:
             raise RuntimeError(
                 "No Ninja-linked computers; the fleet check has nothing to map"
             )
-        result = apply(pages(client), device_map, listed_by="fleet")
+        on_page = (
+            None
+            if count is None
+            else lambda received, total: count(
+                received, total, "software rows from Ninja"
+            )
+        )
+        result = apply(pages(client, on_page=on_page), device_map, listed_by="fleet")
         stats["rows_upserted"] = result.new + result.changed + result.unchanged
         stats["rows_inserted"] = result.new
         log.info("inventory.software fleet check: %s", result.summary())

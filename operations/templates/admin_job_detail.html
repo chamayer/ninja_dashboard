@@ -16,6 +16,9 @@
   .job-state.failed,.job-state.stalled { color:#b91c1c; } .job-state.cancelled { color:#64748b; }
   .job-facts { display:grid; grid-template-columns:repeat(auto-fit,minmax(12rem,1fr)); gap:.7rem; margin:.8rem 0 0; }
   .job-fact span { display:block; color:var(--muted); font-size:.72rem; text-transform:uppercase; letter-spacing:.04em; }
+  .job-progress { display:block; margin-top:.35rem; max-width:22rem; }
+  .job-progress progress { width:100%; height:.6rem; accent-color:#7c3aed; }
+  .job-progress span { display:block; color:var(--muted); font-size:.76rem; }
   .job-links { display:grid; grid-template-columns:repeat(auto-fit,minmax(16rem,1fr)); gap:.7rem; margin-top:.8rem; }
   .job-links > div { border-top:1px solid var(--border); padding-top:.65rem; }
   .job-links h3 { margin:0 0 .35rem; font-size:.82rem; }
@@ -46,6 +49,7 @@
       <div class="job-fact"><span>Started</span>{% if latest_run.started_at %}{{ latest_run.started_at|date:"Y-m-d H:i:s" }}{% else %}Not started{% endif %}</div>
       <div class="job-fact"><span>Finished</span>{% if latest_run.completed_at %}{{ latest_run.completed_at|date:"Y-m-d H:i:s" }}{% else %}Not finished{% endif %}</div>
       {% if latest_run.status == 'running' %}<div class="job-fact"><span>Current stage</span>{{ latest_run.stage }}</div>{% endif %}
+      {% if latest_run.progress %}<div class="job-fact"><span>Progress</span><span class="job-progress">{% if latest_run.progress.total %}<progress max="{{ latest_run.progress.total }}" value="{{ latest_run.progress.done }}" aria-label="Progress">{{ latest_run.progress.percent }}%</progress>{% endif %}<span>{{ latest_run.progress.label }}</span></span></div>{% endif %}
     </div>
     <div class="job-links">
       {% if latest_run.prerequisites %}<div><h3>Waiting for</h3><ul>{% for relation in latest_run.prerequisites %}<li>{% if relation.operator_job_key %}<a href="{% url 'admin_job_detail' job_id=relation.operator_job_key %}?run={{ relation.id }}">{{ relation.name }}</a>{% else %}{{ relation.name }}{% endif %} — {{ relation.status }}</li>{% endfor %}</ul></div>{% endif %}

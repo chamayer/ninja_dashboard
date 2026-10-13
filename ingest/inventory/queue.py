@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import logging
 import re
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 
@@ -222,8 +222,15 @@ def _add(total: _sw.ApplyResult, part: _sw.ApplyResult) -> None:
     total.complete = total.complete and part.complete
 
 
-def drain(client: object, job_run_id: object) -> DrainResult:
-    """Fetch and apply every queued computer, ``BATCH_DEVICES`` per request."""
+def drain(
+    client: object,
+    job_run_id: object,
+    count: Callable[[int, int | None, str], None] | None = None,
+) -> DrainResult:
+    """Fetch and apply every queued computer, ``BATCH_DEVICES`` per request.
+
+    ``count`` receives (requests handled, requests claimed, unit) per batch.
+    """
     recover_stale_entries()
     entries = claim(job_run_id)
     outcome = DrainResult(entries=len(entries), result=_sw.ApplyResult())
@@ -235,6 +242,9 @@ def drain(client: object, job_run_id: object) -> DrainResult:
     )
     usable = [entry for entry in entries if entry.ninja_device_id is not None]
     device_map = _sw.load_device_map()
+    handled = len(unusable)
+    if count is not None:
+        count(handled, len(entries), "computers")
     for start in range(0, len(usable), BATCH_DEVICES):
         batch = usable[start : start + BATCH_DEVICES]
         try:
@@ -244,9 +254,13 @@ def drain(client: object, job_run_id: object) -> DrainResult:
         except Exception as exc:
             log.warning("Software device batch of %d failed: %s", len(batch), exc)
             outcome.failed += _finish(batch, str(exc) or exc.__class__.__name__)
-            continue
-        _add(outcome.result, part)
-        _finish(batch)
+        else:
+            _add(outcome.result, part)
+            _finish(batch)
+        finally:
+            handled += len(batch)
+            if count is not None:
+                count(handled, len(entries), "computers")
     log.info(
         "Software device worker: entries=%d failed=%d %s",
         outcome.entries,

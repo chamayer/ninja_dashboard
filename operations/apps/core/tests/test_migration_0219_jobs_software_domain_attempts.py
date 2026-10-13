@@ -31,5 +31,5 @@ def test_every_domain_claim_records_its_owning_job_attempt():
     assert "INSERT INTO operations.job_domain_attempts" in software
     assert "INSERT INTO operations.job_domain_attempts" in demand
     assert "INSERT INTO operations.job_domain_attempts" in actions
-    assert "main.run_software_queue_once(progress.job_id)" in queue
+    assert "main.run_software_queue_once(progress.job_id, progress.count)" in queue
     assert 'SET LOCAL operations.tenant_id = 1' in software

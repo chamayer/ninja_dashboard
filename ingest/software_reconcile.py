@@ -203,8 +203,35 @@ class RunReport:
     disabled: list[str] = field(default_factory=list)
     unlinked: dict[str, int] = field(default_factory=lambda: defaultdict(int))
 
+    labels: dict[str, str] = field(default_factory=dict)
+
+    def describe(self) -> str:
+        """One plain-English line for the Jobs pages, largest changes first."""
+        opened, resolved = sum(self.opened.values()), sum(self.resolved.values())
+        refreshed = sum(self.refreshed.values())
+        text = f"Software findings: {opened:,} opened, {resolved:,} resolved, {refreshed:,} still current."
+        changes = sorted(
+            (
+                (self.opened.get(name, 0) + self.resolved.get(name, 0), name)
+                for name in set(self.opened) | set(self.resolved)
+            ),
+            reverse=True,
+        )
+        parts = [
+            f"{self.labels.get(name, name.replace('_', ' '))}: "
+            f"+{self.opened.get(name, 0):,} / -{self.resolved.get(name, 0):,}"
+            for total, name in changes if total
+        ]
+        if parts:
+            text += " " + "; ".join(parts[:6]) + ("; ..." if len(parts) > 6 else "") + "."
+        held = sum(self.held_by_limit.values())
+        if held:
+            text += f" {held:,} resolutions held by the close limit for an administrator."
+        return text
+
     def as_result(self) -> dict[str, Any]:
         return {
+            "summary": self.describe(),
             "opened": dict(self.opened),
             "refreshed": dict(self.refreshed),
             "resolved": dict(self.resolved),
@@ -1099,11 +1126,19 @@ def _record_run(tenant_id: int, started_at: datetime, report: RunReport | None,
         log.exception("software_reconcile: run_log write failed")
 
 
-def run(tenant_id: int = 1, *, progress: Callable[[str, str], None] | None = None) -> RunReport:
-    """Rebuild readiness, reconcile every software finding type, write assessments."""
+def run(
+    tenant_id: int = 1,
+    *,
+    progress: Callable[[str, str], None] | None = None,
+    count: Callable[[int, int | None, str], None] | None = None,
+) -> RunReport:
+    """Rebuild readiness, reconcile every software finding type, write assessments.
+
+    ``count`` receives (finding types reconciled, types to reconcile, unit).
+    """
     started_at = datetime.now(timezone.utc)
     try:
-        report = _run(tenant_id, progress)
+        report = _run(tenant_id, progress, count)
     except Exception as exc:
         _record_run(tenant_id, started_at, None, str(exc)[:2000])
         raise
@@ -1111,7 +1146,11 @@ def run(tenant_id: int = 1, *, progress: Callable[[str, str], None] | None = Non
     return report
 
 
-def _run(tenant_id: int, progress: Callable[[str, str], None] | None) -> RunReport:
+def _run(
+    tenant_id: int,
+    progress: Callable[[str, str], None] | None,
+    count: Callable[[int, int | None, str], None] | None = None,
+) -> RunReport:
     def stage(name: str, detail: str) -> None:
         log.info("software_reconcile: %s - %s", name, detail)
         if progress is not None:
@@ -1127,6 +1166,9 @@ def _run(tenant_id: int, progress: Callable[[str, str], None] | None) -> RunRepo
         stage("Loading software evidence", "Titles, versions, intelligence and rules.")
         ctx = load_context(cur, tenant_id, now)
         profile = load_active_profile(cur)
+    report.labels = {
+        name: str(item.get("label") or name) for name, item in profile.definitions.items()
+    }
     stage("Computing desired findings", f"{len(ctx.titles)} titles, {len(ctx.versions)} versions.")
     desired = compute_desired(ctx, report)
 
@@ -1141,15 +1183,20 @@ def _run(tenant_id: int, progress: Callable[[str, str], None] | None) -> RunRepo
     if settings.CAPABILITY_ENFORCEMENT_ENABLED:
         owned |= {"unauthorized_av", "unauthorized_rmm", "unauthorized_remote_access"}
     reconciled: list[int] = []
-    for type_name in sorted(owned & ctx.types.keys()):
-        if type_name in report.disabled:
-            continue
+    to_reconcile = [
+        name for name in sorted(owned & ctx.types.keys()) if name not in report.disabled
+    ]
+    for done, type_name in enumerate(to_reconcile):
+        if count is not None:
+            count(done, len(to_reconcile), "finding types")
         finding_type = ctx.types[type_name]
-        stage("Reconciling findings", type_name.replace("_", " "))
+        stage("Reconciling findings", report.labels.get(type_name, type_name.replace("_", " ")))
         with db.transaction() as cur:
             cur.execute(f"SET LOCAL operations.tenant_id = {int(tenant_id)}")
             reconcile_type(cur, ctx, finding_type, desired.get(type_name, []), report)
         reconciled.append(finding_type.id)
+    if count is not None:
+        count(len(to_reconcile), len(to_reconcile), "finding types")
 
     stage("Recording condition assessments", f"{len(reconciled)} finding types.")
     with db.transaction() as cur:
