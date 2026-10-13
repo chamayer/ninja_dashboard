@@ -61,6 +61,7 @@ from shared.patch_compliance import COMPLIANCE_MISSING_STATUSES, excluded_patch_
 
 from . import capability as capability_evidence
 from . import category as category_evidence
+from . import software_review
 from .client_workspace import (
     build_client_directory,
     build_client_workspace,
@@ -122,6 +123,7 @@ from .models import (
     RequirementProfile,
     SoftwareCatalog,
     SoftwareDecision,
+    SoftwareSuggestionRule,
     Source,
     SuppressionRule,
 )
@@ -16188,177 +16190,75 @@ def client_candidate_fix(request, candidate_id) -> HttpResponse:
 
 @login_required
 def software_decisions_queue(request: HttpRequest) -> HttpResponse:
-    """Review queue: software with open findings that need a decision.
+    """Software review: undecided software, grouped by publisher.
 
-    Grouped by canonical_name; each row shows category, fleet-wide
-    device count, and (if a decision exists) the current disposition.
-    Actions POST to `/software/decisions/<id>/decide` — global,
-    per-client, or per-device scope.
+    Each undecided installed title is one finding (rare on few devices,
+    non-approved above that). Publishers group them, largest decision leverage
+    first; every title keeps its own row, signals and suggestion, with two
+    remediation options: approve the title or approve the publisher.
     """
-    category_filter = request.GET.get("category", "")
-    q_filter = (request.GET.get("q") or "").strip().lower()
-    decision_filter = (request.GET.get("decision") or "").strip().lower()
-    with transaction.atomic():
-        with connection.cursor() as cur:
-            cur.execute("SET LOCAL operations.tenant_id = 1")
-            # Each side is aggregated on its own, then joined.
-            #
-            # Joining `software_installations_current` (529,784 rows) directly
-            # on `f.finding_details->>'canonical_name'` and grouping afterwards
-            # meant evaluating that join across the whole table: no index leads
-            # with `canonical_name` (the two that contain it lead with
-            # client_id/device_id, and the lower(canonical_name) index does not
-            # match this non-lowered predicate). Measured 2026-08-17: 187 s for
-            # this one statement, which is what made the page exceed the
-            # gunicorn worker timeout.
-            #
-            # The device count does not depend on the finding's category, so
-            # aggregating installations by canonical_name first is equivalent
-            # and returns the same rows and the same total (90,891) in 1.4 s.
-            #
-            # The count still comes from installations rather than the exposure
-            # view: this queue is where whitelist_suggestion is decided, and
-            # that type deliberately does not fan out to devices (migration
-            # 084). "How many machines run this" is what the column has always
-            # meant, and it stays correct for every type on the queue.
-            cur.execute(
-                """
-                WITH finding_agg AS (
-                    SELECT f.finding_details->>'canonical_name' AS canonical,
-                           f.finding_details->>'category' AS category,
-                           COALESCE(MAX(f.finding_details->>'publisher'), '') AS publisher,
-                           MAX(f.last_seen_at) AS latest
-                    FROM operations.findings f
-                    JOIN operations.finding_types ft
-                      ON ft.id = f.finding_type_id
-                    WHERE f.tenant_id = 1
-                      AND f.status IN ('open', 'acknowledged')
-                      AND ft.source_module = 'platform.software_findings'
-                      AND f.finding_details->>'canonical_name' IS NOT NULL
-                    GROUP BY 1, 2
-                ),
-                install_agg AS (
-                    SELECT sic.canonical_name,
-                           COUNT(DISTINCT sic.device_id) AS device_count
-                    FROM operations.software_installations_current sic
-                    WHERE sic.tenant_id = 1
-                      AND sic.stale_since IS NULL
-                      AND sic.deleted_at IS NULL
-                      AND sic.canonical_name IN (SELECT canonical FROM finding_agg)
-                    GROUP BY sic.canonical_name
-                ),
-                catalog_agg AS (
-                    SELECT LOWER(sc.canonical_name) AS lname,
-                           MIN(sc.categories::text) AS cats
-                    FROM operations.software_catalog sc
-                    WHERE (sc.tenant_id IS NULL OR sc.tenant_id = 1)
-                      AND LOWER(sc.canonical_name) IN (SELECT LOWER(canonical) FROM finding_agg)
-                    GROUP BY 1
-                )
-                SELECT fa.canonical,
-                       fa.publisher,
-                       fa.category,
-                       ca.cats AS catalog_categories,
-                       COALESCE(ia.device_count, 0) AS device_count,
-                       fa.latest
-                FROM finding_agg fa
-                LEFT JOIN install_agg ia ON ia.canonical_name = fa.canonical
-                LEFT JOIN catalog_agg ca ON ca.lname = LOWER(fa.canonical)
-                ORDER BY device_count DESC, fa.canonical
-                LIMIT 500
-                """,
+    query = (request.GET.get("q") or "").strip()
+    kind = (request.GET.get("kind") or "").strip()
+    suggestion = (request.GET.get("suggestion") or "").strip()
+    try:
+        page_number = int(request.GET.get("page") or 1)
+    except ValueError:
+        page_number = 1
+    with transaction.atomic(), connection.cursor() as cur:
+        cur.execute("SET LOCAL operations.tenant_id = 1")
+        cur.execute(software_review.PROMPTS_SQL, (1,))
+        groups = software_review.build_groups(
+            cur.fetchall(), query=query, kind=kind, suggestion=suggestion
+        )
+        if wants_csv(request):
+            return csv_response(
+                [
+                    {**title, "group_suggestion": group["suggestion_label"]}
+                    for group in groups
+                    for title in group["titles"]
+                ],
+                columns=[
+                    ("Title", "title"),
+                    ("Publisher", "publisher"),
+                    ("Type", "type_label"),
+                    ("Severity", "severity"),
+                    ("Devices", "devices"),
+                    ("Clients", "clients"),
+                    ("Signals", "signals"),
+                    ("Suggested", "suggestion_label"),
+                    ("Publisher suggestion", "group_suggestion"),
+                ],
+                filename_stem="software_review",
             )
-            rows = cur.fetchall()
-
-    # Attach existing decision (global scope) to each row — either a
-    # title-scope decision on the canonical, or a publisher-scope
-    # decision on the observed publisher.
-    canonical_names = [r[0] for r in rows if r[0]]
-    publisher_names = list({r[1] for r in rows if r[1]})
-    title_dec_map = {
-        d.canonical_name.lower(): d
-        for d in SoftwareDecision.objects.filter(
-            tenant_id=1,
-            canonical_name__in=canonical_names,
-            client__isnull=True,
-            device__isnull=True,
-        ).exclude(canonical_name="")
-    }
-    pub_dec_map = {
-        d.publisher.lower(): d
-        for d in SoftwareDecision.objects.filter(
-            tenant_id=1,
-            publisher__in=publisher_names,
-            client__isnull=True,
-            device__isnull=True,
-        ).exclude(publisher="")
-    }
-    display_rows = []
-    for canonical, publisher, category, catalog_cats, device_count, latest in rows:
-        title_dec = title_dec_map.get(canonical.lower()) if canonical else None
-        pub_dec = pub_dec_map.get(publisher.lower()) if publisher else None
-        display_rows.append(
-            {
-                "canonical": canonical,
-                "publisher": publisher or "",
-                "category": category or (catalog_cats or ""),
-                "device_count": device_count,
-                "latest": latest,
-                "global_decision": title_dec.decision if title_dec else "",
-                "publisher_decision": pub_dec.decision if pub_dec else "",
-            }
+        page_groups, page_number, pages = software_review.paginate(groups, page_number)
+        config = EvaluatorConfig.objects.filter(
+            tenant_id=1, evaluator_name="software_classifier"
+        ).first()
+        rare_limit = int(
+            software_settings.effective(config.config if config else {})["rare_max_devices"]
         )
+        software_review.attach_device_targets(cur, 1, page_groups, rare_limit)
 
-    if category_filter:
-        display_rows = [r for r in display_rows if category_filter in (r["category"] or "")]
-    if q_filter:
-        display_rows = [
-            r
-            for r in display_rows
-            if q_filter in (r["canonical"] or "").lower()
-            or q_filter in (r["publisher"] or "").lower()
-        ]
-    if decision_filter == "pending":
-        display_rows = [
-            r for r in display_rows if not r["global_decision"] and not r["publisher_decision"]
-        ]
-    elif decision_filter in ("approve", "reject", "investigate", "approve_publisher"):
-        display_rows = [
-            r
-            for r in display_rows
-            if r["global_decision"] == decision_filter or r["publisher_decision"] == decision_filter
-        ]
-
-    categories_seen = sorted({r["category"] for r in display_rows if r["category"]})
-
-    if wants_csv(request):
-        return csv_response(
-            display_rows,
-            columns=[
-                ("Product", "canonical"),
-                ("Publisher", "publisher"),
-                ("Category", "category"),
-                ("Device count", "device_count"),
-                ("Latest seen", "latest"),
-                ("Product decision", "global_decision"),
-                ("Publisher decision", "publisher_decision"),
-            ],
-            filename_stem="software_decisions",
-        )
-
+    base_query = request.GET.copy()
+    base_query.pop("page", None)
     return render(
         request,
         "software_decisions.html",
         {
             "admin_group": "review",
             "admin_tab": "software",
-            "rows": display_rows,
-            "categories": categories_seen,
-            "active_category": category_filter,
-            "active_q": q_filter,
-            "active_decision": decision_filter,
-            "decision_choices": SoftwareDecision.Decision.choices,
             "software_tab": "decisions",
+            "groups": page_groups,
+            "group_total": len(groups),
+            "title_total": sum(len(group["titles"]) for group in groups),
+            "page": page_number,
+            "pages": pages,
+            "page_query": base_query.urlencode(),
+            "active_q": query,
+            "active_kind": kind,
+            "active_suggestion": suggestion,
+            "suggestion_choices": SoftwareSuggestionRule.Suggestion.choices,
+            "decision_choices": SoftwareDecision.Decision.choices,
         },
     )
 
@@ -16537,10 +16437,18 @@ def software_decision_bulk(request: HttpRequest) -> HttpResponse:
         )
         created += int(was_created)
         updated += int(not was_created)
+    with connection.cursor() as cur:
+        cur.execute("SET LOCAL operations.tenant_id = 1")
+        closed = software_review.resolve_decided_prompts(
+            cur, tenant_id=1, canonical_names=canonical_names, publishers=publishers,
+            decision=decision, actor=request.user.get_username(),
+            decided_at=timezone.now().isoformat(),
+        )
     messages.success(
         request,
         f"{decision}: {created} new, {updated} updated across "
-        f"{len(canonical_names)} product(s) + {len(publishers)} publisher(s).",
+        f"{len(canonical_names)} product(s) + {len(publishers)} publisher(s); "
+        f"{closed} review finding(s) closed.",
     )
     _refresh_software_risk_matview()
     _queue_software_rebuild_after_commit(request.user.id)
@@ -16669,6 +16577,16 @@ def software_decision_create(request: HttpRequest) -> HttpResponse:
         },
     )
     match_key = canonical_name or f"publisher:{publisher}"
+    if scope == "global":
+        with connection.cursor() as cur:
+            cur.execute("SET LOCAL operations.tenant_id = 1")
+            software_review.resolve_decided_prompts(
+                cur, tenant_id=1,
+                canonical_names=[canonical_name] if canonical_name else [],
+                publishers=[publisher] if publisher else [],
+                decision=decision, actor=request.user.get_username(),
+                decided_at=timezone.now().isoformat(),
+            )
     _audit(
         request,
         "software_decision.set",
