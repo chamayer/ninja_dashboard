@@ -341,6 +341,12 @@ def _admit_workflow(
 ) -> None:
     """Create matching successor runs and revision edges atomically."""
     runs = {root_key: root_run_id}
+    # The scope each run in this workflow holds. The database requires an
+    # "inherit" dependent to share its PREREQUISITE's scope, not the root's:
+    # below a tenant-scoped edge (source-refresh -> resolver) the prerequisite is
+    # "tenant:1" even though the root is bound to one source. Sending the
+    # root's scope there made admission raise and failed the whole refresh.
+    scopes = {root_key: root_scope_identity}
     for edge in workflow_edges(root_key, conditions):
         prerequisite_id = runs[edge.prerequisite]
         dependent = definition(edge.dependent)
@@ -353,10 +359,11 @@ def _admit_workflow(
             f"workflow:{root_run_id}:{edge.dependent}:{edge.revision_name}".encode()
         ).hexdigest()
         dependent_scope = (
-            root_scope_identity
+            scopes[edge.prerequisite]
             if edge.scope_mode == "inherit"
             else "tenant:1"
         )
+        scopes[edge.dependent] = dependent_scope
         cur.execute(
             f"SELECT {request_api}(%s, %s, %s, %s, %s, %s, NULL, %s::jsonb, %s::jsonb, %s)",
             (
