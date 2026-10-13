@@ -49,3 +49,13 @@ def test_migration_0287_adds_fenced_progress_counts():
     assert "LEAST(p_done, p_total)" in sql
     assert "TO ninja_ingest;" in sql
     assert migration.Migration.dependencies == [("operations", "0286_software_inventory_policy")]
+
+
+def test_the_computer_page_lists_only_installed_software_and_shows_removals_apart():
+    source = (Path(__file__).resolve().parents[1] / "views.py").read_text(encoding="utf-8")
+    template = (_TEMPLATES / "device_detail.html").read_text(encoding="utf-8")
+    assert "AND installation.stale_since IS NULL" in source
+    assert "FROM operations.software_inventory_devices" in source
+    assert "Removed software (" in template
+    assert "Ninja collected this list" in template
+    assert views._software_removal_reason("ninja.inventory.not_listed") == "No longer listed by Ninja"

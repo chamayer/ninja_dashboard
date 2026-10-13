@@ -479,6 +479,8 @@ def _run_source_refresh(progress: "V1JobProgress") -> JobExecutionResult:
             signals = ("reference_match_data",)
         else:
             signals = ("reference_software_data",)
+            # Reference software data cannot name the titles it affects.
+            _request_whole_fleet_findings(f"source-refresh:{source.source_key}")
     else:
         counts = run_source_observations([source], observed_at)
         rows = sum(counts.values())
@@ -840,12 +842,18 @@ def _execute(job_key: str, progress: V1JobProgress) -> int | JobExecutionResult 
     if job_key == "software-classify":
         return _software_classify_with_intel(progress, matcher, winget, chocolatey, main)
     if job_key in ("software-classify-only", "software-classify-full"):
-        return _software_reconcile(progress)
+        return _software_reconcile(progress, whole_fleet=job_key == "software-classify-full")
     if job_key not in jobs:
         raise ValueError(f"Unknown registered job: {job_key}")
     stage, job = jobs[job_key]
     progress.update(stage, "")
     result = job()
+    if (
+        bool(getattr(result, "material_changed", False))
+        and job_key not in _software_title_scoped_producers()
+        and any(s.successor == "software-classify-only" for s in definition(job_key).successors)
+    ):
+        _request_whole_fleet_findings(job_key)
     if job_key == "patches" and result is False:
         raise RuntimeError("Patch collection could not acquire its database execution lock")
     if isinstance(result, JobExecutionResult):
@@ -858,24 +866,54 @@ def _execute(job_key: str, progress: V1JobProgress) -> int | JobExecutionResult 
     return int(result) if isinstance(result, int) else None
 
 
-def _software_reconcile(progress: V1JobProgress) -> JobExecutionResult:
-    """Reconcile every software finding type and publish the read models.
+def _software_title_scoped_producers() -> frozenset[str]:
+    # Jobs that record the exact titles they changed in the change feed
+    # (inventory apply, vulnerability matching). Every other producer of
+    # software findings input asks for a whole-fleet run.
+    return frozenset({"software-queue-drain", "software-enqueue-orgs", "intel-matcher"})
 
-    One run covers the whole fleet in minutes, so there is no device batch and
-    no continuation request: the routine and the weekly full cadence run the
-    same complete reconciliation.
+
+def _request_whole_fleet_findings(source: str) -> None:
+    from ingest import software_reconcile
+
+    with db.transaction() as cur:
+        cur.execute("SET LOCAL operations.tenant_id = 1")
+        software_reconcile.record_whole_fleet(cur, 1, source)
+
+
+def _software_reconcile(progress: V1JobProgress, *, whole_fleet: bool) -> JobExecutionResult:
+    """Reconcile software findings and publish the exposure read model.
+
+    The routine run (``software-classify-only``) covers only the titles the
+    change feed names (inventory changes, vulnerability matches); a producer
+    that cannot name titles asks for the whole fleet. The full run (daily, and
+    after every decision) always covers the whole fleet. Either way the run
+    clears the change-feed rows it covered, and only after it succeeded.
     """
     from ingest import software_reconcile
     from ingest.inventory import software as software_inventory
 
-    report = software_reconcile.run(1, progress=progress.update, count=progress.count)
+    target_ids, titles = software_reconcile.pending_scope(1, whole_fleet=whole_fleet)
+    if titles == []:
+        software_reconcile.consume_targets(1, target_ids)
+        return JobExecutionResult(
+            rows=0, result={"summary": "No changed software titles to reconcile."}
+        )
+    report = software_reconcile.run(
+        1, progress=progress.update, count=progress.count, titles=titles
+    )
     progress.update(
         "Publishing software status",
         "Making the reconciled findings available to operators.",
     )
-    with db.pool.connection() as conn, conn.cursor() as cur:
-        cur.execute("REFRESH MATERIALIZED VIEW operations.v_software_safety")
+    if titles is None:
+        # The safety read model does not read findings; inventory and decision
+        # changes refresh it themselves. A whole-fleet run also covers
+        # intelligence changes, which it does read.
+        with db.pool.connection() as conn, conn.cursor() as cur:
+            cur.execute("REFRESH MATERIALIZED VIEW operations.v_software_safety")
     software_inventory.refresh_exposure_read_model()
+    software_reconcile.consume_targets(1, target_ids)
     result = report.as_result()
     rows = sum(result["opened"].values()) + sum(result["refreshed"].values()) + sum(
         result["resolved"].values()
@@ -895,4 +933,4 @@ def _software_classify_with_intel(
         ):
             progress.update(stage, "")
             job()
-    return _software_reconcile(progress)
+    return _software_reconcile(progress, whole_fleet=True)

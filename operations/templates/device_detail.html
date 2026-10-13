@@ -215,7 +215,7 @@
     <a class="dd-card" href="?tab=software">
         <div class="lbl">Software inventory</div>
         <div class="val">{% if software_rows %}{{ software_rows|length }}{% if software_rows|length == 300 %}+{% endif %} titles{% else %}Not reported{% endif %}</div>
-        <div class="sub">{% if software_rows %}current installed software{% else %}no current software scan{% endif %}</div>
+        <div class="sub">{% if software_inventory and software_inventory.held_at %}removals held for review{% elif software_inventory and software_inventory.collected_at %}collected by Ninja {{ software_inventory.collected_at|timesince }} ago{% elif software_rows %}current installed software{% else %}no current software scan{% endif %}</div>
     </a>
     <a class="dd-card {% if agent_summary.present < agent_summary.required %}warn{% endif %}" href="#agent-requirements">
         <div class="lbl">Agent status</div>
@@ -480,6 +480,15 @@
         ({{ software_rows|length }}{% if software_rows|length == 300 %}+{% endif %})
       </span>
     </h2>
+    {% if software_inventory %}
+    <p class="muted" style="margin:0 0 .6rem; font-size:.85rem;">
+        Ninja collected this list {% if software_inventory.collected_at %}{{ software_inventory.collected_at|date:"Y-m-d H:i" }} ({{ software_inventory.collected_at|timesince }} ago){% else %}at an unknown time{% endif %}.
+        Operations last received it {{ software_inventory.listed_at|date:"Y-m-d H:i" }} through a {{ software_inventory.listed_by }} ({{ software_inventory.listed_count }} programs).
+        {% if software_inventory.held_at %}<br><strong>Removals are held since {{ software_inventory.held_at|date:"Y-m-d H:i" }}:</strong> {{ software_inventory.held_reason }} <a href="{% url 'software_policy_config' %}">Review</a>{% endif %}
+    </p>
+    {% else %}
+    <p class="muted" style="margin:0 0 .6rem; font-size:.85rem;">Ninja has not sent a software list for this computer since the inventory rebuild.</p>
+    {% endif %}
     <div style="margin-bottom: 0.5rem;">
         <input type="search" id="sw-filter" placeholder="Filter software…"
                oninput="swFilter(this.value)"
@@ -526,6 +535,19 @@
     </table>
     {% else %}
     <p class="muted">No software installations recorded.</p>
+    {% endif %}
+    {% if removed_software %}
+    <details style="margin-top:1rem;">
+        <summary>Removed software ({{ removed_software|length }}{% if removed_software|length == 200 %}+{% endif %})</summary>
+        <table data-sortable style="width:100%; margin-top:.5rem;">
+            <thead><tr><th>Name</th><th>Publisher</th><th>Version</th><th class="num">Removed</th><th>Why</th></tr></thead>
+            <tbody>
+            {% for s in removed_software %}
+            <tr><td>{{ s.name }}</td><td class="muted">{{ s.publisher|default:"—" }}</td><td class="muted">{{ s.version|default:"—" }}</td><td class="muted num">{{ s.removed_at|date:"Y-m-d H:i" }}</td><td class="muted">{{ s.reason }}</td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </details>
     {% endif %}
 </div>
 <script>

@@ -161,6 +161,9 @@ def pages(
     cursor_name: str | None = None
     received = 0
     last_offset = -1
+    # Ninja's last page can come back empty without a cursor, so the total it
+    # reported on earlier pages is what completeness is measured against.
+    known_total: int | None = None
     for _ in range(MAX_PAGES):
         query = dict(params or {})
         query["pageSize"] = PAGE_SIZE
@@ -175,9 +178,11 @@ def pages(
             cursor.get("count"),
             cursor.get("name"),
         )
-        reached = total is None or received >= total
+        if total is not None:
+            known_total = total
+        reached = known_total is None or received >= known_total
         if on_page is not None:
-            on_page(received, total)
+            on_page(received, known_total)
         if not results or not name:
             yield results, reached
             return
@@ -351,6 +356,15 @@ WITH removed AS (
        AND h.canonical_name = r.canonical_name AND h.effective_to IS NULL
     RETURNING 1
 )
+, targeted AS (
+    INSERT INTO operations.software_reclassification_targets
+        (tenant_id, target_key, canonical_name, source)
+    SELECT DISTINCT %(tenant_id)s, left('name:' || lower(canonical_name), 300), lower(canonical_name), 'inventory'
+      FROM removed
+     WHERE canonical_name <> ''
+    ON CONFLICT (tenant_id, target_key, source) WHERE consumed_at IS NULL DO NOTHING
+    RETURNING 1
+)
 SELECT (SELECT COUNT(*) FROM removed)
 """
 
@@ -449,13 +463,38 @@ ON CONFLICT (tenant_id, client_id, device_id, canonical_name) DO UPDATE SET
 # the wrong version. Clearing it lets the catalog projection, which links every
 # unlinked installation by its current version, relink it in the same run.
 RELINK_SQL = """
-UPDATE operations.software_installations_current c
-   SET software_version_id = NULL
-  FROM catalog.software_versions v
- WHERE c.tenant_id = %(tenant_id)s
-   AND c.device_id IN (SELECT device_id FROM inventory_devices)
-   AND v.id = c.software_version_id
-   AND v.version IS DISTINCT FROM COALESCE(c.version, '')
+WITH relinked AS (
+    UPDATE operations.software_installations_current c
+       SET software_version_id = NULL
+      FROM catalog.software_versions v
+     WHERE c.tenant_id = %(tenant_id)s
+       AND c.device_id IN (SELECT device_id FROM inventory_devices)
+       AND v.id = c.software_version_id
+       AND v.version IS DISTINCT FROM COALESCE(c.version, '')
+    RETURNING c.canonical_name
+), targeted AS (
+    INSERT INTO operations.software_reclassification_targets
+        (tenant_id, target_key, canonical_name, source)
+    SELECT DISTINCT %(tenant_id)s, left('name:' || lower(canonical_name), 300), lower(canonical_name), 'inventory'
+      FROM relinked
+     WHERE canonical_name <> ''
+    ON CONFLICT (tenant_id, target_key, source) WHERE consumed_at IS NULL DO NOTHING
+    RETURNING 1
+)
+SELECT (SELECT COUNT(*) FROM relinked)
+"""
+
+# The change feed for the software findings run: every title with a new or
+# changed installation (removals and relinks are recorded by their own
+# statements). The findings run reconciles only these titles.
+CHANGED_TITLES_SQL = """
+INSERT INTO operations.software_reclassification_targets
+        (tenant_id, target_key, canonical_name, source)
+    SELECT DISTINCT %(tenant_id)s, left('name:' || lower(canonical_name), 300), lower(canonical_name), 'inventory'
+      FROM inventory_delta
+     WHERE kind <> 'unchanged' AND canonical_name <> ''
+    ON CONFLICT (tenant_id, target_key, source) WHERE consumed_at IS NULL DO NOTHING
+    RETURNING 1
 """
 
 DEVICES_SQL = """
@@ -600,7 +639,8 @@ def apply(
         cur.execute(OPEN_INTERVALS_SQL, params)
         cur.execute(CURRENT_SQL, params)
         cur.execute(RELINK_SQL, params)
-        result.relinked = cur.rowcount
+        result.relinked = int(cur.fetchone()[0])
+        cur.execute(CHANGED_TITLES_SQL, params)
         cur.execute(DEVICES_SQL, params)
     log.info("inventory.software apply (%s): %s", listed_by, result.summary())
     return result
@@ -658,6 +698,66 @@ def fleet_check(
                 "were applied, removals were not."
             )
         return result
+
+
+FRESHNESS_SQL = """
+SELECT count(*) FILTER (WHERE s.collected_at >= now() - interval '24 hours'),
+       count(*) FILTER (WHERE s.collected_at < now() - interval '24 hours'
+                          AND s.collected_at >= now() - interval '7 days'),
+       count(*) FILTER (WHERE s.collected_at < now() - interval '7 days'),
+       count(*) FILTER (WHERE s.collected_at IS NULL),
+       (SELECT count(DISTINCT i.device_id)
+          FROM operations.software_installations_current i
+         WHERE i.tenant_id = %(tenant_id)s AND i.deleted_at IS NULL AND i.stale_since IS NULL
+           AND NOT EXISTS (SELECT 1 FROM operations.software_inventory_devices d
+                            WHERE d.tenant_id = i.tenant_id AND d.device_id = i.device_id
+                              AND d.listed_at >= %(since)s))
+  FROM operations.software_inventory_devices s
+ WHERE s.tenant_id = %(tenant_id)s AND s.listed_at >= %(since)s
+"""
+
+
+def freshness(since: datetime) -> dict[str, int]:
+    """How old Ninja's lists were for the computers listed since ``since``.
+
+    Also counts computers that still have installed software but sent no list,
+    which keep their inventory (absence of data is not removal).
+    """
+    with db.transaction() as cur:
+        cur.execute(_GUC)
+        cur.execute(FRESHNESS_SQL, {"tenant_id": TENANT_ID, "since": since})
+        within_day, within_week, older, unknown, silent = cur.fetchone()
+    return {
+        "collected_within_24h": int(within_day),
+        "collected_1_to_7_days": int(within_week),
+        "collected_over_7_days": int(older),
+        "collected_unknown": int(unknown),
+        "computers_not_reporting": int(silent),
+    }
+
+
+def describe_freshness(stats: Mapping[str, int]) -> str:
+    listed = sum(
+        stats[key]
+        for key in (
+            "collected_within_24h",
+            "collected_1_to_7_days",
+            "collected_over_7_days",
+            "collected_unknown",
+        )
+    )
+    if not listed:
+        return ""
+    text = (
+        f"Ninja had collected {stats['collected_within_24h'] * 100 // listed}% of these lists "
+        f"within 24 hours; {stats['collected_over_7_days']:,} were over 7 days old."
+    )
+    if stats["computers_not_reporting"]:
+        text += (
+            f" {stats['computers_not_reporting']:,} computers with installed software sent no "
+            "list and keep their inventory."
+        )
+    return text
 
 
 def device_filter(ninja_device_ids: Iterable[int]) -> str:

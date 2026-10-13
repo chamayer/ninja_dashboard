@@ -270,7 +270,7 @@ def test_close_limit_holds_large_resolutions(counts, allow, closes):
 def test_jobs_run_the_reconcile_without_device_batches():
     source = (_ROOT / "ingest" / "operator_job_queue.py").read_text(encoding="utf-8")
     assert 'if job_key in ("software-classify-only", "software-classify-full"):' in source
-    assert "return _software_reconcile(progress)" in source
+    assert 'return _software_reconcile(progress, whole_fleet=job_key == "software-classify-full")' in source
     assert "incremental classifier continuation" not in source
     registry = (_ROOT / "shared" / "jobs_registry.py").read_text(encoding="utf-8")
     assert registry.count('"ingest.software_reconcile.run",') == 2
@@ -296,7 +296,49 @@ def test_a_findings_run_describes_itself_with_policy_labels():
     report.resolved["rare_recent"] = 3
     report.refreshed["vulnerable_software"] = 400
     text = report.describe()
-    assert text.startswith("Software findings: 41 opened, 3 resolved, 400 still current.")
+    assert text.startswith("Software findings (whole fleet): 41 opened, 3 resolved, 400 still current.")
+    report.scope_titles = 12
+    assert report.describe().startswith("Software findings (12 changed titles):")
     assert "Rejected software is installed: +41 / -0" in text
     assert "rare recent: +0 / -3" in text
-    assert report.as_result()["summary"] == text
+    assert report.as_result()["summary"] == report.describe()
+
+
+# ── Changed-only runs ─────────────────────────────────────────────────
+
+
+def test_a_run_without_named_titles_covers_the_whole_fleet():
+    assert sr.scope_from_targets([]) is None
+    assert sr.scope_from_targets([("1", "name:a", "a", None), ("2", "all", "*", None)]) is None
+
+
+def test_named_titles_and_matched_versions_form_the_scope():
+    targets = [("1", "name:zoom", "zoom", None), ("2", "version:9", "", 9)]
+    assert sr.scope_from_targets(targets, ["7-zip"]) == ["7-zip", "zoom"]
+
+
+def test_scoped_queries_filter_by_title_and_whole_fleet_queries_do_not():
+    assert "ANY(%(titles)s)" in sr.scoped(sr.TITLE_FACTS_SQL, ["a"])
+    assert "lower(match.canonical_name) = ANY(%(titles)s)" in sr.scoped(sr.VULNERABLE_SQL, ["a"])
+    for sql in (sr.TITLE_FACTS_SQL, sr.VERSION_FACTS_SQL, sr.VULNERABLE_SQL,
+                sr.PATH_INSTALLS_SQL, sr.CAPABILITY_INSTALLS_SQL):
+        assert "/*" in sql
+        assert "titles" not in sr.scoped(sql, None)
+
+
+def test_a_scoped_reconcile_never_resolves_findings_of_other_titles():
+    source = (_ROOT / "ingest" / "software_reconcile.py").read_text(encoding="utf-8")
+    body = source[source.index("def reconcile_type("):source.index("# ── Assessments")]
+    guard = "lower(finding.finding_details->>'canonical_name') = ANY(%(titles)s::text[])"
+    # Regrain, close-limit count and resolution all carry the title guard.
+    assert body.count(guard) == 3
+    assert sr.ACTIVE_FINDINGS_SQL.count(guard) == 1
+    assert sr.READY_EXPOSURE_SQL.count(guard) == 1
+
+
+def test_only_title_naming_producers_skip_the_whole_fleet_request():
+    from ingest import operator_job_queue
+
+    assert operator_job_queue._software_title_scoped_producers() == {
+        "software-queue-drain", "software-enqueue-orgs", "intel-matcher",
+    }

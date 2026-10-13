@@ -366,14 +366,21 @@ def run_software_fleet_check_once(count=None) -> operator_job_queue.JobExecution
     """
     if not settings.SOFTWARE_QUEUE_ENABLED:
         return None
+    started = datetime.now(timezone.utc)
     with _ninja_client() as client:
         result = software_ingest.fleet_check(client, count)
     if result.material_changed:
         software_ingest.refresh_read_models()
+    details = result.as_result("Full check")
+    stats = software_ingest.freshness(started)
+    details["freshness"] = stats
+    freshness_text = software_ingest.describe_freshness(stats)
+    if freshness_text:
+        details["summary"] = f"{details['summary']} {freshness_text}"
     return operator_job_queue.JobExecutionResult(
         rows=result.devices,
         signals=("material_change",) if result.material_changed else (),
-        result=result.as_result("Full check"),
+        result=details,
     )
 
 

@@ -2947,6 +2947,8 @@ def device_detail(request: HttpRequest, org_slug: str, device_id: str) -> HttpRe
 
     observations = []
     software_rows = []
+    removed_software: list[dict] = []
+    software_inventory: dict | None = None
     patch_rows = []
     patching = None
     windows_servicing = None
@@ -3031,12 +3033,50 @@ def device_detail(request: HttpRequest, org_slug: str, device_id: str) -> HttpRe
                  WHERE installation.tenant_id = %s
                    AND installation.device_id = %s
                    AND installation.deleted_at IS NULL
+                   AND installation.stale_since IS NULL
                  ORDER BY installation.canonical_name
                 LIMIT 300
                 """,
                 [1, str(device.id)],
             )
             software_rows = cur.fetchall()
+
+            # Programs Ninja no longer lists for this computer, newest first.
+            cur.execute(
+                """
+                SELECT canonical_name, publisher, version, stale_since, stale_reason
+                  FROM operations.software_installations_current
+                 WHERE tenant_id = %s AND device_id = %s
+                   AND deleted_at IS NULL AND stale_since IS NOT NULL
+                 ORDER BY stale_since DESC, canonical_name
+                 LIMIT 200
+                """,
+                [1, str(device.id)],
+            )
+            removed_software = [
+                {"name": r[0], "publisher": r[1], "version": r[2], "removed_at": r[3],
+                 "reason": _software_removal_reason(r[4])}
+                for r in cur.fetchall()
+            ]
+
+            # When Ninja last collected this computer's software list.
+            cur.execute(
+                """
+                SELECT collected_at, listed_at, listed_count, listed_by, held_at, held_reason
+                  FROM operations.software_inventory_devices
+                 WHERE tenant_id = %s AND device_id = %s
+                """,
+                [1, str(device.id)],
+            )
+            inventory_row = cur.fetchone()
+            if inventory_row:
+                software_inventory = {
+                    "collected_at": inventory_row[0], "listed_at": inventory_row[1],
+                    "listed_count": inventory_row[2],
+                    "listed_by": "full check" if inventory_row[3] == "fleet"
+                    else "software change",
+                    "held_at": inventory_row[4], "held_reason": inventory_row[5],
+                }
 
             cur.execute(
                 """
@@ -3698,6 +3738,8 @@ def device_detail(request: HttpRequest, org_slug: str, device_id: str) -> HttpRe
             "active_findings": active_findings,
             "observations": observations,
             "software_rows": software_view,
+            "removed_software": removed_software,
+            "software_inventory": software_inventory,
             "patch_rows": patch_rows,
             "patching": patching,
             "windows_servicing": windows_servicing,
@@ -8872,6 +8914,14 @@ _MANAGED_SCHEDULE_REASON = "Managed by its operation entry point."
 # Placeholder older runs recorded as their stage detail; never shown.
 _NO_MEASURABLE_TOTAL = "This job does not publish a measurable work total."
 _WORKER_RESTART_INTERRUPTION = "Jobs worker shutdown interrupted the handler"
+
+
+def _software_removal_reason(reason: str) -> str:
+    """Plain wording for why an installation left the current inventory."""
+    return {
+        "ninja.inventory.not_listed": "No longer listed by Ninja",
+        "ninja.ingest.complete_snapshot_missing": "Missing from a full Ninja snapshot",
+    }.get(reason or "", reason or "Removed")
 
 
 def _run_progress(done, total, unit) -> dict | None:
@@ -17770,6 +17820,8 @@ def classifier_config(request: HttpRequest) -> HttpResponse:
                 merged,
                 entity_type="evaluator_config",
             )
+            # Settings change what every title's findings should be.
+            _queue_software_rebuild_after_commit(request.user.id)
             messages.info(request, "Classifier configuration saved.")
         else:
             messages.info(request, "No classifier settings changed.")

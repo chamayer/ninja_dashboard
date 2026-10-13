@@ -85,7 +85,7 @@ WITH installs AS (
       LEFT JOIN catalog.software_versions version ON version.id = i.software_version_id
       LEFT JOIN catalog.products product ON product.id = version.product_id
       {EFFECTIVE_DECISION_JOINS}
-     WHERE {_LIVE} AND i.canonical_name <> ''
+     WHERE {_LIVE} AND i.canonical_name <> '' /*title_scope*/
 )
 SELECT title_key,
        max(canonical_name) AS canonical_name,
@@ -114,7 +114,7 @@ SELECT lower(i.canonical_name) AS title_key, version.version_uuid,
        max(version.version) AS version, count(DISTINCT i.device_id) AS devices
   FROM operations.software_installations_current i
   JOIN catalog.software_versions version ON version.id = i.software_version_id
- WHERE {_LIVE} AND i.canonical_name <> '' AND version.version_uuid IS NOT NULL
+ WHERE {_LIVE} AND i.canonical_name <> '' AND version.version_uuid IS NOT NULL /*title_scope*/
  GROUP BY lower(i.canonical_name), version.version_uuid
 """
 
@@ -122,7 +122,7 @@ VULNERABLE_SQL = """
 SELECT lower(match.canonical_name), cve.cve_id, cve.cvss_v3, cve.epss_score, cve.kev_flag
   FROM operations.cve_match match
   JOIN intel.cves cve ON cve.cve_id = match.cve_id
- WHERE match.tenant_id = %(tenant_id)s
+ WHERE match.tenant_id = %(tenant_id)s /*match_scope*/
    AND (cve.kev_flag OR cve.cvss_v3 >= %(cvss_cutoff)s)
 """
 
@@ -145,7 +145,7 @@ SELECT i.installation_uuid, i.device_id, i.client_id, lower(i.canonical_name),
        {_TITLE_DECISION}, {_PUBLISHER_DECISION}
   FROM operations.software_installations_current i
   {EFFECTIVE_DECISION_JOINS}
- WHERE {_LIVE} AND lower(i.install_location) = ANY(%(locations)s)
+ WHERE {_LIVE} AND lower(i.install_location) = ANY(%(locations)s) /*title_scope*/
    AND i.installation_uuid IS NOT NULL
 """
 
@@ -157,7 +157,7 @@ SELECT i.device_id, i.client_id, lower(i.canonical_name), i.canonical_name,
   JOIN catalog.software_versions version ON version.id = i.software_version_id
   JOIN catalog.products product ON product.id = version.product_id
   {EFFECTIVE_DECISION_JOINS}
- WHERE {_LIVE} AND product.product_uuid = ANY(%(products)s)
+ WHERE {_LIVE} AND product.product_uuid = ANY(%(products)s) /*title_scope*/
 """
 
 TYPES_SQL = """
@@ -204,12 +204,20 @@ class RunReport:
     unlinked: dict[str, int] = field(default_factory=lambda: defaultdict(int))
 
     labels: dict[str, str] = field(default_factory=dict)
+    scope_titles: int | None = None
 
     def describe(self) -> str:
         """One plain-English line for the Jobs pages, largest changes first."""
         opened, resolved = sum(self.opened.values()), sum(self.resolved.values())
         refreshed = sum(self.refreshed.values())
-        text = f"Software findings: {opened:,} opened, {resolved:,} resolved, {refreshed:,} still current."
+        scope = (
+            "whole fleet" if self.scope_titles is None
+            else f"{self.scope_titles:,} changed title{'s' if self.scope_titles != 1 else ''}"
+        )
+        text = (
+            f"Software findings ({scope}): {opened:,} opened, {resolved:,} resolved, "
+            f"{refreshed:,} still current."
+        )
         changes = sorted(
             (
                 (self.opened.get(name, 0) + self.resolved.get(name, 0), name)
@@ -597,7 +605,18 @@ def _permitted(authorizations: dict, sanctioned: dict, client_id: Any, capabilit
 # ── Loading ────────────────────────────────────────────────────────────
 
 
-def load_context(cur: Any, tenant_id: int, now: datetime) -> Context:
+def scoped(sql: str, titles: list[str] | None) -> str:
+    """Limit a query to the given title keys; None keeps the whole fleet."""
+    if titles is None:
+        return sql.replace("/*title_scope*/", "").replace("/*match_scope*/", "")
+    return sql.replace(
+        "/*title_scope*/", "AND lower(i.canonical_name) = ANY(%(titles)s)"
+    ).replace("/*match_scope*/", "AND lower(match.canonical_name) = ANY(%(titles)s)")
+
+
+def load_context(
+    cur: Any, tenant_id: int, now: datetime, scope_titles: list[str] | None = None
+) -> Context:
     from ingest.software_findings import (
         _capability_schema_ready,
         _load_authorizations,
@@ -612,7 +631,7 @@ def load_context(cur: Any, tenant_id: int, now: datetime) -> Context:
     )
     row = cur.fetchone()
     cfg = software_settings.effective(row[0] if row and isinstance(row[0], dict) else {})
-    params = {"tenant_id": tenant_id}
+    params = {"tenant_id": tenant_id, "titles": scope_titles}
 
     cur.execute(TYPES_SQL)
     types = {r[1]: FindingType(*r) for r in cur.fetchall()}
@@ -626,13 +645,13 @@ def load_context(cur: Any, tenant_id: int, now: datetime) -> Context:
     )
     suggestion_rules = [tuple(r) for r in cur.fetchall()]
 
-    cur.execute(TITLE_FACTS_SQL, params)
+    cur.execute(scoped(TITLE_FACTS_SQL, scope_titles), params)
     columns = [d[0] for d in cur.description]
     titles = {r[0]: dict(zip(columns, r)) for r in cur.fetchall()}
-    cur.execute(VERSION_FACTS_SQL, params)
+    cur.execute(scoped(VERSION_FACTS_SQL, scope_titles), params)
     versions = [(r[0], str(r[1]), r[2] or "", int(r[3])) for r in cur.fetchall()]
 
-    cur.execute(VULNERABLE_SQL, {**params, "cvss_cutoff": float(cfg["vulnerable_software_cvss_cutoff"])})
+    cur.execute(scoped(VULNERABLE_SQL, scope_titles), {**params, "cvss_cutoff": float(cfg["vulnerable_software_cvss_cutoff"])})
     vulnerable: dict[str, dict[str, Any]] = {}
     cutoff = float(cfg["vulnerable_software_cvss_cutoff"])
     for title_key, cve_id, cvss, epss, kev in cur.fetchall():
@@ -667,7 +686,7 @@ def load_context(cur: Any, tenant_id: int, now: datetime) -> Context:
     locations = [r[0] for r in cur.fetchall() if path_rule(r[0])]
     path_installs: list[tuple] = []
     if locations:
-        cur.execute(PATH_INSTALLS_SQL, {**params, "locations": locations})
+        cur.execute(scoped(PATH_INSTALLS_SQL, scope_titles), {**params, "locations": locations})
         path_installs = list(cur.fetchall())
 
     capabilities: dict = {}
@@ -680,7 +699,7 @@ def load_context(cur: Any, tenant_id: int, now: datetime) -> Context:
         sanctioned = _load_sanctioned_product_identities(cur, tenant_id)
         alertable = [p for p, caps in capabilities.items() if any(c["alertable"] for c in caps)]
         if alertable:
-            cur.execute(CAPABILITY_INSTALLS_SQL, {**params, "products": alertable})
+            cur.execute(scoped(CAPABILITY_INSTALLS_SQL, scope_titles), {**params, "products": alertable})
             capability_installs = list(cur.fetchall())
 
     return Context(
@@ -705,8 +724,14 @@ def reconcile_type(
     finding_type: FindingType,
     rows: list[Desired],
     report: RunReport,
+    titles: list[str] | None = None,
 ) -> None:
-    """Open, refresh and resolve one type's findings against its desired set."""
+    """Open, refresh and resolve one type's findings against its desired set.
+
+    With ``titles`` only findings of those title keys are compared: the desired
+    set was computed for them alone, so findings of other titles are outside
+    this run and stay as they are.
+    """
     tid, now = ctx.tenant_id, ctx.now
     cur.execute(
         "CREATE TEMP TABLE IF NOT EXISTS software_desired ("
@@ -783,8 +808,10 @@ def reconcile_type(
          WHERE finding.tenant_id = %(tid)s AND finding.finding_type_id = %(type_id)s
            AND finding.status = ANY(%(resolvable)s)
            AND finding.subject_type <> %(scope)s
+           AND (%(titles)s::text[] IS NULL OR lower(finding.finding_details->>'canonical_name') = ANY(%(titles)s::text[]))
         """,
         {
+            "titles": titles,
             "now": now, "tid": tid, "type_id": finding_type.id,
             "resolvable": list(RESOLVABLE_STATUSES), "scope": finding_type.subject_scope,
             "resolution": json.dumps({"resolution": {
@@ -804,8 +831,10 @@ def reconcile_type(
           LEFT JOIN software_desired desired ON desired.condition_key = finding.condition_key
          WHERE finding.tenant_id = %(tid)s AND finding.finding_type_id = %(type_id)s
            AND finding.status = ANY(%(resolvable)s)
+           AND (%(titles)s::text[] IS NULL OR lower(finding.finding_details->>'canonical_name') = ANY(%(titles)s::text[]))
         """,
-        {"tid": tid, "type_id": finding_type.id, "resolvable": list(RESOLVABLE_STATUSES)},
+        {"tid": tid, "type_id": finding_type.id, "resolvable": list(RESOLVABLE_STATUSES),
+         "titles": titles},
     )
     to_close, open_total = cur.fetchone()
     limit = int(ctx.cfg["reconcile_max_close_percent"])
@@ -829,8 +858,9 @@ def reconcile_type(
                SELECT 1 FROM software_desired desired
                 WHERE desired.condition_key = finding.condition_key
            )
+           AND (%(titles)s::text[] IS NULL OR lower(finding.finding_details->>'canonical_name') = ANY(%(titles)s::text[]))
         """,
-        {"now": now, "tid": tid, "type_id": finding_type.id,
+        {"now": now, "tid": tid, "type_id": finding_type.id, "titles": titles,
          "resolvable": list(RESOLVABLE_STATUSES), "resolution": json.dumps(resolution)},
     )
     report.resolved[finding_type.name] += max(cur.rowcount, 0)
@@ -849,6 +879,7 @@ SELECT finding.id::text, finding_type.id, finding_type.name, finding.condition_k
    AND installation.installation_uuid = finding.subject_id
  WHERE finding.tenant_id = %(tid)s AND finding_type.id = ANY(%(type_ids)s)
    AND finding.status = ANY(%(active)s)
+   AND (%(titles)s::text[] IS NULL OR lower(finding.finding_details->>'canonical_name') = ANY(%(titles)s::text[]))
 """
 
 # Any ready device among a title-level finding's installations, per finding.
@@ -859,6 +890,7 @@ WITH title_findings AS (
      WHERE finding.tenant_id = %(tid)s AND finding.finding_type_id = ANY(%(type_ids)s)
        AND finding.status = ANY(%(active)s)
        AND finding.subject_type IN ('software_product', 'software_version')
+       AND (%(titles)s::text[] IS NULL OR lower(finding.finding_details->>'canonical_name') = ANY(%(titles)s::text[]))
 ), exposed AS (
     SELECT finding.id, installation.device_id, finding.finding_type_id
       FROM title_findings finding
@@ -1011,8 +1043,12 @@ def assessment_rows(
     return participants, assessments
 
 
-def write_assessments(cur: Any, ctx: Context, type_ids: list[int], profile: Any) -> int:
-    params = {"tid": ctx.tenant_id, "type_ids": type_ids, "active": list(ACTIVE_STATUSES)}
+def write_assessments(
+    cur: Any, ctx: Context, type_ids: list[int], profile: Any, titles: list[str] | None = None
+) -> int:
+    """Rewrite participants and assessments of the run's findings (``titles`` scopes it)."""
+    params = {"tid": ctx.tenant_id, "type_ids": type_ids, "active": list(ACTIVE_STATUSES),
+              "titles": titles}
     cur.execute(ACTIVE_FINDINGS_SQL, params)
     findings = cur.fetchall()
     cur.execute(READY_EXPOSURE_SQL, params)
@@ -1100,6 +1136,91 @@ def write_assessments(cur: Any, ctx: Context, type_ids: list[int], profile: Any)
     return len(assessments)
 
 
+# ── Change feed ────────────────────────────────────────────────────────
+#
+# ``operations.software_reclassification_targets`` says which titles changed:
+# the inventory apply records titles with new, changed, removed or relinked
+# installations; vulnerability matching records titles and versions whose
+# matches changed. A producer that cannot name titles (threat feeds, catalog
+# projections) records the whole-fleet marker. The routine findings run
+# reconciles just the named titles; the daily full run and every decision run
+# cover everything and clear whatever is pending.
+
+WHOLE_FLEET_KEY = "all"
+
+PENDING_TARGETS_SQL = """
+SELECT target.id, target.target_key, lower(target.canonical_name), target.software_version_id
+  FROM operations.software_reclassification_targets target
+ WHERE target.tenant_id = %(tid)s AND target.consumed_at IS NULL
+"""
+
+VERSION_TITLES_SQL = """
+SELECT DISTINCT lower(installation.canonical_name)
+  FROM operations.software_installations_current installation
+ WHERE installation.tenant_id = %(tid)s
+   AND installation.software_version_id = ANY(%(versions)s)
+"""
+
+CONSUME_TARGETS_SQL = """
+UPDATE operations.software_reclassification_targets
+   SET consumed_at = now()
+ WHERE tenant_id = %(tid)s AND id = ANY(%(ids)s::uuid[]) AND consumed_at IS NULL
+"""
+
+RECORD_WHOLE_FLEET_SQL = """
+INSERT INTO operations.software_reclassification_targets
+    (tenant_id, target_key, canonical_name, source)
+VALUES (%(tid)s, 'all', '*', %(source)s)
+ON CONFLICT (tenant_id, target_key, source) WHERE consumed_at IS NULL DO NOTHING
+"""
+
+
+def scope_from_targets(
+    targets: Iterable[tuple], version_titles: Iterable[str] = ()
+) -> list[str] | None:
+    """Title keys to reconcile, or None for the whole fleet. Pure.
+
+    No pending target means the run was not asked for specific titles (a
+    manual run, a schedule, a recovery), so it covers the fleet.
+    """
+    targets = list(targets)
+    if not targets or any(row[1] == WHOLE_FLEET_KEY for row in targets):
+        return None
+    titles = {row[2] for row in targets if row[2] and row[2] != "*"}
+    titles.update(title for title in version_titles if title)
+    return sorted(titles)
+
+
+def pending_scope(tenant_id: int, *, whole_fleet: bool) -> tuple[list[str], list[str] | None]:
+    """(target ids this run will consume, title scope or None for the fleet)."""
+    with db.transaction() as cur:
+        cur.execute(f"SET LOCAL operations.tenant_id = {int(tenant_id)}")
+        cur.execute(PENDING_TARGETS_SQL, {"tid": tenant_id})
+        targets = cur.fetchall()
+        ids = [str(row[0]) for row in targets]
+        if whole_fleet:
+            return ids, None
+        versions = [row[3] for row in targets if row[3] is not None]
+        version_titles: list[str] = []
+        if versions and not any(row[1] == WHOLE_FLEET_KEY for row in targets):
+            cur.execute(VERSION_TITLES_SQL, {"tid": tenant_id, "versions": versions})
+            version_titles = [row[0] for row in cur.fetchall()]
+    return ids, scope_from_targets(targets, version_titles)
+
+
+def consume_targets(tenant_id: int, ids: list[str]) -> None:
+    if not ids:
+        return
+    with db.transaction() as cur:
+        cur.execute(f"SET LOCAL operations.tenant_id = {int(tenant_id)}")
+        cur.execute(CONSUME_TARGETS_SQL, {"tid": tenant_id, "ids": ids})
+
+
+def record_whole_fleet(cur: Any, tenant_id: int, source: str) -> None:
+    """Ask the next findings run to cover the whole fleet (``source`` names why)."""
+    cur.execute(RECORD_WHOLE_FLEET_SQL, {"tid": tenant_id, "source": source[:80]})
+
+
 # ── Entry point ────────────────────────────────────────────────────────
 
 
@@ -1131,14 +1252,18 @@ def run(
     *,
     progress: Callable[[str, str], None] | None = None,
     count: Callable[[int, int | None, str], None] | None = None,
+    titles: list[str] | None = None,
 ) -> RunReport:
     """Rebuild readiness, reconcile every software finding type, write assessments.
 
+    ``titles`` limits the run to those title keys (lower-cased canonical names):
+    their evidence is loaded, their findings reconciled and re-assessed, and
+    every other finding is left as it is. None runs the whole fleet.
     ``count`` receives (finding types reconciled, types to reconcile, unit).
     """
     started_at = datetime.now(timezone.utc)
     try:
-        report = _run(tenant_id, progress, count)
+        report = _run(tenant_id, progress, count, titles)
     except Exception as exc:
         _record_run(tenant_id, started_at, None, str(exc)[:2000])
         raise
@@ -1150,6 +1275,7 @@ def _run(
     tenant_id: int,
     progress: Callable[[str, str], None] | None,
     count: Callable[[int, int | None, str], None] | None = None,
+    titles: list[str] | None = None,
 ) -> RunReport:
     def stage(name: str, detail: str) -> None:
         log.info("software_reconcile: %s - %s", name, detail)
@@ -1157,14 +1283,14 @@ def _run(
             progress(name, detail)
 
     now = datetime.now(timezone.utc)
-    report = RunReport()
+    report = RunReport(scope_titles=None if titles is None else len(titles))
     stage("Assessing device readiness", "One decision per device and software type.")
     software_readiness.refresh(tenant_id, now=now)
 
     with db.transaction() as cur:
         cur.execute(f"SET LOCAL operations.tenant_id = {int(tenant_id)}")
         stage("Loading software evidence", "Titles, versions, intelligence and rules.")
-        ctx = load_context(cur, tenant_id, now)
+        ctx = load_context(cur, tenant_id, now, titles)
         profile = load_active_profile(cur)
     report.labels = {
         name: str(item.get("label") or name) for name, item in profile.definitions.items()
@@ -1193,7 +1319,7 @@ def _run(
         stage("Reconciling findings", report.labels.get(type_name, type_name.replace("_", " ")))
         with db.transaction() as cur:
             cur.execute(f"SET LOCAL operations.tenant_id = {int(tenant_id)}")
-            reconcile_type(cur, ctx, finding_type, desired.get(type_name, []), report)
+            reconcile_type(cur, ctx, finding_type, desired.get(type_name, []), report, titles)
         reconciled.append(finding_type.id)
     if count is not None:
         count(len(to_reconcile), len(to_reconcile), "finding types")
@@ -1201,6 +1327,6 @@ def _run(
     stage("Recording condition assessments", f"{len(reconciled)} finding types.")
     with db.transaction() as cur:
         cur.execute(f"SET LOCAL operations.tenant_id = {int(tenant_id)}")
-        written = write_assessments(cur, ctx, reconciled, profile)
+        written = write_assessments(cur, ctx, reconciled, profile, titles)
     log.info("software_reconcile: %s assessments=%d", report.as_result(), written)
     return report

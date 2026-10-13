@@ -70,6 +70,8 @@ def test_software_reference_refresh_starts_targeted_analysis_only_on_material_ch
         ),
     )
     monkeypatch.setattr("ingest.intel.winget.run_once", lambda: MaterialCount(0, material_changed=False))
+    whole_fleet = []
+    monkeypatch.setattr(operator_job_queue, "_request_whole_fleet_findings", whole_fleet.append)
 
     unchanged = operator_job_queue._run_source_refresh(_progress())
 
@@ -79,3 +81,5 @@ def test_software_reference_refresh_starts_targeted_analysis_only_on_material_ch
     assert unchanged.signals == ()
     assert changed.rows == 3
     assert changed.signals == ("reference_software_data",)
+    # Reference software data cannot name titles: the findings run covers the fleet.
+    assert whole_fleet == ["source-refresh:reference.winget"]

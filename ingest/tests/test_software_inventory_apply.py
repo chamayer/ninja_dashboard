@@ -227,3 +227,33 @@ def test_a_run_describes_itself_in_plain_english():
     )
     assert "removals" not in software.ApplyResult(devices=1).describe("x")
     assert "nothing was removed" in software.ApplyResult(devices=1, complete=False).describe("x")
+
+
+def test_every_inventory_change_names_its_title_in_the_change_feed():
+    for sql in (software.REMOVE_SQL, software.RELINK_SQL, software.CHANGED_TITLES_SQL):
+        assert "INSERT INTO operations.software_reclassification_targets" in sql
+        assert "'inventory'" in sql
+        assert "WHERE consumed_at IS NULL DO NOTHING" in sql
+    assert "kind <> 'unchanged'" in software.CHANGED_TITLES_SQL
+
+
+def test_freshness_reads_as_a_sentence():
+    stats = {"collected_within_24h": 69, "collected_1_to_7_days": 10, "collected_over_7_days": 21,
+             "collected_unknown": 0, "computers_not_reporting": 156}
+    text = software.describe_freshness(stats)
+    assert text.startswith("Ninja had collected 69% of these lists within 24 hours; 21 were over")
+    assert "156 computers with installed software sent no list" in text
+    assert software.describe_freshness({**stats, "collected_within_24h": 0, "collected_1_to_7_days": 0,
+                                        "collected_over_7_days": 0}) == ""
+
+
+def test_an_empty_last_page_without_a_cursor_keeps_the_reported_total():
+    """Ninja's final page can be empty with no cursor; the earlier total decides."""
+    seen = []
+    complete = _Client([_page([{}] * 2, 0, 3), _page([{}], 2, 4), {"results": []}])
+    flags = [done for _rows, done in software.pages(
+        complete, on_page=lambda received, total: seen.append((received, total)))]
+    assert flags[-1] is False  # 3 received of 4 reported: incomplete
+    assert seen[-1] == (3, 4)
+    short = _Client([_page([{}] * 2, 0, 9), {"results": []}])
+    assert [done for _rows, done in software.pages(short)][-1] is False
