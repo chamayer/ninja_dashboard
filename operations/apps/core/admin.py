@@ -52,7 +52,9 @@ from .models import (
     RunLog,
     Secret,
     SoftwareCatalog,
+    SoftwareClassifierRule,
     SoftwareDecision,
+    SoftwareSuggestionRule,
     Source,
     SourceBinding,
     SourceFieldMapping,
@@ -414,8 +416,16 @@ class CollectorAdmin(admin.ModelAdmin):
 
 @admin.register(FindingType)
 class FindingTypeAdmin(admin.ModelAdmin):
-    list_display = ("name", "default_severity", "drilldown_evidence_key", "runbook_path")
-    list_filter = ("default_severity",)
+    list_display = (
+        "name",
+        "default_severity",
+        "suppressed_by_approval",
+        "concern_signal",
+        "default_decision_scope",
+        "drilldown_evidence_key",
+        "runbook_path",
+    )
+    list_filter = ("default_severity", "concern_signal", "suppressed_by_approval")
     search_fields = ("name", "description", "runbook_path")
 
 
@@ -725,6 +735,20 @@ class PublisherAliasAdmin(admin.ModelAdmin):
     list_display = ("raw_pattern", "canonical_publisher", "enabled", "is_regex", "created_at")
     list_filter = ("enabled", "is_regex")
     search_fields = ("raw_pattern", "canonical_publisher", "note")
+
+
+@admin.register(SoftwareClassifierRule)
+class SoftwareClassifierRuleAdmin(admin.ModelAdmin):
+    list_display = ("rule_type", "pattern", "is_regex", "enabled", "note")
+    list_filter = ("rule_type", "enabled", "is_regex")
+    search_fields = ("pattern", "note")
+
+
+@admin.register(SoftwareSuggestionRule)
+class SoftwareSuggestionRuleAdmin(admin.ModelAdmin):
+    list_display = ("priority", "signal", "adverse", "suggestion", "enabled", "note")
+    list_filter = ("adverse", "enabled", "suggestion")
+    ordering = ("priority", "id")
 
 
 @admin.register(IntelMatcherHint)

@@ -1,5 +1,89 @@
 # Active root implementation plan
 
+## Active plan — Software findings rebuild (implementation)
+
+**Status:** design complete (`.work/software-findings-design.md`, decisions
+D1-D16). Build started 2026-10-13 on the user's instruction "get it done as
+quickly as possible; results come after". Two stages, no shadow period, no
+phases by finding type. Nothing committed for this build yet.
+
+**Goal:** replace the per-installation classifier and per-(finding, device)
+assessments with set-based desired-state reconciliation, per-device readiness and
+a derived exposure model, so every software finding type is current and runs
+finish inside their budget.
+
+**Baseline:** HEAD `4508ac7` (Codex exposure read model, migration 112 applied
+2026-10-13 16:50:42 UTC) on top of my fixes 78e2b97, a2599b3, 417ea91. The old
+classifier still fails to commit a batch (64 timeouts, 0 completions in 14
+days).
+
+**Scope / affected areas:**
+- `shared/`: one defaults module for classifier settings; suggestion rules.
+- `ingest/`: new `software_reconcile` module (desired state per type, diff,
+  open/update/resolve with recorded reasons, circuit breaker); device readiness
+  computation; job handlers; retire `software_findings.classify` paths.
+- `shared/jobs_registry.py` + Operations migrations: new job definitions,
+  recovery authorities, workflow successors, retire old classifier jobs.
+- `sql/migrations/113+`: readiness table, effective-decision function, exposure
+  read model redefined on readiness + all approval scopes + per-type matrix.
+- Operations: classifier admin page (merge-on-save, settings, audit), Issues
+  grouping by publisher and suggestion panel, decision actions with scope
+  defaults, finding types (rare software, rejected software installed).
+
+**Stage 1 — foundations (independently useful):**
+1. Shared classifier defaults + admin page fix (merge-on-save, expose settings,
+   audit).
+2. Effective software decision: one SQL function/view; exposure applies
+   approvals at every scope through the per-type matrix.
+3. Per-device readiness table and computation (engine called once per device and
+   finding type, not per finding).
+
+**Stage 2 — the new classifier, all types, one cutover:**
+4. Desired-state queries per type: vulnerable_software, eol_runtime,
+   known_malicious_hint, suspicious_name, non-approved (whitelist_suggestion),
+   rare software, install_path_suspicious, unauthorized_*,
+   rejected_software_installed; suggestions and the recent signal.
+5. Reconcile engine: condition keys, diff, open/update/resolve, aggregate
+   assessments from readiness (D1/D4), circuit breaker, per-type switch.
+6. Jobs: registry, handlers, recovery authority, successors; retire the old
+   classifier jobs and `software_reclassification_targets` use.
+7. Operations UI: publisher grouping with two remediation options, suggestion
+   panel, scope defaults.
+8. ADR (amend 0015, 0020, 0021, 0028) and changelog entry.
+9. Data with admin surface (user, 2026-10-13): signals of concern as a
+   finding-type flag; suggestion rules and junk-publisher patterns as rule data;
+   default decision scope per finding type; Operations admin pages for finding
+   types and `software_classifier_rules` (today Django-admin only / no surface).
+   Decision precedence and the approval vocabulary stay in code (they define a
+   decision; documented in the ADR).
+
+**Validation:** unit tests with fakes for every module; `manage.py check`;
+ruff; every new query run read-only against prod for timing and counts before
+commit; DDL reviewed against existing migration patterns (no local Postgres).
+Post-deploy: per-type comparison with previous open sets, 20-finding spot check,
+job timings, approvals effective at every scope.
+
+**Checkpoint (2026-10-13):** Stage 1 complete locally, not committed:
+- Step 1: `shared/software_settings.py`; classifier admin page merges, validates,
+  audits; previous classifier reads the shared settings. 8 tests.
+- Step 2: `sql/migrations/113_software_effective_decision.sql`
+  (`v_software_decision_keys`; exposure view applies all scopes through
+  `suppressed_by_approval`). View bodies ran read-only on prod (143 ms; 427
+  decision keys). 5 tests.
+- Step 3: migration `0282_software_device_readiness`, `ingest/software_readiness.py`
+  (set-based identity: 401 ms vs >58 s; 66,708 rows computed in 0.75 s). Not yet
+  wired to a job. 8 tests.
+- Step 9 data: migration `0283_software_rules_and_finding_type_policy`
+  (concern_signal, default_decision_scope, junk_publisher rules, suggestion
+  rules), Django admin for both rule tables. 4 tests.
+- Suites: ingest 368 passed; Operations 287 passed; the 6 failures
+  (test_no_hardcoded_domain_mappings, test_software_classify_schedule,
+  2x test_conditions, test_conditions_command, test_e5_generic_admin) fail
+  identically on clean HEAD. No new ratchet violations.
+
+**Next action:** commit/push approval for Stage 1 (migrations 0282, 0283, SQL
+113); then Stage 2 step 4 (desired-state queries).
+
 ## Active plan — Source-refresh completion fails at workflow admission
 
 **Status:** both causes validated 2026-10-12; scope fix a122cc9, software merge

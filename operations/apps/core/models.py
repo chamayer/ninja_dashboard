@@ -362,6 +362,31 @@ class FindingType(models.Model):
             "path) -- approving software does not make those untrue."
         ),
     )
+    # Whether a finding of this type is a trust or anomaly concern (design D9).
+    # A publisher-level approval silences an anomaly signal only when no other
+    # concern exists on that title or installation; this flag decides which
+    # types count. Facts about a version (vulnerability, end of life) and the
+    # approval prompt itself are not concerns. Registry data, not a constant.
+    concern_signal = models.BooleanField(
+        default=False,
+        help_text=(
+            "Checked when a finding of this type is a trust or anomaly concern. A "
+            "publisher approval does not silence another signal on a title that "
+            "carries a concern."
+        ),
+    )
+
+    class DecisionScope(models.TextChoices):
+        DEVICE = "device", "This device"
+        CLIENT = "client", "This client"
+        GLOBAL = "global", "Everywhere"
+
+    # The scope a decision made from this finding defaults to (design 4.7):
+    # rare software defaults to the device it is on; non-approved software to
+    # everywhere. Operators can still choose another scope.
+    default_decision_scope = models.CharField(
+        max_length=8, choices=DecisionScope.choices, default=DecisionScope.GLOBAL
+    )
     drilldown_evidence_key = models.CharField(
         max_length=64,
         blank=True,
@@ -3886,6 +3911,7 @@ class SoftwareClassifierRule(models.Model):
         SUSPICIOUS_NAME = "suspicious_name", "Suspicious name"
         INSTALL_PATH_SUSPICIOUS = "install_path_suspicious", "Suspicious install path"
         EOL_RUNTIME = "eol_runtime", "End-of-life runtime"
+        JUNK_PUBLISHER = "junk_publisher", "Placeholder or junk publisher"
 
     id = models.SmallAutoField(primary_key=True)
     rule_type = models.CharField(max_length=32, choices=RuleType.choices)
@@ -3907,6 +3933,47 @@ class SoftwareClassifierRule(models.Model):
 
     def __str__(self) -> str:
         return f"{self.rule_type}:{self.pattern}"
+
+
+class SoftwareSuggestionRule(models.Model):
+    """Signal-to-suggestion rules for software review findings (design 4.10).
+
+    Evaluated in priority order; the first matching adverse rule wins and an
+    adverse rule always beats a favorable one. Global reference data, editable
+    by an administrator, never a constant in the classifier.
+    """
+
+    class Signal(models.TextChoices):
+        THREAT_HIT = "threat_hit", "Threat-intelligence hit"
+        INSTALL_PATH = "install_path", "Install-path anomaly"
+        SUSPICIOUS_NAME = "suspicious_name", "Suspicious name"
+        UNAUTHORIZED_CAPABILITY = "unauthorized_capability", "Unauthorized capability"
+        JUNK_PUBLISHER = "junk_publisher", "Placeholder or junk publisher"
+        ESTABLISHED_PUBLISHER = "established_publisher", "Established publisher"
+        PREVALENT = "prevalent", "Prevalent, no concern"
+        FALLBACK = "fallback", "Otherwise"
+
+    class Suggestion(models.TextChoices):
+        INVESTIGATE = "investigate", "Investigate"
+        REVIEW_CAPABILITY = "review_capability", "Review capability"
+        APPROVE_PUBLISHER = "approve_publisher", "Approve publisher"
+        APPROVE_TITLE = "approve_title", "Approve title"
+        NONE = "none", "No suggestion"
+
+    id = models.SmallAutoField(primary_key=True)
+    priority = models.PositiveSmallIntegerField()
+    signal = models.CharField(max_length=32, choices=Signal.choices, unique=True)
+    adverse = models.BooleanField(default=True)
+    suggestion = models.CharField(max_length=32, choices=Suggestion.choices)
+    enabled = models.BooleanField(default=True)
+    note = models.CharField(max_length=240, blank=True, default="")
+
+    class Meta:
+        db_table = "software_suggestion_rules"
+        ordering = ("priority", "id")
+
+    def __str__(self) -> str:
+        return f"{self.priority}:{self.signal}->{self.suggestion}"
 
 
 class MergeCandidate(UUIDTenantScopedModel):
