@@ -2,6 +2,50 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.127.0] — 2026-10-13 — Software inventory and findings rebuild
+
+### Added
+
+- Software inventory from complete Ninja lists: computers with a Ninja software
+  event are refreshed 100 per request, and a daily full check fetches the whole
+  fleet (about a minute). Uninstalls are recorded with when and why; computers
+  that send no list keep their inventory.
+- Per-computer software state: when Ninja collected the list, when Operations
+  received it, and a hold when a list suddenly shrinks sharply. The computer
+  page shows the collection time and removed software; held computers appear
+  as a "Software list held for review" admin issue and on the Software policy
+  page with "Allow removals".
+- "Rejected software is installed" issues for titles or publishers with a
+  reject decision that are still installed.
+- Job progress bars ("700 of 3,674 computers") and plain-English run summaries
+  on the Jobs pages.
+- Software policy admin page (finding-type policy, classifier and suggestion
+  rules) and software review grouped by publisher with suggestions.
+
+### Changed
+
+- Software findings are reconciled from desired state with per-device
+  readiness; the routine run covers only the titles that changed, and a
+  fleet-wide run follows decisions, settings or policy changes and runs daily.
+- Software approvals apply at every scope; rare and non-approved software split
+  at one device limit.
+- Version links are corrected when an installed version changes (166,310
+  installations pointed at an older version).
+- The publishers page uses one wording for actions (Approve, Reject,
+  Investigate) and states.
+- Operations refresh actions fetch the computer's software list directly; an
+  issue's Refresh fetches software only for software issues.
+
+### Removed
+
+- The per-client and on-demand software queues and the ingest service's
+  software pages.
+
+### Migrations
+
+- Operations 0282-0287; SQL 113-114. Activates condition policy
+  `conditions-software-inventory-1`.
+
 ## [0.126.18] — 2026-10-12 — Metabase retirement
 
 ### Removed

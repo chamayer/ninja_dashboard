@@ -135,8 +135,24 @@ backlog, classifier runs only after changes.
   helper insertion had moved `@login_required` off the view; regression test
   added). Ingest 418 passed; Operations 319 passed (4 known failures).
 
-**Next action:** commit/push approval (includes migration 0287); first fleet
-check and catalog relink verification.
+- Shipped 4af34aa (publishers wording) and d878e32 (job progress, migration
+  0287); verified: migration applied, first worker run summary recorded.
+- First full check on the new code (requested by the user, 21:09-21:18):
+  4,629 computers, 10,051 new, 821 changed, 2,062 removed, 554,207 unchanged,
+  19,469 version links corrected; fetch complete (568,792 of 568,792 rows).
+- Built locally, not committed (user: "fix it", "do it"): changed-only
+  findings run (change feed in `software_reclassification_targets`; routine
+  run scoped to named titles; title-blind producers and settings/policy saves
+  request a whole-fleet run; full run daily, default 24 h); computer page shows
+  Ninja collection time, held state and removed software, and lists only
+  installed software; full-check summary reports fleet freshness; pager keeps
+  Ninja's reported total across an empty last page (progress bar and
+  completeness); ADR 0029; CHANGELOG/VERSION 0.127.0. Ingest 426 passed,
+  Operations 320 passed (known failures only).
+
+**Next action:** commit/push approval (no migrations), then verify a scoped
+findings run, the full-run cadence (job_schedules 1440 min) and the computer
+page.
 
 ## Active plan — Software findings rebuild (implementation)
 
