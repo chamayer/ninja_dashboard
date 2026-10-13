@@ -43,6 +43,35 @@ someone manually triggers a run. Operations native path
 the live surface. Retirement of the legacy AC module + schema is a
 bounded destructive slice when ready.
 
+### Legacy operator actions on the ingest HTTP server (checked 2026-10-13)
+
+The legacy dashboard's action links (`/agent-compliance/action/*`, short
+`/a/*`, `ingest/main.py`) write the legacy `ninja_agent_compliance` schema.
+Each was compared with the Operations feature that changes the same thing in
+Operations' own tables, and with what reads that data.
+
+| Legacy action | What it did | Operations | Verdict |
+|---|---|---|---|
+| `add-source` (`/a/as`) | Add a ScreenConnect source for a customer (secrets then set in the host `.env`) | Source instances and bindings exist only in Django admin; the Sources page refreshes and schedules but cannot add | **Gap**: no Operations page |
+| `add-alias` (`/a/aa`), `manual-alias` (`/a/ma`) | Map a platform's customer name to a customer | Client mappings: unattached record → "map to an existing client"; mapping decisions (explicit / ignored / review) | Covered |
+| `approve-customer` (`/a/ac`) | Accept a reported name as a new customer | Client mappings: unattached record → "accept a new client" | Covered |
+| `exclude-org` (`/a/eo`) | Stop treating a reported name as a customer | Client mappings: unattached record → "exclude" (`client_org_excludes`, read by the client resolver) | Covered |
+| `unexclude-org` (`/a/ue`) | Undo an exclusion | Nothing removes a `client_org_excludes` row (no page, no admin) | **Gap** |
+| `set-requirement` (`/a/sr`) | Coverage profile per customer and device scope | Client Configuration: inherited baseline profile, per-agent and per-scope required / not required | Covered |
+| `toggle-platform-requirement` (`/a/tp`) | Require or drop one platform per customer and scope | Client Configuration, same controls | Covered |
+| `set-max-age` (`/a/sd`) | Days without contact before a customer's devices (per scope) count as stale | `gap_after_hours` on requirement profile items drives the evaluator but is not editable anywhere (no page, no admin). The Policies page's "Agent SLA (days)" is stored but read by nothing | **Gap** (and an inert field) |
+| `ignore-device` (`/a/ig`) | Ignore a whole device for N days (1-365) | Per-agent exemption on the computer page (no expiry); lifecycle "retired" (permanent) | **Partial**: no time-limited whole-device ignore |
+| `unignore-device` (`/a/ui`) | Undo the ignore | Clear exemption; lifecycle back to active | Covered for what exists |
+| `bulk-ignore-stale` (`/a/bs`) | Ignore all of a customer's stale devices for N days | Lifecycle ages devices automatically (offline 7-30 days, pending cleanup after 30) | **Partial**: aging is automatic; no bulk operator action |
+| `confirm-missing` (`/a/cm`) | Record that a device really lacks a platform after a cross-customer hostname review | Coverage issues come from device identity links, not hostname matching, so the open issue is that fact; identity conflicts have "reviewed as distinct" | Covered by design (no operator step needed) |
+| `merge-device` (`/a/md`) | Merge two device records | Device merge (identity conflict issues, admin link) | Covered |
+| `toggle-alert-rule` (`/a/tr`) | Turn an alert rule on or off | Notification rules: on / off | Covered |
+| `set-customer-alert` (`/a/sca`) | Turn one alert kind on or off for one customer | Notification rules carry a client, but nothing creates or edits a rule (list and toggle only; not in admin) | **Gap** |
+
+Also found: the per-client **Policies** page (category, approved products,
+agent SLA days, `client_policies`) is read by nothing in ingest, shared code
+or SQL. It is an inert surface.
+
 ### `migrated/Multi_org_agent_compliance.ps1` (1972 lines)
 
 Cross-platform multi-org AC checker. What it does:

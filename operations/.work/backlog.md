@@ -15,6 +15,35 @@
 The Dashboard task is intentionally separate from Dashboard maturity below;
 it is an information-architecture reset, not a business-metric enhancement.
 
+## Legacy agent-compliance action parity gaps (found 2026-10-13)
+
+- Source: parity check of the 16 legacy `/agent-compliance/action/*` links
+  (`ingest/main.py`) against Operations; full table in
+  `operations/docs/legacy-scripts-parity-audit.md`. The legacy links are no
+  longer reachable from browsers since the ingest port is not published on the
+  host (2026-10-13); the legacy agent-compliance jobs are disabled since
+  2026-10-06. User: "document gap. will address later".
+- Gaps to build in Operations (each needs its engine, not just a page):
+  1. **Add a source** (ScreenConnect and other bindings): today Django admin
+     only (`SourceInstance`, `SourceBinding`); secrets stay in the host `.env`.
+  2. **Undo a client-name exclusion**: nothing removes a
+     `client_org_excludes` row; exclusions are read by
+     `ingest/identity/client_resolver.py`.
+  3. **Per-client stale threshold**: `requirement_profile_items.gap_after_hours`
+     drives `ingest/evaluator.py` but has no edit surface (no page, no admin);
+     the legacy action set it per customer and device scope.
+  4. **Per-client alert on/off**: `NotificationRule` has a client field, but
+     rules can only be listed and toggled (`notification_rules_list`,
+     `notification_rule_toggle`); nothing creates or edits one.
+  5. **Time-limited whole-device ignore and bulk ignore of a client's stale
+     devices**: today per-agent exemptions (no expiry) and lifecycle retire;
+     lifecycle aging is automatic.
+- Inert surface: the per-client Policies page (`client_policies`: category,
+  approved products, agent SLA days) is read by nothing in ingest, shared or
+  SQL. Either wire it (SLA days could become item 3) or retire it with its
+  data recorded; do not leave it editable and ineffective.
+- Revisit: before retiring the legacy agent-compliance module and schema.
+
 ## Conditions enforcement after shadow validation
 
 - Foundation/shadow is implemented under `apps/core/conditions/`; runbook:
