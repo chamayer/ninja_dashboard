@@ -48,6 +48,33 @@ _TENANT_ID = 1
 # eligible at once.
 _INCREMENTAL_DEVICE_BATCH_SIZE = 25
 
+# Devices whose installations match an open reclassification target.  A target
+# names a software version or, when it has none, a lower-cased title.  The two
+# matches are separate equality joins on purpose: one join with an OR between
+# them cannot be hashed, so it compared every installation with every open
+# target (minutes per call) and each Run spent its time budget before it began
+# classifying.  Takes the tenant id twice.
+_TARGET_DEVICES_SQL = """
+                SELECT DISTINCT installation.device_id
+                  FROM operations.software_reclassification_targets target
+                  JOIN operations.software_installations_current installation
+                    ON installation.tenant_id = target.tenant_id
+                   AND installation.software_version_id = target.software_version_id
+                 WHERE target.tenant_id = %s AND target.consumed_at IS NULL
+                   AND (target.cursor_device_id IS NULL
+                        OR installation.device_id > target.cursor_device_id)
+                UNION
+                SELECT DISTINCT installation.device_id
+                  FROM operations.software_reclassification_targets target
+                  JOIN operations.software_installations_current installation
+                    ON installation.tenant_id = target.tenant_id
+                   AND LOWER(installation.canonical_name) = target.canonical_name
+                 WHERE target.tenant_id = %s AND target.consumed_at IS NULL
+                   AND target.software_version_id IS NULL
+                   AND (target.cursor_device_id IS NULL
+                        OR installation.device_id > target.cursor_device_id)
+"""
+
 # Fallback defaults for the software classifier. Every knob can be
 # overridden per-tenant via operations.evaluator_config rows keyed on
 # evaluator_name = 'software_classifier'. Kept as constants only so a
@@ -543,20 +570,8 @@ def incremental_pending_count(tenant_id: int = _TENANT_ID) -> int | None:
         if _table_exists(cur, "operations.software_reclassification_targets") and _column_exists(
             cur, "operations.software_reclassification_targets", "cursor_device_id"
         ):
-            target_cte = """
-                UNION
-                SELECT DISTINCT installation.device_id
-                  FROM operations.software_reclassification_targets target
-                  JOIN operations.software_installations_current installation
-                    ON installation.tenant_id = target.tenant_id
-                   AND (installation.software_version_id = target.software_version_id
-                        OR (target.software_version_id IS NULL
-                            AND LOWER(installation.canonical_name) = target.canonical_name))
-                 WHERE target.tenant_id = %s AND target.consumed_at IS NULL
-                   AND (target.cursor_device_id IS NULL
-                        OR installation.device_id > target.cursor_device_id)
-            """
-            params = (tenant_id, tenant_id)
+            target_cte = "UNION" + _TARGET_DEVICES_SQL
+            params = (tenant_id, tenant_id, tenant_id)
         cur.execute(
             f"""
             SELECT count(*) FROM (
@@ -599,19 +614,7 @@ def _incremental_selection(
     ) and _column_exists(cur, "operations.software_reclassification_targets", "cursor_device_id")
     target_cte = ""
     if target_table_ready:
-        target_cte = """
-        UNION
-        SELECT DISTINCT installation.device_id
-          FROM operations.software_reclassification_targets target
-          JOIN operations.software_installations_current installation
-            ON installation.tenant_id = target.tenant_id
-           AND (installation.software_version_id = target.software_version_id
-                OR (target.software_version_id IS NULL
-                    AND LOWER(installation.canonical_name) = target.canonical_name))
-         WHERE target.tenant_id = %s AND target.consumed_at IS NULL
-           AND (target.cursor_device_id IS NULL
-                OR installation.device_id > target.cursor_device_id)
-        """
+        target_cte = "UNION" + _TARGET_DEVICES_SQL
     cur.execute(
         f"""
         WITH candidate_devices AS (
@@ -625,7 +628,7 @@ def _incremental_selection(
         )
         SELECT device_id FROM candidate_devices ORDER BY device_id LIMIT %s
         """,
-        (tenant_id, *( (tenant_id,) if target_table_ready else () ), _INCREMENTAL_DEVICE_BATCH_SIZE),
+        (tenant_id, *( (tenant_id, tenant_id) if target_table_ready else () ), _INCREMENTAL_DEVICE_BATCH_SIZE),
     )
     device_ids = [row[0] for row in cur.fetchall()]
     if not device_ids:
