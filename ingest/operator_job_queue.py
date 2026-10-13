@@ -713,7 +713,6 @@ def _execute(job_key: str, progress: V1JobProgress) -> int | JobExecutionResult 
     functions intentionally raise, allowing the durable record to show failure.
     """
     from ingest import cmdb_findings, main, platform_findings, runlog
-    from ingest.inventory import software as software_inventory
     from ingest.intel import (
         abusech,
         capability_match,
@@ -727,10 +726,6 @@ def _execute(job_key: str, progress: V1JobProgress) -> int | JobExecutionResult 
         nvd,
         otx,
         winget,
-    )
-    from ingest.software_findings import (
-        full_reclassification_pending,
-        incremental_pending_count,
     )
 
     jobs = {
@@ -746,12 +741,12 @@ def _execute(job_key: str, progress: V1JobProgress) -> int | JobExecutionResult 
         ),
         "parity-check": ("Checking operational parity", lambda: main.parity_check_run(tenant_id=1)),
         "software-classify-only": (
-            "Classifying changed software",
-            lambda: main.software_classify(tenant_id=1, incremental=True),
+            "Reconciling software findings",
+            lambda: _software_reconcile(progress),
         ),
         "software-classify-full": (
-            "Rebuilding all software findings",
-            lambda: main.software_classify(tenant_id=1, incremental=False),
+            "Reconciling software findings",
+            lambda: _software_reconcile(progress),
         ),
         "resolver": ("Resolving computer identity", lambda: main.run_identity_resolver_once()),
         "patches": ("Collecting Ninja information", lambda: main.run_patching_once()),
@@ -823,39 +818,8 @@ def _execute(job_key: str, progress: V1JobProgress) -> int | JobExecutionResult 
     }
     if job_key == "software-classify":
         return _software_classify_with_intel(progress, matcher, winget, chocolatey, main)
-    if job_key == "software-classify-only":
-        pending = incremental_pending_count(tenant_id=1)
-        detail = (
-            "Evaluating changed software installations only."
-            if pending is None
-            else f"Evaluating changed software on {pending} device(s)."
-        )
-        progress.update("Classifying changed software", detail)
-        rows = int(jobs[job_key][1]())
-        progress.update(
-            "Publishing software status",
-            "Making the completed classification available to operators.",
-        )
-        software_inventory.refresh_exposure_read_model()
-        remaining = incremental_pending_count(tenant_id=1)
-        if remaining:
-            request_system_job("software-classify-only", "incremental classifier continuation")
-        return JobExecutionResult(
-            rows=rows,
-            result={"remaining_devices": remaining or 0, "continued": bool(remaining)},
-        )
-    if job_key == "software-classify-full":
-        progress.update("Rebuilding software status", "Processing the next device batch.")
-        rows = int(jobs[job_key][1]())
-        progress.update(
-            "Publishing software status",
-            "Making the completed classification available to operators.",
-        )
-        software_inventory.refresh_exposure_read_model()
-        remaining = full_reclassification_pending(tenant_id=1)
-        if remaining:
-            request_system_job("software-classify-full", "full classifier continuation")
-        return JobExecutionResult(rows=rows, result={"continued": remaining})
+    if job_key in ("software-classify-only", "software-classify-full"):
+        return _software_reconcile(progress)
     if job_key not in jobs:
         raise ValueError(f"Unknown registered job: {job_key}")
     stage, job = jobs[job_key]
@@ -873,10 +837,35 @@ def _execute(job_key: str, progress: V1JobProgress) -> int | JobExecutionResult 
     return int(result) if isinstance(result, int) else None
 
 
+def _software_reconcile(progress: V1JobProgress) -> JobExecutionResult:
+    """Reconcile every software finding type and publish the read models.
+
+    One run covers the whole fleet in minutes, so there is no device batch and
+    no continuation request: the routine and the weekly full cadence run the
+    same complete reconciliation.
+    """
+    from ingest import software_reconcile
+    from ingest.inventory import software as software_inventory
+
+    report = software_reconcile.run(1, progress=progress.update)
+    progress.update(
+        "Publishing software status",
+        "Making the reconciled findings available to operators.",
+    )
+    with db.pool.connection() as conn, conn.cursor() as cur:
+        cur.execute("REFRESH MATERIALIZED VIEW operations.v_software_safety")
+    software_inventory.refresh_exposure_read_model()
+    result = report.as_result()
+    rows = sum(result["opened"].values()) + sum(result["refreshed"].values()) + sum(
+        result["resolved"].values()
+    )
+    return JobExecutionResult(rows=rows, result=result)
+
+
 def _software_classify_with_intel(
     progress: V1JobProgress, matcher: Any, winget: Any, chocolatey: Any, main: Any
-) -> int | None:
-    """Run the advertised auto-intel sequence with each real stage recorded."""
+) -> int | JobExecutionResult | None:
+    """Run the advertised auto-intel sequence, then the software reconcile."""
     if main.settings.INTEL_ENABLED:
         for stage, job in (
             ("Matching software to vulnerabilities", matcher.run_once),
@@ -885,16 +874,4 @@ def _software_classify_with_intel(
         ):
             progress.update(stage, "This stage does not publish a measurable work total.")
             job()
-    progress.update(
-        "Classifying installed software", "This stage does not publish a measurable work total."
-    )
-    result = main.software_classify(tenant_id=1, incremental=False)
-    progress.update(
-        "Refreshing software views", "Making the completed classification available to operators."
-    )
-    with db.pool.connection() as conn, conn.cursor() as cur:
-        cur.execute("REFRESH MATERIALIZED VIEW operations.v_software_safety")
-    from ingest.inventory import software as software_inventory
-
-    software_inventory.refresh_exposure_read_model()
-    return int(result) if isinstance(result, int) else None
+    return _software_reconcile(progress)

@@ -75,7 +75,6 @@ from ingest.patch_findings import classify as patch_classify
 from ingest.patches import ingest as patches_ingest
 from ingest.policy_scope import sync_patching_enabled_policies
 from ingest.runlog import run_log
-from ingest.software_findings import classify as software_classify
 from ingest.source_observations import (
     SourceObservationFailure,
     is_identity_source,
@@ -572,6 +571,21 @@ def run_notifications_digest_once() -> None:
         log.info("Notifications digest complete: routes_fired=%d", fired)
     except Exception:
         log.exception("Notifications digest failed")
+
+
+def software_classify(tenant_id: int = 1, incremental: bool = True) -> int:
+    """Reconcile every software finding type (rebuild design v2).
+
+    ``incremental`` is accepted for the existing callers and ignored: one
+    reconcile covers the whole fleet, so there is no partial mode.
+    """
+    from ingest import software_reconcile
+
+    del incremental
+    report = software_reconcile.run(tenant_id).as_result()
+    return sum(
+        sum(report[key].values()) for key in ("opened", "refreshed", "resolved")
+    )
 
 
 def run_software_classify_once(*, with_intel_pre_steps: bool = True) -> None:

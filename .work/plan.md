@@ -63,26 +63,39 @@ commit; DDL reviewed against existing migration patterns (no local Postgres).
 Post-deploy: per-type comparison with previous open sets, 20-finding spot check,
 job timings, approvals effective at every scope.
 
-**Checkpoint (2026-10-13):** Stage 1 complete locally, not committed:
-- Step 1: `shared/software_settings.py`; classifier admin page merges, validates,
-  audits; previous classifier reads the shared settings. 8 tests.
-- Step 2: `sql/migrations/113_software_effective_decision.sql`
-  (`v_software_decision_keys`; exposure view applies all scopes through
-  `suppressed_by_approval`). View bodies ran read-only on prod (143 ms; 427
-  decision keys). 5 tests.
-- Step 3: migration `0282_software_device_readiness`, `ingest/software_readiness.py`
-  (set-based identity: 401 ms vs >58 s; 66,708 rows computed in 0.75 s). Not yet
-  wired to a job. 8 tests.
-- Step 9 data: migration `0283_software_rules_and_finding_type_policy`
-  (concern_signal, default_decision_scope, junk_publisher rules, suggestion
-  rules), Django admin for both rule tables. 4 tests.
-- Suites: ingest 368 passed; Operations 287 passed; the 6 failures
-  (test_no_hardcoded_domain_mappings, test_software_classify_schedule,
-  2x test_conditions, test_conditions_command, test_e5_generic_admin) fail
-  identically on clean HEAD. No new ratchet violations.
+**Checkpoint (2026-10-13):** Stage 1 shipped (7f4133f, 89e8df7, 2edc5b4,
+0d55c22; SQL 113 and Django 0282/0283 applied 18:2x UTC, services healthy).
 
-**Next action:** commit/push approval for Stage 1 (migrations 0282, 0283, SQL
-113); then Stage 2 step 4 (desired-state queries).
+Stage 2 engine complete locally, not committed:
+- `ingest/software_reconcile.py`: desired state per type, reconcile with
+  close limit and regrain handling, aggregate assessments from readiness (D1/D4),
+  run-log record. Jobs `software-classify-only/-full/software-classify` and
+  `main.software_classify` run it; registry owner updated.
+- `sql/migrations/114_software_exposure_from_readiness.sql`: exposure read model
+  from aggregate assessment + readiness, staged MATERIALIZED (upper bound 166 s,
+  46,303 rows).
+- Django `0284_rare_software_title_grain`.
+- New settings: per-type switches, close limit, allow-large-close.
+- Read-only dry run on prod (load 98.5 s, compute 3.1 s): keys kept for every
+  unchanged type (eol 165/165, suspicious 6/6, install path 496/496, unauthorized
+  remote access 6,312/6,317, vulnerable 4,180/4,181, whitelist 1,797/1,799);
+  new: rare 9,883 (102 regrained), non-approved +3,047, vulnerable +431.
+- Tests: 20 reconcile tests; ingest 388 passed, Operations 287 passed; only the
+  six pre-existing failures; ratchet entries ACTIVE_STATUSES/RESOLVABLE_STATUSES
+  justified.
+
+Not yet done (Stage 2): Issues grouping by publisher with two remediation
+options and suggestion panel; decision scope defaults in the UI; Operations
+admin pages for finding types and rules; rejected_software_installed (needs a
+policy version that defines the type); ADR and changelog; retire the old
+classify loop and reclassification targets.
+
+Risk to keep visible: notification schedules are disabled (0 events ever). After
+the first reconcile about 25k findings carry fresh notifiable assessments, so a
+manual dispatch or enabling the schedule would send a large burst.
+
+**Next action:** commit/push approval for the Stage 2 engine (SQL 114, Django
+0284); verify the first reconcile run; then UI and admin pages.
 
 ## Active plan — Source-refresh completion fails at workflow admission
 
