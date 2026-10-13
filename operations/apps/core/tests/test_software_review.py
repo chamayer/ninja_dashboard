@@ -98,3 +98,15 @@ def test_queue_and_decisions_use_the_review_module():
     assert "software_review.PROMPTS_SQL" in body
     assert "software_review.build_groups(" in body
     assert _VIEWS.count("software_review.resolve_decided_prompts(") == 2
+
+
+def test_decision_writes_refresh_risk_view_only_after_commit():
+    """A best-effort refresh must not abort the durable decision transaction."""
+    bulk = _VIEWS[_VIEWS.index("def software_decision_bulk(") :]
+    bulk = bulk[: bulk.index("\ndef ", 1)]
+    create = _VIEWS[_VIEWS.index("def software_decision_create(") :]
+    create = create[: create.index("\ndef ", 1)]
+
+    for body in (bulk, create):
+        assert "transaction.on_commit(_refresh_software_risk_matview)" in body
+        assert "\n    _refresh_software_risk_matview()" not in body

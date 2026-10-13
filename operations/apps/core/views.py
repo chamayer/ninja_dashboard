@@ -16570,7 +16570,12 @@ def software_decision_bulk(request: HttpRequest) -> HttpResponse:
         f"{len(canonical_names)} product(s) + {len(publishers)} publisher(s); "
         f"{closed} review finding(s) closed.",
     )
-    _refresh_software_risk_matview()
+    # A materialized-view refresh can fail (for example while another refresh
+    # owns the relation).  Do not run it inside this decision's atomic write:
+    # PostgreSQL marks that transaction aborted even when the helper catches
+    # the database exception.  The decision remains the authority; the view
+    # refresh is only a post-commit convenience for the next page render.
+    transaction.on_commit(_refresh_software_risk_matview)
     _queue_software_rebuild_after_commit(request.user.id)
     return redirect(_safe_next(request, "software_decisions_queue"))
 
@@ -16726,7 +16731,9 @@ def software_decision_create(request: HttpRequest) -> HttpResponse:
         f"{decision} recorded for {match_key} ({scope})."
         + (" Created." if created else " Updated."),
     )
-    _refresh_software_risk_matview()
+    # See software_decision_bulk: a failed courtesy refresh must never turn a
+    # durable operator decision into a 500 response.
+    transaction.on_commit(_refresh_software_risk_matview)
     _queue_software_rebuild_after_commit(request.user.id)
     next_url = request.POST.get("next") or ""
     # Only follow relative URLs to avoid open-redirects.
