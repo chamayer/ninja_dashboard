@@ -36,7 +36,7 @@ import json
 import logging
 from datetime import datetime, timezone
 
-from ingest import db
+from ingest import db, device_status_settings
 from ingest.config import settings
 from ingest.conditions import record_assessment
 from ingest.condition_evidence import (
@@ -631,7 +631,7 @@ def _record_assessment(cur, tenant_id, finding_id, ft_id, condition_key,
         offline_state, offline_reason = offline_readiness(
             [contact_row[0] if contact_row else None],
             now=now,
-            offline_days=_policy(cur, tenant_id)["patch_activity_days"],
+            offline_days=device_status_settings.load(cur, tenant_id)[0],
         )
         signals = (
             identity,

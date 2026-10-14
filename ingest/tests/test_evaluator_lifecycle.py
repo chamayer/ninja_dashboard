@@ -128,21 +128,21 @@ def test_equally_recent_conflicting_reported_states_do_not_select_lifecycle():
 
 
 def test_lifecycle_target_preserves_three_state_aging_rules():
-    assert _lifecycle_target({"status": "active", "at": NOW}, NOW) == "active"
+    assert _lifecycle_target({"status": "active", "at": NOW}, NOW, 7, 30) == "active"
     assert (
         _lifecycle_target(
-            {"status": "active", "at": NOW - timedelta(days=7, seconds=1)}, NOW
+            {"status": "active", "at": NOW - timedelta(days=7, seconds=1)}, NOW, 7, 30
         )
         == "offline_aging"
     )
     assert (
         _lifecycle_target(
-            {"status": "offline_aging", "at": NOW - timedelta(days=30, seconds=1)}, NOW
+            {"status": "offline_aging", "at": NOW - timedelta(days=30, seconds=1)}, NOW, 7, 30
         )
         == "pending_cleanup"
     )
     assert (
-        _lifecycle_target({"status": "offline_aging", "at": NOW}, NOW)
+        _lifecycle_target({"status": "offline_aging", "at": NOW}, NOW, 7, 30)
         == "offline_aging"
     )
 
@@ -227,10 +227,10 @@ def test_no_qualified_evidence_keeps_lifecycle_unchanged():
 
 def test_lifecycle_target_keeps_exact_aging_boundaries_in_the_younger_bucket():
     assert (
-        _lifecycle_target({"status": "active", "at": NOW - timedelta(days=7)}, NOW)
+        _lifecycle_target({"status": "active", "at": NOW - timedelta(days=7)}, NOW, 7, 30)
         == "active"
     )
     assert (
-        _lifecycle_target({"status": "active", "at": NOW - timedelta(days=30)}, NOW)
+        _lifecycle_target({"status": "active", "at": NOW - timedelta(days=30)}, NOW, 7, 30)
         == "offline_aging"
     )

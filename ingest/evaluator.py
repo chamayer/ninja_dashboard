@@ -38,6 +38,7 @@ from typing import Any
 
 from ingest import db
 from ingest.condition_evidence import preserve_operator_episode
+from ingest import device_status_settings
 from ingest.conditions import load_active_profile, record_assessment
 from ingest.identity import identity_entity_types
 from ingest.intel.windows_servicing import sync as sync_windows_servicing
@@ -475,12 +476,20 @@ def _select_lifecycle_evidence(
     return newest[0], False
 
 
-def _lifecycle_target(evidence: dict[str, Any], now: datetime) -> str:
-    """Apply the deployed three-state aging rules to selected evidence."""
-    if evidence["at"] < now - timedelta(days=30):
+def _lifecycle_target(
+    evidence: dict[str, Any],
+    now: datetime,
+    offline_after_days: int,
+    retire_review_days: int,
+) -> str:
+    """Apply the three-state aging rules to selected evidence.
+
+    The two thresholds are the tenant's Device status settings, not constants.
+    """
+    if evidence["at"] < now - timedelta(days=retire_review_days):
         return "pending_cleanup"
     if evidence["status"] == "offline_aging" or evidence["at"] < now - timedelta(
-        days=7
+        days=offline_after_days
     ):
         return "offline_aging"
     return "active"
@@ -821,6 +830,7 @@ def _sync_lifecycle_status(
     that is the source observation time for the reported state. ``retired`` is
     an operator decision and is never selected for an automatic update.
     """
+    offline_after_days, retire_review_days = device_status_settings.load(cur, tenant_id)
     cur.execute(
         """
         SELECT d.id, d.client_id, d.lifecycle_status,
@@ -977,7 +987,7 @@ def _sync_lifecycle_status(
         if evidence is None:
             continue
 
-        target = _lifecycle_target(evidence, now)
+        target = _lifecycle_target(evidence, now, offline_after_days, retire_review_days)
         previous = device["lifecycle_status"]
         if target == previous:
             continue
@@ -1360,6 +1370,7 @@ def _evaluate_coverage(
         log.warning("evaluator: finding_type 'missing_required_platform' not found")
         return 0
     policy = load_active_profile(cur)
+    offline_after_days, _retire_review_days = device_status_settings.load(cur, tenant_id)
     identity_blocked = _identity_blocked_devices(cur, tenant_id)
 
     # Pre-compute devices that are fully offline (last contact across
@@ -1380,7 +1391,7 @@ def _evaluate_coverage(
         HAVING MAX(COALESCE(apc.last_contact_at, apc.last_observed_at))
              < NOW() - (%s::text || ' days')::interval
         """,
-        (tenant_id, policy.offline_days),
+        (tenant_id, offline_after_days),
     )
     fully_offline_devices = {r[0] for r in cur.fetchall()}
 
@@ -1799,8 +1810,9 @@ def _evaluate_device_offline(cur: Any, tenant_id: int, now: datetime) -> int:
     ft_id = _get_finding_type_id(cur, "device_offline")
     if ft_id is None:
         return 0
+    offline_after_days, _retire_review_days = device_status_settings.load(cur, tenant_id)
     policy = load_active_profile(cur)
-    threshold_interval = f"{policy.offline_days} days"
+    threshold_interval = f"{offline_after_days} days"
     identity_blocked = _identity_blocked_devices(cur, tenant_id)
     # Per-platform last-seen is preserved as evidence on the finding
     # so operators triaging a fully-offline device can see the exact

@@ -18109,6 +18109,7 @@ def device_status_config(request: HttpRequest) -> HttpResponse:
     if request.method == "POST":
         limits = {
             "active_device_days": (1, 90),
+            "retire_review_days": (2, 365),
             "patch_activity_days": (1, 180),
             "reboot_pending_days": (1, 90),
             "repeated_failure_count": (1, 20),
@@ -18122,6 +18123,10 @@ def device_status_config(request: HttpRequest) -> HttpResponse:
             except ValueError:
                 value = DEVICE_STATUS_DEFAULTS[key]
             new_config[key] = max(minimum, min(value, maximum))
+        # Review for retirement cannot come before a computer is offline.
+        new_config["retire_review_days"] = max(
+            new_config["retire_review_days"], new_config["active_device_days"] + 1
+        )
         before = row.config
         row.config = new_config
         row.updated_by = request.user

@@ -7,6 +7,7 @@ from .models import EvaluatorConfig
 POLICY_NAME = "device_status"
 DEFAULTS = {
     "active_device_days": 7,
+    "retire_review_days": 30,
     "patch_activity_days": 35,
     "reboot_pending_days": 3,
     "repeated_failure_count": 3,
@@ -30,4 +31,8 @@ def get_device_status_policy(tenant_id: int = 1) -> dict[str, int]:
         except (TypeError, ValueError):
             value = default
         policy[key] = max(1, min(value, 365 if key.endswith("days") else 10_000))
+    # Review for retirement cannot come before a computer is offline.
+    policy["retire_review_days"] = max(
+        policy["retire_review_days"], policy["active_device_days"] + 1
+    )
     return policy

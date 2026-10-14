@@ -20,7 +20,7 @@ from collections.abc import Iterable, Mapping
 from datetime import datetime, timezone
 from typing import Any
 
-from ingest import db
+from ingest import db, device_status_settings
 from ingest.condition_evidence import offline_readiness
 from ingest.conditions import load_active_profile
 from shared.conditions.contracts import Condition, Participant, Readiness, Signal
@@ -28,8 +28,6 @@ from shared.conditions.engine import assess
 from shared.conditions.policy import Profile
 
 log = logging.getLogger(__name__)
-
-_DEFAULT_OFFLINE_DAYS = 35
 
 # One row per live device: whether it is attached to an identity and a client,
 # and whether an unreviewed identity conflict names it. Same predicates as
@@ -142,20 +140,8 @@ def compute(
 
 
 def _offline_days(cur: Any, tenant_id: int) -> int:
-    # Same source as the previous classifier's per-participant offline signal.
-    cur.execute(
-        """
-        SELECT config FROM operations.evaluator_config
-         WHERE tenant_id = %s AND evaluator_name = 'device_status'
-        """,
-        (tenant_id,),
-    )
-    row = cur.fetchone()
-    config = row[0] if row and isinstance(row[0], dict) else {}
-    try:
-        return max(1, int(config.get("patch_activity_days", _DEFAULT_OFFLINE_DAYS)))
-    except (TypeError, ValueError):
-        return _DEFAULT_OFFLINE_DAYS
+    # The tenant's single "offline after" setting (Device status page).
+    return device_status_settings.load(cur, tenant_id)[0]
 
 
 def refresh(tenant_id: int = 1, *, now: datetime | None = None) -> int:

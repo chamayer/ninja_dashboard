@@ -58,7 +58,7 @@ acts on admin findings; whether `jobs_unmet_dependency` maps cleanly to the upst
 | W6 | Withdrawn records | Emitter computes the cause: replaced (timeline event, no finding), no source remains or a missing-agent finding exists (hidden under its parent), otherwise a low finding; details carry remaining sources and the replacement | M | no | W5 |
 | W7 | Jobs chain | `jobs_unmet_dependency` hidden under the upstream job's failure; retire the overlapping `software_queue_stalled` | M | no | W5 |
 | W8 | Admin findings in the queue | Spike first: a SQL view that gives both tables one row shape, read-only in the queue; then actions; no storage move | L | yes (view) | none |
-| W9 | Housekeeping | Retire the dormant and superseded types; find duplicate open rows across the two tables; look at the 2,534 withdrawn and the `unauthorized_remote_access` authorization gap | S-M | policy version | none |
+| W9 | Housekeeping | Retire the dormant and superseded types; find duplicate open rows across the two tables; look at the 2,534 withdrawn and the `unauthorized_remote_access` authorization gap | S-M | policy version | none; add a duplicate-platform-record finding for two same-class agent records linked to one computer (3 today, no finding); classify Hyper-V and VMware monitoring records so they never read as a second agent id (626 computers) |
 
 Also pending and separate: the local, uncommitted changes from this session (old classifier removal, ADR 0030,
 Issues context line, rare-limit preview).

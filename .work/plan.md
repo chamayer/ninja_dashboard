@@ -49,8 +49,22 @@ runs already run hourly (40 completed, 1 failed by a DB restart, in 24 h; about 
 **Phase 2 W3 capability confirm/reject:** built, uncommitted (`capability_review_actions.py`); closes the 297 frozen
 `capability_review_candidate` findings with a recorded reason as each is judged. Nothing produces new ones yet.
 
-**Next action:** commit approval for capability actions; then Phase 3 W4 (one offline value; needs a nullable
-per-client column, so a proposal naming the migration first).
+**W9 additions (2026-10-14):** duplicate-platform-record finding for same-class agent records linked to one computer
+(3 today); classify Hyper-V and VMware monitoring records so they never read as a second agent id (626 computers).
+
+**Capability actions committed locally (593b5c0), not pushed.**
+
+**Phase 3 W4 Stage 1 built, uncommitted (no migration):** `ingest/device_status_settings.py` reads the Device status
+settings `active_device_days` (offline after, default 7) and the new `retire_review_days` (default 30, always above
+offline). Lifecycle aging, the `device_offline` finding, the stale-agent demotion and the offline gate for patch and
+software readiness read it; `patch_activity_days` (35) now only means patch data is stale. Operations Device status
+page relabeled and gains the second setting. The conditions shadow report still reads the policy's literal 180 until
+W5 sets `offline_days` to 7 in the next policy version. Production config is `{}`, so defaults apply: expect
+`device_offline` to grow from about 744 to about 1,194 computers and computers silent 7 to 35 days to read blocked on
+patch and software readiness.
+
+**Next action:** commit approval for Stage 1 (names the effect above; no migration); then Stage 2 (per-client override,
+migration proposal) or W5.
 
 ## Active plan — Software inventory ingest rebuild
 
