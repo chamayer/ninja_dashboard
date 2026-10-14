@@ -186,3 +186,19 @@ def test_titles_under_a_publisher_are_capped_but_counted():
     template = (_ROOT / "templates" / "software_decisions.html").read_text(encoding="utf-8")
     assert "See every title of this publisher as a table" in template
     assert 'id="sw-review-publishers"' in template
+
+
+def test_titles_under_each_publisher_are_sortable_and_keep_their_publisher_open():
+    template = (_ROOT / "templates" / "software_decisions.html").read_text(encoding="utf-8")
+    views = (_ROOT / "apps" / "core" / "views.py").read_text(encoding="utf-8")
+    # Sub-table headers are links that carry the publisher anchor ...
+    assert '{% for col in title_columns %}' in template
+    assert '<a href="{{ col.href }}#pub-{{ group.publisher|slugify }}">' in template
+    # ... the page reopens that publisher after the reload ...
+    assert 'id="pub-{{ group.publisher|slugify }}"' in template
+    assert "location.hash.indexOf('#pub-') === 0" in template
+    # ... and the sort is applied before the 50-title cap, so the shown titles are
+    # the first in the chosen order.
+    sort_at = views.index("title_sort, title_dir")
+    trim_at = views.index("page_groups = software_review.trim_group_titles(page_groups)")
+    assert sort_at < trim_at

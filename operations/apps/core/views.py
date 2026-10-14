@@ -16465,6 +16465,12 @@ def software_decisions_queue(request: HttpRequest) -> HttpResponse:
     sort_dir = "asc" if request.GET.get("dir") == "asc" else "desc"
     if sort_key not in {name for name, _label, _numeric in sort_columns}:
         sort_key, sort_dir = ("devices" if view_mode == "table" else "titles"), "desc"
+    title_sort = request.GET.get("tsort") or ""
+    title_dir = "asc" if request.GET.get("tdir") == "asc" else "desc"
+    if title_sort not in {
+        name for name, _label, _numeric in software_review.SORT_COLUMNS if name != "publisher"
+    }:
+        title_sort = ""
     with transaction.atomic(), connection.cursor() as cur:
         cur.execute("SET LOCAL operations.tenant_id = 1")
         cur.execute(software_review.PROMPTS_SQL, (1,))
@@ -16512,6 +16518,18 @@ def software_decisions_queue(request: HttpRequest) -> HttpResponse:
             page_groups, page_number, pages = software_review.paginate(
                 groups, page_number, per_page=25
             )
+            if title_sort:
+                # Sort each publisher's titles before the cap, so the titles
+                # shown are the first ones in the chosen order.
+                page_groups = [
+                    {
+                        **group,
+                        "titles": software_review.sort_titles(
+                            group["titles"], title_sort, title_dir
+                        ),
+                    }
+                    for group in page_groups
+                ]
             page_groups = software_review.trim_group_titles(page_groups)
         config = EvaluatorConfig.objects.filter(
             tenant_id=1, evaluator_name="software_classifier"
@@ -16547,6 +16565,20 @@ def software_decisions_queue(request: HttpRequest) -> HttpResponse:
             "href": _href(view=view_mode, sort=name, dir=next_dir),
             "mark": (" ▼" if sort_dir == "desc" else " ▲") if active else "",
         })
+    title_columns = []
+    for name, label, numeric in software_review.SORT_COLUMNS:
+        if name == "publisher":
+            continue
+        if name == title_sort:
+            next_dir = "asc" if title_dir == "desc" else "desc"
+        else:
+            next_dir = "desc" if numeric else "asc"
+        title_columns.append({
+            "label": label,
+            "numeric": numeric,
+            "href": _href(tsort=name, tdir=next_dir),
+            "mark": (" ▼" if title_dir == "desc" else " ▲") if name == title_sort else "",
+        })
     return render(
         request,
         "software_decisions.html",
@@ -16554,6 +16586,7 @@ def software_decisions_queue(request: HttpRequest) -> HttpResponse:
             "admin_group": "review",
             "admin_tab": "software",
             "software_tab": "decisions",
+            "title_columns": title_columns,
             "view_mode": view_mode,
             "sort_key": sort_key,
             "sort_dir": sort_dir,

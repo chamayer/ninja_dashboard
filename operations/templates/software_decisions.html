@@ -27,6 +27,7 @@
   .pub-summary td { background: var(--surface); vertical-align: middle; }
   .pub-titles > td { padding-top: 0; }
   #sw-review-publishers th a, #sw-review-flat th a { color: inherit; text-decoration: none; }
+  .pub-titles th a { color: inherit; text-decoration: none; }
   .pub-meta { color: var(--muted); font-size: 0.85rem; }
   .pub-actions { margin-left: auto; display: flex; gap: 0.3rem; flex-wrap: wrap; }
   .pub-actions form, .row-actions form { margin: 0; }
@@ -159,7 +160,7 @@
             </tr>
         </thead>
         {% for group in groups %}
-        <tbody class="pub-block">
+        <tbody class="pub-block" id="pub-{{ group.publisher|slugify }}">
             <tr class="pub-summary">
                 <td><button type="button" class="pub-toggle" aria-expanded="{% if forloop.first %}true{% else %}false{% endif %}" aria-label="Show or hide the titles of {{ group.publisher|default:'no publisher' }}">{% if forloop.first %}&#9662;{% else %}&#9656;{% endif %}</button></td>
                 <td><strong>{% if group.publisher %}{{ group.publisher }}{% else %}<span class="muted">No publisher</span>{% endif %}</strong></td>
@@ -177,12 +178,9 @@
                         <thead>
                             <tr>
                                 <th style="width:2rem;"></th>
-                                <th>Title</th>
-                                <th>Type</th>
-                                <th class="num">Devices</th>
-                                <th class="num">Clients</th>
-                                <th>Signals</th>
-                                <th>Suggested</th>
+                                {% for col in title_columns %}
+                                <th{% if col.numeric %} class="num"{% endif %}><a href="{{ col.href }}#pub-{{ group.publisher|slugify }}">{{ col.label }}{{ col.mark }}</a></th>
+                                {% endfor %}
                                 <th style="text-align:right;">Decide this title</th>
                             </tr>
                         </thead>
@@ -253,6 +251,17 @@
       });
     });
     scopeKind.addEventListener('change', refresh);
+    // Keep the publisher you were working in open after sorting its titles.
+    if (location.hash.indexOf('#pub-') === 0) {
+      const block = document.getElementById(location.hash.slice(1));
+      if (block) {
+        const titles = block.querySelector('.pub-titles');
+        const btn = block.querySelector('.pub-toggle');
+        if (titles) titles.removeAttribute('hidden');
+        if (btn) { btn.setAttribute('aria-expanded', 'true'); btn.innerHTML = '&#9662;'; }
+        block.scrollIntoView();
+      }
+    }
     refresh();
   })();
 </script>
