@@ -455,6 +455,9 @@ class Client(UUIDTenantScopedModel):
     slug = models.SlugField(max_length=120)
     display_name = models.CharField(max_length=240)
     timezone = models.CharField(max_length=64, default="UTC")
+    # This client's own "offline after" days; empty uses the tenant value on the
+    # Device status page. Review-for-retirement stays tenant-wide.
+    offline_after_days = models.PositiveSmallIntegerField(null=True, blank=True)
     requirement_profile = models.ForeignKey(
         "RequirementProfile",
         on_delete=models.PROTECT,

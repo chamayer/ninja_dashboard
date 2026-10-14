@@ -4,6 +4,18 @@
 
 {% block content %}
 <div class="card">
+  <h1>Offline threshold</h1>
+  <p class="muted">A computer is offline when no source has heard from it for this many days. Leave empty to use the default of {{ device_policy.active_device_days }} days from Device status. It drives the offline issue, stale-agent handling, lifecycle aging, and patch and software readiness for this client.</p>
+  <form method="post" style="display:flex; align-items:end; gap:.6rem; flex-wrap:wrap;">
+    {% csrf_token %}<input type="hidden" name="action" value="offline_after">
+    <label>Offline after (days)<br>
+      <input type="number" name="offline_after_days" min="1" max="{{ device_policy.retire_review_days|add:-1 }}" value="{{ client.offline_after_days|default_if_none:'' }}" placeholder="{{ device_policy.active_device_days }} (default)">
+    </label>
+    <button type="submit">Save</button>
+  </form>
+</div>
+
+<div class="card">
   <h1>Service requirements</h1>
   <p class="muted">Choose the inherited baseline, then make exceptions for individual services. Required services are evaluated only for devices in their stated scope.</p>
   <form method="post" style="display:flex; align-items:end; gap:.6rem; flex-wrap:wrap;">

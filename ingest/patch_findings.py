@@ -631,7 +631,7 @@ def _record_assessment(cur, tenant_id, finding_id, ft_id, condition_key,
         offline_state, offline_reason = offline_readiness(
             [contact_row[0] if contact_row else None],
             now=now,
-            offline_days=device_status_settings.load(cur, tenant_id)[0],
+            offline_days=device_status_settings.device_offline_days(cur, tenant_id, subject_id),
         )
         signals = (
             identity,

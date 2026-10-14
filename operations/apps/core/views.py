@@ -17999,6 +17999,33 @@ def client_requirements_config(request: HttpRequest, org_slug: str) -> HttpRespo
                 },
             )
             messages.success(request, "Inherited service baseline updated.")
+        elif action == "offline_after":
+            raw_days = (request.POST.get("offline_after_days") or "").strip()
+            policy = get_device_status_policy()
+            ceiling = policy["retire_review_days"] - 1
+            try:
+                days = int(raw_days) if raw_days else None
+            except ValueError:
+                days = -1
+            if days is not None and not 1 <= days <= ceiling:
+                messages.error(
+                    request,
+                    f"Offline after must be between 1 and {ceiling} days, or empty to use "
+                    f"the default of {policy['active_device_days']}.",
+                )
+                return redirect("client_requirements_config", org_slug=client.slug)
+            before = client.offline_after_days
+            if days != before:
+                client.offline_after_days = days
+                client.save(update_fields=["offline_after_days"])
+                _audit(
+                    request,
+                    "client.offline_after_days.update",
+                    client.id,
+                    {"offline_after_days": before},
+                    {"offline_after_days": days},
+                )
+            messages.success(request, "Offline threshold updated.")
         elif action == "override":
             agent = get_object_or_404(Agent, id=request.POST.get("agent_id"))
             scope = request.POST.get("device_scope") or "all"
@@ -18056,6 +18083,7 @@ def client_requirements_config(request: HttpRequest, org_slug: str) -> HttpRespo
                 "-is_tenant_default", "name"
             ),
             "service_rows": _client_service_requirement_rows(client),
+            "device_policy": get_device_status_policy(),
         },
     )
 

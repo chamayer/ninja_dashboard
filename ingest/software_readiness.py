@@ -110,6 +110,7 @@ def compute(
     profile: Profile,
     now: datetime,
     offline_days: int,
+    offline_days_by_device: Mapping[str, int] | None = None,
 ) -> list[tuple]:
     """Return one readiness row per (device, finding type). Pure; no I/O."""
     types = list(finding_types)
@@ -117,7 +118,9 @@ def compute(
     for device_id, attached, conflicted in devices:
         participant = Participant("device", str(device_id), "affected", tenant_id)
         offline_state, offline_reason = offline_readiness(
-            [contacts.get(str(device_id))], now=now, offline_days=offline_days
+            [contacts.get(str(device_id))],
+            now=now,
+            offline_days=(offline_days_by_device or {}).get(str(device_id), offline_days),
         )
         signals = (
             identity_signal(participant, bool(attached), bool(conflicted)),
@@ -160,6 +163,7 @@ def refresh(tenant_id: int = 1, *, now: datetime | None = None) -> int:
             tenant_id=tenant_id, devices=devices, contacts=contacts,
             finding_types=finding_types, profile=profile, now=now,
             offline_days=_offline_days(cur, tenant_id),
+            offline_days_by_device=device_status_settings.device_overrides(cur, tenant_id),
         )
         columns = READINESS_COLUMNS
         cur.execute(

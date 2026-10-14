@@ -39,7 +39,7 @@ from typing import Any
 from ingest import db
 from ingest.condition_evidence import preserve_operator_episode
 from ingest import device_status_settings
-from ingest.conditions import load_active_profile, record_assessment
+from ingest.conditions import record_assessment
 from ingest.identity import identity_entity_types
 from ingest.intel.windows_servicing import sync as sync_windows_servicing
 from ingest.normalize import normalize_hostname
@@ -831,6 +831,7 @@ def _sync_lifecycle_status(
     an operator decision and is never selected for an automatic update.
     """
     offline_after_days, retire_review_days = device_status_settings.load(cur, tenant_id)
+    client_offline_days = device_status_settings.client_overrides(cur, tenant_id)
     cur.execute(
         """
         SELECT d.id, d.client_id, d.lifecycle_status,
@@ -987,7 +988,13 @@ def _sync_lifecycle_status(
         if evidence is None:
             continue
 
-        target = _lifecycle_target(evidence, now, offline_after_days, retire_review_days)
+        device_offline_days = client_offline_days.get(str(device["client_id"]), offline_after_days)
+        target = _lifecycle_target(
+            evidence,
+            now,
+            device_offline_days,
+            max(retire_review_days, device_offline_days + 1),
+        )
         previous = device["lifecycle_status"]
         if target == previous:
             continue
@@ -1369,8 +1376,8 @@ def _evaluate_coverage(
     if missing_ft is None:
         log.warning("evaluator: finding_type 'missing_required_platform' not found")
         return 0
-    policy = load_active_profile(cur)
     offline_after_days, _retire_review_days = device_status_settings.load(cur, tenant_id)
+    client_days = device_status_settings.override_expression(cur, "c")
     identity_blocked = _identity_blocked_devices(cur, tenant_id)
 
     # Pre-compute devices that are fully offline (last contact across
@@ -1382,14 +1389,17 @@ def _evaluate_coverage(
     # offline devices (the agent was never installed, that's a real
     # gap regardless of current online state).
     cur.execute(
-        """
+        f"""
         SELECT apc.device_id
         FROM operations.device_agent_presence_current apc
+        JOIN operations.devices dv
+          ON dv.id = apc.device_id AND dv.tenant_id = apc.tenant_id
+        LEFT JOIN operations.clients c ON c.id = dv.client_id
         WHERE apc.tenant_id = %s
           AND apc.entity_type LIKE 'agent.%%'
-        GROUP BY apc.device_id
+        GROUP BY apc.device_id, {client_days}
         HAVING MAX(COALESCE(apc.last_contact_at, apc.last_observed_at))
-             < NOW() - (%s::text || ' days')::interval
+             < NOW() - make_interval(days => COALESCE({client_days}, %s))
         """,
         (tenant_id, offline_after_days),
     )
@@ -1811,8 +1821,7 @@ def _evaluate_device_offline(cur: Any, tenant_id: int, now: datetime) -> int:
     if ft_id is None:
         return 0
     offline_after_days, _retire_review_days = device_status_settings.load(cur, tenant_id)
-    policy = load_active_profile(cur)
-    threshold_interval = f"{offline_after_days} days"
+    client_days = device_status_settings.override_expression(cur, "c")
     identity_blocked = _identity_blocked_devices(cur, tenant_id)
     # Per-platform last-seen is preserved as evidence on the finding
     # so operators triaging a fully-offline device can see the exact
@@ -1820,7 +1829,7 @@ def _evaluate_device_offline(cur: Any, tenant_id: int, now: datetime) -> int:
     # ScreenConnect 7/14 → fully offline since 7/14") without
     # having to click through to the device detail Sources tab.
     cur.execute(
-        """
+        f"""
         WITH per_platform AS (
             SELECT tenant_id, device_id, platform,
                    MAX(COALESCE(last_contact_at, last_observed_at)) AS last_seen
@@ -1835,12 +1844,13 @@ def _evaluate_device_offline(cur: Any, tenant_id: int, now: datetime) -> int:
         FROM per_platform pp
         JOIN operations.devices d
              ON d.id = pp.device_id AND d.tenant_id = pp.tenant_id
+        LEFT JOIN operations.clients c ON c.id = d.client_id
         WHERE d.deleted_at IS NULL
           AND d.lifecycle_status <> 'retired'
-        GROUP BY pp.device_id, d.client_id, d.canonical_hostname
-        HAVING MAX(pp.last_seen) < NOW() - %s::interval
+        GROUP BY pp.device_id, d.client_id, d.canonical_hostname, {client_days}
+        HAVING MAX(pp.last_seen) < NOW() - make_interval(days => COALESCE({client_days}, %s))
         """,
-        (tenant_id, threshold_interval),
+        (tenant_id, offline_after_days),
     )
     count = 0
     offenders: list[uuid.UUID] = []
