@@ -88,12 +88,68 @@ APPROVE_REMOTE_ACCESS_CLIENT = FindingAction(
 )
 
 
+# Undecided software is decided from the queue. Anyone who can use the review
+# page can decide, so these carry no extra permission (empty string).
+_SOFTWARE_PROMPTS = frozenset({"rare_recent", "whitelist_suggestion"})
+
+
+def _software_action(key: str, label: str, confirmation: str, hint: str) -> FindingAction:
+    return FindingAction(
+        key=key,
+        label=label,
+        permission="",
+        finding_types=_SOFTWARE_PROMPTS,
+        requires_reason=False,
+        confirmation=confirmation,
+        eligibility_hint=hint,
+    )
+
+
+SOFTWARE_APPROVE_TITLE = _software_action(
+    "software_approve_title",
+    "Approve software",
+    "Approve the selected software titles everywhere?",
+    "Approves each selected title for every client. Remote access is approved separately.",
+)
+SOFTWARE_APPROVE_PUBLISHER = _software_action(
+    "software_approve_publisher",
+    "Approve publisher",
+    "Approve the publishers of the selected software for every title they make?",
+    "Approves the whole publisher; a title with another concern still shows.",
+)
+SOFTWARE_REJECT = _software_action(
+    "software_reject",
+    "Reject software",
+    "Reject the selected software titles? Installed copies will raise an issue.",
+    "Rejected software that is installed raises its own issue.",
+)
+SOFTWARE_INVESTIGATE = _software_action(
+    "software_investigate",
+    "Investigate",
+    "Mark the selected software titles as being investigated?",
+    "",
+)
+
 FINDING_ACTIONS = {
     BULK_RETIRE_COMPUTERS.key: BULK_RETIRE_COMPUTERS,
     ARCHIVE_HUDU_ASSETS.key: ARCHIVE_HUDU_ASSETS,
     APPROVE_REMOTE_ACCESS_ALL.key: APPROVE_REMOTE_ACCESS_ALL,
     APPROVE_REMOTE_ACCESS_CLIENT.key: APPROVE_REMOTE_ACCESS_CLIENT,
+    SOFTWARE_APPROVE_TITLE.key: SOFTWARE_APPROVE_TITLE,
+    SOFTWARE_APPROVE_PUBLISHER.key: SOFTWARE_APPROVE_PUBLISHER,
+    SOFTWARE_REJECT.key: SOFTWARE_REJECT,
+    SOFTWARE_INVESTIGATE.key: SOFTWARE_INVESTIGATE,
 }
+
+
+def can_run_action(user: object, action: FindingAction) -> bool:
+    """Whether ``user`` may start ``action``; an empty permission needs only a login."""
+    if not action.permission:
+        return bool(getattr(user, "is_authenticated", False))
+    return bool(
+        getattr(user, "is_superuser", False)
+        or getattr(user, "has_perm", lambda _permission: False)(action.permission)
+    )
 
 
 def can_manage_lifecycle(user: object) -> bool:
@@ -106,9 +162,4 @@ def can_manage_lifecycle(user: object) -> bool:
 
 def available_finding_actions(user: object) -> tuple[FindingAction, ...]:
     """Actions this operator is authorized to start from the Findings page."""
-    return tuple(
-        action
-        for action in FINDING_ACTIONS.values()
-        if getattr(user, "is_superuser", False)
-        or getattr(user, "has_perm", lambda _permission: False)(action.permission)
-    )
+    return tuple(action for action in FINDING_ACTIONS.values() if can_run_action(user, action))

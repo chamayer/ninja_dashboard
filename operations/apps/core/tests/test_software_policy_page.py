@@ -36,7 +36,7 @@ def test_invalid_regex_rules_are_refused(monkeypatch, pattern):
 def test_table_rows_bind_controls_with_form_attributes_not_nested_forms():
     assert "<tr>\n            <form" not in _TEMPLATE
     assert _TEMPLATE.count('form="type-{{ ft.id }}"') == 5
-    assert _TEMPLATE.count('form="suggestion-{{ rule.id }}"') == 4
+    assert _TEMPLATE.count('form="suggestion-{{ rule.id }}"') == 5
 
 
 def test_held_computers_are_listed_with_a_release_action():

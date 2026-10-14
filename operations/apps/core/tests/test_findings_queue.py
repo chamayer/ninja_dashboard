@@ -384,9 +384,15 @@ class _FindingActionUser:
         )
 
 
+def _permissioned_actions(user):
+    # Login-only actions (software decisions) carry no permission; this suite
+    # asserts the permission-gated ones.
+    return tuple(a for a in available_finding_actions(user) if a.permission)
+
+
 def test_registered_retirement_action_requires_lifecycle_permission():
-    assert available_finding_actions(_FindingActionUser(may_manage_lifecycle=False)) == ()
-    assert available_finding_actions(_FindingActionUser(may_manage_lifecycle=True)) == (
+    assert _permissioned_actions(_FindingActionUser(may_manage_lifecycle=False)) == ()
+    assert _permissioned_actions(_FindingActionUser(may_manage_lifecycle=True)) == (
         BULK_RETIRE_COMPUTERS,
     )
 
@@ -400,7 +406,7 @@ def test_manual_retirement_is_visible_without_a_lifecycle_finding_gate():
 
 
 def test_hudu_archive_action_requires_source_management_permission():
-    assert available_finding_actions(
+    assert _permissioned_actions(
         _FindingActionUser(may_manage_lifecycle=False, may_manage_sources=True)
     ) == (ARCHIVE_HUDU_ASSETS,)
 

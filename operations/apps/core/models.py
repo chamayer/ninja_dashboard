@@ -3961,6 +3961,8 @@ class SoftwareSuggestionRule(models.Model):
         JUNK_PUBLISHER = "junk_publisher", "Placeholder or junk publisher"
         ESTABLISHED_PUBLISHER = "established_publisher", "Established publisher"
         PREVALENT = "prevalent", "Prevalent, no concern"
+        KNOWN_VENDOR = "known_vendor", "Known vendor"
+        PUBLISHER_APPROVED = "publisher_approved", "Publisher already approved"
         FALLBACK = "fallback", "Otherwise"
 
     class Suggestion(models.TextChoices):
@@ -3968,6 +3970,7 @@ class SoftwareSuggestionRule(models.Model):
         REVIEW_CAPABILITY = "review_capability", "Review capability"
         APPROVE_PUBLISHER = "approve_publisher", "Approve publisher"
         APPROVE_TITLE = "approve_title", "Approve title"
+        LOOKS_ROUTINE = "supports_approval", "Supports approval"
         NONE = "none", "No suggestion"
 
     id = models.SmallAutoField(primary_key=True)
@@ -3977,6 +3980,13 @@ class SoftwareSuggestionRule(models.Model):
     suggestion = models.CharField(max_length=32, choices=Suggestion.choices)
     enabled = models.BooleanField(default=True)
     note = models.CharField(max_length=240, blank=True, default="")
+    # Other signals that must also be present, so a suggestion can need
+    # several agreeing facts. Data, edited on the Software policy page.
+    requires = models.JSONField(
+        default=list,
+        blank=True,
+        help_text="Other signals that must also be present for this rule to apply.",
+    )
 
     class Meta:
         db_table = "software_suggestion_rules"

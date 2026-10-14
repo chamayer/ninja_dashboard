@@ -113,7 +113,8 @@ def _toggle_rule(request: HttpRequest) -> str:
 def _update_suggestion(request: HttpRequest) -> str:
     rule = get_object_or_404(SoftwareSuggestionRule, id=request.POST.get("rule_id"))
     before = {"priority": rule.priority, "adverse": rule.adverse,
-              "suggestion": rule.suggestion, "enabled": rule.enabled}
+              "suggestion": rule.suggestion, "enabled": rule.enabled,
+              "requires": list(rule.requires or [])}
     suggestion = request.POST.get("suggestion") or rule.suggestion
     try:
         priority = max(0, min(int(request.POST.get("priority") or rule.priority), 32767))
@@ -121,14 +122,22 @@ def _update_suggestion(request: HttpRequest) -> str:
         return "Priority must be a number."
     if suggestion not in SoftwareSuggestionRule.Suggestion.values:
         return "Choose a valid suggestion."
+    requires = [s.strip() for s in (request.POST.get("requires") or "").split(",") if s.strip()]
+    unknown = [s for s in requires if s not in SoftwareSuggestionRule.Signal.values]
+    if unknown:
+        return "Unknown required signal: " + ", ".join(unknown) + "."
+    if rule.signal in requires:
+        return "A rule cannot require its own signal."
+    rule.requires = requires
     rule.priority = priority
     rule.suggestion = suggestion
     rule.adverse = request.POST.get("adverse") == "on"
     rule.enabled = request.POST.get("enabled") == "on"
     after = {"priority": rule.priority, "adverse": rule.adverse,
-             "suggestion": rule.suggestion, "enabled": rule.enabled}
+             "suggestion": rule.suggestion, "enabled": rule.enabled,
+             "requires": requires}
     if after != before:
-        rule.save(update_fields=["priority", "adverse", "suggestion", "enabled"])
+        rule.save(update_fields=["priority", "adverse", "suggestion", "enabled", "requires"])
         _audit(request, "software_suggestion_rule.update", "software_suggestion_rule", rule.id,
                before, after)
     return ""

@@ -93,6 +93,7 @@ from .finding_actions import (
     FINDING_ACTIONS,
     available_finding_actions,
     can_manage_lifecycle,
+    can_run_action,
 )
 from .forms import ClientPolicyForm
 from .models import (
@@ -130,6 +131,7 @@ from .models import (
     SuppressionRule,
 )
 from .remote_access_approval import approve_remote_access
+from .software_decision_actions import decide_software, decision_for
 
 DEVICE_PAGE_SIZE = 100
 
@@ -6150,6 +6152,9 @@ def _software_review_context(details: dict) -> str:
     suggestion = details.get("suggestion") or "none"
     if suggestion != "none":
         pieces.append(f"suggested: {labels.get(suggestion, suggestion)}")
+    evidence = software_review.evidence_labels(details)
+    if evidence:
+        pieces.append("because: " + ", ".join(evidence))
     signals = [s for s in (details.get("signals") or []) if isinstance(s, str)]
     if signals:
         pieces.append("signals: " + ", ".join(signals).replace("_", " "))
@@ -6623,7 +6628,7 @@ def findings_bulk_action(request: HttpRequest) -> HttpResponse:
 
     registered_action = FINDING_ACTIONS.get(action)
     if registered_action is not None:
-        if not (request.user.is_superuser or request.user.has_perm(registered_action.permission)):
+        if not can_run_action(request.user, registered_action):
             raise PermissionDenied
         if registered_action.key == BULK_RETIRE_COMPUTERS.key:
             return _retire_selected_computers(request, ids, registered_action)
@@ -6634,6 +6639,8 @@ def findings_bulk_action(request: HttpRequest) -> HttpResponse:
             APPROVE_REMOTE_ACCESS_CLIENT.key,
         ):
             return approve_remote_access(request, ids, registered_action)
+        if decision_for(registered_action.key) is not None:
+            return decide_software(request, ids, registered_action)
     if action not in ("refresh", "snooze", "suppress"):
         messages.warning(request, "That action is not available.")
         return redirect(request.POST.get("next") or "findings_queue")

@@ -109,6 +109,17 @@ SELECT title_key,
  GROUP BY title_key
 """
 
+VENDORS_SQL = "SELECT DISTINCT regexp_replace(lower(vendor), '[^a-z0-9]+', '_', 'g') FROM intel.cpes"
+
+PUBLISHER_APPROVED_SQL = f"""
+SELECT lower(COALESCE(i.publisher, '')), count(DISTINCT lower(i.canonical_name))
+  FROM operations.software_installations_current i
+  {EFFECTIVE_DECISION_JOINS}
+ WHERE {_LIVE} AND i.canonical_name <> '' AND COALESCE(i.publisher, '') <> ''
+   AND {_TITLE_DECISION} IN ('approve', 'approve_publisher')
+ GROUP BY 1
+"""
+
 VERSION_FACTS_SQL = f"""
 SELECT lower(i.canonical_name) AS title_key, version.version_uuid,
        max(version.version) AS version, count(DISTINCT i.device_id) AS devices
@@ -320,15 +331,35 @@ def _recent(first_seen: datetime | None, now: datetime, days: int) -> bool:
 
 
 def suggestion_for(
-    rules: list[tuple[int, str, bool, str]],
+    rules: list[tuple],
     signals: set[str],
 ) -> str:
-    """First enabled rule whose signal is present, adverse rules first."""
+    """First enabled rule whose signals are present, adverse rules first.
+
+    A rule is (priority, signal, adverse, suggestion[, requires]); it applies when
+    its signal and every required signal are present.
+    """
     ordered = sorted(rules, key=lambda rule: (not rule[2], rule[0]))
-    for _priority, signal, _adverse, suggestion in ordered:
-        if signal in signals or signal == "fallback":
+    for rule in ordered:
+        signal, suggestion = rule[1], rule[3]
+        requires = rule[4] if len(rule) > 4 and rule[4] else ()
+        if (signal in signals or signal == "fallback") and all(
+            required in signals for required in requires
+        ):
             return suggestion
     return "none"
+
+
+# Legal-form words dropped when comparing a publisher with a vendor name.
+_LEGAL_FORMS = frozenset(
+    "incorporated inc corporation corp limited ltd llc gmbh co company plc ag sa bv the".split()
+)
+
+
+def vendor_key(publisher: str) -> str:
+    """Normalize a publisher the way vendor names are written in the CPE list."""
+    words = re.findall(r"[a-z0-9]+", (publisher or "").lower())
+    return "_".join(word for word in words if word not in _LEGAL_FORMS)
 
 
 # ── Desired state ──────────────────────────────────────────────────────
@@ -341,7 +372,7 @@ class Context:
     cfg: dict[str, Any]
     types: dict[str, FindingType]
     rules: dict[str, Callable[[str], bool]]
-    suggestion_rules: list[tuple[int, str, bool, str]]
+    suggestion_rules: list[tuple]
     titles: dict[str, dict[str, Any]]
     versions: list[tuple[str, str, str, int]]
     vulnerable: dict[str, dict[str, Any]]
@@ -351,6 +382,10 @@ class Context:
     capabilities: dict[Any, list[dict[str, Any]]]
     authorizations: dict
     sanctioned: dict
+    # Publisher names of vendors in the vulnerability database, and how many
+    # titles of each publisher are already approved here (lower-case keys).
+    known_vendors: frozenset[str] = frozenset()
+    publisher_approved: dict[str, int] = field(default_factory=dict)
 
 
 def _rule(ctx: Context, name: str) -> Callable[[str], bool]:
@@ -401,6 +436,8 @@ def compute_desired(ctx: Context, report: RunReport) -> dict[str, list[Desired]]
             concerns.add("junk_publisher")
         return bool(concerns - {exclude})
 
+    # Facts that support a decision rather than warn against it.
+    supporting = {"prevalent", "established_publisher", "known_vendor", "publisher_approved"}
     desired: dict[str, list[Desired]] = defaultdict(list)
 
     def enabled(type_name: str, setting: str | None) -> bool:
@@ -529,12 +566,18 @@ def compute_desired(ctx: Context, report: RunReport) -> dict[str, list[Desired]]
                 signals.add("established_publisher")
             if facts["devices"] > rare_max:
                 signals.add("prevalent")
+            if vendor_key(facts["publisher"]) in ctx.known_vendors:
+                signals.add("known_vendor")
+            if (ctx.publisher_approved.get((facts["publisher"] or "").lower(), 0)
+                    >= int(cfg["suggestion_min_approved_titles"])):
+                signals.add("publisher_approved")
             details = {
                 "fleet_device_count": facts["devices"],
                 "client_count": facts["clients"],
                 "first_seen_at": facts["first_seen"].isoformat() if facts["first_seen"] else None,
                 "recent": recent,
-                "signals": sorted(signals - {"prevalent", "established_publisher"}),
+                "signals": sorted(signals - supporting),
+                "evidence": sorted(signals & supporting),
                 "suggestion": suggestion_for(ctx.suggestion_rules, signals),
             }
             if rare:
@@ -633,10 +676,18 @@ def load_context(
     )
     rules = compile_rules(cur.fetchall())
     cur.execute(
-        "SELECT priority, signal, adverse, suggestion FROM operations.software_suggestion_rules "
-        "WHERE enabled ORDER BY priority, id"
+        "SELECT priority, signal, adverse, suggestion, requires "
+        "FROM operations.software_suggestion_rules WHERE enabled ORDER BY priority, id"
     )
     suggestion_rules = [tuple(r) for r in cur.fetchall()]
+
+    known_vendors: frozenset[str] = frozenset()
+    cur.execute("SELECT to_regclass('intel.cpes')")
+    if cur.fetchone()[0] is not None:
+        cur.execute(VENDORS_SQL)
+        known_vendors = frozenset(r[0] for r in cur.fetchall() if r[0])
+    cur.execute(PUBLISHER_APPROVED_SQL, params)
+    publisher_approved = {r[0]: int(r[1]) for r in cur.fetchall()}
 
     cur.execute(scoped(TITLE_FACTS_SQL, scope_titles), params)
     columns = [d[0] for d in cur.description]
@@ -698,6 +749,7 @@ def load_context(
     return Context(
         tenant_id, now, cfg, types, rules, suggestion_rules, titles, versions, vulnerable,
         threat_hits, path_installs, capability_installs, capabilities, authorizations, sanctioned,
+        known_vendors, publisher_approved,
     )
 
 

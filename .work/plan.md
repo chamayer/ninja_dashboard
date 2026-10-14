@@ -27,7 +27,22 @@ Postgres run of migration 0291.
 **Local, uncommitted work from the same session:** old classifier removal (item 7), ADR 0030 and amendments,
 Issues context line for undecided software, rare-limit preview. Awaiting commit approval.
 
-**Next action:** user confirms D1, then commit approval for Phase 1 (names migration 0291), then Phase 2 (W3).
+**Phase 1 shipped** (e2210db on both remotes; migration 0291 applied, 21 types alertable). Remote access approval
+actions shipped in the same push (no migration).
+
+**Phase 2 (W3) in progress, uncommitted:** four software decision actions in the queue bulk bar
+(`software_decision_actions.py`, login-only, global scope). Not yet: whitelist_suggestion rows are still excluded from
+the Issues queue (`_SOFTWARE_POLICY_CANDIDATE_TYPES`), so only rare_recent rows can be selected; capability
+confirm/reject as queue actions.
+
+**Decision helper built, uncommitted:** migration 0292 (`software_suggestion_rules.requires`, signals
+`known_vendor`/`publisher_approved`, suggestion `supports_approval`; popularity rules disabled), ingest signals and
+evidence on findings, evidence shown on the review page and in the Issues context line, editable "Also needs".
+Measured before building: known vendor + established + no warning = about 377 undecided titles today;
+`publisher_approved` is empty until approvals exist (no decisions recorded yet).
+
+**Next action:** commit approval (software decision actions; decision helper, names migration 0292); then merge the
+two prompt types, lift the whitelist_suggestion queue exclusion, capability confirm/reject actions.
 
 ## Active plan — Software inventory ingest rebuild
 

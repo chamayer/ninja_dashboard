@@ -111,14 +111,15 @@
 
 <div class="sp-section">
     <h2>Suggestion rules</h2>
-    <p class="muted" style="margin-top:0;">Each review finding shows the first rule whose signal is present. Adverse rules always come before favorable ones, then by priority.</p>
+    <p class="muted" style="margin-top:0;">Each review finding shows the first rule whose signal, and every signal in &ldquo;Also needs&rdquo;, is present. Adverse rules always come before favorable ones, then by priority. &ldquo;Supports approval&rdquo; needs several agreeing facts; popularity alone is not evidence.</p>
     <table class="sp-table">
-        <thead><tr><th>Priority</th><th>Signal</th><th>Adverse</th><th>Suggestion</th><th>Enabled</th><th>Note</th><th></th></tr></thead>
+        <thead><tr><th>Priority</th><th>Signal</th><th>Also needs</th><th>Adverse</th><th>Suggestion</th><th>Enabled</th><th>Note</th><th></th></tr></thead>
         <tbody>
         {% for rule in suggestion_rules %}
         <tr>
             <td><input type="number" form="suggestion-{{ rule.id }}" name="priority" value="{{ rule.priority }}" min="0" max="32767" style="width:5rem;" aria-label="Priority for {{ rule.signal }}"{% if not can_edit %} disabled{% endif %}></td>
             <td>{{ rule.get_signal_display }}</td>
+            <td><input type="text" form="suggestion-{{ rule.id }}" name="requires" value="{{ rule.requires|join:', ' }}" placeholder="signal, signal" style="width:11rem;" aria-label="Also needs for {{ rule.signal }}"{% if not can_edit %} disabled{% endif %}></td>
             <td><input type="checkbox" form="suggestion-{{ rule.id }}" name="adverse" aria-label="Adverse for {{ rule.signal }}"{% if rule.adverse %} checked{% endif %}{% if not can_edit %} disabled{% endif %}></td>
             <td><select form="suggestion-{{ rule.id }}" name="suggestion" aria-label="Suggestion for {{ rule.signal }}"{% if not can_edit %} disabled{% endif %}>{% for value, label in suggestion_choices %}<option value="{{ value }}"{% if rule.suggestion == value %} selected{% endif %}>{{ label }}</option>{% endfor %}</select></td>
             <td><input type="checkbox" form="suggestion-{{ rule.id }}" name="enabled" aria-label="Enabled for {{ rule.signal }}"{% if rule.enabled %} checked{% endif %}{% if not can_edit %} disabled{% endif %}></td>

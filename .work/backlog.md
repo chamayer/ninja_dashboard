@@ -1060,3 +1060,32 @@ class; that is separate work and carries no unscoped-entity requirement.
 - **Gap:** no operator-visible surface for them yet (nothing-hidden rule). Needs
   a non-identity entity type and its own stream or source.
 - **Revisit when:** someone needs process-monitor coverage in Operations.
+
+## Software environment: ideas parked 2026-10-14
+
+Original intent (legacy analyzer, `inventory-scripts/SW Inventory`): say whether
+software should be here or not. A decision list ranked by how many machines
+have it, a per-computer removal list, a low-priority rare tail, and a
+per-computer risk view. The items below were explored and set aside so the
+active work stays on the decision list.
+
+- **Merge `rare_recent` and `whitelist_suggestion`.** Re-keys about 15,000
+  findings and loses their history. Revisit only if the 2-to-3 computer
+  boundary churn becomes a nuisance.
+- **Retire rare titles that have no warning sign as findings.** Evidence: 9,553
+  of 10,274 have none; a sample of 30 was half business software, a quarter
+  Linux packages, a quarter consumer apps. Needs the close-limit allowance
+  (ADR 0030). A junk publisher must still raise a finding.
+- **Unusual-computer finding.** One-off software far above the client's norm:
+  181 computers (at least 15 one-off titles and 8 times the client median, 41
+  clients with 20 or more computers). The "missing what peers have" flip is
+  not measured.
+- **Category coverage.** Only 36 products have a category, so "what kind of
+  software is this" is nearly empty. Measure before relying on it.
+- **Linux package names** (about 1,100 titles ending in :amd64 and similar) as
+  a data rule that keeps them out of review lists.
+- **Scope use.** All 429 decisions are global; none at client or device scope.
+- **Triggers not built:** version sprawl, publisher change on a known title,
+  fleet-wide vanishing, scope leakage, investigating-too-long reminder.
+- **Mislabeled link:** the home overview line "N decisions recorded" opens the
+  undecided list.

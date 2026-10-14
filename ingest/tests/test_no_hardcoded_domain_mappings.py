@@ -51,6 +51,8 @@ KNOWN: dict[str, str] = {
     "FINDING_TYPE_VALUES": "EXEMPT UI/dashboard definition",
     "ISSUE_CARDS": "BASELINE 2026-08-05 - not individually reviewed",
     "KNOWN": "BASELINE 2026-08-05 - not individually reviewed",
+    "_SOFTWARE_DECISION_PROMPT_TYPES": "EXEMPT names the two finding types that are undecided-software prompts (code identity of the emitter's types, used to count them; not a value-to-value mapping; operations/apps/core/views.py)",
+    "_SOFTWARE_PROMPTS": "EXEMPT names the two finding types that are undecided-software prompts, for which queue actions are offered (code identity, not a value-to-value mapping; operations/apps/core/finding_actions.py)",
     "_PUBLISHER_DECISIONS": "EXEMPT decoder for the legacy decisions CSV format, not a domain mapping - the file format is fixed and dead (ADR-0015 step 1)",
     "_TITLE_DECISIONS": "EXEMPT decoder for the legacy decisions CSV format, not a domain mapping - the file format is fixed and dead (ADR-0015 step 1)",
     "NAV_DISPLAY_NAMES": "EXEMPT UI/dashboard definition",

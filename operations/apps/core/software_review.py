@@ -25,6 +25,18 @@ SELECT finding.id::text, finding_type.name, finding.severity, finding.finding_de
    AND finding_type.name IN ('whitelist_suggestion', 'rare_recent')
 """
 
+def evidence_labels(details: dict[str, Any]) -> list[str]:
+    """The supporting facts recorded on a finding, in the signal vocabulary."""
+    from .models import SoftwareSuggestionRule
+
+    names = dict(SoftwareSuggestionRule.Signal.choices)
+    return [
+        names.get(code, code.replace("_", " ")).lower()
+        for code in (details.get("evidence") or [])
+        if isinstance(code, str)
+    ]
+
+
 DEVICES_SQL = """
 SELECT DISTINCT lower(installation.canonical_name), installation.device_id::text,
        device.canonical_hostname, client.slug, client.display_name
@@ -119,6 +131,7 @@ def build_groups(
             "recent": bool(details.get("recent")),
             "first_seen_at": details.get("first_seen_at"),
             "signals": signals,
+            "evidence": evidence_labels(details),
             "suggestion": title_suggestion,
             "suggestion_label": suggestion_labels.get(title_suggestion, title_suggestion),
             "default_scope": default_scope or "global",
@@ -142,6 +155,8 @@ def build_groups(
         elif group["concerns"]:
             group["suggestion"] = "review_titles"
             group["suggestion_label"] = f"Review titles first ({group['concerns']} with concerns)"
+        elif all(t["suggestion"] == "supports_approval" for t in group["titles"]):
+            group["suggestion"], group["suggestion_label"] = "supports_approval", "Supports approval"
         elif any(t["suggestion"] == "approve_publisher" for t in group["titles"]):
             group["suggestion"], group["suggestion_label"] = "approve_publisher", "Approve publisher"
         else:

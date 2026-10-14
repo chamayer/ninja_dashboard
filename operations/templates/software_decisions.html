@@ -39,7 +39,7 @@
   .pill.sev-medium { background: #fef3c7; color: #92400e; }
   .pill.sev-low, .pill.sev-info { background: #f3f4f6; color: #374151; }
   .pill.suggest-investigate, .pill.suggest-review_capability, .pill.suggest-review_titles { background: #fef3c7; color: #92400e; }
-  .pill.suggest-approve_publisher, .pill.suggest-approve_title { background: #dcfce7; color: #166534; }
+  .pill.suggest-approve_publisher, .pill.suggest-approve_title, .pill.suggest-supports_approval { background: #dcfce7; color: #166534; }
   .pill.suggest-none, .pill.suggest-decide_titles { background: #f3f4f6; color: #6b7280; font-weight: 400; }
 
   .row-actions { display: flex; gap: 0.25rem; flex-wrap: wrap; justify-content: flex-end; }
@@ -154,7 +154,7 @@
                 <td class="num">{{ t.devices }}</td>
                 <td class="num">{{ t.clients }}</td>
                 <td>{% for s in t.signals %}<span class="pill signal">{{ s|humanize_label }}</span>{% empty %}<span class="muted">—</span>{% endfor %}</td>
-                <td><span class="pill suggest-{{ t.suggestion }}">{{ t.suggestion_label }}</span></td>
+                <td><span class="pill suggest-{{ t.suggestion }}">{{ t.suggestion_label }}</span>{% if t.evidence %}<div class="muted" style="font-size:0.72rem;">{{ t.evidence|join:", " }}</div>{% endif %}</td>
                 <td>
                     <div class="row-actions">
                         {% if t.default_scope == "device" and t.device_targets %}

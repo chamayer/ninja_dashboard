@@ -184,6 +184,13 @@ FIELDS: tuple[SettingField, ...] = (
         "least this many days ago.",
         "int", 30, 0, 3650,
     ),
+    SettingField(
+        "suggestion_min_approved_titles", "Suggestions",
+        "Publisher already approved: minimum approved titles",
+        "Treat a publisher as already approved here when at least this many of its "
+        "titles have been approved.",
+        "int", 3, 1, 1000,
+    ),
 )
 
 DEFAULTS = MappingProxyType({field.key: field.default for field in FIELDS})
