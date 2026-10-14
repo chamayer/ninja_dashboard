@@ -202,3 +202,16 @@ def test_titles_under_each_publisher_are_sortable_and_keep_their_publisher_open(
     sort_at = views.index("title_sort, title_dir")
     trim_at = views.index("page_groups = software_review.trim_group_titles(page_groups)")
     assert sort_at < trim_at
+
+
+def test_counts_on_the_review_page_link_to_the_entities_they_count():
+    row = (_ROOT / "templates" / "_software_review_row.html").read_text(encoding="utf-8")
+    page = (_ROOT / "templates" / "software_decisions.html").read_text(encoding="utf-8")
+    # Per title: the same pages the publisher page already uses.
+    assert "{% url 'devices_page' %}?software={{ t.title|urlencode }}" in row
+    assert "{% url 'software_clients' %}?software={{ t.title|urlencode }}" in row
+    # Per publisher: titles, installs, clients and flagged titles.
+    assert "{% url 'software_publisher_detail' publisher=group.publisher %}" in page
+    assert "{% url 'devices_page' %}?software_publisher={{ group.publisher|urlencode }}" in page
+    assert "{% url 'software_clients' %}?software_publisher={{ group.publisher|urlencode }}" in page
+    assert "?view=table&amp;q={{ group.publisher|urlencode }}&amp;sort=signals&amp;dir=desc" in page

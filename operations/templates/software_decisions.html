@@ -164,10 +164,17 @@
             <tr class="pub-summary">
                 <td><button type="button" class="pub-toggle" aria-expanded="{% if forloop.first %}true{% else %}false{% endif %}" aria-label="Show or hide the titles of {{ group.publisher|default:'no publisher' }}">{% if forloop.first %}&#9662;{% else %}&#9656;{% endif %}</button></td>
                 <td><strong>{% if group.publisher %}{{ group.publisher }}{% else %}<span class="muted">No publisher</span>{% endif %}</strong></td>
+                {% if group.publisher %}
+                <td class="num"><a href="{% url 'software_publisher_detail' publisher=group.publisher %}">{{ group.title_count }}</a></td>
+                <td class="num"><a href="{% url 'devices_page' %}?software_publisher={{ group.publisher|urlencode }}">{{ group.devices }}</a></td>
+                <td class="num"><a href="{% url 'software_clients' %}?software_publisher={{ group.publisher|urlencode }}">{{ group.clients }}</a></td>
+                <td class="num">{% if group.concerns %}<a href="?view=table&amp;q={{ group.publisher|urlencode }}&amp;sort=signals&amp;dir=desc">{{ group.concerns }}</a>{% else %}{{ group.concerns }}{% endif %}</td>
+                {% else %}
                 <td class="num">{{ group.title_count }}</td>
                 <td class="num">{{ group.devices }}</td>
                 <td class="num">{{ group.clients }}</td>
                 <td class="num">{{ group.concerns }}</td>
+                {% endif %}
                 <td><span class="pill suggest-{{ group.suggestion }}">{{ group.suggestion_label }}</span></td>
                 <td>{% if group.publisher %}{% include "_software_review_publisher_actions.html" %}{% endif %}</td>
             </tr>
