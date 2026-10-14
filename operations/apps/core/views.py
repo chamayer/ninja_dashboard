@@ -17937,10 +17937,16 @@ def classifier_config(request: HttpRequest) -> HttpResponse:
         return redirect("classifier_config")
 
     effective = software_settings.effective(stored)
+    with transaction.atomic(), connection.cursor() as cur:
+        cur.execute("SET LOCAL operations.tenant_id = 1")
+        cur.execute(software_review.DEVICE_COUNTS_SQL, (1,))
+        distribution = {int(devices): int(count) for devices, count in cur.fetchall()}
     return render(
         request,
         "classifier_config.html",
         {
+            "rare_distribution": distribution,
+            "rare_current": int(effective["rare_max_devices"]),
             "admin_group": "config",
             "admin_tab": "classifier",
             "sections": [

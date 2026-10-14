@@ -71,6 +71,43 @@
             </div>
         </div>
         {% endfor %}
+        {% if title == "Rare and non-approved software" %}
+        <div id="rare-preview" class="cc-row" style="grid-template-columns: 260px 1fr;">
+            <div class="lbl">Effect of the rare limit
+                <div class="hint">Undecided software today, split at the limit above. Nothing changes until you save.</div>
+            </div>
+            <div id="rare-preview-text" class="muted" aria-live="polite"></div>
+        </div>
+        {{ rare_distribution|json_script:"rare-distribution" }}
+        <script>
+        (function () {
+            var input = document.querySelector('input[name="rare_max_devices"]');
+            var out = document.getElementById('rare-preview-text');
+            var data = JSON.parse(document.getElementById('rare-distribution').textContent || '{}');
+            var current = {{ rare_current }};
+            function split(limit) {
+                var rare = 0, total = 0;
+                Object.keys(data).forEach(function (k) {
+                    total += data[k];
+                    if (parseInt(k, 10) <= limit) rare += data[k];
+                });
+                return {rare: rare, total: total};
+            }
+            function show() {
+                var limit = parseInt(input.value, 10);
+                if (isNaN(limit) || limit < 1) { out.textContent = ''; return; }
+                var now = split(current), next = split(limit);
+                var moved = Math.abs(next.rare - now.rare);
+                out.textContent = next.total.toLocaleString() + ' undecided titles: '
+                    + next.rare.toLocaleString() + ' rare (on ' + limit + ' device' + (limit === 1 ? '' : 's')
+                    + ' or fewer), ' + (next.total - next.rare).toLocaleString() + ' non-approved. '
+                    + (moved ? moved.toLocaleString() + ' titles would change type from today (limit ' + current + ').'
+                                : 'No change from today (limit ' + current + ').');
+            }
+            if (input && out) { input.addEventListener('input', show); show(); }
+        })();
+        </script>
+        {% endif %}
     </div>
     {% endfor %}
 

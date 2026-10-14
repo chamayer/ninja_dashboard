@@ -52,6 +52,33 @@ UPDATE operations.findings finding
    AND {predicate}
 """
 
+DEVICE_COUNTS_SQL = """
+SELECT (finding.finding_details->>'fleet_device_count')::int AS devices, count(*)
+  FROM operations.findings finding
+  JOIN operations.finding_types finding_type ON finding_type.id = finding.finding_type_id
+ WHERE finding.tenant_id = %s AND finding.status IN ('open', 'acknowledged')
+   AND finding_type.name IN ('whitelist_suggestion', 'rare_recent')
+   AND finding.finding_details->>'fleet_device_count' IS NOT NULL
+ GROUP BY 1
+"""
+
+
+def rare_limit_preview(distribution: dict[int, int], limit: int, current: int) -> dict[str, int]:
+    """How undecided titles would split at ``limit`` devices, against ``current``.
+
+    ``distribution`` maps a device count to the number of undecided titles with
+    that many devices. A title is rare at or below the limit and non-approved
+    above it, so every undecided title is exactly one of the two.
+    """
+    total = sum(distribution.values())
+    rare = sum(count for devices, count in distribution.items() if devices <= limit)
+    rare_now = sum(count for devices, count in distribution.items() if devices <= current)
+    return {
+        "limit": limit, "total": total, "rare": rare, "non_approved": total - rare,
+        "moves": abs(rare - rare_now),
+    }
+
+
 def build_groups(
     rows: list[tuple],
     *,

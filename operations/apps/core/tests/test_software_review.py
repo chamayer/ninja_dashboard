@@ -110,3 +110,22 @@ def test_decision_writes_refresh_risk_view_only_after_commit():
     for body in (bulk, create):
         assert "transaction.on_commit(_refresh_software_risk_matview)" in body
         assert "\n    _refresh_software_risk_matview()" not in body
+
+
+def test_rare_limit_preview_splits_every_title_into_exactly_one_type():
+    distribution = {1: 6000, 2: 3883, 3: 1800, 5: 1200, 10: 300}
+    now = review.rare_limit_preview(distribution, 2, 2)
+    assert (now["rare"], now["non_approved"], now["moves"]) == (9883, 3300, 0)
+    raised = review.rare_limit_preview(distribution, 3, 2)
+    assert (raised["rare"], raised["non_approved"]) == (11683, 1500)
+    assert raised["moves"] == 1800 and raised["rare"] + raised["non_approved"] == raised["total"]
+    lowered = review.rare_limit_preview(distribution, 1, 2)
+    assert lowered["moves"] == 3883
+
+
+def test_classifier_settings_page_embeds_the_preview():
+    template = (Path(__file__).resolve().parents[3] / "templates" / "classifier_config.html").read_text(
+        encoding="utf-8")
+    assert 'id="rare-preview"' in template and 'json_script:"rare-distribution"' in template
+    assert "Nothing changes until you save." in template
+    assert "rare_distribution" in _VIEWS and "DEVICE_COUNTS_SQL" in _VIEWS
