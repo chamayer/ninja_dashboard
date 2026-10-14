@@ -25,6 +25,23 @@ SELECT finding.id::text, finding_type.name, finding.severity, finding.finding_de
    AND finding_type.name IN ('whitelist_suggestion', 'rare_recent')
 """
 
+def _details(raw: Any) -> dict[str, Any]:
+    """Finding details from a raw cursor row.
+
+    Django's database connection hands back jsonb as text, so a raw query row
+    carries a JSON string rather than a dict.
+    """
+    if isinstance(raw, dict):
+        return raw
+    if isinstance(raw, str):
+        try:
+            parsed = json.loads(raw)
+        except ValueError:
+            return {}
+        return parsed if isinstance(parsed, dict) else {}
+    return {}
+
+
 def evidence_labels(details: dict[str, Any]) -> list[str]:
     """The supporting facts recorded on a finding, in the signal vocabulary."""
     from .models import SoftwareSuggestionRule
@@ -107,7 +124,7 @@ def build_groups(
     suggestion_labels = dict(SoftwareSuggestionRule.Suggestion.choices)
     groups: dict[str, dict[str, Any]] = {}
     for finding_id, type_name, severity, raw_details, last_seen, default_scope in rows:
-        details = raw_details if isinstance(raw_details, dict) else {}
+        details = _details(raw_details)
         title = details.get("canonical_name") or ""
         publisher = details.get("publisher") or ""
         if kind and type_name != kind:

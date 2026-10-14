@@ -89,3 +89,25 @@ def test_migration_adds_the_helper_rules_and_disables_popularity_rules():
     assert "SET enabled = FALSE" in _MIGRATION
     assert "'established_publisher', 'prevalent'" in _MIGRATION
     assert "0291_finding_type_alertable" in _MIGRATION
+
+
+def test_review_page_survives_a_finding_with_no_title():
+    template = (_ROOT / "templates" / "software_decisions.html").read_text(encoding="utf-8")
+    assert "{% if t.title %}<a href=\"{% url 'software_detail' name=t.title %}\">" in template
+    assert "(no title recorded)" in template
+
+
+def test_review_groups_read_details_that_arrive_as_json_text():
+    # Django's raw cursor returns jsonb as text; this is what production sends.
+    details = (
+        '{"canonical_name": "Foo", "publisher": "Acme", "fleet_device_count": 9, '
+        '"suggestion": "supports_approval", "evidence": ["known_vendor"]}'
+    )
+    (group,) = software_review.build_groups(
+        [("f1", "whitelist_suggestion", "low", details, None, "global")]
+    )
+    assert group["titles"][0]["title"] == "Foo"
+    assert group["titles"][0]["devices"] == 9
+    assert group["titles"][0]["evidence"] == ["known vendor"]
+    assert software_review._details("not json") == {}
+    assert software_review._details("[1]") == {}

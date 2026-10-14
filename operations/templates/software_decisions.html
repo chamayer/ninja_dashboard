@@ -149,7 +149,7 @@
             {% for t in group.titles %}
             <tr>
                 <td><input type="checkbox" class="bulk-cb" aria-label="Select {{ t.title }}" data-canonical="{{ t.title }}" data-publisher="{{ t.publisher }}"></td>
-                <td><a href="{% url 'software_detail' name=t.title %}">{{ t.title }}</a></td>
+                <td>{% if t.title %}<a href="{% url 'software_detail' name=t.title %}">{{ t.title }}</a>{% else %}<span class="muted">(no title recorded)</span>{% endif %}</td>
                 <td><span class="pill sev-{{ t.severity }}">{{ t.type_label }} · {{ t.severity }}</span>{% if t.recent %}<span class="pill recent">recent</span>{% endif %}</td>
                 <td class="num">{{ t.devices }}</td>
                 <td class="num">{{ t.clients }}</td>
