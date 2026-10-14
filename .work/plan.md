@@ -1,5 +1,34 @@
 # Active root implementation plan
 
+## Active plan — Central work queue (design awaiting approval)
+
+**Status:** Phase 1 built locally (uncommitted, not validated against Postgres): W1 `alertable` and W2 counts.
+`.work/central-work-queue-design.md` (principles, verified facts, work items W1-W9, phases, safeguards,
+decisions), with `.work/finding-type-review.md` and `.work/finding-dependency-review.md`.
+
+**Goal:** one Issues queue for all waiting work (including admin findings), grouped in the five existing
+categories; dependency suppression that keeps findings but hides them under their parent; alerting as a
+per-type property, default off; decisions made as queue actions.
+
+**Decisions made (user, 2026-10-14):** admin findings stay in `admin_findings` and are shown in the queue; no
+"staff", admins; categories keep their five names, no split; every finding invites a check (no no-action class);
+the event / hidden-under-parent / finding rule; suppressed dependents remain real findings; severity for a
+vanished security agent left open.
+
+**Decisions:** D4 do all phases in the recommended order (user). D1: one offline value, per-client override,
+default 7 days (recommendation presented; awaiting confirmation). D2: 21 alertable types presented.
+
+**Phase 1 checkpoint:** migration 0291 `finding_types.alertable` (seeds 21 true), `ingest/notification_scope.py`
+`alertable_clause` used at 4 notifier sites and 1 digest site, admin page `/admin/alert-eligibility/`
+(`apps/core/finding_alerts.py`), W2: Issues tile and Software page count open rare_recent + whitelist_suggestion
+titles (`_SOFTWARE_DECISION_PROMPT_TYPES`). Operations tests: 334 passed, 4 known failures. Not yet: commit,
+Postgres run of migration 0291.
+
+**Local, uncommitted work from the same session:** old classifier removal (item 7), ADR 0030 and amendments,
+Issues context line for undecided software, rare-limit preview. Awaiting commit approval.
+
+**Next action:** user confirms D1, then commit approval for Phase 1 (names migration 0291), then Phase 2 (W3).
+
 ## Active plan — Software inventory ingest rebuild
 
 **Status:** design agreed 2026-10-13 (`.work/software-inventory-design.md`);
@@ -150,9 +179,51 @@ backlog, classifier runs only after changes.
   completeness); ADR 0029; CHANGELOG/VERSION 0.127.0. Ingest 426 passed,
   Operations 320 passed (known failures only).
 
-**Next action:** commit/push approval (no migrations), then verify a scoped
-findings run, the full-run cadence (job_schedules 1440 min) and the computer
-page.
+- Shipped e0a9d7d/e3ade33 (changed-only findings run, computer page, paging fix,
+  ADR 0029, 0.127.0), 7a2541b/5600ae7 (ingest port closed, SQL 115 drops the
+  retired queues, legacy-action parity table; gaps in
+  `operations/.work/backlog.md`). Verified: SQL 115 applied, port closed,
+  Operations reaches ingest internally. The first full run after the deploy
+  (22:06) consumed all pending change-feed rows (cve_match 1,341, inventory
+  125); a changed-only run is still to be seen.
+- Findings rebuild item 7 (built locally, not committed): the four capability
+  loaders moved to `ingest/software_capabilities.py`; `ingest/software_findings.py`
+  deleted with the tests that exercised only its internals (classify slicing,
+  emit repeat work, target-devices SQL); approval, authorization, installation
+  subject, safety-contract and settings tests ported to the new modules; the
+  condition-key equivalence test pins the old formula's values. Ingest 413
+  passed (known failures only), Operations 323 passed, manage.py check clean.
+  Behavior change recorded: the old classifier closed findings only with a
+  current `may_clear` assessment; the findings run closes from the complete
+  desired state with a recorded reason and the close limit.
+
+- Findings rebuild list after item 7 (built locally, not committed):
+  - 6 done: ADR 0030 (findings by desired-state reconciliation); 0015, 0020,
+    0021, 0028 carry an "Amended by 0030" note.
+  - 2 done: 20 open findings across all 11 types checked against live
+    inventory and Ninja; all correct. One apparent miss was the checker
+    choosing a Ninja id that returns no list: 813 computers have two or more
+    Ninja ids (v_device_source_link); the inventory unions both. Worth
+    understanding separately (which id is the live node).
+  - 4 done (in the Issues table, not a second decision UI): the Context column
+    for undecided software shows title, publisher, scale, suggestion and
+    signals (Python and SQL wording pinned by a test); each row links "By
+    publisher" to the grouped review page filtered to that publisher.
+  - 5 done: Classifier settings page shows, live as the limit is typed, how
+    many undecided titles are rare vs non-approved and how many would change
+    (distribution from open findings; at limit 2 today: 10,273 rare).
+  - 3 measured, awaiting decision: exact normalized publisher == NVD CPE vendor
+    matches 675 of 5,222 publishers (84.8% of installs) and 4,362 of 15,193
+    undecided title findings; variant names miss (Realtek Semiconductor Corp,
+    Advanced Micro Devices, Python Software Foundation, SentinelOne, Spotify
+    AB). First-word matching rejected (a fake "Adobe ..." publisher would
+    pass).
+  - 1 awaiting decision: 297 capability_review_candidate findings are frozen
+    since 2026-09-16 (no run produces them).
+  - 8 standing risk (27,721 findings qualify for alerts; delivery off).
+
+**Next action:** commit approvals (item 7; items 6/4/5/2 docs and UI), then
+decisions on items 1 and 3.
 
 ## Active plan — Software findings rebuild (implementation)
 
@@ -640,6 +711,19 @@ the exact same summary returns in 2.61 s. The next release applies that
 request-local setting and leaves database defaults and background evaluation
 unchanged. Its remaining query cost will be revisited only after measuring the
 deployed first view.
+
+**Deployed Issues result and Computers diagnosis (2026-10-13):** release
+`31d42c9` is healthy. The complete Issues landing page now measures 5.24 s,
+down from 8.18 s, with the governed-state query at 3.55 s rather than 7.18 s.
+The main Inventory route (`/inventory/computers/`) is independently slow at
+about 9 s. Its first view intentionally constructs one operator inventory
+from canonical Computers, effective coverage rules, current presence,
+current/withdrawn source records, Hudu records, and unresolved source-only
+records, then applies its filtering/presentation in Python. Disabling JIT did
+not improve its controlled handler measurement. Its correct next change is a
+single rebuildable inventory-list projection owned by existing source,
+identity, coverage, and Hudu read models—not another request-query or a
+cache. Define its refresh boundary and lifecycle before implementation.
 
 ---
 

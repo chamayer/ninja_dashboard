@@ -375,6 +375,16 @@ class FindingType(models.Model):
             "carries a concern."
         ),
     )
+    # Whether a finding of this type may notify at all (alert or digest line).
+    # Default off: decisions, mappings, identity and symptom types never alert.
+    # Routes and rules still decide where an alertable finding goes.
+    alertable = models.BooleanField(
+        default=False,
+        help_text=(
+            "Checked when a finding of this type may produce an alert or a "
+            "digest line. Notification rules only apply to checked types."
+        ),
+    )
 
     class DecisionScope(models.TextChoices):
         DEVICE = "device", "This device"

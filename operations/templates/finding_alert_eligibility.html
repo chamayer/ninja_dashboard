@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+
+{% block title %}Alert eligibility{% endblock %}
+
+{% block content %}
+<style>
+  .ae-section { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 1rem 1.1rem; margin-bottom: 1rem; }
+  .ae-table { width: 100%; border-collapse: collapse; font-size: 0.86rem; }
+  .ae-table th, .ae-table td { padding: 0.35rem 0.5rem; border-top: 1px solid var(--border); text-align: left; vertical-align: middle; }
+  .ae-table th { color: var(--muted); font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em; }
+</style>
+
+<div class="ae-section">
+    <h1 style="margin-top:0;">Alert eligibility</h1>
+    <p class="muted">
+        A finding type can send an alert or appear in the digest only when it is checked here.
+        Alert rules and routes still decide who is told and how. Decisions, mappings and
+        symptoms of another problem should stay unchecked. Changes are recorded in the audit
+        log.{% if not can_edit %} Only staff can make changes.{% endif %}
+    </p>
+    <p>{{ alertable_count }} of {{ finding_types|length }} types may send alerts.</p>
+</div>
+
+<form method="post" class="ae-section">
+    {% csrf_token %}
+    <table class="ae-table" data-sortable>
+        <thead><tr><th>May alert</th><th>Finding type</th><th>Default severity</th><th>Description</th></tr></thead>
+        <tbody>
+        {% for t in finding_types %}
+        <tr>
+            <td><input type="checkbox" name="alertable" value="{{ t.id }}" {% if t.alertable %}checked{% endif %}{% if not can_edit %} disabled{% endif %}></td>
+            <td><code>{{ t.name }}</code></td>
+            <td>{{ t.default_severity }}</td>
+            <td>{{ t.description|truncatechars:140 }}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    {% if can_edit %}<p><button type="submit">Save</button></p>{% endif %}
+</form>
+{% endblock %}

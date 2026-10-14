@@ -27,6 +27,7 @@ from psycopg.types.json import Json
 
 from ingest import db
 from ingest.condition_priority import critical_priority_clause
+from ingest.notification_scope import alertable_clause
 from ingest.config import settings
 
 log = logging.getLogger(__name__)
@@ -111,6 +112,7 @@ def _still_notifyable(finding: dict[str, Any], tenant_id: int) -> bool:
                  WHERE f.tenant_id = %s AND f.id = %s
                    AND f.status IN ('open', 'acknowledged')
                    AND (f.snoozed_until IS NULL OR f.snoozed_until <= now())
+                   {alertable_clause('f.finding_type_id')}
                    AND EXISTS (
                        SELECT 1
                          FROM operations.condition_assessments authority
@@ -150,12 +152,13 @@ def _still_notifyable(finding: dict[str, Any], tenant_id: int) -> bool:
             )
         """
     elif row_kind == "admin":
-        query = """
+        query = f"""
             SELECT EXISTS (
                 SELECT 1
                   FROM operations.admin_findings f
                  WHERE f.tenant_id = %s AND f.id = %s
                    AND f.status IN ('open', 'acknowledged')
+                   {alertable_clause('f.finding_type_id')}
                    AND EXISTS (
                        SELECT 1
                          FROM operations.condition_assessments authority
@@ -254,6 +257,7 @@ def _load_pending_findings(cur, tenant_id: int) -> list[dict[str, Any]]:
         JOIN operations.finding_types ft ON ft.id = f.finding_type_id
         WHERE f.tenant_id = %s AND f.status IN ('open', 'acknowledged')
           AND (f.snoozed_until IS NULL OR f.snoozed_until <= now())
+          {alertable_clause('f.finding_type_id')}
           AND EXISTS (
               SELECT 1
                 FROM operations.condition_assessments assessment
@@ -316,6 +320,7 @@ def _load_pending_findings(cur, tenant_id: int) -> list[dict[str, Any]]:
         FROM operations.admin_findings af
         JOIN operations.finding_types ft ON ft.id = af.finding_type_id
         WHERE af.tenant_id = %s AND af.status IN ('open', 'acknowledged')
+          {alertable_clause('af.finding_type_id')}
           AND EXISTS (
               SELECT 1
                 FROM operations.condition_assessments assessment

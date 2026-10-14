@@ -15,6 +15,7 @@ from psycopg.rows import dict_row
 
 from ingest import db
 from ingest.config import settings
+from ingest.notification_scope import alertable_clause
 from ingest.notifications import _send, _still_notifyable
 
 log = logging.getLogger(__name__)
@@ -32,7 +33,7 @@ def send_digest(tenant_id: int = _TENANT_ID) -> int:
     with db.pool.connection() as conn, conn.cursor(row_factory=dict_row) as cur:
         cur.execute(f"SET LOCAL operations.tenant_id = {tenant_id}")
         cur.execute(
-            """
+            f"""
             SELECT f.id AS finding_id, f.severity, f.confidence, ft.name AS finding_type,
                    c.display_name AS client_name, f.finding_details,
                    f.last_seen_at
@@ -43,6 +44,7 @@ def send_digest(tenant_id: int = _TENANT_ID) -> int:
               AND f.status IN ('open', 'acknowledged')
               AND (f.snoozed_until IS NULL OR f.snoozed_until <= now())
               AND (f.confidence <> 'confirmed' OR f.confidence = '')
+              {alertable_clause('f.finding_type_id')}
               AND EXISTS (
                   SELECT 1 FROM operations.condition_assessments a
                   WHERE a.tenant_id = f.tenant_id AND a.row_kind = 'entity'

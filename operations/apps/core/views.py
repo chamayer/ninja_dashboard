@@ -140,6 +140,9 @@ _FINDING_ACTIVE_STATUSES = (
 # authoritative state changes live in SoftwareDecision, whose scope resolves
 # device before client before global.
 _SOFTWARE_POLICY_CANDIDATE_TYPES = ("whitelist_suggestion",)
+# The one definition of "software needs a decision": an open prompt finding,
+# one per undecided title. The Issues tile and the Software page both count it.
+_SOFTWARE_DECISION_PROMPT_TYPES = ("whitelist_suggestion", "rare_recent")
 
 log = logging.getLogger(__name__)
 
@@ -4358,7 +4361,7 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
         tenant_id=1,
         status__in=_FINDING_ACTIVE_STATUSES,
         snoozed_until__isnull=True,
-        finding_type__name__in=_SOFTWARE_POLICY_CANDIDATE_TYPES,
+        finding_type__name__in=_SOFTWARE_DECISION_PROMPT_TYPES,
     )
     fleet_policy_count = fleet_policy_qs.count()
     fleet_summary_cards = [
@@ -4400,8 +4403,8 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
         {
             "label": "Software decisions",
             "value": fleet_policy_count,
-            "note": "separate decision workflow",
-            "href": reverse("software_decisions_queue") + "?decision=pending",
+            "note": "titles waiting for an approve or reject decision",
+            "href": reverse("software_decisions_queue"),
             "tile_class": "tile-accent",
         },
     ]
@@ -7478,19 +7481,21 @@ def _software_page_data(request: HttpRequest) -> dict:
     # made the Products page return 500.  The direct predicate is equivalent
     # (the type is itself a software finding) and uses
     # idx_findings_type_canonical.
-    whitelist_type_id = (
-        FindingType.objects.filter(name="whitelist_suggestion").values_list("id", flat=True).first()
+    prompt_type_ids = list(
+        FindingType.objects.filter(name__in=_SOFTWARE_DECISION_PROMPT_TYPES).values_list(
+            "id", flat=True
+        )
     )
     whitelist_suggestions = (
         Finding.objects.filter(
             tenant_id=1,
             status__in=_FINDING_ACTIVE_STATUSES,
-            finding_type_id=whitelist_type_id,
+            finding_type_id__in=prompt_type_ids,
         )
         .values("finding_details__canonical_name")
         .distinct()
         .count()
-        if whitelist_type_id is not None
+        if prompt_type_ids
         else 0
     )
 
