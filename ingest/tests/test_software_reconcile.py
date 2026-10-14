@@ -82,10 +82,15 @@ def _desired(ctx, monkeypatch=None):
 
 
 def test_condition_keys_are_identical_to_the_previous_classifier():
-    from ingest.software_findings import _condition_key
-
-    assert sr.condition_key(1, None, None, 7, "Zoom") == _condition_key(1, None, None, "7", "Zoom")
-    assert sr.condition_key(1, "c", "d", 7, "Zoom@v") == _condition_key(1, "c", "d", "7", "Zoom@v")
+    """Pinned values of sha256("{tenant}:{client}:{device}:{type}:{material}")[:64]
+    from the retired per-installation classifier, so existing findings keep
+    their identity."""
+    assert sr.condition_key(1, None, None, 7, "Zoom") == (
+        "7556c67f8fc23a0056bfca71d5dc5aa1811272bf475ee10e5f782bd7850f7f46"
+    )
+    assert sr.condition_key(1, "c", "d", 7, "Zoom@v") == (
+        "e870ac2b44f6239631eb963db67d3725d03c06fdf0e5408e629e3d395cbff8d7"
+    )
 
 
 def test_undecided_titles_split_at_the_rare_limit_with_no_gap():

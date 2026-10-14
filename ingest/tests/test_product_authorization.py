@@ -22,7 +22,9 @@ import sys
 import types
 from pathlib import Path
 
-_EMITTER = Path(__file__).resolve().parents[1] / "software_findings.py"
+# The authorization loaders live in software_capabilities; the permit ladder
+# (`_permitted`) in the findings run that applies it.
+_EMITTER = Path(__file__).resolve().parents[1] / "software_capabilities.py"
 _MIGRATION = (
     Path(__file__).resolve().parents[2] / "sql" / "migrations"
     / "099_product_authorizations.sql"
@@ -48,14 +50,14 @@ def _import_emitter():
     re-raised -- a real import error must still fail.
     """
     try:
-        import ingest.software_findings as sf
+        import ingest.software_reconcile as sf
     except ModuleNotFoundError as exc:
         if exc.name != "pydantic":
             raise
         stub = types.ModuleType("ingest.config")
         stub.settings = types.SimpleNamespace()
         sys.modules.setdefault("ingest.config", stub)
-        import ingest.software_findings as sf
+        import ingest.software_reconcile as sf
     return sf
 
 
@@ -156,7 +158,7 @@ def test_loader_excludes_withdrawn_rows() -> None:
     """A withdrawn authorization has no force. Filtering at the loader rather
     than the call site means no caller can forget to."""
     code = _EMITTER.read_text(encoding="utf-8")
-    loader = code.split("def _load_authorizations")[1].split("def ")[0]
+    loader = code.split("def load_authorizations")[1].split("def ")[0]
     assert "withdrawn_at IS NULL" in loader
 
 
@@ -165,7 +167,7 @@ def test_schema_probe_fails_closed_without_the_table() -> None:
     table must read as capability-not-ready rather than leave enforcement
     running with nothing able to permit."""
     code = _EMITTER.read_text(encoding="utf-8")
-    probe = code.split("def _capability_schema_ready")[1].split("def ")[0]
+    probe = code.split("def capability_schema_ready")[1].split("def ")[0]
     assert "operations.product_authorizations" in probe
 
 
@@ -240,9 +242,9 @@ def test_product_authorization_parity() -> None:
 
 
 def test_required_loader_is_untouched_by_authorization() -> None:
-    """Coverage semantics must not shift: `_load_sanctioned_product_identities`
+    """Coverage semantics must not shift: `load_sanctioned_product_identities`
     remains the required-platform source and gains no authorization logic."""
     code = _EMITTER.read_text(encoding="utf-8")
-    loader = code.split("def _load_sanctioned_product_identities")[1].split("\ndef ")[0]
+    loader = code.split("def load_sanctioned_product_identities")[1].split("\ndef ")[0]
     assert "product_authorizations" not in loader
     assert "required_platforms" in loader

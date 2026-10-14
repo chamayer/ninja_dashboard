@@ -73,6 +73,7 @@ def test_admin_page_merges_validates_and_audits():
     assert "row.config = new_cfg" not in body
 
 
-def test_previous_classifier_reads_the_shared_settings():
-    source = (_ROOT / "ingest" / "software_findings.py").read_text(encoding="utf-8")
-    assert "merged.update(software_settings.effective(stored))" in source
+def test_the_findings_run_and_inventory_read_the_shared_settings():
+    for name in ("software_reconcile.py", "inventory/software.py"):
+        source = (_ROOT / "ingest" / name).read_text(encoding="utf-8")
+        assert "software_settings.effective(" in source, name

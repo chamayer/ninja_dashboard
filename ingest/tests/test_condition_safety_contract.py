@@ -154,13 +154,16 @@ def test_evaluator_lifecycle_absent_closure_requires_current_clear_assessment():
     assert "p.active" in signature
 
 
-def test_software_auto_clear_requires_current_assessment_and_participants():
-    source = (Path(__file__).parents[1] / "software_findings.py").read_text()
-    signature = source[source.index("def _auto_resolve"):]
-    assert "may_clear" in signature
-    assert "condition_participants" in signature
-    assert "participant_role <> 'context'" in signature
-    assert "p.active" in signature or "pp.active" in signature
+def test_software_resolution_records_a_reason_and_is_rate_limited():
+    """The findings run resolves from the complete desired state, never from a
+    partial read: every resolution records when, why and by what, and a run
+    that would close more than the configured share of a type closes none."""
+    source = (Path(__file__).parents[1] / "software_reconcile.py").read_text(encoding="utf-8")
+    body = source[source.index("def reconcile_type"):source.index("# ── Assessments")]
+    assert '"reason": "no_longer_detected"' in body
+    assert '"resolved_by": "software_reconcile"' in body
+    assert "closed_at = COALESCE(finding.closed_at" in body
+    assert "reconcile_max_close_percent" in body and "held_by_limit" in body
 
 
 def test_client_resolver_only_closes_after_clear_decision():
@@ -197,9 +200,10 @@ def test_windows_servicing_uses_measured_identity_evidence():
     assert "Readiness.READY" in evidence
 
 
-def test_software_device_findings_use_shared_measured_identity_evidence():
-    source = (Path(__file__).parents[1] / "software_findings.py").read_text()
-    assert "device_identity_signal(cur, tenant_id, participant.reference)" in source
+def test_software_device_findings_use_measured_identity_evidence():
+    source = (Path(__file__).parents[1] / "software_readiness.py").read_text()
+    assert "IDENTITY_SQL" in source
+    assert "condition_evidence.device_identity_signals" in source
 
 
 def test_platform_health_assessments_use_admin_row_kind():
@@ -415,15 +419,16 @@ def test_patch_assessments_measure_identity_offline_and_coverage():
     assert source.count("external_id::int") == source.count("external_id ~ '^[0-9]+$'")
 
 
-def test_software_assessments_cover_each_device_and_measure_contact():
-    source = (Path(__file__).parents[1] / "software_findings.py").read_text()
-    section = source[source.index("def _emit_scoped"):source.index("def _auto_resolve")]
-    assert "already_emitted" in section
-    assert "device_agent_presence_current" in section
-    assert "offline_readiness" in section
-    assert "offline:contact_unavailable" not in section
-    assert "all_devices" in section
-    assert "participants.extend" in section
+def test_software_readiness_covers_each_device_and_measures_contact():
+    source = (Path(__file__).parents[1] / "software_readiness.py").read_text()
+    assert "device_agent_presence_current" in source
+    assert "offline_readiness(" in source
+    assert "offline:contact_unavailable" not in source
+    # One decision per (device, software finding type), written for every device.
+    assert "PRIMARY KEY (tenant_id, device_id, finding_type_id)" in (
+        Path(__file__).parents[2]
+        / "operations/apps/core/migrations/0282_software_device_readiness.py"
+    ).read_text(encoding="utf-8")
 
 
 def test_snapshot_chooses_latest_run_before_validating_status():

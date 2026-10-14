@@ -9,7 +9,7 @@ there: reads degrade to "not available yet" and writes fail closed with an
 explicit error, instead of 500ing on `UndefinedTable`.
 
 The probe asks `pg_catalog` rather than catching the error, for the same reason
-`software_findings._column_exists` does: a failed statement aborts the
+`software_capabilities._column_exists` does: a failed statement aborts the
 transaction, and recovering by rolling back would discard the tenant GUC that
 surrounding Operations code depends on.
 

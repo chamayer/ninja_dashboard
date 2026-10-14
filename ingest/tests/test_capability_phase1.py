@@ -368,9 +368,10 @@ def test_matcher_version_is_stamped() -> None:
 def test_enforcement_is_explicitly_gated() -> None:
     """The classifier may consume effective evidence only behind Phase 4's
     separately reviewed enablement gate."""
-    emitter = (_ROOT / "ingest" / "software_findings.py").read_text(encoding="utf-8")
+    emitter = (_ROOT / "ingest" / "software_reconcile.py").read_text(encoding="utf-8")
+    loaders = (_ROOT / "ingest" / "software_capabilities.py").read_text(encoding="utf-8")
     config = (_ROOT / "ingest" / "config.py").read_text(encoding="utf-8")
-    assert "v_product_capability_effective" in emitter
+    assert "v_product_capability_effective" in loaders
     assert "CAPABILITY_ENFORCEMENT_ENABLED" in emitter
     assert "CAPABILITY_ENFORCEMENT_ENABLED: bool = False" in config
 

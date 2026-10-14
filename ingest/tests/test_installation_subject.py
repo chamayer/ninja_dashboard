@@ -19,71 +19,26 @@ from __future__ import annotations
 
 import uuid
 
-import pytest
+from ingest import software_reconcile as sr
+from ingest.tests.test_software_reconcile import TYPES, _ctx, _desired, _title
 
-sf = pytest.importorskip("ingest.software_findings")
+DEVICE_A, DEVICE_B, CLIENT = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
 
-DEVICE = uuid.uuid4()
-PRODUCT = uuid.uuid4()
-VERSION = uuid.uuid4()
-INSTALL = uuid.uuid4()
+
+def _path(installation, device, title="Acme Tool"):
+    # (installation_uuid, device, client, title_key, name, publisher, location,
+    #  title decision, publisher decision): the PATH_INSTALLS_SQL row shape.
+    return (installation, device, CLIENT, title.lower(), title, "Acme",
+            r"C:\Users\x\AppData\Local\Temp\acme", None, None)
 
 
 def test_installation_scope_resolves_to_the_installation_uuid() -> None:
-    subject_type, subject_id, *_ = sf._subject_for(
-        "software_installation", DEVICE, PRODUCT, VERSION, INSTALL
-    )
-    assert subject_type == "software_installation"
-    assert subject_id == INSTALL
-
-
-def test_installation_scope_is_not_the_device_or_the_version() -> None:
-    _t, subject_id, *_ = sf._subject_for(
-        "software_installation", DEVICE, PRODUCT, VERSION, INSTALL
-    )
-    assert subject_id != DEVICE
-    assert subject_id != VERSION
-
-
-def test_missing_installation_uuid_falls_back_to_device() -> None:
-    """A NULL handle must not produce a finding with a NULL subject."""
-    subject_type, subject_id, *_ = sf._subject_for(
-        "software_installation", DEVICE, PRODUCT, VERSION, None
-    )
-    assert subject_type == "device"
-    assert subject_id == DEVICE
-
-
-def test_the_other_scopes_are_unchanged() -> None:
-    assert sf._subject_for("software_product", DEVICE, PRODUCT, VERSION, INSTALL)[:2] == (
-        "software_product", PRODUCT,
-    )
-    assert sf._subject_for("software_version", DEVICE, PRODUCT, VERSION, INSTALL)[:2] == (
-        "software_version", VERSION,
-    )
-    assert sf._subject_for("device", DEVICE, PRODUCT, VERSION, INSTALL)[:2] == (
-        "device", DEVICE,
-    )
-
-
-def test_unknown_scope_still_defaults_to_device() -> None:
-    assert sf._subject_for("not_a_scope", DEVICE, PRODUCT, VERSION, INSTALL)[:2] == (
-        "device", DEVICE,
-    )
-
-
-def test_subject_survives_a_version_upgrade() -> None:
-    """The whole reason 089 mints rather than derives.
-
-    Same installation row, new release: the subject must not move.
-    """
-    before = sf._subject_for(
-        "software_installation", DEVICE, PRODUCT, uuid.uuid4(), INSTALL
-    )
-    after = sf._subject_for(
-        "software_installation", DEVICE, PRODUCT, uuid.uuid4(), INSTALL
-    )
-    assert before[1] == after[1] == INSTALL
+    install = uuid.uuid4()
+    desired, _ = _desired(_ctx([_title("Acme Tool", 2)], paths=[_path(install, DEVICE_A)]))
+    [finding] = desired["install_path_suspicious"]
+    assert finding.subject_type == "software_installation"
+    assert finding.subject_id == str(install)
+    assert finding.device_id == str(DEVICE_A)
 
 
 def test_installation_scope_keeps_per_pair_identity_in_the_condition_key() -> None:
@@ -93,18 +48,21 @@ def test_installation_scope_keeps_per_pair_identity_in_the_condition_key() -> No
     claim is about the title. An installation claim is about the pair, so the
     same reduction would silently collapse the two rows into one.
     """
-    install_a, install_b = uuid.uuid4(), uuid.uuid4()
-    key_a = sf._condition_key(1, None, None, "7", f"acme tool@{install_a}")
-    key_b = sf._condition_key(1, None, None, "7", f"acme tool@{install_b}")
-    assert key_a != key_b
+    a, b = uuid.uuid4(), uuid.uuid4()
+    desired, _ = _desired(_ctx([_title("Acme Tool", 2)],
+                               paths=[_path(a, DEVICE_A), _path(b, DEVICE_B)]))
+    keys = {d.condition_key for d in desired["install_path_suspicious"]}
+    type_id = TYPES["install_path_suspicious"].id
+    assert keys == {sr.condition_key(1, None, None, type_id, f"Acme Tool@{a}"),
+                    sr.condition_key(1, None, None, type_id, f"Acme Tool@{b}")}
 
 
-def test_three_tuple_callers_still_work() -> None:
-    """`subj` gained a fourth member; older callers must not raise."""
-    scope_by_id = {7: "software_product"}
-    subj = (scope_by_id, PRODUCT, VERSION)
-    unpacked = (
-        tuple(subj) + (None,) if subj is not None and len(subj) == 3
-        else (subj or ({}, None, None, None))
-    )
-    assert unpacked == (scope_by_id, PRODUCT, VERSION, None)
+def test_subject_survives_a_version_upgrade() -> None:
+    """The installation handle (migration 089) does not change with the
+    version, so the subject and key stay put across an upgrade."""
+    install = uuid.uuid4()
+    first, _ = _desired(_ctx([_title("Acme Tool", 1)], paths=[_path(install, DEVICE_A)]))
+    second, _ = _desired(_ctx([_title("Acme Tool", 1)], paths=[_path(install, DEVICE_A)],
+                              versions=[("acme tool", str(uuid.uuid4()), "2.0", 1)]))
+    assert ([d.condition_key for d in first["install_path_suspicious"]]
+            == [d.condition_key for d in second["install_path_suspicious"]])

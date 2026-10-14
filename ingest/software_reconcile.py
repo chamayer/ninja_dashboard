@@ -29,7 +29,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from ingest import db, software_readiness
+from ingest import db, software_capabilities, software_readiness
 from ingest.conditions import load_active_profile
 from ingest.config import settings
 from shared import software_settings
@@ -617,13 +617,6 @@ def scoped(sql: str, titles: list[str] | None) -> str:
 def load_context(
     cur: Any, tenant_id: int, now: datetime, scope_titles: list[str] | None = None
 ) -> Context:
-    from ingest.software_findings import (
-        _capability_schema_ready,
-        _load_authorizations,
-        _load_effective_capabilities,
-        _load_sanctioned_product_identities,
-    )
-
     cur.execute(
         "SELECT config FROM operations.evaluator_config "
         "WHERE tenant_id = %s AND evaluator_name = 'software_classifier'",
@@ -693,10 +686,10 @@ def load_context(
     authorizations: dict = {}
     sanctioned: dict = {}
     capability_installs: list[tuple] = []
-    if _capability_schema_ready(cur):
-        capabilities = _load_effective_capabilities(cur)
-        authorizations = _load_authorizations(cur, tenant_id)
-        sanctioned = _load_sanctioned_product_identities(cur, tenant_id)
+    if software_capabilities.capability_schema_ready(cur):
+        capabilities = software_capabilities.load_effective_capabilities(cur)
+        authorizations = software_capabilities.load_authorizations(cur, tenant_id)
+        sanctioned = software_capabilities.load_sanctioned_product_identities(cur, tenant_id)
         alertable = [p for p, caps in capabilities.items() if any(c["alertable"] for c in caps)]
         if alertable:
             cur.execute(scoped(CAPABILITY_INSTALLS_SQL, scope_titles), {**params, "products": alertable})
