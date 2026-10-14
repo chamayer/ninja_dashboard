@@ -4681,24 +4681,25 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
                        FROM jsonb_array_elements_text(COALESCE(finding_details->'av_products', '[]'::jsonb)) value),
                     'multiple AV products'
                  )
-          WHEN finding_type_id = (SELECT id FROM operations.finding_types WHERE name = 'rare_recent')
+          WHEN finding_type_id IN (SELECT id FROM operations.finding_types WHERE name IN ('rare_recent', 'whitelist_suggestion'))
             THEN COALESCE(NULLIF(concat_ws(' · ',
                     NULLIF(finding_details->>'canonical_name', ''),
+                    NULLIF(finding_details->>'publisher', ''),
                     CASE WHEN finding_details->>'fleet_device_count' IS NOT NULL
                          THEN 'on ' || (finding_details->>'fleet_device_count') || ' machine'
-                              || CASE WHEN finding_details->>'fleet_device_count' <> '1' THEN 's' ELSE '' END END,
-                    CASE WHEN finding_details->>'first_seen_days' IS NOT NULL
-                         THEN 'first seen ' || (finding_details->>'first_seen_days') || 'd ago' END
-                 ), ''), 'rare install')
-          WHEN finding_type_id = (SELECT id FROM operations.finding_types WHERE name = 'whitelist_suggestion')
-            THEN CASE WHEN finding_details->>'fleet_device_count' IS NOT NULL
-                           AND finding_details->>'threshold' IS NOT NULL
-                      THEN 'installed on ' || (finding_details->>'fleet_device_count')
-                           || ' devices (review threshold ' || (finding_details->>'threshold') || ')'
-                      WHEN finding_details->>'fleet_device_count' IS NOT NULL
-                      THEN 'installed on ' || (finding_details->>'fleet_device_count')
-                           || ' devices; no decision recorded'
-                      ELSE COALESCE(finding_details->>'reason', 'widespread software with no decision') END
+                              || CASE WHEN finding_details->>'fleet_device_count' <> '1' THEN 's' ELSE '' END
+                              || CASE WHEN COALESCE((finding_details->>'client_count')::int, 0) > 1
+                                      THEN ' at ' || (finding_details->>'client_count') || ' clients' ELSE '' END
+                    END,
+                    CASE WHEN finding_details->>'recent' = 'true' THEN 'first seen recently' END,
+                    CASE WHEN COALESCE(finding_details->>'suggestion', 'none') <> 'none'
+                         THEN 'suggested: ' || /*suggestion_label*/ END,
+                    CASE WHEN jsonb_array_length(COALESCE(finding_details->'signals', '[]'::jsonb)) > 0
+                         THEN 'signals: ' || replace((
+                              SELECT string_agg(value, ', ')
+                                FROM jsonb_array_elements_text(finding_details->'signals') value
+                         ), '_', ' ') END
+                 ), ''), COALESCE(finding_details->>'reason', 'undecided software'))
           WHEN finding_type_id = (SELECT id FROM operations.finding_types WHERE name = 'vulnerable_software')
             THEN COALESCE(finding_details->>'reason', 'matched vulnerability intelligence')
                  || CASE WHEN finding_details->>'worst_cvss' IS NOT NULL
@@ -4723,7 +4724,7 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
                       ELSE COALESCE(finding_details->>'reason', 'community threat-intel accumulation') END
           ELSE COALESCE(finding_details->>'platform', '')
         END
-        """,
+        """.replace("/*suggestion_label*/", _suggestion_label_sql()),
         [],
     )
     context_expression = RawSQL(
@@ -5019,24 +5020,8 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
         if name == "multi_av_conflict":
             avs = d.get("av_products") or []
             return ", ".join(avs) if avs else "multiple AV products"
-        if name == "rare_recent":
-            n = d.get("fleet_device_count") or d.get("machine_count")
-            days = d.get("first_seen_days")
-            cn = d.get("canonical_name") or ""
-            pieces = [cn] if cn else []
-            if n is not None:
-                pieces.append(f"on {n} machine{'s' if n != 1 else ''}")
-            if days is not None:
-                pieces.append(f"first seen {days}d ago")
-            return " · ".join(pieces) if pieces else "rare install"
-        if name == "whitelist_suggestion":
-            devices = d.get("fleet_device_count")
-            threshold = d.get("threshold")
-            if devices is not None and threshold is not None:
-                return f"installed on {devices} devices (review threshold {threshold})"
-            if devices is not None:
-                return f"installed on {devices} devices; no decision recorded"
-            return d.get("reason") or "widespread software with no decision"
+        if name in ("rare_recent", "whitelist_suggestion"):
+            return _software_review_context(d)
         if name == "vulnerable_software":
             pieces = [d.get("reason") or "matched vulnerability intelligence"]
             if d.get("worst_cvss") is not None:
@@ -5317,6 +5302,15 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
             "publisher": details.get("publisher", ""),
             "fleet_device_count": details.get("fleet_device_count"),
             "threshold": details.get("threshold"),
+            # Undecided software is decided in bulk on the review page, which
+            # groups titles by publisher and offers title and publisher options.
+            "publisher_review_url": (
+                reverse("software_decisions_queue")
+                + "?"
+                + urlencode({"q": details.get("publisher") or details.get("canonical_name") or ""})
+                if f.finding_type.name in ("rare_recent", "whitelist_suggestion")
+                else ""
+            ),
         }
 
     findings_with_detail = [_display_row(f) for f in findings]
@@ -6120,6 +6114,41 @@ def _policy_candidate_state_action_blocked(request: HttpRequest, finding: Findin
         "a global, client, or device decision is the authoritative action.",
     )
     return True
+
+
+def _suggestion_label_sql() -> str:
+    """SQL CASE that turns finding_details->>'suggestion' into its label.
+
+    Built from the suggestion choices, so the Issues sort and filter text uses
+    the same wording as the review page and the Python context line.
+    """
+    whens = " ".join(
+        f"WHEN '{value}' THEN '{label}'" for value, label in SoftwareSuggestionRule.Suggestion.choices
+    )
+    return f"(CASE finding_details->>'suggestion' {whens} ELSE finding_details->>'suggestion' END)"
+
+
+def _software_review_context(details: dict) -> str:
+    """Issues context line for undecided software; mirrors the SQL branch above."""
+    labels = dict(SoftwareSuggestionRule.Suggestion.choices)
+    pieces = [details.get("canonical_name") or "", details.get("publisher") or ""]
+    devices = details.get("fleet_device_count")
+    if devices is not None:
+        text = f"on {devices} machine{'s' if str(devices) != '1' else ''}"
+        clients = details.get("client_count") or 0
+        if int(clients) > 1:
+            text += f" at {clients} clients"
+        pieces.append(text)
+    if details.get("recent") is True:
+        pieces.append("first seen recently")
+    suggestion = details.get("suggestion") or "none"
+    if suggestion != "none":
+        pieces.append(f"suggested: {labels.get(suggestion, suggestion)}")
+    signals = [s for s in (details.get("signals") or []) if isinstance(s, str)]
+    if signals:
+        pieces.append("signals: " + ", ".join(signals).replace("_", " "))
+    text = " · ".join(piece for piece in pieces if piece)
+    return text or details.get("reason") or "undecided software"
 
 
 def _software_finding_modules() -> frozenset[str]:

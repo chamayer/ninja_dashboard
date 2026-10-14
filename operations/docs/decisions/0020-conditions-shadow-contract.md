@@ -78,3 +78,7 @@ the follow-up acceptance gate in the runbook, not a silent feature toggle.
 No migration, role grant, new dependency, or default production behavior change
 is required. The existing Dockerfile copies the entire application directory,
 including the profile and command.
+
+## Amended 2026-10-13
+
+Amended by 0030: a title or version software finding has one title participant and one aggregate assessment that is executable only while an exposed computer is ready (0030, decision 4).

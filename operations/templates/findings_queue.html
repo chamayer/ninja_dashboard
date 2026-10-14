@@ -424,6 +424,7 @@
                     <td>
                         <div class="issue-row-actions">
                             <a class="issue-row-action issue-row-action--primary" href="{{ row.review_url }}">Review</a>
+                            {% if row.publisher_review_url %}<a class="issue-row-action" href="{{ row.publisher_review_url }}" title="Decide this title or its whole publisher, grouped with the publisher's other undecided software">By publisher</a>{% endif %}
                             {% if f.status != "resolved" and row.refresh_available %}
                                 <button type="submit" formaction="{% url 'finding_refresh' f.id %}" class="issue-row-action" title="{{ row.refresh_title }}">Refresh</button>
                             {% endif %}

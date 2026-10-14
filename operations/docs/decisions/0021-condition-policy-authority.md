@@ -46,3 +46,7 @@ roles and migrations, including RLS, privileges, concurrent activation, and
 backfill behavior. Until that validation and an approved release are complete,
 the repository profile remains usable only as bootstrap/shadow input and no
 deployment or production cutover is implied by this record.
+
+## Amended 2026-10-13
+
+Amended by 0030: the aggregate rule for title and version software findings in 0030 (decision 4) applies under this policy authority; the governed policy version `conditions-software-inventory-1` adds two finding types.

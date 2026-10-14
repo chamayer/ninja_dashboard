@@ -39,3 +39,7 @@ materialized relation.
   finding-to-installation fan-out.
 - The relation is derived state, not a second software, evidence, finding, or
   decision authority.
+
+## Amended 2026-10-13
+
+Amended by 0030: exposure is derived from per-device readiness and the aggregate assessment (SQL 114) and refreshed after scoped runs; see 0030 and 0029.

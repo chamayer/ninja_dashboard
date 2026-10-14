@@ -205,3 +205,7 @@ maps explicitly to one or more catalog product UUIDs, and that exact identity
 map determines whether a client permits an alertable capability. Consequently
 unauthorized AV, RMM, and remote-access findings are device-scoped: the same
 product can be allowed for one client and unauthorized for another.
+
+## Amended 2026-10-13
+
+Amended by 0030: software findings are reconciled from desired state at the grain in 0030: version and title findings carry no per-device rows, and device readiness is computed once per device.
