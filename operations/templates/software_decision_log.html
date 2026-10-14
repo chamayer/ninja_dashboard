@@ -38,10 +38,10 @@
         <label>Decision</label>
         <select name="decision" onchange="this.form.submit()">
             <option value="">Any</option>
-            <option value="approve"           {% if active_decision == 'approve'           %}selected{% endif %}>Allow</option>
-            <option value="approve_publisher" {% if active_decision == 'approve_publisher' %}selected{% endif %}>Trust publisher</option>
-            <option value="reject"            {% if active_decision == 'reject'            %}selected{% endif %}>Block</option>
-            <option value="investigate"       {% if active_decision == 'investigate'       %}selected{% endif %}>Review</option>
+            <option value="approve"           {% if active_decision == 'approve'           %}selected{% endif %}>Approved</option>
+            <option value="approve_publisher" {% if active_decision == 'approve_publisher' %}selected{% endif %}>Publisher approved</option>
+            <option value="reject"            {% if active_decision == 'reject'            %}selected{% endif %}>Rejected</option>
+            <option value="investigate"       {% if active_decision == 'investigate'       %}selected{% endif %}>Investigating</option>
         </select>
     </div>
     <button type="submit">Apply</button>

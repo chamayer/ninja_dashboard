@@ -1,0 +1,39 @@
+<script>
+  /* One behavior for every software decision form: a high-effect decision
+     (any publisher-level decision, or any reject) asks for a comment first,
+     and a publisher reject asks for confirmation. The server enforces the same
+     rule; this only collects the comment. */
+  (function () {
+    if (window.__decisionCommentBound) return;
+    window.__decisionCommentBound = true;
+    document.addEventListener('submit', function (event) {
+      var form = event.target;
+      var action = form.getAttribute('action') || '';
+      if (!/\/software\/decisions\/(create|bulk)|\/software\/decide/.test(action)) return;
+      var decisionField = form.querySelector('[name=decision]');
+      if (!decisionField) return;
+      var decision = decisionField.value;
+      var publisherLevel = false;
+      form.querySelectorAll('input[name=publisher]').forEach(function (input) {
+        if (input.value) publisherLevel = true;
+      });
+      if (!(publisherLevel || decision === 'reject')) return;
+      var existing = form.querySelector('[name=reason]');
+      if (existing && existing.value.trim()) return;
+      if (publisherLevel && decision === 'reject' &&
+          !window.confirm('Reject every title from this publisher? Each installed copy raises an issue.')) {
+        event.preventDefault();
+        return;
+      }
+      var why = window.prompt('Why? A comment is required for this decision.');
+      if (!why || !why.trim()) { event.preventDefault(); return; }
+      if (!existing) {
+        existing = document.createElement('input');
+        existing.type = 'hidden';
+        existing.name = 'reason';
+        form.appendChild(existing);
+      }
+      existing.value = why.trim();
+    }, true);
+  })();
+</script>

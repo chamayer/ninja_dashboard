@@ -182,7 +182,7 @@
     <a class="tile" href="?decision=pending">
         <div class="tile-label">Awaiting review</div>
         <div class="tile-value {% if pending_decisions %}has-open{% endif %}">{{ pending_decisions }}</div>
-        <div class="tile-note">no allow or block decision yet</div>
+        <div class="tile-note">no approve or reject decision yet</div>
     </a>
     <a class="tile tile-alert" href="?safety=high">
         <div class="tile-label">High risk</div>
@@ -322,7 +322,7 @@
         </span>
         <span class="wf-body">
             <div class="wf-title">Activity</div>
-            <div class="wf-desc">what you and other operators recently allowed / blocked</div>
+            <div class="wf-desc">what you and other operators recently approved / rejected</div>
         </span>
         <span class="wf-count zero">
             → <small>view</small>
@@ -397,8 +397,8 @@
     <div class="card">
         <h2>Where you stand</h2>
         <p class="muted" style="font-size:0.85rem;">
-            {{ approved_titles }} allowed · {{ rejected_titles }} blocked ·
-            {{ investigate_titles }} under review · {{ pending_decisions }} still waiting
+            {{ approved_titles }} approved · {{ rejected_titles }} rejected ·
+            {{ investigate_titles }} investigating · {{ pending_decisions }} still waiting
         </p>
         <a href="{% url 'software_products' %}?flagged=1" style="font-size:0.85rem;">Review flagged products →</a>
         &nbsp;·&nbsp;

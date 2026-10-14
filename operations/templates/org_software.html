@@ -3,6 +3,7 @@
 {% block title %}Software — {{ client.display_name }}{% endblock %}
 
 {% block content %}
+{% include "_decision_comment_script.html" %}
 <div class="card">
     <p class="muted">
         <a href="{% url 'org_index' org_slug=client.slug %}">{{ client.display_name }}</a>

@@ -4,6 +4,7 @@
 {% block title %}Products — Software{% endblock %}
 
 {% block content %}
+{% include "_decision_comment_script.html" %}
 {% include "_sw_style.html" %}
 
 <div class="sw-page-header">
@@ -97,9 +98,9 @@
         <label>Decision</label>
         <select name="decision">
             <option value="">Any</option>
-            <option value="approved" {% if active_decision == 'approved' %}selected{% endif %}>Allowed</option>
-            <option value="rejected" {% if active_decision == 'rejected' %}selected{% endif %}>Blocked</option>
-            <option value="pending"  {% if active_decision == 'pending'  %}selected{% endif %}>No decision</option>
+            <option value="approved" {% if active_decision == 'approved' %}selected{% endif %}>Approved</option>
+            <option value="rejected" {% if active_decision == 'rejected' %}selected{% endif %}>Rejected</option>
+            <option value="pending"  {% if active_decision == 'pending'  %}selected{% endif %}>Undecided</option>
         </select>
     </div>
     <div>
@@ -196,7 +197,7 @@
                     {% if t.decision %}
                         <span class="decision-pill {{ t.decision }}">{{ t.decision|humanize_label|default:t.decision|title }}</span>
                     {% else %}
-                        <span class="decision-pill none">No decision</span>
+                        <span class="decision-pill none">Undecided</span>
                     {% endif %}
                 </td>
                 <td class="actions">

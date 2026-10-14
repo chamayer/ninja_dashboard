@@ -63,7 +63,7 @@ from shared.patch_compliance import COMPLIANCE_MISSING_STATUSES, excluded_patch_
 
 from . import capability as capability_evidence
 from . import category as category_evidence
-from . import software_review
+from . import software_decision_rules, software_review
 from .capability_review_actions import decide_capability
 from .client_workspace import (
     build_client_directory,
@@ -7254,7 +7254,7 @@ def _software_page_data(request: HttpRequest) -> dict:
             where_clauses.append(
                 "(EXISTS (SELECT 1 FROM operations.software_decisions sd "
                 " WHERE sd.tenant_id = sic.tenant_id "
-                "   AND sd.canonical_name = sic.canonical_name "
+                "   AND LOWER(sd.canonical_name) = LOWER(sic.canonical_name) "
                 "   AND sd.decision IN ('approve','approve_publisher'))"
                 " OR EXISTS (SELECT 1 FROM operations.software_decisions sd "
                 " WHERE sd.tenant_id = sic.tenant_id "
@@ -7266,7 +7266,7 @@ def _software_page_data(request: HttpRequest) -> dict:
             where_clauses.append(
                 "(EXISTS (SELECT 1 FROM operations.software_decisions sd "
                 " WHERE sd.tenant_id = sic.tenant_id "
-                "   AND sd.canonical_name = sic.canonical_name "
+                "   AND LOWER(sd.canonical_name) = LOWER(sic.canonical_name) "
                 "   AND sd.decision = 'reject')"
                 " OR EXISTS (SELECT 1 FROM operations.software_decisions sd "
                 " WHERE sd.tenant_id = sic.tenant_id "
@@ -7278,7 +7278,7 @@ def _software_page_data(request: HttpRequest) -> dict:
             where_clauses.append(
                 "NOT EXISTS (SELECT 1 FROM operations.software_decisions sd "
                 " WHERE sd.tenant_id = sic.tenant_id "
-                "   AND (sd.canonical_name = sic.canonical_name "
+                "   AND (LOWER(sd.canonical_name) = LOWER(sic.canonical_name) "
                 "        OR (sd.publisher <> '' "
                 "            AND LOWER(sd.publisher) = LOWER(COALESCE(sic.publisher, '')))))"
             )
@@ -7344,7 +7344,7 @@ def _software_page_data(request: HttpRequest) -> dict:
                        (SELECT MIN(sd.decision)
                         FROM operations.software_decisions sd
                         WHERE sd.tenant_id = sic.tenant_id
-                          AND sd.canonical_name = sic.canonical_name
+                          AND LOWER(sd.canonical_name) = LOWER(sic.canonical_name)
                        ) AS decision,
                        COUNT(*) OVER ()::bigint AS total_filtered
                 FROM operations.software_title_current sic
@@ -7356,7 +7356,7 @@ def _software_page_data(request: HttpRequest) -> dict:
                 LIMIT {page_size} OFFSET {page_offset}
             )
             SELECT filtered.canonical_name,
-                   filtered.publisher,
+                   COALESCE(main_publisher.publisher, filtered.publisher),
                    filtered.device_count,
                    filtered.client_count,
                    filtered.last_install,
@@ -7368,6 +7368,17 @@ def _software_page_data(request: HttpRequest) -> dict:
                    filtered.total_filtered
             FROM totals
             LEFT JOIN filtered ON TRUE
+            LEFT JOIN LATERAL (
+                SELECT installed.publisher
+                FROM operations.software_installations_current installed
+                WHERE installed.tenant_id = 1
+                  AND installed.deleted_at IS NULL AND installed.stale_since IS NULL
+                  AND LOWER(installed.canonical_name) = LOWER(filtered.canonical_name)
+                  AND COALESCE(installed.publisher, '') <> ''
+                GROUP BY installed.publisher
+                ORDER BY COUNT(*) DESC, installed.publisher
+                LIMIT 1
+            ) main_publisher ON filtered.canonical_name IS NOT NULL
             """,
             params,
         )
@@ -13982,6 +13993,13 @@ def org_software_decide(request: HttpRequest, org_slug: str) -> HttpResponse:
     decision = request.POST.get("decision", "").strip()
     if not sw_name or decision not in SoftwareDecision.Decision.values:
         return redirect("org_software", org_slug=org_slug)
+    reason = (request.POST.get("reason") or "").strip()
+    problem = software_decision_rules.comment_problem(
+        decision, publisher_level=False, comment=reason
+    )
+    if problem:
+        messages.error(request, problem)
+        return redirect("org_software", org_slug=org_slug)
 
     SoftwareDecision.objects.update_or_create(
         tenant_id=1,
@@ -13994,6 +14012,7 @@ def org_software_decide(request: HttpRequest, org_slug: str) -> HttpResponse:
         publisher="",
         defaults={
             "decision": decision,
+            "reason": reason,
             "decided_by": request.user,
             "decided_at": timezone.now(),
         },
@@ -16741,6 +16760,13 @@ def software_decision_bulk(request: HttpRequest) -> HttpResponse:
     if not canonical_names and not publishers:
         messages.error(request, "Select at least one product or publisher.")
         return redirect(_safe_next(request, "software_decisions_queue"))
+    reason = (request.POST.get("reason") or "").strip()
+    problem = software_decision_rules.comment_problem(
+        decision, publisher_level=bool(publishers), comment=reason
+    )
+    if problem:
+        messages.error(request, problem)
+        return redirect(_safe_next(request, "software_decisions_queue"))
 
     created, updated = 0, 0
     for name in canonical_names:
@@ -16752,7 +16778,7 @@ def software_decision_bulk(request: HttpRequest) -> HttpResponse:
             device=None,
             defaults={
                 "decision": decision,
-                "reason": "",
+                "reason": reason,
                 "decided_by": request.user,
                 "decided_at": timezone.now(),
             },
@@ -16775,7 +16801,7 @@ def software_decision_bulk(request: HttpRequest) -> HttpResponse:
             device=None,
             defaults={
                 "decision": decision,
-                "reason": "",
+                "reason": reason,
                 "decided_by": request.user,
                 "decided_at": timezone.now(),
             },
@@ -16872,6 +16898,12 @@ def software_decision_create(request: HttpRequest) -> HttpResponse:
     if bool(canonical_name) == bool(publisher):
         messages.error(request, "Provide exactly one of canonical_name or publisher.")
         return redirect("software_decisions_queue")
+    problem = software_decision_rules.comment_problem(
+        decision, publisher_level=bool(publisher), comment=reason
+    )
+    if problem:
+        messages.error(request, problem)
+        return redirect(_safe_next(request, "software_decisions_queue"))
 
     if scope not in {"global", "client", "device"}:
         messages.error(request, "Choose global, client, or device scope.")

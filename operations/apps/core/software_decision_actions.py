@@ -15,15 +15,18 @@ from django.http import HttpRequest, HttpResponse
 from django.shortcuts import redirect
 from django.utils import timezone
 
-from . import software_review
+from . import software_decision_rules, software_review
 from .finding_actions import FindingAction
 from .models import AuditLog, Finding, SoftwareDecision
 
-REASON_MAX_LENGTH = 500
 
 def decision_for(action_key: str):
     """(decision recorded, whether the match key is the publisher) for an action key."""
     match action_key:
+        case "software_reject_publisher":
+            return SoftwareDecision.Decision.REJECT, True
+        case "software_investigate_publisher":
+            return SoftwareDecision.Decision.INVESTIGATE, True
         case "software_approve_title":
             return SoftwareDecision.Decision.APPROVE, False
         case "software_approve_publisher":
@@ -53,10 +56,13 @@ def match_values(findings: list, by_publisher: bool) -> tuple[dict[str, str], in
 def decide_software(request: HttpRequest, ids: list[str], action: FindingAction) -> HttpResponse:
     back = request.POST.get("next") or "findings_queue"
     reason = (request.POST.get("reason") or "").strip()
-    if len(reason) > REASON_MAX_LENGTH:
-        messages.warning(request, f"Keep the reason to {REASON_MAX_LENGTH} characters or fewer.")
-        return redirect(back)
     decision, by_publisher = decision_for(action.key)
+    problem = software_decision_rules.comment_problem(
+        decision, publisher_level=by_publisher, comment=reason
+    )
+    if problem:
+        messages.warning(request, problem)
+        return redirect(back)
 
     findings = list(Finding.objects.select_related("finding_type").filter(tenant_id=1, id__in=ids))
     if len(findings) != len(ids):

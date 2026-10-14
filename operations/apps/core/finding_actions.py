@@ -115,13 +115,25 @@ SOFTWARE_APPROVE_PUBLISHER = _software_action(
     "software_approve_publisher",
     "Approve publisher",
     "Approve the publishers of the selected software for every title they make?",
-    "Approves the whole publisher; a title with another concern still shows.",
+    "A comment is required. Approves the whole publisher; a title with another concern still shows.",
 )
 SOFTWARE_REJECT = _software_action(
     "software_reject",
     "Reject software",
     "Reject the selected software titles? Installed copies will raise an issue.",
-    "Rejected software that is installed raises its own issue.",
+    "A comment is required. Rejected software that is installed raises its own issue.",
+)
+SOFTWARE_REJECT_PUBLISHER = _software_action(
+    "software_reject_publisher",
+    "Reject publisher",
+    "Reject EVERY title from the publishers of the selected software? Each installed copy raises an issue.",
+    "A comment is required. Rejects the whole publisher; a title with its own decision keeps it.",
+)
+SOFTWARE_INVESTIGATE_PUBLISHER = _software_action(
+    "software_investigate_publisher",
+    "Investigate publisher",
+    "Mark the publishers of the selected software as being investigated?",
+    "A comment is required.",
 )
 SOFTWARE_INVESTIGATE = _software_action(
     "software_investigate",
@@ -161,6 +173,8 @@ FINDING_ACTIONS = {
     SOFTWARE_APPROVE_TITLE.key: SOFTWARE_APPROVE_TITLE,
     SOFTWARE_APPROVE_PUBLISHER.key: SOFTWARE_APPROVE_PUBLISHER,
     SOFTWARE_REJECT.key: SOFTWARE_REJECT,
+    SOFTWARE_REJECT_PUBLISHER.key: SOFTWARE_REJECT_PUBLISHER,
+    SOFTWARE_INVESTIGATE_PUBLISHER.key: SOFTWARE_INVESTIGATE_PUBLISHER,
     SOFTWARE_INVESTIGATE.key: SOFTWARE_INVESTIGATE,
     CAPABILITY_CONFIRM.key: CAPABILITY_CONFIRM,
     CAPABILITY_REJECT.key: CAPABILITY_REJECT,

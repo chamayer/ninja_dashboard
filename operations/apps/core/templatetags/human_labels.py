@@ -168,10 +168,10 @@ _LABELS: dict[str, str] = {
     "productivity": "Productivity",
     "developer": "Developer tool",
     # ── Software decision values (operator-facing) ───────────
-    "approve": "Allow",
-    "approve_publisher": "Trust publisher",
-    "reject": "Block",
-    "investigate": "Review",
+    "approve": "Approved",
+    "approve_publisher": "Publisher approved",
+    "reject": "Rejected",
+    "investigate": "Investigating",
     # ── Portfolio state buckets (Dashboard) ──────────────────
     "critical": "Critical",
     "degrading": "Degrading",
