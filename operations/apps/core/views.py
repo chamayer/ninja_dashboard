@@ -86,6 +86,8 @@ from .device_status import DEFAULTS as DEVICE_STATUS_DEFAULTS
 from .device_status import POLICY_NAME as DEVICE_STATUS_POLICY_NAME
 from .device_status import get_device_status_policy
 from .finding_actions import (
+    APPROVE_REMOTE_ACCESS_ALL,
+    APPROVE_REMOTE_ACCESS_CLIENT,
     ARCHIVE_HUDU_ASSETS,
     BULK_RETIRE_COMPUTERS,
     FINDING_ACTIONS,
@@ -127,6 +129,7 @@ from .models import (
     Source,
     SuppressionRule,
 )
+from .remote_access_approval import approve_remote_access
 
 DEVICE_PAGE_SIZE = 100
 
@@ -6626,6 +6629,11 @@ def findings_bulk_action(request: HttpRequest) -> HttpResponse:
             return _retire_selected_computers(request, ids, registered_action)
         if registered_action.key == ARCHIVE_HUDU_ASSETS.key:
             return _queue_selected_hudu_archives(request, ids, registered_action)
+        if registered_action.key in (
+            APPROVE_REMOTE_ACCESS_ALL.key,
+            APPROVE_REMOTE_ACCESS_CLIENT.key,
+        ):
+            return approve_remote_access(request, ids, registered_action)
     if action not in ("refresh", "snooze", "suppress"):
         messages.warning(request, "That action is not available.")
         return redirect(request.POST.get("next") or "findings_queue")

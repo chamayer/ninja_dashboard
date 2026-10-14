@@ -55,9 +55,44 @@ ARCHIVE_HUDU_ASSETS = FindingAction(
 )
 
 
+# Remote access is approved on its own, apart from software approval. Two
+# buttons make the scope explicit: the MSP's own management tool is approved for
+# every client; any other tool is approved for the clients of the selected issues.
+AUTHORIZE_SOFTWARE_PERMISSION = "operations.authorize_software_product"
+
+APPROVE_REMOTE_ACCESS_ALL = FindingAction(
+    key="approve_remote_access_all",
+    label="Approve remote access: all clients",
+    permission=AUTHORIZE_SOFTWARE_PERMISSION,
+    finding_types=frozenset({"unauthorized_remote_access"}),
+    requires_reason=True,
+    confirmation=(
+        "Approve the selected remote access tools for ALL clients? "
+        "Use this only for the management tool you run for every client."
+    ),
+    eligibility_hint=(
+        "Approves the product on the selected issues, everywhere. Software approval is not changed."
+    ),
+)
+
+APPROVE_REMOTE_ACCESS_CLIENT = FindingAction(
+    key="approve_remote_access_client",
+    label="Approve remote access: these clients",
+    permission=AUTHORIZE_SOFTWARE_PERMISSION,
+    finding_types=frozenset({"unauthorized_remote_access"}),
+    requires_reason=True,
+    confirmation="Approve the selected remote access tools for the clients of the selected issues?",
+    eligibility_hint=(
+        "Approves each selected product only at the client of each selected issue."
+    ),
+)
+
+
 FINDING_ACTIONS = {
     BULK_RETIRE_COMPUTERS.key: BULK_RETIRE_COMPUTERS,
     ARCHIVE_HUDU_ASSETS.key: ARCHIVE_HUDU_ASSETS,
+    APPROVE_REMOTE_ACCESS_ALL.key: APPROVE_REMOTE_ACCESS_ALL,
+    APPROVE_REMOTE_ACCESS_CLIENT.key: APPROVE_REMOTE_ACCESS_CLIENT,
 }
 
 
