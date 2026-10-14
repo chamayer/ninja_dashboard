@@ -92,7 +92,7 @@ def test_migration_adds_the_helper_rules_and_disables_popularity_rules():
 
 
 def test_review_page_survives_a_finding_with_no_title():
-    template = (_ROOT / "templates" / "software_decisions.html").read_text(encoding="utf-8")
+    template = (_ROOT / "templates" / "_software_review_row.html").read_text(encoding="utf-8")
     assert "{% if t.title %}<a href=\"{% url 'software_detail' name=t.title %}\">" in template
     assert "(no title recorded)" in template
 
@@ -111,3 +111,39 @@ def test_review_groups_read_details_that_arrive_as_json_text():
     assert group["titles"][0]["evidence"] == ["known vendor"]
     assert software_review._details("not json") == {}
     assert software_review._details("[1]") == {}
+
+
+def _t(title, publisher="", devices=1, clients=1, signals=(), label="Rare", severity="low", suggestion="None"):
+    return {
+        "title": title, "publisher": publisher, "devices": devices, "clients": clients,
+        "signals": list(signals), "type_label": label, "severity": severity,
+        "suggestion_label": suggestion,
+    }
+
+
+def test_every_column_sorts_the_whole_table_in_both_directions():
+    rows = [
+        _t("b", "Zed", 5, 2, ["x"], "Rare", "high", "Investigate"),
+        _t("a", "", 9, 1, [], "Non-approved", "low", "No suggestion"),
+        _t("c", "Acme", 1, 7, ["x", "y"], "Rare", "low", "Supports approval"),
+    ]
+    first = lambda key, d: [t["title"] for t in software_review.sort_titles(rows, key, d)]  # noqa: E731
+    assert first("title", "asc") == ["a", "b", "c"]
+    assert first("title", "desc") == ["c", "b", "a"]
+    assert first("devices", "desc") == ["a", "b", "c"]
+    assert first("clients", "desc") == ["c", "b", "a"]
+    assert first("publisher", "asc") == ["c", "b", "a"]  # blank publisher last
+    assert first("signals", "desc") == ["c", "b", "a"]
+    assert first("suggestion", "asc") == ["b", "a", "c"]
+    assert first("type", "asc")[0] == "a"  # Non-approved before Rare
+    assert first("not_a_column", "asc") == first("devices", "desc")
+
+
+def test_flat_table_has_sortable_headers_and_a_toggle_to_group_by_publisher():
+    template = (_ROOT / "templates" / "software_decisions.html").read_text(encoding="utf-8")
+    row = (_ROOT / "templates" / "_software_review_row.html").read_text(encoding="utf-8")
+    assert '<a href="{{ col.href }}">{{ col.label }}{{ col.mark }}</a>' in template
+    assert "Group by publisher" in template and "Show as one sortable table" in template
+    assert '{% include "_software_review_row.html"' in template
+    # An included template does not inherit the parent's {% load %}.
+    assert row.lstrip().startswith("{% load human_labels %}")

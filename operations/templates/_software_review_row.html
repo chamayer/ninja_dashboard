@@ -1,0 +1,23 @@
+{% load human_labels %}
+            <tr>
+                <td><input type="checkbox" class="bulk-cb" aria-label="Select {{ t.title }}" data-canonical="{{ t.title }}" data-publisher="{{ t.publisher }}"></td>
+                <td>{% if t.title %}<a href="{% url 'software_detail' name=t.title %}">{{ t.title }}</a>{% else %}<span class="muted">(no title recorded)</span>{% endif %}</td>
+                {% if show_publisher %}<td>{{ t.publisher|default:"—" }}</td>{% endif %}
+                <td><span class="pill sev-{{ t.severity }}">{{ t.type_label }} · {{ t.severity }}</span>{% if t.recent %}<span class="pill recent">recent</span>{% endif %}</td>
+                <td class="num">{{ t.devices }}</td>
+                <td class="num">{{ t.clients }}</td>
+                <td>{% for s in t.signals %}<span class="pill signal">{{ s|humanize_label }}</span>{% empty %}<span class="muted">—</span>{% endfor %}</td>
+                <td><span class="pill suggest-{{ t.suggestion }}">{{ t.suggestion_label }}</span>{% if t.evidence %}<div class="muted" style="font-size:0.72rem;">{{ t.evidence|join:", " }}</div>{% endif %}</td>
+                <td>
+                    <div class="row-actions">
+                        {% if t.default_scope == "device" and t.device_targets %}
+                            {% for target in t.device_targets %}
+                            <form method="post" action="{% url 'software_decision_create' %}">{% csrf_token %}<input type="hidden" name="canonical_name" value="{{ t.title }}"><input type="hidden" name="scope" value="device"><input type="hidden" name="device_id" value="{{ target.device_id }}"><input type="hidden" name="next" value="{{ request.get_full_path }}"><input type="hidden" name="decision" value="approve"><button type="submit" class="btn-allow" title="Approve on this device only ({{ target.client_name }})">Approve on {{ target.hostname }}</button></form>
+                            {% endfor %}
+                        {% endif %}
+                        <form method="post" action="{% url 'software_decision_create' %}">{% csrf_token %}<input type="hidden" name="canonical_name" value="{{ t.title }}"><input type="hidden" name="scope" value="global"><input type="hidden" name="next" value="{{ request.get_full_path }}"><input type="hidden" name="decision" value="approve"><button type="submit" class="btn-allow" title="Approve this title everywhere">Approve{% if t.default_scope == "device" and t.device_targets %} everywhere{% endif %}</button></form>
+                        <form method="post" action="{% url 'software_decision_create' %}">{% csrf_token %}<input type="hidden" name="canonical_name" value="{{ t.title }}"><input type="hidden" name="scope" value="global"><input type="hidden" name="next" value="{{ request.get_full_path }}"><input type="hidden" name="decision" value="investigate"><button type="submit" class="btn-review">Investigate</button></form>
+                        <form method="post" action="{% url 'software_decision_create' %}">{% csrf_token %}<input type="hidden" name="canonical_name" value="{{ t.title }}"><input type="hidden" name="scope" value="global"><input type="hidden" name="next" value="{{ request.get_full_path }}"><input type="hidden" name="decision" value="reject"><button type="submit" class="btn-block">Reject</button></form>
+                    </div>
+                </td>
+            </tr>

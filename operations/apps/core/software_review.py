@@ -184,6 +184,36 @@ def build_groups(
     )
 
 
+SORT_COLUMNS = (
+    ("title", "Title", False),
+    ("publisher", "Publisher", False),
+    ("type", "Type", False),
+    ("devices", "Devices", True),
+    ("clients", "Clients", True),
+    ("signals", "Signals", False),
+    ("suggestion", "Suggested", False),
+)
+
+
+def sort_titles(titles: list[dict[str, Any]], key: str, direction: str) -> list[dict[str, Any]]:
+    """Sort every title as one table, by any displayed column."""
+    severity_rank = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
+    keys = {
+        "title": lambda t: t["title"].lower(),
+        "publisher": lambda t: (t["publisher"] == "", t["publisher"].lower()),
+        "type": lambda t: (t["type_label"], severity_rank.get(t["severity"], 9)),
+        "devices": lambda t: t["devices"],
+        "clients": lambda t: t["clients"],
+        "signals": lambda t: (len(t["signals"]), ", ".join(t["signals"])),
+        "suggestion": lambda t: t["suggestion_label"],
+    }
+    if key not in keys:
+        key = "devices"
+        direction = "desc"
+    ordered = sorted(titles, key=lambda t: t["title"].lower())
+    return sorted(ordered, key=keys[key], reverse=(direction == "desc"))
+
+
 def paginate(items: list, page: int, per_page: int = 40) -> tuple[list, int, int]:
     pages = max(1, -(-len(items) // per_page))
     page = min(max(1, page), pages)

@@ -64,7 +64,7 @@
         name is set by the installer, so check flagged titles before approving a
         publisher.
     </p>
-    <p class="muted" style="font-size:0.85rem;">{{ title_total }} title{{ title_total|pluralize }} in {{ group_total }} publisher group{{ group_total|pluralize }}.</p>
+    <p class="muted" style="font-size:0.85rem;">{{ title_total }} title{{ title_total|pluralize }} in {{ group_total }} publisher group{{ group_total|pluralize }}. {% if view_mode == "table" %}<a href="{{ other_view_href }}">Group by publisher</a>{% else %}<a href="{{ other_view_href }}">Show as one sortable table</a>{% endif %}</p>
 </div>
 
 <div class="card">
@@ -90,6 +90,9 @@
                 {% endfor %}
             </select>
         </div>
+        <input type="hidden" name="view" value="{{ view_mode }}">
+        <input type="hidden" name="sort" value="{{ sort_key }}">
+        <input type="hidden" name="dir" value="{{ sort_dir }}">
         <div><button type="submit">Apply</button></div>
         {% if active_q or active_kind or active_suggestion %}<a class="clear" href="?">Clear</a>{% endif %}
     </form>
@@ -99,7 +102,7 @@
     {% csrf_token %}
     <input type="hidden" name="next" value="{{ request.get_full_path }}">
     <input type="hidden" name="scope" value="global">
-    {% if groups %}
+    {% if groups or titles %}
     <div class="bulk-bar">
         <label><input type="checkbox" id="bulk-select-all"> Select all on this page</label>
         <strong id="bulk-count">0 selected</strong>
@@ -118,6 +121,28 @@
     <div id="bulk-hidden-fields"></div>
 </form>
 
+{% if view_mode == "table" %}
+<div class="card">
+    <table class="sw-review-table" id="sw-review-flat">
+        <thead>
+            <tr>
+                <th style="width:2rem;"></th>
+                {% for col in columns %}
+                <th{% if col.numeric %} class="num"{% endif %}><a href="{{ col.href }}">{{ col.label }}{{ col.mark }}</a></th>
+                {% endfor %}
+                <th style="text-align:right;">Decide this title</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for t in titles %}
+            {% include "_software_review_row.html" with show_publisher=True %}
+            {% empty %}
+            <tr><td colspan="9" class="muted">No software is waiting for a decision.</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% else %}
 {% for group in groups %}
 <details class="pub-group"{% if forloop.first %} open{% endif %}>
     <summary>
@@ -147,27 +172,7 @@
         </thead>
         <tbody>
             {% for t in group.titles %}
-            <tr>
-                <td><input type="checkbox" class="bulk-cb" aria-label="Select {{ t.title }}" data-canonical="{{ t.title }}" data-publisher="{{ t.publisher }}"></td>
-                <td>{% if t.title %}<a href="{% url 'software_detail' name=t.title %}">{{ t.title }}</a>{% else %}<span class="muted">(no title recorded)</span>{% endif %}</td>
-                <td><span class="pill sev-{{ t.severity }}">{{ t.type_label }} · {{ t.severity }}</span>{% if t.recent %}<span class="pill recent">recent</span>{% endif %}</td>
-                <td class="num">{{ t.devices }}</td>
-                <td class="num">{{ t.clients }}</td>
-                <td>{% for s in t.signals %}<span class="pill signal">{{ s|humanize_label }}</span>{% empty %}<span class="muted">—</span>{% endfor %}</td>
-                <td><span class="pill suggest-{{ t.suggestion }}">{{ t.suggestion_label }}</span>{% if t.evidence %}<div class="muted" style="font-size:0.72rem;">{{ t.evidence|join:", " }}</div>{% endif %}</td>
-                <td>
-                    <div class="row-actions">
-                        {% if t.default_scope == "device" and t.device_targets %}
-                            {% for target in t.device_targets %}
-                            <form method="post" action="{% url 'software_decision_create' %}">{% csrf_token %}<input type="hidden" name="canonical_name" value="{{ t.title }}"><input type="hidden" name="scope" value="device"><input type="hidden" name="device_id" value="{{ target.device_id }}"><input type="hidden" name="next" value="{{ request.get_full_path }}"><input type="hidden" name="decision" value="approve"><button type="submit" class="btn-allow" title="Approve on this device only ({{ target.client_name }})">Approve on {{ target.hostname }}</button></form>
-                            {% endfor %}
-                        {% endif %}
-                        <form method="post" action="{% url 'software_decision_create' %}">{% csrf_token %}<input type="hidden" name="canonical_name" value="{{ t.title }}"><input type="hidden" name="scope" value="global"><input type="hidden" name="next" value="{{ request.get_full_path }}"><input type="hidden" name="decision" value="approve"><button type="submit" class="btn-allow" title="Approve this title everywhere">Approve{% if t.default_scope == "device" and t.device_targets %} everywhere{% endif %}</button></form>
-                        <form method="post" action="{% url 'software_decision_create' %}">{% csrf_token %}<input type="hidden" name="canonical_name" value="{{ t.title }}"><input type="hidden" name="scope" value="global"><input type="hidden" name="next" value="{{ request.get_full_path }}"><input type="hidden" name="decision" value="investigate"><button type="submit" class="btn-review">Investigate</button></form>
-                        <form method="post" action="{% url 'software_decision_create' %}">{% csrf_token %}<input type="hidden" name="canonical_name" value="{{ t.title }}"><input type="hidden" name="scope" value="global"><input type="hidden" name="next" value="{{ request.get_full_path }}"><input type="hidden" name="decision" value="reject"><button type="submit" class="btn-block">Reject</button></form>
-                    </div>
-                </td>
-            </tr>
+            {% include "_software_review_row.html" with show_publisher=False %}
             {% endfor %}
         </tbody>
     </table>
@@ -175,6 +180,7 @@
 {% empty %}
 <div class="card"><p class="muted">No software is waiting for a decision.</p></div>
 {% endfor %}
+{% endif %}
 
 {% if pages > 1 %}
 <nav class="pager" aria-label="Pages">
