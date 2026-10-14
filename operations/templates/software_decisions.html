@@ -23,6 +23,10 @@
   .pub-group > summary::before { content: "▸"; color: var(--muted); }
   .pub-group[open] > summary::before { content: "▾"; }
   .pub-name { font-weight: 700; }
+  .pub-toggle { background: none; border: 0; cursor: pointer; color: var(--muted); font-size: 0.9rem; padding: 0 0.3rem; }
+  .pub-summary td { background: var(--surface); vertical-align: middle; }
+  .pub-titles > td { padding-top: 0; }
+  #sw-review-publishers th a, #sw-review-flat th a { color: inherit; text-decoration: none; }
   .pub-meta { color: var(--muted); font-size: 0.85rem; }
   .pub-actions { margin-left: auto; display: flex; gap: 0.3rem; flex-wrap: wrap; }
   .pub-actions form, .row-actions form { margin: 0; }
@@ -58,8 +62,8 @@
     </div>
     <p class="muted">
         Every installed title without a decision is a finding: rare software on few
-        devices, non-approved software above that. Titles are grouped by publisher,
-        largest decision first. Approve a title, or approve its publisher to cover all
+        devices, non-approved software above that. Titles are grouped by publisher; sort the
+        publishers by any total, or open every title as one table. Approve a title, or approve its publisher to cover all
         of its titles; a suggestion shows what the evidence supports. The publisher
         name is set by the installer, so check flagged titles before approving a
         publisher.
@@ -104,7 +108,7 @@
     <input type="hidden" name="scope" value="global">
     {% if groups or titles %}
     <div class="bulk-bar">
-        <label><input type="checkbox" id="bulk-select-all"> Select all on this page</label>
+        <label><input type="checkbox" id="bulk-select-all"> Select all visible</label>
         <strong id="bulk-count">0 selected</strong>
         <select id="bulk-scope-kind" aria-label="Apply to">
             <option value="product">This title only</option>
@@ -143,43 +147,62 @@
     </table>
 </div>
 {% else %}
-{% for group in groups %}
-<details class="pub-group"{% if forloop.first %} open{% endif %}>
-    <summary>
-        <span class="pub-name">{% if group.publisher %}{{ group.publisher }}{% else %}<span class="muted">No publisher</span>{% endif %}</span>
-        <span class="pub-meta">{{ group.titles|length }} title{{ group.titles|length|pluralize }} · {{ group.devices }} device{{ group.devices|pluralize }}</span>
-        <span class="pill suggest-{{ group.suggestion }}">{{ group.suggestion_label }}</span>
-        {% if group.publisher %}
-        <span class="pub-actions">
-            <form method="post" action="{% url 'software_decision_create' %}">{% csrf_token %}<input type="hidden" name="publisher" value="{{ group.publisher }}"><input type="hidden" name="scope" value="global"><input type="hidden" name="next" value="{{ request.get_full_path }}"><input type="hidden" name="decision" value="approve_publisher"><button type="submit" class="btn-trust" title="Approve every title from this publisher, now and later">Approve publisher ({{ group.titles|length }})</button></form>
-            <form method="post" action="{% url 'software_decision_create' %}">{% csrf_token %}<input type="hidden" name="publisher" value="{{ group.publisher }}"><input type="hidden" name="scope" value="global"><input type="hidden" name="next" value="{{ request.get_full_path }}"><input type="hidden" name="decision" value="investigate"><button type="submit" class="btn-review">Investigate publisher</button></form>
-            <form method="post" action="{% url 'software_decision_create' %}">{% csrf_token %}<input type="hidden" name="publisher" value="{{ group.publisher }}"><input type="hidden" name="scope" value="global"><input type="hidden" name="next" value="{{ request.get_full_path }}"><input type="hidden" name="decision" value="reject"><button type="submit" class="btn-block">Reject publisher</button></form>
-        </span>
-        {% endif %}
-    </summary>
-    <table class="sw-review-table">
+<div class="card">
+    <table class="sw-review-table" id="sw-review-publishers">
         <thead>
             <tr>
                 <th style="width:2rem;"></th>
-                <th>Title</th>
-                <th>Type</th>
-                <th class="num">Devices</th>
-                <th class="num">Clients</th>
-                <th>Signals</th>
-                <th>Suggested</th>
-                <th style="text-align:right;">Decide this title</th>
+                {% for col in columns %}
+                <th{% if col.numeric %} class="num"{% endif %}><a href="{{ col.href }}">{{ col.label }}{{ col.mark }}</a></th>
+                {% endfor %}
+                <th>Decide the publisher</th>
             </tr>
         </thead>
-        <tbody>
-            {% for t in group.titles %}
-            {% include "_software_review_row.html" with show_publisher=False %}
-            {% endfor %}
+        {% for group in groups %}
+        <tbody class="pub-block">
+            <tr class="pub-summary">
+                <td><button type="button" class="pub-toggle" aria-expanded="{% if forloop.first %}true{% else %}false{% endif %}" aria-label="Show or hide the titles of {{ group.publisher|default:'no publisher' }}">{% if forloop.first %}&#9662;{% else %}&#9656;{% endif %}</button></td>
+                <td><strong>{% if group.publisher %}{{ group.publisher }}{% else %}<span class="muted">No publisher</span>{% endif %}</strong></td>
+                <td class="num">{{ group.title_count }}</td>
+                <td class="num">{{ group.devices }}</td>
+                <td class="num">{{ group.clients }}</td>
+                <td class="num">{{ group.concerns }}</td>
+                <td><span class="pill suggest-{{ group.suggestion }}">{{ group.suggestion_label }}</span></td>
+                <td>{% if group.publisher %}{% include "_software_review_publisher_actions.html" %}{% endif %}</td>
+            </tr>
+            <tr class="pub-titles"{% if not forloop.first %} hidden{% endif %}>
+                <td></td>
+                <td colspan="7">
+                    <table class="sw-review-table">
+                        <thead>
+                            <tr>
+                                <th style="width:2rem;"></th>
+                                <th>Title</th>
+                                <th>Type</th>
+                                <th class="num">Devices</th>
+                                <th class="num">Clients</th>
+                                <th>Signals</th>
+                                <th>Suggested</th>
+                                <th style="text-align:right;">Decide this title</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for t in group.titles %}
+                            {% include "_software_review_row.html" with show_publisher=False %}
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                    {% if group.title_count > group.titles|length %}
+                    <p class="muted" style="margin:0.4rem 0 0;">Showing {{ group.titles|length }} of {{ group.title_count }} titles. <a href="?view=table&amp;q={{ group.publisher|urlencode }}">See every title of this publisher as a table</a>.</p>
+                    {% endif %}
+                </td>
+            </tr>
         </tbody>
+        {% empty %}
+        <tbody><tr><td colspan="8" class="muted">No software is waiting for a decision.</td></tr></tbody>
+        {% endfor %}
     </table>
-</details>
-{% empty %}
-<div class="card"><p class="muted">No software is waiting for a decision.</p></div>
-{% endfor %}
+</div>
 {% endif %}
 
 {% if pages > 1 %}
@@ -216,7 +239,19 @@
       });
     }
     cbs.forEach(cb => cb.addEventListener('change', refresh));
-    if (all) all.addEventListener('change', function () { cbs.forEach(cb => cb.checked = all.checked); refresh(); });
+    // Only titles that are on screen: a collapsed publisher is not part of a bulk decision.
+    if (all) all.addEventListener('change', function () { cbs.forEach(cb => { if (cb.offsetParent !== null) cb.checked = all.checked; }); refresh(); });
+    document.querySelectorAll('.pub-toggle').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        const titles = btn.closest('tbody').querySelector('.pub-titles');
+        const open = titles.hasAttribute('hidden');
+        titles.toggleAttribute('hidden', !open);
+        btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+        btn.innerHTML = open ? '&#9662;' : '&#9656;';
+        if (!open) titles.querySelectorAll('.bulk-cb:checked').forEach(cb => { cb.checked = false; });
+        refresh();
+      });
+    });
     scopeKind.addEventListener('change', refresh);
     refresh();
   })();

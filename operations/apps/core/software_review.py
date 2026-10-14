@@ -158,10 +158,11 @@ def build_groups(
         key = publisher.lower()
         group = groups.setdefault(
             key,
-            {"publisher": publisher, "titles": [], "devices": 0, "concerns": 0},
+            {"publisher": publisher, "titles": [], "devices": 0, "clients": 0, "concerns": 0},
         )
         group["titles"].append(entry)
         group["devices"] += devices
+        group["clients"] = max(group["clients"], entry["clients"])
         group["concerns"] += int(bool(signals))
     for group in groups.values():
         group["titles"].sort(
@@ -212,6 +213,44 @@ def sort_titles(titles: list[dict[str, Any]], key: str, direction: str) -> list[
         direction = "desc"
     ordered = sorted(titles, key=lambda t: t["title"].lower())
     return sorted(ordered, key=keys[key], reverse=(direction == "desc"))
+
+
+GROUP_COLUMNS = (
+    ("publisher", "Publisher", False),
+    ("titles", "Titles", True),
+    ("installs", "Installs", True),
+    ("clients", "Clients (widest title)", True),
+    ("flagged", "Flagged titles", True),
+    ("suggestion", "Suggested", False),
+)
+
+
+def sort_groups(groups: list[dict[str, Any]], key: str, direction: str) -> list[dict[str, Any]]:
+    """Sort the publisher rows by any of their totals."""
+    keys = {
+        "publisher": lambda g: (g["publisher"] == "", g["publisher"].lower()),
+        "titles": lambda g: len(g["titles"]),
+        "installs": lambda g: g["devices"],
+        "clients": lambda g: g["clients"],
+        "flagged": lambda g: g["concerns"],
+        "suggestion": lambda g: g["suggestion_label"],
+    }
+    if key not in keys:
+        key, direction = "titles", "desc"
+    ordered = sorted(groups, key=lambda g: g["publisher"].lower())
+    return sorted(ordered, key=keys[key], reverse=(direction == "desc"))
+
+
+GROUP_TITLES_SHOWN = 50
+
+
+def trim_group_titles(groups: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Cap the titles listed under each publisher; the rest stay one click away."""
+    return [
+        {**group, "titles": group["titles"][:GROUP_TITLES_SHOWN],
+         "title_count": len(group["titles"])}
+        for group in groups
+    ]
 
 
 def paginate(items: list, page: int, per_page: int = 40) -> tuple[list, int, int]:

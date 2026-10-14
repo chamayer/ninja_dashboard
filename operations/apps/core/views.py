@@ -16457,17 +16457,22 @@ def software_decisions_queue(request: HttpRequest) -> HttpResponse:
         page_number = int(request.GET.get("page") or 1)
     except ValueError:
         page_number = 1
-    view_mode = "groups" if request.GET.get("view") == "groups" else "table"
-    sort_key = request.GET.get("sort") or "devices"
+    view_mode = "table" if request.GET.get("view") == "table" else "groups"
+    sort_columns = (
+        software_review.SORT_COLUMNS if view_mode == "table" else software_review.GROUP_COLUMNS
+    )
+    sort_key = request.GET.get("sort") or ""
     sort_dir = "asc" if request.GET.get("dir") == "asc" else "desc"
-    if sort_key not in {name for name, _label, _numeric in software_review.SORT_COLUMNS}:
-        sort_key, sort_dir = "devices", "desc"
+    if sort_key not in {name for name, _label, _numeric in sort_columns}:
+        sort_key, sort_dir = ("devices" if view_mode == "table" else "titles"), "desc"
     with transaction.atomic(), connection.cursor() as cur:
         cur.execute("SET LOCAL operations.tenant_id = 1")
         cur.execute(software_review.PROMPTS_SQL, (1,))
         groups = software_review.build_groups(
             cur.fetchall(), query=query, kind=kind, suggestion=suggestion
         )
+        if view_mode == "groups":
+            groups = software_review.sort_groups(groups, sort_key, sort_dir)
         all_titles = software_review.sort_titles(
             [
                 {**title, "group_suggestion": group["suggestion_label"]}
@@ -16504,7 +16509,10 @@ def software_decisions_queue(request: HttpRequest) -> HttpResponse:
             page_groups = [{"titles": page_titles}]
         else:
             page_titles = []
-            page_groups, page_number, pages = software_review.paginate(groups, page_number)
+            page_groups, page_number, pages = software_review.paginate(
+                groups, page_number, per_page=25
+            )
+            page_groups = software_review.trim_group_titles(page_groups)
         config = EvaluatorConfig.objects.filter(
             tenant_id=1, evaluator_name="software_classifier"
         ).first()
@@ -16516,15 +16524,18 @@ def software_decisions_queue(request: HttpRequest) -> HttpResponse:
     base_query = request.GET.copy()
     base_query.pop("page", None)
 
-    def _href(**changes: str) -> str:
+    def _href(**changes: str | None) -> str:
         params = request.GET.copy()
         params.pop("page", None)
         for name, value in changes.items():
-            params[name] = value
+            if value is None:
+                params.pop(name, None)
+            else:
+                params[name] = value
         return "?" + params.urlencode()
 
     columns = []
-    for name, label, numeric in software_review.SORT_COLUMNS:
+    for name, label, numeric in sort_columns:
         active = name == sort_key
         if active:
             next_dir = "asc" if sort_dir == "desc" else "desc"
@@ -16533,7 +16544,7 @@ def software_decisions_queue(request: HttpRequest) -> HttpResponse:
         columns.append({
             "label": label,
             "numeric": numeric,
-            "href": _href(view="table", sort=name, dir=next_dir),
+            "href": _href(view=view_mode, sort=name, dir=next_dir),
             "mark": (" ▼" if sort_dir == "desc" else " ▲") if active else "",
         })
     return render(
@@ -16548,7 +16559,9 @@ def software_decisions_queue(request: HttpRequest) -> HttpResponse:
             "sort_dir": sort_dir,
             "columns": columns,
             "titles": page_titles,
-            "other_view_href": _href(view="groups" if view_mode == "table" else "table"),
+            "other_view_href": _href(
+                view="groups" if view_mode == "table" else "table", sort=None, dir=None
+            ),
             "groups": page_groups if view_mode == "groups" else [],
             "group_total": len(groups),
             "title_total": sum(len(group["titles"]) for group in groups),

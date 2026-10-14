@@ -147,3 +147,42 @@ def test_flat_table_has_sortable_headers_and_a_toggle_to_group_by_publisher():
     assert '{% include "_software_review_row.html"' in template
     # An included template does not inherit the parent's {% load %}.
     assert row.lstrip().startswith("{% load human_labels %}")
+
+
+def _g(publisher, titles, devices, clients, concerns, suggestion="No suggestion"):
+    return {
+        "publisher": publisher, "titles": [{"title": f"t{i}"} for i in range(titles)],
+        "devices": devices, "clients": clients, "concerns": concerns,
+        "suggestion_label": suggestion,
+    }
+
+
+def test_publisher_rows_sort_by_every_total():
+    groups = [_g("Zed", 3, 10, 5, 0), _g("Acme", 9, 4, 2, 3, "Investigate"), _g("", 1, 50, 9, 1)]
+    order = lambda k, d: [g["publisher"] for g in software_review.sort_groups(groups, k, d)]  # noqa: E731
+    assert order("titles", "desc") == ["Acme", "Zed", ""]
+    assert order("installs", "desc") == ["", "Zed", "Acme"]
+    assert order("clients", "desc") == ["", "Zed", "Acme"]
+    assert order("flagged", "desc") == ["Acme", "", "Zed"]
+    assert order("publisher", "asc") == ["Acme", "Zed", ""]  # no publisher last
+    assert order("suggestion", "asc")[0] == "Acme"  # Investigate sorts before No suggestion
+    assert order("nope", "asc") == order("titles", "desc")
+
+
+def test_group_clients_total_is_the_widest_title():
+    rows = [
+        ("a", "whitelist_suggestion", "low", {"canonical_name": "A", "publisher": "P", "fleet_device_count": 3, "client_count": 2}, None, "global"),
+        ("b", "whitelist_suggestion", "low", {"canonical_name": "B", "publisher": "P", "fleet_device_count": 4, "client_count": 7}, None, "global"),
+    ]
+    (group,) = software_review.build_groups(rows)
+    assert group["clients"] == 7 and group["devices"] == 7 and len(group["titles"]) == 2
+
+
+def test_titles_under_a_publisher_are_capped_but_counted():
+    big = _g("Big", software_review.GROUP_TITLES_SHOWN + 20, 1, 1, 0)
+    (trimmed,) = software_review.trim_group_titles([big])
+    assert len(trimmed["titles"]) == software_review.GROUP_TITLES_SHOWN
+    assert trimmed["title_count"] == software_review.GROUP_TITLES_SHOWN + 20
+    template = (_ROOT / "templates" / "software_decisions.html").read_text(encoding="utf-8")
+    assert "See every title of this publisher as a table" in template
+    assert 'id="sw-review-publishers"' in template
