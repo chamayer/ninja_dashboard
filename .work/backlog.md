@@ -1114,3 +1114,15 @@ active work stays on the decision list.
   checks, the checker's choice of id).
 - **Revisit when:** working the withdrawn-record emitter (plan W6) or the
   duplicate-record housekeeping (plan W9).
+
+## Title view shows the alphabetically last publisher (addressed, awaiting deploy)
+
+- **Cause:** `operations.software_title_current` took `max(publisher)`, so a
+  Cyrillic string beat Latin ("Microsoft Edge" listed "Корпорация Майкрософт").
+  301 of 514 multi-publisher titles showed a non-main publisher.
+- **Fix:** migration 0293 recreates `software_title_current` (most common
+  publisher via `mode()`) and its only dependent `v_software_safety`, with the
+  same columns, indexes, grants and owner. The products list also looks up the
+  main publisher itself, so the page is right even before the migration lands.
+- **Revisit when:** confirm after deploy that the products list, the publisher
+  filters and the risk pills agree for Microsoft Edge.
