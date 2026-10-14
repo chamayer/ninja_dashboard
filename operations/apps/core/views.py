@@ -23,6 +23,7 @@ from django.db.models import (
     Count,
     F,
     Func,
+    IntegerField,
     Max,
     OuterRef,
     Q,
@@ -31,7 +32,8 @@ from django.db.models import (
     When,
 )
 from django.db.models.expressions import RawSQL
-from django.db.models.functions import Coalesce, Concat
+from django.db.models.fields.json import KeyTextTransform
+from django.db.models.functions import Cast, Coalesce, Concat
 from django.http import Http404, HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
@@ -144,6 +146,8 @@ _FINDING_ACTIVE_STATUSES = (
 # These are title-level policy recommendations, not incidents. Their
 # authoritative state changes live in SoftwareDecision, whose scope resolves
 # device before client before global.
+# Undecided software appears in the Issues queue, but a decision (approve,
+# reject, investigate) is its action; pausing or excluding it is blocked.
 _SOFTWARE_POLICY_CANDIDATE_TYPES = ("whitelist_suggestion",)
 # The one definition of "software needs a decision": an open prompt finding,
 # one per undecided title. The Issues tile and the Software page both count it.
@@ -563,10 +567,9 @@ def _fleet_condition_state_counts() -> dict[str, dict[str, int]]:
                   JOIN operations.finding_types ft ON ft.id = f.finding_type_id
                  WHERE f.tenant_id = 1
                    AND f.status = ANY(%s)
-                   AND ft.name <> ALL(%s)
                  GROUP BY ft.name, CASE WHEN f.snoozed_until > now() THEN 'paused' ELSE 'pending' END
                 """,
-                [list(_FINDING_ACTIVE_STATUSES), list(_SOFTWARE_POLICY_CANDIDATE_TYPES)],
+                [list(_FINDING_ACTIVE_STATUSES)],
             )
         else:
             cursor.execute(
@@ -578,7 +581,6 @@ def _fleet_condition_state_counts() -> dict[str, dict[str, int]]:
                       JOIN operations.finding_types ft ON ft.id = f.finding_type_id
                      WHERE f.tenant_id = 1
                        AND f.status = ANY(%s)
-                       AND ft.name <> ALL(%s)
                 ), expected AS (
                     SELECT f.id,
                            COALESCE(array_agg(DISTINCT cp.participant_kind || ':' || cp.participant_id::text || ':' || cp.participant_role
@@ -650,7 +652,7 @@ def _fleet_condition_state_counts() -> dict[str, dict[str, int]]:
                   JOIN operations.finding_types ft ON ft.id = final.finding_type_id
                  GROUP BY ft.name, final.attention
                 """,
-                [list(_FINDING_ACTIVE_STATUSES), list(_SOFTWARE_POLICY_CANDIDATE_TYPES)],
+                [list(_FINDING_ACTIVE_STATUSES)],
             )
         for finding_type, attention, count in cursor.fetchall():
             empty.setdefault(finding_type, {})[attention] = count
@@ -4268,10 +4270,6 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
             subject_id__in=_online_device_ids(online_filter),
         )
 
-    # Software policy candidates have a separate decision queue. They are not
-    # Issues and must not inflate the Issues response counts or appear here.
-    qs = qs.exclude(finding_type__name__in=_SOFTWARE_POLICY_CANDIDATE_TYPES)
-
     # A collapsed queue is navigation, not a review scope.  Its fleet counters
     # must not first materialize every finding and participant assessment.
     show_finding_rows = bool(
@@ -4310,7 +4308,7 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
     fleet_governed_qs = Finding.objects.filter(
         tenant_id=1,
         status__in=_FINDING_ACTIVE_STATUSES,
-    ).exclude(finding_type__name__in=_SOFTWARE_POLICY_CANDIDATE_TYPES)
+    )
     fleet_ids = (
         list(fleet_governed_qs.values_list("id", flat=True)) if needs_per_finding_states else []
     )
@@ -4892,6 +4890,19 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
                     if sort_dir == "desc"
                     else expression.asc(nulls_last=True)
                 )
+            if (
+                sort_key == "group"
+                and selected_type
+                and set(selected_type["types"]) <= set(_SOFTWARE_DECISION_PROMPT_TYPES)
+            ):
+                # Undecided software: the most widespread title first.
+                order = [
+                    Cast(
+                        KeyTextTransform("fleet_device_count", "finding_details"),
+                        IntegerField(),
+                    ).desc(nulls_last=True),
+                    F("id").asc(),
+                ]
             database_page = Paginator(database_qs.order_by(*order), 50).get_page(
                 request.GET.get("page")
             )
@@ -6652,8 +6663,8 @@ def findings_bulk_action(request: HttpRequest) -> HttpResponse:
     if not qs.exists():
         messages.info(
             request,
-            "Software policy candidates are reviewed through Software Decisions; "
-            "no issue-state action was applied.",
+            "Undecided software is decided with Approve, Reject or Investigate; "
+            "pausing or excluding it does not apply, so no issue-state action was applied.",
         )
         return redirect(request.POST.get("next") or "findings_queue")
     if action == "refresh":

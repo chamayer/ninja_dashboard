@@ -431,14 +431,19 @@ def test_findings_scope_cards_compare_filtered_counts_with_labeled_baselines():
     assert '"total_label": total_label' not in source
 
 
-def test_software_policy_candidates_are_not_managed_as_incidents():
+def test_undecided_software_is_in_the_queue_but_is_decided_not_paused():
     source = Path("apps/core/views.py").read_text(encoding="utf-8")
 
     assert views._SOFTWARE_POLICY_CANDIDATE_TYPES == ("whitelist_suggestion",)
-    assert "qs = qs.exclude(finding_type__name__in=_SOFTWARE_POLICY_CANDIDATE_TYPES)" in source
+    # No longer excluded from the listing or the counts ...
+    assert "must not inflate the Issues response counts" not in source
+    assert "ft.name <> ALL(%s)" not in source
+    # ... but pausing or excluding it is still blocked: a decision is the action.
     assert "actionable_qs" in source
     assert "_policy_candidate_state_action_blocked" in source
     assert "Skipped {policy_count} software policy candidate" in source
+    # The most widespread undecided title is listed first.
+    assert 'KeyTextTransform("fleet_device_count", "finding_details")' in source
 
 
 def test_findings_queue_csv_includes_windows_servicing_context():
