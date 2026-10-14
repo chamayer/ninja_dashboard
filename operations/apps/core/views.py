@@ -64,6 +64,7 @@ from shared.patch_compliance import COMPLIANCE_MISSING_STATUSES, excluded_patch_
 from . import capability as capability_evidence
 from . import category as category_evidence
 from . import software_review
+from .capability_review_actions import decide_capability
 from .client_workspace import (
     build_client_directory,
     build_client_workspace,
@@ -92,6 +93,8 @@ from .finding_actions import (
     APPROVE_REMOTE_ACCESS_CLIENT,
     ARCHIVE_HUDU_ASSETS,
     BULK_RETIRE_COMPUTERS,
+    CAPABILITY_CONFIRM,
+    CAPABILITY_REJECT,
     FINDING_ACTIONS,
     available_finding_actions,
     can_manage_lifecycle,
@@ -6650,6 +6653,8 @@ def findings_bulk_action(request: HttpRequest) -> HttpResponse:
             APPROVE_REMOTE_ACCESS_CLIENT.key,
         ):
             return approve_remote_access(request, ids, registered_action)
+        if registered_action.key in (CAPABILITY_CONFIRM.key, CAPABILITY_REJECT.key):
+            return decide_capability(request, ids, registered_action)
         if decision_for(registered_action.key) is not None:
             return decide_software(request, ids, registered_action)
     if action not in ("refresh", "snooze", "suppress"):

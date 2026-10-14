@@ -1089,3 +1089,28 @@ active work stays on the decision list.
   fleet-wide vanishing, scope leakage, investigating-too-long reminder.
 - **Mislabeled link:** the home overview line "N decisions recorded" opens the
   undecided list.
+
+## Computers with more than one Ninja id
+
+- **Context:** 816 computers have two or more Ninja source links in
+  `v_device_source_link` (measured 2026-10-14). The software inventory unions
+  the ids, so software data is complete; the checker problem was choosing an id
+  that returns no list.
+- **What it is not:** mostly not re-enrollment. Only 127 have exactly one
+  current id with the rest withdrawn (the re-enrolled pattern); 629 have two or
+  more *current* ids; 60 have none current.
+- **Explained (2026-10-14):** of the 629 computers with several current
+  Ninja ids, 626 are an agent record plus a virtualization record Ninja
+  creates for the same machine. 93 pair the agent with a VMware guest record
+  (`vmware_guest_vmx_path`). 533 pair it with a Hyper-V record in the `device`
+  namespace: 443 guests (`HYPERV_VMM_GUEST` + a server, workstation or Linux
+  agent) and 90 hosts (`HYPERV_VMM_HOST` + the host's server agent). All were
+  seen in the last day and sit in one organization, so they are live, not
+  leftovers.
+- **Still unexplained:** 3 computers hold two `WINDOWS_WORKSTATION` records,
+  and 60 computers hold no current Ninja id.
+- **Gap:** the Hyper-V and VMware records are VM monitoring, not agents. They
+  should not read as a second agent id for the computer (coverage, identity
+  checks, the checker's choice of id).
+- **Revisit when:** working the withdrawn-record emitter (plan W6) or the
+  duplicate-record housekeeping (plan W9).

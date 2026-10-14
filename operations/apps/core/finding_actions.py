@@ -130,6 +130,29 @@ SOFTWARE_INVESTIGATE = _software_action(
     "",
 )
 
+# A curator judges whether a product really has a candidate capability.
+CURATE_CAPABILITY_PERMISSION = "operations.curate_software_capability"
+
+CAPABILITY_CONFIRM = FindingAction(
+    key="capability_confirm",
+    label="Confirm capability",
+    permission=CURATE_CAPABILITY_PERMISSION,
+    finding_types=frozenset({"capability_review_candidate"}),
+    requires_reason=False,
+    confirmation="Confirm the selected products have this capability? This is a global decision.",
+    eligibility_hint="Records the capability as true for each selected product and closes the issue.",
+)
+
+CAPABILITY_REJECT = FindingAction(
+    key="capability_reject",
+    label="Reject capability",
+    permission=CURATE_CAPABILITY_PERMISSION,
+    finding_types=frozenset({"capability_review_candidate"}),
+    requires_reason=False,
+    confirmation="Reject this capability for the selected products? This is a global decision.",
+    eligibility_hint="Records the capability as not true for each selected product and closes the issue.",
+)
+
 FINDING_ACTIONS = {
     BULK_RETIRE_COMPUTERS.key: BULK_RETIRE_COMPUTERS,
     ARCHIVE_HUDU_ASSETS.key: ARCHIVE_HUDU_ASSETS,
@@ -139,6 +162,8 @@ FINDING_ACTIONS = {
     SOFTWARE_APPROVE_PUBLISHER.key: SOFTWARE_APPROVE_PUBLISHER,
     SOFTWARE_REJECT.key: SOFTWARE_REJECT,
     SOFTWARE_INVESTIGATE.key: SOFTWARE_INVESTIGATE,
+    CAPABILITY_CONFIRM.key: CAPABILITY_CONFIRM,
+    CAPABILITY_REJECT.key: CAPABILITY_REJECT,
 }
 
 

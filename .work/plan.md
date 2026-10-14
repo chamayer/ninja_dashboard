@@ -41,8 +41,16 @@ evidence on findings, evidence shown on the review page and in the Issues contex
 Measured before building: known vendor + established + no warning = about 377 undecided titles today;
 `publisher_approved` is empty until approvals exist (no decisions recorded yet).
 
-**Next action:** commit approval (software decision actions; decision helper, names migration 0292); then merge the
-two prompt types, lift the whitelist_suggestion queue exclusion, capability confirm/reject actions.
+**Software review shipped 2026-10-14 (abded17 to 38527d5):** decision buttons, evidence helper (0292), undecided
+list in Issues, jsonb-text fix, sortable publisher table with linked counts. Findings-run measurement: changed-only
+runs already run hourly (40 completed, 1 failed by a DB restart, in 24 h; about 2.5 minutes for the usual 500 to
+1,800 rows; about 5 minutes when decisions or deploys widen coverage to about 27,800 rows).
+
+**Phase 2 W3 capability confirm/reject:** built, uncommitted (`capability_review_actions.py`); closes the 297 frozen
+`capability_review_candidate` findings with a recorded reason as each is judged. Nothing produces new ones yet.
+
+**Next action:** commit approval for capability actions; then Phase 3 W4 (one offline value; needs a nullable
+per-client column, so a proposal naming the migration first).
 
 ## Active plan — Software inventory ingest rebuild
 
