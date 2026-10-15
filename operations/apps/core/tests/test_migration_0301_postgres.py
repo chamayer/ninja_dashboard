@@ -14,6 +14,7 @@ import pytest
 from apps.core.tests.test_migration_0297_postgres import SCHEMA
 
 _MIGRATION = importlib.import_module("apps.core.migrations.0301_finding_state")
+_SKIP = importlib.import_module("apps.core.migrations.0302_finding_state_skip_unchanged")
 TENANT = 1
 
 
@@ -30,6 +31,7 @@ def conn():
             # Production: the migration owner bypasses row-level security.
             connection.execute("ALTER ROLE operations_migrate BYPASSRLS")
             connection.execute(_MIGRATION.FORWARD_SQL)
+            connection.execute(_SKIP.FORWARD_SQL)
             yield connection
 
 
@@ -233,3 +235,81 @@ def test_the_consistency_check_records_then_repairs_a_wrong_state(conn):
     assert kept == ("blocked", "needs_action")
     with conn.cursor() as cursor:
         assert finding_attention.check_and_repair_state(cursor, TENANT) == 0
+
+
+def _set_state(conn, finding, **columns):
+    conn.execute("SELECT set_config('operations.tenant_id', '1', false)")
+    assignments = ", ".join(f"{name} = %s" for name in columns)
+    conn.execute(
+        f"UPDATE operations.finding_state SET {assignments} WHERE finding_id = %s",
+        (*columns.values(), finding),
+    )
+
+
+def _computed_at(conn, finding):
+    return conn.execute(
+        "SELECT computed_at FROM operations.finding_state WHERE finding_id = %s", (finding,)
+    ).fetchone()[0]
+
+
+def test_an_unchanged_reassessment_only_restamps_the_state(conn):
+    device = uuid.uuid4()
+    finding = _finding(conn, "plain", device)
+    _participant(conn, finding, device)
+    _assess(conn, finding, device)
+    _set_state(conn, finding, attention="blocked")  # a marker the full rule would overwrite
+    before = _computed_at(conn, finding)
+    conn.execute(
+        "UPDATE operations.condition_assessments SET assessed_at = now() WHERE finding_id = %s",
+        (finding,),
+    )
+    assert _state(conn, finding)[0] == "blocked"  # not recomputed
+    assert _computed_at(conn, finding) > before  # but kept inside the freshness window
+
+
+def test_a_changed_reassessment_is_recomputed_in_full(conn):
+    device = uuid.uuid4()
+    finding = _finding(conn, "plain", device)
+    _participant(conn, finding, device)
+    _assess(conn, finding, device)
+    _set_state(conn, finding, attention="blocked")
+    conn.execute(
+        """UPDATE operations.condition_assessments
+              SET response = response || '{"reasons": ["something_new"]}', assessed_at = now()
+            WHERE finding_id = %s""",
+        (finding,),
+    )
+    assert _state(conn, finding)[0] == "needs_action"
+
+
+def test_one_statement_can_mix_changed_and_unchanged_findings(conn):
+    devices = [uuid.uuid4(), uuid.uuid4()]
+    same, different = (_finding(conn, "plain", d) for d in devices)
+    for finding, device in ((same, devices[0]), (different, devices[1])):
+        _participant(conn, finding, device)
+        _assess(conn, finding, device)
+        _set_state(conn, finding, attention="blocked")
+    conn.execute(
+        """UPDATE operations.condition_assessments
+              SET assessed_at = now(),
+                  response = CASE WHEN finding_id = %s
+                                  THEN response || '{"reasons": ["x"]}'::jsonb ELSE response END
+            WHERE finding_id = ANY(%s)""",
+        (different, [same, different]),
+    )
+    assert _state(conn, same)[0] == "blocked"  # only re-stamped
+    assert _state(conn, different)[0] == "needs_action"  # recomputed
+
+
+def test_a_state_from_an_older_policy_version_is_recomputed_not_restamped(conn):
+    device = uuid.uuid4()
+    finding = _finding(conn, "plain", device)
+    _participant(conn, finding, device)
+    _assess(conn, finding, device)
+    _set_state(conn, finding, attention="blocked", policy_version="older")
+    conn.execute(
+        "UPDATE operations.condition_assessments SET assessed_at = now() WHERE finding_id = %s",
+        (finding,),
+    )
+    assert _state(conn, finding)[0] == "needs_action"
+    assert _state(conn, finding)[3] == "p1"

@@ -71,9 +71,9 @@ def test_only_the_refresh_function_writes_attention():
 
 
 def test_only_the_state_functions_write_finding_state():
-    allowed_migrations = {"0301_finding_state.py"}
+    allowed_migrations = {"0301_finding_state.py", "0302_finding_state_skip_unchanged.py"}
     offenders = []
-    pattern = re.compile(r"(INSERT\s+INTO|UPDATE|DELETE\s+FROM)\s+operations\.finding_state", re.I)
+    pattern = re.compile(r"(INSERT\s+INTO|UPDATE|DELETE\s+FROM)\s+operations\.finding_state\b", re.I)
     for base in ("ingest", "operations/apps", "operations/config", "shared"):
         for path in (ROOT / base).rglob("*.py"):
             if "tests" in path.parts or path.name in allowed_migrations:
