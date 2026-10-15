@@ -165,3 +165,18 @@ before the next deploy.
 
 Approve this design (including the table rather than columns, the staging in section 10, and the
 count shift in section 3). No code until then.
+
+## 14. Amendment 2026-10-15: cover is a live relation (migration 0304)
+
+Section 5 read cover from the child's assessment (a current `covered_by` assessment whose covering
+finding is still open). That froze a fact about another finding inside the child's evidence, which
+caused the two limits in section 12: a newly opened parent could not cover its children until they
+were reassessed, and a closed parent left children Pending until reassessed.
+
+Now `compute_finding_state` decides cover itself: a finding on a computer is covered while an open
+finding on the same computer has a type in its `finding_types.covered_by` chain; the root-most open
+parents are stored in `covered_by`. Assessments carry only the child's own evidence. The existing
+triggers (a finding becoming active or closed refreshes the findings it covers) make both directions
+immediate. The page reads "N covered" and the highest covered severity from the stored `covered_by`.
+The policy is unchanged: every assessment reports its now-redundant `parent_open` rule ready, and the
+rule goes at the next policy version.

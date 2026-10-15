@@ -2,7 +2,10 @@
 
 ## Active plan — Central work queue (design awaiting approval)
 
-**Status:** Phase 1 built locally (uncommitted, not validated against Postgres): W1 `alertable` and W2 counts.
+**Status (2026-10-15):** W1-W5 shipped and live (alertable, counts, decisions in the queue, one offline definition,
+dependency engine as the finding types registry + stored finding state, ADR 0031). Remaining: W6 withdrawn records, W7 jobs
+chain, W8 admin findings in the queue, W9 housekeeping. Open: severity of a vanished security agent; 922 stale-agent info
+findings unexplained; browser checks of the review table, Finding types page, comment prompts and Configuration field.
 `.work/central-work-queue-design.md` (principles, verified facts, work items W1-W9, phases, safeguards,
 decisions), with `.work/finding-type-review.md` and `.work/finding-dependency-review.md`.
 
@@ -25,7 +28,8 @@ push (names 0297; the page reads the stored value on deploy), re-compare after t
 `.work/finding-state-design.md`, decision `operations/docs/decisions/0031-...`. Deployed: 0301 (`finding_state`, one writer,
 triggers), 0302 (re-stamp unchanged reassessments). Issues filtered pages 14-36 s -> 1-4 s; platform evaluate with triggers
 452 s vs 323 s before (0302 should cut about two thirds of that overhead; re-measure on the next chain). Deploy 2 (0303)
-drops the view, function, `findings.attention` columns, old triggers and drift table; removes the Python refresh and old
+drops the view, function, `findings.attention` columns, old triggers and drift table (deployed, 0303);
+migration 0304 (built, pending push) makes cover a live relation decided by the writer, closing the cover gaps; removes the Python refresh and old
 check; adds the read-only Finding state checks page (`/admin/finding-state-checks/`). Validation: disposable Postgres with
 production types (0297-0303 applied in order), production reads of the compute and cascade queries, deployed page timings.
 

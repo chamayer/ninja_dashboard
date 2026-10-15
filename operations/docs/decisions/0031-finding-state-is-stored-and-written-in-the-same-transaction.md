@@ -30,7 +30,10 @@ the covering findings, the policy version and when it was computed. Its only wri
 application roles can only read it. Database triggers call the writer in the same transaction as
 every change that affects it: assessments, participants, and a finding's insert, status or
 severity. A bounded cascade refreshes the findings that a finding becoming active or closed covers
-or uncovers. Pause, closed status, freshness and policy version are not stored; the page compares
+or uncovers. Cover is a live relation, not evidence: the writer decides it from the open findings
+on the same computer whose type is in the child's `covered_by` chain (migration 0304), so a parent
+opening or closing changes its children's state at once without a reassessment, and assessments no
+longer carry cover. Pause, closed status, freshness and policy version are not stored; the page compares
 them as columns. "Critical takes priority" is no longer a state: critical findings sort first and
 a visible row shows a badge.
 
@@ -53,6 +56,8 @@ grouped counts. Measured after deploy: filtered Issues pages 1-4 s, down from 14
   rule would; the hourly check records and repairs it.
 - Counts moved when "critical takes priority" stopped being a state: Blocked about 714 -> 448,
   Needs action about 5,389 -> 5,711.
+- The `parent_open` rule that migration 0296 added to the policy is now redundant: every assessment
+  reports it ready. Remove it at the next policy version.
 - Notifications, source actions, software exposure and the evaluators still read assessments.
   Moving them to `finding_state` is a separate decision.
 - Migration tests must use production column types and the production role attributes. Two

@@ -500,35 +500,34 @@ def _condition_response_ids(finding_ids) -> dict[str, set[str]]:
     return result
 
 
-def _covered_counts_by_parent(parent_ids) -> dict[str, dict[str, int]]:
-    """For each visible finding, how many findings it covers (and how many are high or critical)."""
+_SEVERITY_RANK = {"critical": 4, "high": 3, "medium": 2, "low": 1, "info": 0}
+
+
+def _covered_counts_by_parent(parent_ids) -> dict[str, dict]:
+    """For each visible finding: how many findings it covers, how many are high or critical,
+    and the highest severity among them. Read from the stored ``covered_by`` of each state."""
     ids = [str(value) for value in parent_ids if value]
     if not ids:
         return {}
-    sql = """
-        SELECT b.parent, count(DISTINCT f.id),
-               count(DISTINCT f.id) FILTER (WHERE f.severity IN ('critical', 'high'))
-          FROM operations.condition_assessments a
-          JOIN operations.findings f ON f.id = a.finding_id AND f.tenant_id = 1
-               AND f.status = ANY(%s)
-          CROSS JOIN LATERAL jsonb_array_elements_text(a.response->'blockers') b(parent)
-         WHERE a.tenant_id = 1 AND a.row_kind = 'entity'
-           AND a.policy_version = (SELECT version FROM operations.condition_policy_versions
-                                    WHERE active ORDER BY version DESC LIMIT 1)
-           AND a.assessed_at >= now() - (SELECT (policy->>'freshness_hours')::integer * interval '1 hour'
-                                           FROM operations.condition_policy_versions
-                                          WHERE active ORDER BY version DESC LIMIT 1)
-           AND EXISTS (SELECT 1 FROM jsonb_array_elements_text(a.response->'reasons') r
-                        WHERE r LIKE 'covered_by:%%')
-           AND b.parent = ANY(%s)
-         GROUP BY b.parent
-    """
     with connection.cursor() as cursor:
-        cursor.execute("SELECT to_regclass('operations.condition_assessments')")
-        if cursor.fetchone()[0] is None:
-            return {}
-        cursor.execute(sql, [list(_FINDING_ACTIVE_STATUSES), ids])
-        return {parent: {"n": n, "high": high} for parent, n, high in cursor.fetchall()}
+        cursor.execute(
+            """
+            SELECT p.parent::text, count(*),
+                   count(*) FILTER (WHERE f.severity IN ('critical', 'high')),
+                   (array_agg(f.severity ORDER BY CASE f.severity WHEN 'critical' THEN 4
+                        WHEN 'high' THEN 3 WHEN 'medium' THEN 2 WHEN 'low' THEN 1 ELSE 0 END DESC))[1]
+              FROM operations.finding_state s
+              JOIN operations.findings f ON f.id = s.finding_id AND f.status = ANY(%s)
+             CROSS JOIN LATERAL unnest(s.covered_by) p(parent)
+             WHERE s.attention = 'covered' AND s.covered_by && %s::uuid[] AND p.parent = ANY(%s::uuid[])
+             GROUP BY p.parent
+            """,
+            [list(_FINDING_ACTIVE_STATUSES), ids, ids],
+        )
+        return {
+            parent: {"n": n, "high": high, "top": top}
+            for parent, n, high, top in cursor.fetchall()
+        }
 
 
 _STATE_LABELS = {
@@ -5215,6 +5214,13 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
         counts = covered_counts.get(str(row["f"].id))
         row["covered_count"] = counts["n"] if counts else 0
         row["covered_high"] = counts["high"] if counts else 0
+        # A finding that covers others is shown at the highest severity of what it covers.
+        # Display only: the stored severity and the sort order do not change.
+        top = counts["top"] if counts else None
+        own = row["f"].severity
+        row["severity_shown"] = (
+            top if top and _SEVERITY_RANK.get(top, 0) > _SEVERITY_RANK.get(own, 0) else ""
+        )
 
     # A duplicate-Computer Finding carries the whole collision group.  Resolve
     # the IDs once here so operators can inspect or compare the actual

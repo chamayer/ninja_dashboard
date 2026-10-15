@@ -40,8 +40,8 @@ def record_assessment(
     profile = load_active_profile(cur)
     signals = tuple(signals)
     if finding_cover.RULE in profile.rules:
-        # Covered while a parent type has an open finding on the same computer.
-        signals += finding_cover.cover_signals(cur, condition)
+        # Cover is a relation decided by the state writer, not evidence about this finding.
+        signals += finding_cover.ready_signals(condition)
     decision = assess(condition, profile, signals, now, participant)
     signal_watermark = hashlib.sha256(
         json.dumps(
