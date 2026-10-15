@@ -20,6 +20,7 @@
 <section class="settings-section"><h2>Notifications</h2><div class="settings-grid">
   <a class="settings-card" href="{% url 'notification_rules_list' %}"><strong>Alert rules</strong><span>Choose which conditions send notifications.</span></a>
   <a class="settings-card" href="{% url 'finding_types_config' %}"><strong>Finding types</strong><span>Names, groups, severity, alerts and what covers what, for every finding.</span></a>
+  <a class="settings-card" href="{% url 'finding_state_checks' %}"><strong>Finding state checks</strong><span>Times the hourly check found a saved state out of line, and what it fixed.</span></a>
   <a class="settings-card" href="{% url 'notification_suppressions_list' %}"><strong>Suppressions</strong><span>Manage approved exceptions.</span></a>
 </div></section>
 <section class="settings-section"><h2>Data presentation</h2><div class="settings-grid">

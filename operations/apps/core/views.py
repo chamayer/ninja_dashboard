@@ -4149,9 +4149,9 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
     )
 
     # Top cards are fleet-wide operator populations; they do not inherit selected filters.
-    # State comes from the ``finding_states`` view (the stored roll-up with pause, closed
-    # status and "critical takes priority" applied live), so nothing here builds a state
-    # per finding.
+    # State comes from ``finding_state`` (written in the same transaction as every change that
+    # affects it) with pause and freshness read live, so nothing here builds a state per
+    # finding.
     fleet_state_counts_by_type = _fleet_state_counts()
     fleet_total = sum(sum(counts.values()) for counts in fleet_state_counts_by_type.values())
 

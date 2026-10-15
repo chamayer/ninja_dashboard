@@ -10,6 +10,7 @@ from drf_spectacular.views import (
     SpectacularSwaggerView,
 )
 
+from apps.core.finding_state_checks import finding_state_checks
 from apps.core.finding_types_admin import finding_types_config
 from apps.core.generic_admin import (
     entity_admin_detail,
@@ -354,6 +355,7 @@ urlpatterns = [
     path("admin/classifier/", classifier_config, name="classifier_config"),
     path("admin/software-policy/", software_policy_config, name="software_policy_config"),
     path("admin/finding-types/", finding_types_config, name="finding_types_config"),
+    path("admin/finding-state-checks/", finding_state_checks, name="finding_state_checks"),
     path("admin/device-status/", device_status_config, name="device_status_config"),
     path("admin/lifecycle/", lifecycle_policy_status, name="lifecycle_policy_status"),
     path("software/decisions/", software_decisions_queue, name="software_decisions_queue"),

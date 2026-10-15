@@ -4121,10 +4121,6 @@ class Finding(UUIDTenantScopedModel):
     last_detected_at = models.DateTimeField(null=True, blank=True)
     last_reviewed_at = models.DateTimeField(null=True, blank=True)
     snoozed_until = models.DateTimeField(null=True, blank=True)
-    # Rolled-up assessment state, written only by operations.refresh_finding_attention
-    # (migration 0297). Null for closed findings and before the first refresh.
-    attention = models.CharField(max_length=16, null=True, blank=True)
-    attention_at = models.DateTimeField(null=True, blank=True)
     # First time an operator acknowledged this issue. Set once; a
     # re-ack after resolve/reopen would leave the original ack
     # timestamp. Enables MTTA (mean time to acknowledge) metrics.
@@ -4895,33 +4891,6 @@ class UserPermission(TenantScopedModel):
 
     def __str__(self) -> str:
         return f"{self.user_id}:{self.permission_id}"
-
-
-class FindingState(models.Model):
-    """Read-only operator state of a finding (view ``operations.finding_states``, migration 0298).
-
-    The stored roll-up (``Finding.attention``) with pause, closed status, freshness and
-    "critical takes priority" applied live. The Issues page filters, counts and labels
-    findings through this instead of building a state per finding in Python.
-    """
-
-    id = models.UUIDField(primary_key=True)
-    tenant_id = models.IntegerField()
-    finding_type_id = models.IntegerField()
-    finding_type = models.CharField(max_length=120)
-    severity = models.CharField(max_length=16)
-    status = models.CharField(max_length=24)
-    snoozed_until = models.DateTimeField(null=True)
-    subject_type = models.CharField(max_length=24)
-    subject_id = models.UUIDField()
-    attention = models.CharField(max_length=16)
-    critical_finding_id = models.UUIDField(null=True)
-    critical_type = models.CharField(max_length=120, null=True)
-    critical_subject_id = models.UUIDField(null=True)
-
-    class Meta:
-        managed = False
-        db_table = "finding_states"
 
 
 class StoredFindingState(models.Model):

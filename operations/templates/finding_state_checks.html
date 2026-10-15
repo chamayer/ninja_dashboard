@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+
+{% block title %}Finding state checks{% endblock %}
+
+{% block content %}
+<h1>Finding state checks</h1>
+<p class="muted">
+  Each finding's state is saved the moment anything that affects it changes. Once an hour a check
+  works every state out again and compares. A row below means the saved state was out of line: it
+  shows what was saved, what it should have been, and when it was found. It was corrected
+  at that time.
+</p>
+{% if total %}
+<p><strong>{{ total }}</strong> found in total; most recent {{ latest|date:"Y-m-d H:i" }}.
+  {% if total > limit %}Showing the latest {{ limit }}.{% endif %}</p>
+<table class="ops-table">
+  <thead><tr><th>Found</th><th>Finding type</th><th>Saved as</th><th>Should have been</th><th>Finding</th></tr></thead>
+  <tbody>
+  {% for row in rows %}
+    <tr>
+      <td>{{ row.found_at|date:"Y-m-d H:i" }}</td>
+      <td>{{ row.finding_type }}</td>
+      <td>{{ row.stored }}</td>
+      <td>{{ row.computed }}</td>
+      <td><a href="{% url 'findings_queue' %}?q={{ row.finding_id }}">Open</a></td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p>Nothing found. Every hourly check so far matched the saved state.</p>
+{% endif %}
+{% endblock %}

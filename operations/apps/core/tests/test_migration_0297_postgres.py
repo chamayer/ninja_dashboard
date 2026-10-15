@@ -185,30 +185,6 @@ def test_compute_agrees_with_the_stored_value_after_a_fill(conn):
     assert drift == 0
 
 
-def test_the_consistency_check_records_then_repairs_a_wrong_value(conn):
-    from ingest import finding_attention
-
-    finding_attention._available.update(at=0.0, ok=False, warned=False)
-    device = uuid.uuid4()
-    finding = _finding(conn, "plain", device)
-    _participant(conn, finding, device)
-    _assess(conn, finding, device)
-    conn.execute("SELECT operations.refresh_finding_attention(%s)", ([finding],))
-    conn.execute("UPDATE operations.findings SET attention = 'blocked' WHERE id = %s", (finding,))
-    with conn.cursor() as cursor:
-        repaired = finding_attention.check_and_repair(cursor, TENANT)
-    assert repaired >= 1
-    assert _attention(conn, finding) == "needs_action"
-    kept = conn.execute(
-        """SELECT stored_attention, computed_attention FROM operations.finding_attention_drift
-           WHERE finding_id = %s""",
-        (finding,),
-    ).fetchone()
-    assert kept == ("blocked", "needs_action")
-    with conn.cursor() as cursor:
-        assert finding_attention.check_and_repair(cursor, TENANT) == 0
-
-
 def _state(conn, finding):
     return conn.execute(
         """SELECT attention, critical_finding_id, critical_type
