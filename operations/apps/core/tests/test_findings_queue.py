@@ -246,25 +246,22 @@ def test_collapsed_queue_skips_affected_device_rollup_until_a_type_is_opened():
     assert "_affected_device_rows(matching_qs) if needs_affected_devices else []" in source
 
 
-def test_collapsed_queue_counts_state_in_the_database():
+def test_collapsed_queue_counts_state_from_the_stored_table():
     source = Path("apps/core/views.py").read_text(encoding="utf-8")
 
-    summary = source[
-        source.index("def _fleet_state_counts()") : source.index("def _state_counts_for(")
-    ]
-    assert "FindingState.objects.filter(tenant_id=1, status__in=_FINDING_ACTIVE_STATUSES)" in summary
-    assert ".annotate(n=Count(\"id\"))" in summary
+    summary = source[source.index("def _state_rows()") : source.index("def _state_counts_for(")]
+    assert "StoredFindingState.objects.filter(" in summary
+    assert "finding__status__in=_FINDING_ACTIVE_STATUSES" in summary
+    assert ".annotate(n=Count(\"pk\"))" in summary
     assert "fleet_state_counts_by_type = _fleet_state_counts()" in source
 
 
 def test_filtered_issue_queue_filters_and_counts_state_in_the_database():
     source = Path("apps/core/views.py").read_text(encoding="utf-8")
 
-    assert (
-        "qs = qs.filter(id__in=FindingState.objects.filter(attention=attention_filter).values(\"id\"))"
-        in source
-    )
+    assert "qs = qs.filter(id__in=_state_ids(attention_filter))" in source
     assert "state_counts_by_type = _state_counts_for(database_qs)" in source
+    assert "FindingState" not in source.replace("StoredFindingState", "")
     assert "fleet_states" not in source
     assert "governed_ids" not in source
 
@@ -743,14 +740,15 @@ def test_condition_response_reads_are_batched():
     assert "[batch, batch]" in source
 
 
-def test_row_states_come_from_the_state_view_not_a_per_finding_projection():
+def test_row_states_come_from_the_stored_state_for_the_rows_on_screen():
     source = Path("apps/core/views.py").read_text(encoding="utf-8")
     section = source[
         source.index("def _condition_operator_states") : source.index(
             "def _operator_issue_type_groups"
         )
     ]
-    assert "FindingState.objects.filter(id__in=ids[offset : offset + 1000])" in section
+    assert "_state_rows().filter(finding_id__in=ids)" in section
+    assert "_critical_issue_badges(ids)" in section
     assert "operator_states = _condition_operator_states([f.id for f in findings])" in source
     assert "_condition_response_ids" not in section
 

@@ -68,3 +68,21 @@ def test_only_the_refresh_function_writes_attention():
                 if re.search(r"UPDATE\s+operations\.findings", line, re.I) and pattern.search(line):
                     offenders.append(str(path))
     assert not offenders, offenders
+
+
+def test_only_the_state_functions_write_finding_state():
+    allowed_migrations = {"0301_finding_state.py"}
+    offenders = []
+    pattern = re.compile(r"(INSERT\s+INTO|UPDATE|DELETE\s+FROM)\s+operations\.finding_state", re.I)
+    for base in ("ingest", "operations/apps", "operations/config", "shared"):
+        for path in (ROOT / base).rglob("*.py"):
+            if "tests" in path.parts or path.name in allowed_migrations:
+                continue
+            if pattern.search(path.read_text(encoding="utf-8", errors="ignore")):
+                offenders.append(str(path))
+    assert not offenders, offenders
+
+
+def test_the_hourly_check_compares_the_stored_state():
+    source = (ROOT / "ingest" / "operator_job_queue.py").read_text(encoding="utf-8")
+    assert "finding_attention.check_and_repair_state(cur, 1)" in source

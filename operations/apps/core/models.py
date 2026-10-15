@@ -4922,3 +4922,30 @@ class FindingState(models.Model):
     class Meta:
         managed = False
         db_table = "finding_states"
+
+
+class StoredFindingState(models.Model):
+    """Stored operator state of a finding (table ``operations.finding_state``, migration 0301).
+
+    Written only by ``operations.refresh_finding_state`` (database triggers call it in the same
+    transaction as every change that affects it); the application only reads it. See
+    ``.work/finding-state-design.md``.
+    """
+
+    finding = models.OneToOneField(
+        "Finding",
+        primary_key=True,
+        db_column="finding_id",
+        on_delete=models.DO_NOTHING,
+        related_name="stored_state",
+    )
+    tenant_id = models.IntegerField()
+    finding_type_id = models.IntegerField()
+    attention = models.CharField(max_length=16, null=True)
+    reason = models.CharField(max_length=60)
+    policy_version = models.CharField(max_length=80, null=True)
+    computed_at = models.DateTimeField()
+
+    class Meta:
+        managed = False
+        db_table = "finding_state"

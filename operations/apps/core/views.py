@@ -123,7 +123,7 @@ from .models import (
     EntityType,
     EvaluatorConfig,
     Finding,
-    FindingState,
+    StoredFindingState,
     FindingType,
     MergeCandidate,
     NotificationEvent,
@@ -537,7 +537,6 @@ _STATE_LABELS = {
     ATTENTION_PENDING: "Pending",
     ATTENTION_COVERED: "Covered",
     ATTENTION_PAUSED: "Paused",
-    "": "Resolved",
 }
 
 _STATE_REASONS = {
@@ -549,16 +548,58 @@ _STATE_REASONS = {
 }
 
 
+def _active_policy_window():
+    """(version, oldest acceptable compute time) of the active condition policy."""
+    with connection.cursor() as cursor:
+        cursor.execute(
+            "SELECT version, (policy->>'freshness_hours')::integer "
+            "FROM operations.condition_policy_versions WHERE active ORDER BY version DESC LIMIT 1"
+        )
+        row = cursor.fetchone()
+    if row is None:
+        return None, timezone.now()
+    return row[0], timezone.now() - timedelta(hours=row[1])
+
+
+def _state_rows():
+    """Active findings' state from ``finding_state``, as the operator sees it.
+
+    ``shown`` is the stored attention, except that a pause shows as paused and a state
+    computed under an older policy, or older than the policy's freshness window, shows as
+    pending. Those are comparisons of columns, not computations, and the stored value is
+    written in the same transaction as every change that affects it (migration 0301).
+    """
+    version, oldest = _active_policy_window()
+    return StoredFindingState.objects.filter(
+        tenant_id=1, finding__status__in=_FINDING_ACTIVE_STATUSES
+    ).annotate(
+        shown=Case(
+            When(finding__snoozed_until__gt=timezone.now(), then=Value(ATTENTION_PAUSED)),
+            When(
+                Q(computed_at__gte=oldest, policy_version=version, attention__isnull=False),
+                then=F("attention"),
+            ),
+            default=Value(ATTENTION_PENDING),
+            output_field=CharField(),
+        )
+    )
+
+
+def _state_ids(attention: str):
+    """Subquery of finding ids whose state is ``attention``."""
+    return _state_rows().filter(shown=attention).values("finding_id")
+
+
 def _fleet_state_counts() -> dict[str, dict[str, int]]:
-    """Active findings by Type and operator attention, from the ``finding_states`` view."""
+    """Active findings by Type and operator attention."""
     counts: dict[str, dict[str, int]] = {}
     rows = (
-        FindingState.objects.filter(tenant_id=1, status__in=_FINDING_ACTIVE_STATUSES)
-        .values("finding_type", "attention")
-        .annotate(n=Count("id"))
+        _state_rows()
+        .values("finding__finding_type__name", "shown")
+        .annotate(n=Count("pk"))
     )
     for row in rows:
-        counts.setdefault(row["finding_type"], {})[row["attention"]] = row["n"]
+        counts.setdefault(row["finding__finding_type__name"], {})[row["shown"]] = row["n"]
     return counts
 
 
@@ -566,50 +607,80 @@ def _state_counts_for(findings) -> dict[str, dict[str, int]]:
     """Needs action / blocked / pending counts by Type for a filtered set of findings."""
     counts: dict[str, dict[str, int]] = {}
     rows = (
-        FindingState.objects.filter(id__in=findings.order_by().values("id"))
-        .values("finding_type", "attention")
-        .annotate(n=Count("id"))
+        _state_rows()
+        .filter(finding_id__in=findings.order_by().values("id"))
+        .values("finding__finding_type__name", "shown")
+        .annotate(n=Count("pk"))
     )
     for row in rows:
         entry = counts.setdefault(
-            row["finding_type"], {"needs_action": 0, "blocked": 0, "pending": 0}
+            row["finding__finding_type__name"], {"needs_action": 0, "blocked": 0, "pending": 0}
         )
-        if row["attention"] in entry:
-            entry[row["attention"]] = row["n"]
+        if row["shown"] in entry:
+            entry[row["shown"]] = row["n"]
     return counts
 
 
-def _condition_operator_states(finding_ids, *, now=None) -> dict[str, dict[str, str]]:
-    """Operator state (status, attention, reason) for specific findings.
+def _critical_issue_badges(ids: list[str]) -> dict[str, dict[str, str]]:
+    """For the findings on screen: a critical needs-action finding on the same subject.
 
-    Read from the ``finding_states`` view: the stored roll-up with pause, closed status,
-    freshness and "critical takes priority" applied live. For the rows on screen, not for
-    the fleet: filters and counts use the view directly.
+    Shown as a badge. It is not part of any state or count.
     """
+    if not ids:
+        return {}
+    with connection.cursor() as cursor:
+        cursor.execute(
+            """
+            SELECT DISTINCT ON (f.id) f.id::text, c.id::text, ct.name, c.subject_id::text
+              FROM operations.findings f
+              JOIN operations.findings c
+                ON c.tenant_id = f.tenant_id AND c.subject_type = f.subject_type
+               AND c.subject_id = f.subject_id AND c.id <> f.id
+               AND c.severity = 'critical' AND c.status = ANY(%s)
+              JOIN operations.finding_state cs
+                ON cs.finding_id = c.id AND cs.attention = 'needs_action'
+              JOIN operations.finding_types ct ON ct.id = c.finding_type_id
+             WHERE f.id = ANY(%s::uuid[]) AND f.severity <> 'critical'
+             ORDER BY f.id, c.id
+            """,
+            [list(_FINDING_ACTIVE_STATUSES), ids],
+        )
+        return {
+            finding: {
+                "critical_finding_id": critical,
+                "critical_type": critical_type,
+                "critical_subject_id": subject,
+            }
+            for finding, critical, critical_type, subject in cursor.fetchall()
+        }
+
+
+def _condition_operator_states(finding_ids, *, now=None) -> dict[str, dict[str, str]]:
+    """Operator state (status, attention, reason) for the findings shown on a page."""
     ids = [str(value) for value in finding_ids if value]
     if not ids:
         return {}
     now = now or timezone.now()
     states: dict[str, dict[str, str]] = {}
-    for offset in range(0, len(ids), 1000):
-        for row in FindingState.objects.filter(id__in=ids[offset : offset + 1000]):
-            state = {
-                "status": operator_status(row.status, row.snoozed_until, now),
-                "attention": row.attention,
-                "reason": _STATE_REASONS.get(row.attention, ""),
-                "subject_type": row.subject_type,
-                "subject_id": str(row.subject_id),
-            }
-            if row.critical_finding_id:
-                state.update(
-                    {
-                        "reason": "Critical issue takes priority",
-                        "critical_finding_id": str(row.critical_finding_id),
-                        "critical_subject_id": str(row.critical_subject_id),
-                        "critical_type": row.critical_type,
-                    }
-                )
-            states[str(row.id)] = state
+    shown = {
+        str(row["finding_id"]): row["shown"]
+        for row in _state_rows().filter(finding_id__in=ids).values("finding_id", "shown")
+    }
+    for row in Finding.objects.filter(tenant_id=1, id__in=ids).values(
+        "id", "status", "snoozed_until", "subject_type", "subject_id"
+    ):
+        key = str(row["id"])
+        attention = shown.get(key, "")
+        states[key] = {
+            "status": operator_status(row["status"], row["snoozed_until"], now),
+            "attention": attention,
+            "reason": _STATE_REASONS.get(attention, ""),
+            "subject_type": row["subject_type"],
+            "subject_id": str(row["subject_id"]),
+        }
+    for key, badge in _critical_issue_badges(ids).items():
+        if key in states:
+            states[key].update(badge)
     return {key: states[key] for key in ids if key in states}
 
 
@@ -3936,7 +4007,7 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
     show_covered = attention_filter == ATTENTION_COVERED or request.GET.get("covered") == "1"
     if not show_covered:
         qs = qs.exclude(
-            id__in=FindingState.objects.filter(attention=ATTENTION_COVERED).values("id")
+            id__in=_state_ids(ATTENTION_COVERED)
         )
 
     if category_filter:
@@ -4087,7 +4158,7 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
     # Attention is separate from operator Status. It filters only after all subject and
     # evidence filters have been applied.
     if attention_filter:
-        qs = qs.filter(id__in=FindingState.objects.filter(attention=attention_filter).values("id"))
+        qs = qs.filter(id__in=_state_ids(attention_filter))
 
     if severity_filter:
         qs = qs.filter(severity=severity_filter)
@@ -4205,8 +4276,12 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
         output_field=CharField(),
     )
     status_label_expression = Case(
+        When(
+            status__in=(Finding.Status.RESOLVED, Finding.Status.SUPPRESSED, Finding.Status.WONTFIX),
+            then=Value("Resolved"),
+        ),
         *[
-            When(id__in=FindingState.objects.filter(attention=key).values("id"), then=Value(label))
+            When(id__in=_state_ids(key), then=Value(label))
             for key, label in _STATE_LABELS.items()
         ],
         default=Value(""),

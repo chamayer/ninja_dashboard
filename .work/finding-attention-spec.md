@@ -1,4 +1,6 @@
-# Stored finding attention (spec, awaiting approval)
+# Stored finding attention (spec, superseded)
+
+Superseded by `.work/finding-state-design.md` (2026-10-15). Kept for history.
 
 Status: proposal. Nothing built. Measured 2026-10-15 against production (read-only).
 Replaces the earlier option B sketch after review with the user: no lag in the list, no change to

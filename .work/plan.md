@@ -21,6 +21,14 @@ Issues reads state from the `finding_states` view (migration 0298: stored roll-u
 39,391 findings, 0 mismatches, 7.4 s; migration + triggers + check on disposable Postgres (8 tests). Next: approval to
 push (names 0297; the page reads the stored value on deploy), re-compare after the fill; later remove the live roll-up.
 
+**Finding state redesign (2026-10-15, approved, deploy 1 built locally, migration 0301):** spec
+`.work/finding-state-design.md`. Table `finding_state` (one writer: `refresh_finding_state`; DB triggers on
+assessments, participants, finding insert/status/severity refresh it in the same transaction, with a bounded cascade).
+Issues reads it (tiles, matrix, filters, labels, row states); "critical takes priority" dropped as a state (row badge
+instead). 0297-0300 objects stay unused until deploy 2 (migration 0302 drops view, function, old columns and triggers;
+remove `finding_attention.refresh` and the old drift check; admin list of drift rows). Found while building: the 0297
+Python hook missed bulk writers (27,918 of 38,043 active findings had a stored value older than their latest assessment).
+
 **Slim policy + covered state (2026-10-15, uncommitted, migration 0296):** policy schema 2
 (behavior only: rules, per-type rule lists, freshness; no labels, categories, taxonomy, aliases or offline_days);
 migration 0296 installs and activates `conditions-registry-1` with a generic `parent_open` rule. `ingest/finding_cover.py`

@@ -887,7 +887,7 @@ def _platform_evaluate_and_check():
 
     affected = main.platform_evaluate(tenant_id=1)
     with db.transaction() as cur:
-        finding_attention.check_and_repair(cur, 1)
+        finding_attention.check_and_repair_state(cur, 1)
     return affected
 
 
