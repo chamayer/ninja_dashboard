@@ -15,7 +15,10 @@ from typing import ClassVar
 from django.db import migrations
 
 FORWARD_SQL = r"""
-CREATE OR REPLACE VIEW operations.finding_states
+/* A view cannot change a column's type in place (name is varchar(120) in finding_types),
+ * so drop and recreate it. Nothing else depends on it. */
+DROP VIEW IF EXISTS operations.finding_states;
+CREATE VIEW operations.finding_states
 WITH (security_invoker = true) AS
 WITH crit AS MATERIALIZED (
     SELECT c.id, c.tenant_id, ct.name AS finding_type, c.subject_type, c.subject_id
@@ -114,6 +117,12 @@ SELECT l.id,
   JOIN operations.finding_types ft ON ft.id = l.finding_type_id
   JOIN held h ON h.id = l.id
 ;
+
+ALTER VIEW operations.finding_states OWNER TO operations_migrate;
+REVOKE ALL ON operations.finding_states FROM PUBLIC;
+REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON operations.finding_states
+    FROM operations_app, ninja_ingest, operations_readonly, metabase_ro;
+GRANT SELECT ON operations.finding_states TO operations_app, ninja_ingest, operations_readonly;
 """
 
 REVERSE_SQL = migrations.RunSQL.noop

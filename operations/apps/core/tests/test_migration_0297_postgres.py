@@ -22,7 +22,7 @@ CREATE ROLE metabase_ro; CREATE ROLE operations_migrate;
 CREATE SCHEMA operations AUTHORIZATION operations_migrate;
 GRANT ALL ON SCHEMA operations TO CURRENT_USER;
 CREATE TABLE operations.finding_types (
-    id serial PRIMARY KEY, name text UNIQUE NOT NULL, covered_by jsonb NOT NULL DEFAULT '[]');
+    id serial PRIMARY KEY, name varchar(120) UNIQUE NOT NULL, covered_by jsonb NOT NULL DEFAULT '[]');
 CREATE TABLE operations.findings (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(), tenant_id integer NOT NULL,
     finding_type_id integer NOT NULL REFERENCES operations.finding_types(id),
