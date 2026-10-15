@@ -33,8 +33,8 @@ Config / Integrations page. Views must set:
 <div class="at-strip">
   {% if admin_group == 'review' %}
     <span class="at-group">Issues</span>
-    <a class="at-tab" href="{% url 'findings_queue' %}?type=client_source_mapping">Match clients</a>
-    <a class="at-tab" href="{% url 'findings_queue' %}?type=possible_duplicate_computers">Review duplicates</a>
+    <a class="at-tab" href="{% url 'findings_queue' %}?type=client_mapping">Match clients</a>
+    <a class="at-tab" href="{% url 'findings_queue' %}?type=duplicate_computers">Review duplicates</a>
     <a class="at-tab {% if admin_tab == 'software' %}active{% endif %}"
        href="{% url 'software_products' %}?flagged=1">
       Software

@@ -10,6 +10,7 @@ from drf_spectacular.views import (
     SpectacularSwaggerView,
 )
 
+from apps.core.finding_types_admin import finding_types_config
 from apps.core.generic_admin import (
     entity_admin_detail,
     entity_admin_list,
@@ -21,7 +22,6 @@ from apps.core.generic_admin import (
     entity_candidates_queue,
     entity_observation_reveal,
 )
-from apps.core.finding_alerts import finding_alert_eligibility
 from apps.core.software_policy import software_policy_config
 from apps.core.views import (
     admin_data,
@@ -353,7 +353,7 @@ urlpatterns = [
     ),
     path("admin/classifier/", classifier_config, name="classifier_config"),
     path("admin/software-policy/", software_policy_config, name="software_policy_config"),
-    path("admin/alert-eligibility/", finding_alert_eligibility, name="finding_alert_eligibility"),
+    path("admin/finding-types/", finding_types_config, name="finding_types_config"),
     path("admin/device-status/", device_status_config, name="device_status_config"),
     path("admin/lifecycle/", lifecycle_policy_status, name="lifecycle_policy_status"),
     path("software/decisions/", software_decisions_queue, name="software_decisions_queue"),

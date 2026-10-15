@@ -91,7 +91,7 @@ def brand(request: HttpRequest) -> dict:
             ).count()
         ctx["nav_patching_open"] = Finding.objects.filter(
             tenant_id=tenant_id,
-            finding_type__category__name="patching",
+            finding_type__issue_category="Patching & support",
             status__in=_FINDING_ACTIVE_STATUSES,
         ).count()
     else:

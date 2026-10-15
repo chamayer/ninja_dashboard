@@ -402,7 +402,7 @@ def entity_attribute_reveal(
 @require_GET
 def entity_candidates_queue(request: HttpRequest) -> HttpResponse:
     """Compatibility route for the retired parallel record-match queue."""
-    return redirect(f"{reverse('findings_queue')}?type=computer_identity_matching")
+    return redirect(f"{reverse('findings_queue')}?type=computer_identity")
 
 
 def _entity_candidates_legacy_queue(request: HttpRequest) -> HttpResponse:

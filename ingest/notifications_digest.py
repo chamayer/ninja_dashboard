@@ -34,7 +34,7 @@ def send_digest(tenant_id: int = _TENANT_ID) -> int:
         cur.execute(f"SET LOCAL operations.tenant_id = {tenant_id}")
         cur.execute(
             f"""
-            SELECT f.id AS finding_id, f.severity, f.confidence, ft.name AS finding_type,
+            SELECT f.id AS finding_id, f.severity, f.confidence, ft.display_name AS finding_type,
                    c.display_name AS client_name, f.finding_details,
                    f.last_seen_at
             FROM operations.findings f

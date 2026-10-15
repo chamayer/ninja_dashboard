@@ -251,6 +251,7 @@ def _load_pending_findings(cur, tenant_id: int) -> list[dict[str, Any]]:
                f.condition_key, f.severity, f.confidence, f.status,
                f.first_seen_at, f.last_seen_at, f.last_detected_at,
                ft.name AS finding_type_name,
+               ft.display_name AS finding_type_display,
                ft.finding_class AS finding_class,
                'entity' AS finding_row_kind
         FROM operations.findings f
@@ -315,6 +316,7 @@ def _load_pending_findings(cur, tenant_id: int) -> list[dict[str, Any]]:
                af.last_detected_at AS last_seen_at,
                af.last_detected_at AS last_detected_at,
                ft.name AS finding_type_name,
+               ft.display_name AS finding_type_display,
                ft.finding_class AS finding_class,
                'admin' AS finding_row_kind
         FROM operations.admin_findings af
@@ -574,7 +576,7 @@ def _send_zendesk(payload: dict) -> tuple[str, int | None, str | None]:
 def _build_payload(finding: dict) -> dict:
     details = finding.get("finding_details") or {}
     return {
-        "title": finding["finding_type_name"],
+        "title": finding.get("finding_type_display") or finding["finding_type_name"],
         "severity": finding.get("severity") or "info",
         "confidence": finding.get("confidence") or "",
         "client_id": str(finding.get("client_id") or ""),

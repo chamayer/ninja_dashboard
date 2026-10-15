@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+
+{% block title %}Finding types{% endblock %}
+
+{% block content %}
+<style>
+  .ft-section { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 1rem 1.1rem; margin-bottom: 1rem; }
+  .ft-cat { font-size: 1.05rem; margin: 0 0 .4rem; display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; }
+  .ft-group { margin: .8rem 0 .3rem; font-weight: 700; display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; }
+  .ft-table { width: 100%; border-collapse: collapse; font-size: 0.84rem; }
+  .ft-table th, .ft-table td { padding: .3rem .4rem; border-top: 1px solid var(--border); text-align: left; vertical-align: top; }
+  .ft-table th { color: var(--muted); font-size: .68rem; text-transform: uppercase; letter-spacing: .05em; }
+  .ft-table input[type=text] { width: 100%; min-width: 11rem; }
+  .ft-small { font-size: .74rem; color: var(--muted); }
+  .ft-inline { display: inline-flex; gap: .3rem; align-items: center; margin: 0; }
+</style>
+
+<div class="ft-section">
+    <h1 style="margin-top:0;">Finding types</h1>
+    <p class="muted">
+        Everything configurable for a finding is here: its name, where it sits in the Issues page, its
+        default severity, whether it may alert, and which findings cover it. A covered finding is hidden
+        under its parent while the parent is open on the same computer, and returns by itself when the
+        parent clears and it is still true. Covering never lowers urgency: a parent shows the highest
+        severity of what it covers. Rules a type is subject to are shown for reference; they are behavior
+        and change only through the policy. Changes are recorded in the audit log.{% if not can_edit %} Only staff can make changes.{% endif %}
+    </p>
+</div>
+
+{% for category in categories %}
+<div class="ft-section">
+    <h2 class="ft-cat">{{ category.label }}
+        {% if can_edit %}
+        <form method="post" class="ft-inline">{% csrf_token %}<input type="hidden" name="action" value="rename_category"><input type="hidden" name="old" value="{{ category.label }}"><input type="text" name="new" value="{{ category.label }}" aria-label="Rename category {{ category.label }}"><button type="submit">Rename</button></form>
+        <form method="post" class="ft-inline">{% csrf_token %}<input type="hidden" name="action" value="move_category"><input type="hidden" name="label" value="{{ category.label }}"><button type="submit" name="direction" value="up" aria-label="Move {{ category.label }} up">&#9650;</button><button type="submit" name="direction" value="down" aria-label="Move {{ category.label }} down">&#9660;</button></form>
+        {% endif %}
+    </h2>
+    {% for group in category.groups %}
+    <div class="ft-group">{{ group.label }}
+        {% if can_edit %}
+        <form method="post" class="ft-inline">{% csrf_token %}<input type="hidden" name="action" value="rename_group"><input type="hidden" name="old" value="{{ group.label }}"><input type="text" name="new" value="{{ group.label }}" aria-label="Rename group {{ group.label }}"><button type="submit">Rename</button></form>
+        <form method="post" class="ft-inline">{% csrf_token %}<input type="hidden" name="action" value="move_group"><input type="hidden" name="label" value="{{ group.label }}"><input type="hidden" name="category" value="{{ category.label }}"><button type="submit" name="direction" value="up" aria-label="Move {{ group.label }} up">&#9650;</button><button type="submit" name="direction" value="down" aria-label="Move {{ group.label }} down">&#9660;</button></form>
+        {% endif %}
+    </div>
+    <table class="ft-table">
+        <thead><tr><th>Name</th><th>Category</th><th>Group</th><th>Order</th><th>Severity</th><th>May alert</th><th>Auto-resolve</th><th>Covered by</th><th>Reference</th><th></th></tr></thead>
+        <tbody>
+        {% for item in group.types %}{% with t=item.type %}
+        <tr>
+            <td><input type="text" form="ft-{{ t.name }}" name="display_name" value="{{ t.display_name }}" maxlength="120" aria-label="Name of {{ t.name }}"{% if not can_edit %} disabled{% endif %}><div class="ft-small" title="Internal name">{{ t.name }}</div></td>
+            <td><input type="text" form="ft-{{ t.name }}" name="issue_category" value="{{ t.issue_category }}" list="ft-categories" maxlength="40" aria-label="Category of {{ t.name }}"{% if not can_edit %} disabled{% endif %}></td>
+            <td><input type="text" form="ft-{{ t.name }}" name="issue_group" value="{{ t.issue_group }}" list="ft-groups" maxlength="80" aria-label="Group of {{ t.name }}"{% if not can_edit %} disabled{% endif %}></td>
+            <td><input type="number" form="ft-{{ t.name }}" name="sort_order" value="{{ t.sort_order }}" min="0" max="65000" style="width:4.5rem;" aria-label="Order of {{ t.name }}"{% if not can_edit %} disabled{% endif %}></td>
+            <td><select form="ft-{{ t.name }}" name="default_severity" aria-label="Severity of {{ t.name }}"{% if not can_edit %} disabled{% endif %}>{% for value, label in severities %}<option value="{{ value }}"{% if t.default_severity == value %} selected{% endif %}>{{ label }}</option>{% endfor %}</select></td>
+            <td><input type="checkbox" form="ft-{{ t.name }}" name="alertable"{% if t.alertable %} checked{% endif %}{% if not can_edit %} disabled{% endif %} aria-label="May alert: {{ t.name }}"></td>
+            <td><input type="checkbox" form="ft-{{ t.name }}" name="auto_resolvable"{% if t.auto_resolvable %} checked{% endif %}{% if not can_edit %} disabled{% endif %} aria-label="Auto-resolve: {{ t.name }}"></td>
+            <td>
+                <select form="ft-{{ t.name }}" name="covered_by" multiple size="3" aria-label="Covered by, for {{ t.name }}"{% if not can_edit %} disabled{% endif %}>
+                    {% for other in all_types %}{% if other.name != t.name %}<option value="{{ other.name }}"{% if other.name in t.covered_by %} selected{% endif %}>{{ other.display_name }}</option>{% endif %}{% endfor %}
+                </select>
+                <input type="text" form="ft-{{ t.name }}" name="cover_note" value="{{ t.cover_note }}" maxlength="240" placeholder="Why it is covered" aria-label="Cover note for {{ t.name }}"{% if not can_edit %} disabled{% endif %}>
+                {% if item.covers %}<div class="ft-small">Covers: {{ item.covers|join:", " }}</div>{% endif %}
+            </td>
+            <td class="ft-small">
+                {% if item.policy %}{{ item.policy.lifecycle }}{% if item.policy.rules %}; rules: {{ item.policy.rules|join:", " }}{% endif %}{% else %}not in the policy{% endif %}
+                {% if t.suppressed_by_approval or t.concern_signal or t.source_module == "platform.software_findings" or t.source_module == "platform.capability_match" %}<br>
+                <label><input type="checkbox" form="ft-{{ t.name }}" name="suppressed_by_approval"{% if t.suppressed_by_approval %} checked{% endif %}{% if not can_edit %} disabled{% endif %}> silenced by approval</label><br>
+                <label><input type="checkbox" form="ft-{{ t.name }}" name="concern_signal"{% if t.concern_signal %} checked{% endif %}{% if not can_edit %} disabled{% endif %}> concern signal</label><br>
+                <select form="ft-{{ t.name }}" name="default_decision_scope" aria-label="Decision scope of {{ t.name }}"{% if not can_edit %} disabled{% endif %}>{% for value, label in scopes %}<option value="{{ value }}"{% if t.default_decision_scope == value %} selected{% endif %}>{{ label }}</option>{% endfor %}</select>
+                {% endif %}
+            </td>
+            <td>{% if can_edit %}<form method="post" id="ft-{{ t.name }}">{% csrf_token %}<input type="hidden" name="action" value="save_type"><input type="hidden" name="type_name" value="{{ t.name }}"><button type="submit">Save</button></form>{% endif %}</td>
+        </tr>
+        {% endwith %}{% endfor %}
+        </tbody>
+    </table>
+    {% endfor %}
+</div>
+{% endfor %}
+
+<datalist id="ft-categories">{% for name in category_names %}<option value="{{ name }}">{% endfor %}</datalist>
+<datalist id="ft-groups">{% for name in group_names %}<option value="{{ name }}">{% endfor %}</datalist>
+{% endblock %}

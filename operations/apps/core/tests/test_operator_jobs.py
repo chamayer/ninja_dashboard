@@ -135,7 +135,7 @@ def test_admin_navigation_folds_services_into_jobs():
     assert 'name="return_to" value="jobs"' in jobs_template
     assert "job.detail_url" in jobs_template
     assert views.count("health = _admin_health_snapshot") == 2
-    assert 'finding_type__category__name="platform_health"' in views
+    assert "finding_type__issue_category=finding_registry.COLLECTION" in views
     assert 'return redirect("admin_jobs")' in views
     assert "Job processing needs attention" in jobs_template
     assert "Scheduler {% if scheduler_current %}running" not in jobs_template

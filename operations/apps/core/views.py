@@ -63,7 +63,7 @@ from shared.patch_compliance import COMPLIANCE_MISSING_STATUSES, excluded_patch_
 
 from . import capability as capability_evidence
 from . import category as category_evidence
-from . import software_decision_rules, software_review
+from . import finding_registry, software_decision_rules, software_review
 from .capability_review_actions import decide_capability
 from .client_workspace import (
     build_client_directory,
@@ -121,7 +121,6 @@ from .models import (
     EntityType,
     EvaluatorConfig,
     Finding,
-    FindingCategory,
     FindingType,
     MergeCandidate,
     NotificationEvent,
@@ -252,61 +251,11 @@ def _online_device_ids(source_name: str = "") -> RawSQL:
     )
 
 
-def _finding_type_groups(
-    categories: list[FindingCategory], finding_types: list[FindingType]
-) -> list[dict]:
-    """Group the type selector by its data-owned category."""
-    by_category: dict[int | None, list[FindingType]] = {}
-    for finding_type in finding_types:
-        by_category.setdefault(finding_type.category_id, []).append(finding_type)
-
-    groups = [
-        {"label": category.name, "types": by_category.pop(category.id, [])}
-        for category in categories
-        if by_category.get(category.id)
-    ]
-    if ungrouped := by_category.pop(None, []):
-        groups.append({"label": "Other", "types": ungrouped})
-    return groups
-
-
 def _issue_taxonomy() -> tuple[list[dict], dict[str, dict]]:
-    """Return the active policy's sole operator-facing taxonomy authority."""
-    profile = load_active_profile()
-    if not profile.issue_taxonomy:
-        raise RuntimeError("Active policy has no approved Issues taxonomy")
-    categories = []
-    type_groups = {}
-    for category in profile.issue_taxonomy:
-        category_types = set()
-        legacy_names = set()
-        for type_item in category["types"]:
-            condition_names = set(type_item["conditions"])
-            category_types.update(condition_names)
-            legacy_names.update(profile.definitions[name]["category"] for name in condition_names)
-            group = {
-                "value": type_item["key"],
-                "label": type_item["label"],
-                "types": condition_names,
-                "issues": tuple(
-                    {
-                        "value": name,
-                        "label": profile.definitions[name]["label"],
-                    }
-                    for name in type_item["conditions"]
-                ),
-                "legacy_types": {profile.definitions[name]["type"] for name in condition_names},
-                "category": category["key"],
-            }
-            type_groups[type_item["key"]] = group
-        categories.append(
-            {
-                "key": category["key"],
-                "label": category["label"],
-                "categories": legacy_names,
-                "types": category_types,
-            }
-        )
+    """Categories and groups for the Issues page, from the finding types registry."""
+    categories, type_groups = finding_registry.build_taxonomy()
+    if not categories:
+        raise RuntimeError("The finding types registry has no categories")
     return categories, type_groups
 
 
@@ -929,12 +878,10 @@ def _registered_sources() -> tuple[str, ...]:
 
 
 _DASHBOARD_DOMAIN_CATEGORIES = {
-    "patching": "patching",
-    "coverage": "compliance",
-    "software": "software",
-    "identity": "inventory",
-    "lifecycle": "inventory",
-    "data_quality": "inventory",
+    finding_registry.PATCHING: "patching",
+    finding_registry.AGENTS: "compliance",
+    finding_registry.SOFTWARE: "software",
+    finding_registry.INVENTORY: "inventory",
 }
 
 _DASHBOARD_STATE_LABELS = {
@@ -1100,12 +1047,12 @@ def home(request: HttpRequest) -> HttpResponse:  # noqa: PLR0912, PLR0915
         Finding.objects.filter(
             tenant_id=1,
             status__in=_FINDING_ACTIVE_STATUSES,
-            finding_type__category__name__in=_DASHBOARD_DOMAIN_CATEGORIES,
+            finding_type__issue_category__in=_DASHBOARD_DOMAIN_CATEGORIES,
         )
         .filter(Q(snoozed_until__isnull=True) | Q(snoozed_until__lt=now))
         .values(
             "client_id",
-            "finding_type__category__name",
+            "finding_type__issue_category",
             "finding_type__name",
             "severity",
         )
@@ -1122,7 +1069,7 @@ def home(request: HttpRequest) -> HttpResponse:  # noqa: PLR0912, PLR0915
     }
     global_category_counts: dict[str, int] = {}
     for row in issue_rows:
-        category_name = row["finding_type__category__name"]
+        category_name = row["finding_type__issue_category"]
         domain_name = _DASHBOARD_DOMAIN_CATEGORIES[category_name]
         global_category_counts[category_name] = (
             global_category_counts.get(category_name, 0) + row["n"]
@@ -1308,7 +1255,7 @@ def home(request: HttpRequest) -> HttpResponse:  # noqa: PLR0912, PLR0915
             "has_data": total_devices > 0,
             "delayed": any_source_delayed,
             "updated_at": min(observed_updates, default=None),
-            "href": f"{reverse('findings_queue')}?category=coverage",
+            "href": f"{reverse('findings_queue')}?category=agents_reporting",
             "facts": [
                 {
                     "label": f"{_count(compliance_stats, 'missing_required_platform')} missing",
@@ -1320,7 +1267,7 @@ def home(request: HttpRequest) -> HttpResponse:  # noqa: PLR0912, PLR0915
                 },
                 {
                     "label": f"{compliance_stats['total']} need review",
-                    "href": f"{reverse('findings_queue')}?category=coverage",
+                    "href": f"{reverse('findings_queue')}?category=agents_reporting",
                 },
             ],
         },
@@ -1337,11 +1284,11 @@ def home(request: HttpRequest) -> HttpResponse:  # noqa: PLR0912, PLR0915
             "facts": [
                 {
                     "label": f"{global_domain_stats['software']['new_total']} new review items",
-                    "href": f"{reverse('findings_queue')}?category=software",
+                    "href": f"{reverse('findings_queue')}?category=software_security",
                 },
                 {
                     "label": f"{global_domain_stats['software']['total']} need review",
-                    "href": f"{reverse('findings_queue')}?category=software",
+                    "href": f"{reverse('findings_queue')}?category=software_security",
                 },
                 {
                     "label": f"{software_decisions_total} decisions recorded",
@@ -1362,19 +1309,19 @@ def home(request: HttpRequest) -> HttpResponse:  # noqa: PLR0912, PLR0915
             "facts": [
                 {
                     "label": f"{global_category_counts.get('identity', 0)} identity reviews",
-                    "href": f"{reverse('findings_queue')}?category=identity",
+                    "href": f"{reverse('findings_queue')}?category=inventory",
                 },
                 {
                     "label": f"{global_category_counts.get('lifecycle', 0)} lifecycle reviews",
-                    "href": f"{reverse('findings_queue')}?category=lifecycle",
+                    "href": f"{reverse('findings_queue')}?category=inventory",
                 },
                 {
                     "label": f"{global_category_counts.get('data_quality', 0)} data-quality reviews",
-                    "href": f"{reverse('findings_queue')}?category=data_quality",
+                    "href": f"{reverse('findings_queue')}?category=inventory",
                 },
                 {
                     "label": f"{pending_merges} possible duplicates",
-                    "href": f"{reverse('findings_queue')}?type=possible_duplicate_computers",
+                    "href": f"{reverse('findings_queue')}?type=duplicate_computers",
                 },
             ],
         },
@@ -1461,7 +1408,7 @@ def home(request: HttpRequest) -> HttpResponse:  # noqa: PLR0912, PLR0915
                     f"{_percent(compliance_covered_client, devices)}% covered"
                     f" · {missing} missing"
                 ),
-                "href": f"{reverse('findings_queue')}?client={client.slug}&category=coverage",
+                "href": f"{reverse('findings_queue')}?client={client.slug}&category=agents_reporting",
             },
             {
                 "key": "software",
@@ -1554,7 +1501,7 @@ def home(request: HttpRequest) -> HttpResponse:  # noqa: PLR0912, PLR0915
     patch_subject_count = Finding.objects.filter(
         active_issue_filter,
         tenant_id=1,
-        finding_type__category__name="patching",
+        finding_type__issue_category=finding_registry.PATCHING,
     ).values("subject_id").distinct().count()
     patch_clear_count = max(total_devices - patch_subject_count, 0)
     kpis = [
@@ -1589,7 +1536,6 @@ def home(request: HttpRequest) -> HttpResponse:  # noqa: PLR0912, PLR0915
             "href": reverse("software_page"),
         },
     ]
-    profile = load_active_profile()
     _issue_categories, issue_type_groups = _operator_issue_taxonomy()
     issue_group_by_name = {
         issue_name: group_key
@@ -1601,7 +1547,7 @@ def home(request: HttpRequest) -> HttpResponse:  # noqa: PLR0912, PLR0915
     attention_by_type: dict[str, dict] = {}
     grouped_findings = (
         Finding.objects.filter(active_issue_filter, tenant_id=1)
-        .values("finding_type__name", "finding_type__category__name")
+        .values("finding_type__name", "finding_type__issue_category")
         .annotate(
             count=Count("id"),
             clients=Count("client_id", distinct=True),
@@ -1626,7 +1572,7 @@ def home(request: HttpRequest) -> HttpResponse:  # noqa: PLR0912, PLR0915
             type_name,
             {
                 "type_name": type_name,
-                "category": row["finding_type__category__name"] or "",
+                "category": row["finding_type__issue_category"] or "",
                 "count": 0,
                 "clients": 0,
                 "subjects": 0,
@@ -1648,7 +1594,7 @@ def home(request: HttpRequest) -> HttpResponse:  # noqa: PLR0912, PLR0915
 
     for row in (
         AdminFinding.objects.filter(tenant_id=1, status__in=_FINDING_ACTIVE_STATUSES)
-        .values("finding_type__name", "finding_type__category__name")
+        .values("finding_type__name", "finding_type__issue_category")
         .annotate(
             count=Count("id"),
             new=Count("id", filter=Q(first_detected_at__gte=yesterday)),
@@ -1670,7 +1616,7 @@ def home(request: HttpRequest) -> HttpResponse:  # noqa: PLR0912, PLR0915
             type_name,
             {
                 "type_name": type_name,
-                "category": row["finding_type__category__name"] or "",
+                "category": row["finding_type__issue_category"] or "",
                 "count": 0,
                 "clients": 0,
                 "subjects": 0,
@@ -1718,10 +1664,7 @@ def home(request: HttpRequest) -> HttpResponse:  # noqa: PLR0912, PLR0915
 
     attention_items = []
     for item in attention_by_type.values():
-        definition = profile.definitions.get(item["type_name"], {})
-        item["label"] = definition.get(
-            "label", item["type_name"].replace("_", " ").title()
-        )
+        item["label"] = finding_registry.finding_type_name(item["type_name"])
         issue_group = issue_group_by_name.get(item["type_name"], item["type_name"])
         item["href"] = (
             f"{reverse('findings_queue')}?type={issue_group}&issue={item['type_name']}"
@@ -1832,7 +1775,7 @@ def home(request: HttpRequest) -> HttpResponse:  # noqa: PLR0912, PLR0915
         {
             "label": "New software Issues",
             "value": global_domain_stats["software"]["new_total"],
-            "href": f"{reverse('findings_queue')}?category=software",
+            "href": f"{reverse('findings_queue')}?category=software_security",
         },
     ]
 
@@ -4052,7 +3995,6 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
     type_filter = request.GET.get("type", "")
     issue_filter = request.GET.get("issue", "")
     category_filter = request.GET.get("category", "")
-    requested_category_filter = category_filter
     confidence_filter = request.GET.get("confidence", "")
     client_filter = request.GET.get("client", "")
     platform_filter = request.GET.get("platform", "")
@@ -4077,10 +4019,9 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
     group_key_filter = (request.GET.get("group_key") or "").strip()
     group_value_filter = (request.GET.get("group_value") or "").strip()
     q_filter = (request.GET.get("q") or "").strip()
-    profile = None
     try:
         issue_categories, issue_type_groups = _operator_issue_taxonomy()
-        profile = load_active_profile()
+        load_active_profile()  # the response states below need an active policy
         condition_policy_available = True
     except RuntimeError:
         # Evidence and retained findings remain reviewable when policy
@@ -4088,37 +4029,13 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
         issue_categories, issue_type_groups = [], {}
         condition_policy_available = False
 
-    # Normalize legacy technical values into the operator-facing filter groups.
+    # A category may be given by its key or its label.
     category_filter = next(
         (item["key"] for item in issue_categories if category_filter in item["categories"]),
         category_filter,
     )
-    if category_filter == requested_category_filter and requested_category_filter:
-        # Preserve old bookmarked category URLs by resolving the legacy
-        # registry category to the policy-owned taxonomy category.
-        legacy_type_names = set(
-            FindingType.objects.filter(category__name=requested_category_filter).values_list(
-                "name", flat=True
-            )
-        )
-        category_filter = next(
-            (
-                item["key"]
-                for item in issue_categories
-                if legacy_type_names.intersection(item["types"])
-            ),
-            category_filter,
-        )
-    if (
-        condition_policy_available
-        and requested_category_filter
-        and category_filter != requested_category_filter
-    ):
-        params = request.GET.copy()
-        params["category"] = category_filter
-        return redirect(f"{reverse('findings_queue')}?{params.urlencode()}")
     for group_key, group in issue_type_groups.items():
-        if type_filter in group["types"] or type_filter in group["legacy_types"]:
+        if type_filter in group["types"]:
             type_filter = group_key
             break
 
@@ -4136,7 +4053,6 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
 
     qs = Finding.objects.filter(tenant_id=1).select_related(
         "finding_type",
-        "finding_type__category",
         "client",
         "owner",
     )
@@ -4161,10 +4077,6 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
         qs = qs.filter(Q(snoozed_until__isnull=True) | Q(snoozed_until__lt=timezone.now()))
 
     if category_filter:
-        category_names = next(
-            (item["categories"] for item in issue_categories if item["key"] == category_filter),
-            {category_filter},
-        )
         category_types = next(
             (
                 item.get("types", set())
@@ -4173,10 +4085,7 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
             ),
             set(),
         )
-        if category_types:
-            qs = qs.filter(finding_type__name__in=category_types)
-        else:
-            qs = qs.filter(finding_type__category__name__in=category_names)
+        qs = qs.filter(finding_type__name__in=category_types)
     if type_filter:
         type_names = issue_type_groups.get(type_filter, {}).get("types", {type_filter})
         qs = qs.filter(finding_type__name__in=type_names)
@@ -4439,9 +4348,7 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
         for type_name in group["types"]
     }
     issue_labels = {
-        type_name: (
-            profile.definitions.get(type_name, {}).get("label", type_name) if profile else type_name
-        )
+        type_name: finding_registry.finding_type_name(type_name)
         for type_name in type_labels
     }
 
@@ -5469,8 +5376,7 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
     # use the same taxonomy projection as the page and cannot rely on fields
     # added later in the response path.
     for row in findings_with_detail:
-        condition = profile.definitions.get(row["f"].finding_type.name) if profile else None
-        row["issue_label"] = condition["label"] if condition else "Unclassified issue"
+        row["issue_label"] = finding_registry.finding_type_name(row["f"].finding_type.name)
         if row["f"].finding_type.name == "patching_stalled":
             row["issue_label"] = _patching_inactive_label(row["f"].finding_details or {})
         type_group = next(
@@ -5837,11 +5743,7 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
                         ),
                         finding.finding_type.name,
                     ),
-                    "issue_label": profile.definitions.get(finding.finding_type.name, {}).get(
-                        "label", finding.finding_type.name
-                    )
-                    if profile
-                    else finding.finding_type.name,
+                    "issue_label": finding_registry.finding_type_name(finding.finding_type.name),
                     "client_name": (
                         client.display_name
                         if client
@@ -7513,7 +7415,7 @@ def _software_page_data(request: HttpRequest) -> dict:
     software_open_qs = Finding.objects.filter(
         tenant_id=1,
         status__in=_FINDING_ACTIVE_STATUSES,
-        finding_type__category__name="software",
+        finding_type__issue_category=finding_registry.SOFTWARE,
     )
     software_issues = software_open_qs.exclude(finding_type__name="whitelist_suggestion").count()
     # Resolve the registry id before the distinct JSON aggregate.  Filtering
@@ -11281,11 +11183,10 @@ def devices_page(request: HttpRequest) -> HttpResponse:
         cur.execute(
             """
             SELECT
-              COUNT(DISTINCT f.subject_id) FILTER (WHERE fc.name = 'coverage')::int,
-              COUNT(DISTINCT f.subject_id) FILTER (WHERE fc.name = 'identity')::int
+              COUNT(DISTINCT f.subject_id) FILTER (WHERE ft.issue_category = 'Agents & reporting')::int,
+              COUNT(DISTINCT f.subject_id) FILTER (WHERE ft.issue_category = 'Inventory')::int
             FROM operations.findings f
             JOIN operations.finding_types ft ON ft.id = f.finding_type_id
-            JOIN operations.finding_categories fc ON fc.id = ft.category_id
             WHERE f.tenant_id = 1
               AND f.status IN ('open', 'acknowledged', 'investigating')
               AND f.subject_type = 'device'
@@ -11692,7 +11593,7 @@ def patching_queue(request: HttpRequest) -> HttpResponse:
     # the main table (tiles remain per-type navigators).
     base_qs = Finding.objects.filter(
         tenant_id=1,
-        finding_type__category__name="patching",
+        finding_type__issue_category=finding_registry.PATCHING,
     )
     if status_filter == "active":
         base_qs = base_qs.filter(status__in=_FINDING_ACTIVE_STATUSES)
@@ -12803,7 +12704,7 @@ def _admin_health_finding_presentation(finding: AdminFinding) -> dict:
                 "label": "Open related Issues",
                 "url": reverse("findings_queue")
                 + "?"
-                + urlencode({"category": "data_collection", "type": "collection_failures"}),
+                + urlencode({"category": "data_collection", "type": "collection_and_processing"}),
             }
         )
     if not links:
@@ -12818,15 +12719,15 @@ def _condition_coverage_summary(profile) -> list[dict]:
         return []
     names = sorted(definitions)
     taxonomy_by_condition = {
-        condition: {
-            "category": category["key"],
-            "category_label": category["label"],
-            "type": issue_type["key"],
-            "type_label": issue_type["label"],
+        name: {
+            "category": finding_registry.slug(category),
+            "category_label": category,
+            "type": finding_registry.slug(group),
+            "type_label": group,
         }
-        for category in profile.issue_taxonomy
-        for issue_type in category["types"]
-        for condition in issue_type["conditions"]
+        for name, category, group in FindingType.objects.values_list(
+            "name", "issue_category", "issue_group"
+        )
     }
     placeholders = ", ".join(["%s"] * len(names))
     with connection.cursor() as cur:
@@ -12835,7 +12736,7 @@ def _condition_coverage_summary(profile) -> list[dict]:
             return [
                 {
                     "name": name,
-                    "label": definitions[name].get("label", name),
+                    "label": finding_registry.finding_type_name(name),
                     "category": taxonomy_by_condition.get(name, {}).get(
                         "category_label", definitions[name].get("category", "")
                     ),
@@ -12916,7 +12817,7 @@ def _condition_coverage_summary(profile) -> list[dict]:
     return [
         {
             "name": name,
-            "label": definitions[name].get("label", name),
+            "label": finding_registry.finding_type_name(name),
             "category": taxonomy_by_condition.get(name, {}).get(
                 "category_label", definitions[name].get("category", "")
             ),
@@ -13696,7 +13597,7 @@ def client_policy_delete(request: HttpRequest, org_slug: str, policy_id: str) ->
 @login_required
 def merge_candidates_queue(request: HttpRequest) -> HttpResponse:
     """Compatibility route for the retired duplicate-computer queue."""
-    return redirect(f"{reverse('findings_queue')}?type=possible_duplicate_computers")
+    return redirect(f"{reverse('findings_queue')}?type=duplicate_computers")
 
 
 def _merge_candidates_legacy_queue(request: HttpRequest) -> HttpResponse:
@@ -15874,7 +15775,7 @@ def source_schedule_update(request: HttpRequest, binding_id: uuid.UUID) -> HttpR
 @login_required
 def client_candidates_queue(request: HttpRequest) -> HttpResponse:
     """Compatibility route for the retired parallel client-match queue."""
-    return redirect(f"{reverse('findings_queue')}?type=client_source_mapping")
+    return redirect(f"{reverse('findings_queue')}?type=client_mapping")
 
 
 def _client_candidates_legacy_queue(request: HttpRequest) -> HttpResponse:
@@ -17599,7 +17500,7 @@ def _admin_health_system_findings() -> tuple[bool, int, list[AdminFinding]]:
         findings = AdminFinding.objects.filter(
             tenant_id=1,
             status__in=("open", "acknowledged"),
-            finding_type__category__name="platform_health",
+            finding_type__issue_category=finding_registry.COLLECTION,
         ).exclude(finding_type__name__startswith="jobs_").exclude(
             finding_type__name="source_failure"
         )

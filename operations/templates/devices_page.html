@@ -37,8 +37,8 @@
     <p class="muted" style="margin-top:0.5rem;">A current view of devices across all clients — explore, filter, and drill in.</p>
     {% if coverage_issues or identity_issues or delayed_sources %}
     <div class="dv-chips" style="margin-top:0.6rem;">
-        {% if coverage_issues %}<a class="dv-chip" href="{% url 'findings_queue' %}?category=coverage">{{ coverage_issues }} device{{ coverage_issues|pluralize }} with a coverage gap</a>{% endif %}
-        {% if identity_issues %}<a class="dv-chip" href="{% url 'findings_queue' %}?category=identity">{{ identity_issues }} device{{ identity_issues|pluralize }} with an identity conflict</a>{% endif %}
+        {% if coverage_issues %}<a class="dv-chip" href="{% url 'findings_queue' %}?category=agents_reporting">{{ coverage_issues }} device{{ coverage_issues|pluralize }} with a coverage gap</a>{% endif %}
+        {% if identity_issues %}<a class="dv-chip" href="{% url 'findings_queue' %}?category=inventory">{{ identity_issues }} device{{ identity_issues|pluralize }} with an identity conflict</a>{% endif %}
         {% if delayed_sources %}<a class="dv-chip" href="{% url 'sources_status' %}">{{ delayed_sources }} source{{ delayed_sources|pluralize }} delayed</a>{% endif %}
     </div>
     {% endif %}

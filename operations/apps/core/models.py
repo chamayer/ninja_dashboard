@@ -257,24 +257,6 @@ class Collector(models.Model):
         return self.name
 
 
-class FindingCategory(models.Model):
-    """Admin-editable classification of finding types (coverage, identity,
-    software, lifecycle, platform_health, data_quality, ...). Data-driven;
-    operators add new categories without a schema change."""
-
-    id = models.SmallAutoField(primary_key=True)
-    name = models.CharField(max_length=32, unique=True)
-    description = models.CharField(max_length=240, blank=True, default="")
-    display_order = models.PositiveIntegerField(default=100)
-
-    class Meta:
-        db_table = "finding_categories"
-        ordering = ("display_order", "name")
-
-    def __str__(self) -> str:
-        return self.name
-
-
 class FindingType(models.Model):
     class Severity(models.TextChoices):
         INFO = "info", "Info"
@@ -313,13 +295,18 @@ class FindingType(models.Model):
     finding_class = models.CharField(
         max_length=16, choices=FindingClass.choices, default=FindingClass.ENTITY
     )
-    category = models.ForeignKey(
-        FindingCategory,
-        on_delete=models.PROTECT,
-        null=True,
-        blank=True,
-        related_name="finding_types",
-    )
+    # The registry: one place for how a finding type is named, grouped and covered.
+    # Category and group are plain text on purpose (the Finding types page offers the
+    # existing values and a test keeps each group in one category); the category and
+    # group order follow their first type's sort_order.
+    display_name = models.CharField(max_length=120, unique=True)
+    issue_category = models.CharField(max_length=40)
+    issue_group = models.CharField(max_length=80)
+    sort_order = models.PositiveSmallIntegerField(default=0)
+    # Parent types (by name) that make this finding redundant on the same computer:
+    # while one has an open finding, this one is covered. A check stops self-cover.
+    covered_by = models.JSONField(default=list, blank=True)
+    cover_note = models.CharField(max_length=240, blank=True, default="")
     source_module = models.CharField(max_length=80, blank=True, default="")
     # Defaults to device because that is what every existing type is, so
     # adding the column changes no behavior until a row is set otherwise.

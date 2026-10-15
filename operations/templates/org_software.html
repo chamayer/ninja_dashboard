@@ -152,7 +152,7 @@
             <td class="muted" style="white-space: nowrap; font-size: 0.8rem;">{{ last_seen|date:"Y-m-d"|default:"—" }}</td>
             <td>
                 {% if findings_count %}
-                    <a href="{% url 'findings_queue' %}?category=software&amp;client={{ client.slug }}&amp;q={{ name|urlencode }}">
+                    <a href="{% url 'findings_queue' %}?category=software_security&amp;client={{ client.slug }}&amp;q={{ name|urlencode }}">
                         <span class="badge badge-high">{{ findings_count }}</span>
                     </a>
                 {% else %}

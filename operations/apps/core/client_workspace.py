@@ -16,20 +16,16 @@ from .templatetags.human_labels import humanize_label
 
 ACTIVE_FINDING_STATUSES = ("open", "acknowledged", "investigating")
 DOMAIN_BY_CATEGORY = {
-    "patching": "patching",
-    "coverage": "compliance",
-    "software": "software",
-    "identity": "inventory",
-    "lifecycle": "inventory",
-    "data_quality": "inventory",
+    "Patching & support": "patching",
+    "Agents & reporting": "compliance",
+    "Software & security": "software",
+    "Inventory": "inventory",
 }
 DOMAIN_LABEL_BY_CATEGORY = {
-    "patching": "Patching",
-    "coverage": "Compliance",
-    "software": "Software",
-    "identity": "Inventory",
-    "lifecycle": "Inventory",
-    "data_quality": "Inventory",
+    "Patching & support": "Patching & support",
+    "Agents & reporting": "Agents & reporting",
+    "Software & security": "Software & security",
+    "Inventory": "Inventory",
 }
 STATE_LABELS = {
     "needs_action": "Attention",
@@ -127,7 +123,7 @@ def _software_rollup_rows(*, client_id=None) -> list[dict]:
 
     sql = f"""
         SELECT e.client_id,
-               fc.name AS category_name,
+               ft.issue_category AS category_name,
                ft.name AS finding_type_name,
                e.severity,
                -- (finding, device) pairs, not distinct findings: this is the
@@ -138,9 +134,8 @@ def _software_rollup_rows(*, client_id=None) -> list[dict]:
                    FILTER (WHERE e.first_seen_at >= now() - interval '24 hours') AS new
           FROM operations.v_device_software_exposure e
           JOIN operations.finding_types ft ON ft.id = e.finding_type_id
-          JOIN operations.finding_categories fc ON fc.id = ft.category_id
          WHERE {' AND '.join(where)}
-           AND fc.name = ANY(%s)
+           AND ft.issue_category = ANY(%s)
          GROUP BY 1, 2, 3, 4
     """
     params.append(list(DOMAIN_BY_CATEGORY))
@@ -151,7 +146,7 @@ def _software_rollup_rows(*, client_id=None) -> list[dict]:
         return [
             {
                 "client_id": row[0],
-                "finding_type__category__name": row[1],
+                "finding_type__issue_category": row[1],
                 "finding_type__name": row[2],
                 "severity": row[3],
                 "n": row[4],
@@ -166,7 +161,7 @@ def _issue_rollup(*, client_id=None) -> tuple[dict, list[dict]]:
     filters = {
         "tenant_id": 1,
         "status__in": ACTIVE_FINDING_STATUSES,
-        "finding_type__category__name__in": DOMAIN_BY_CATEGORY,
+        "finding_type__issue_category__in": DOMAIN_BY_CATEGORY,
     }
     if client_id is not None:
         filters["client_id"] = client_id
@@ -185,7 +180,7 @@ def _issue_rollup(*, client_id=None) -> tuple[dict, list[dict]]:
         .filter(Q(snoozed_until__isnull=True) | Q(snoozed_until__lt=timezone.now()))
         .values(
             "client_id",
-            "finding_type__category__name",
+            "finding_type__issue_category",
             "finding_type__name",
             "severity",
         )
@@ -202,7 +197,7 @@ def _issue_rollup(*, client_id=None) -> tuple[dict, list[dict]]:
     stats_by_client: dict = {}
     detail_rows = []
     for row in rows:
-        domain_key = DOMAIN_BY_CATEGORY[row["finding_type__category__name"]]
+        domain_key = DOMAIN_BY_CATEGORY[row["finding_type__issue_category"]]
         stats = stats_by_client.setdefault(row["client_id"], {}).setdefault(
             domain_key, _empty_stats()
         )
@@ -436,7 +431,7 @@ def build_client_workspace(client, existing: dict, *, device_policy: dict | None
         view_name = "patching_queue" if domain_key == "patching" else "findings_queue"
         attention_groups.append(
             {
-                "domain": DOMAIN_LABEL_BY_CATEGORY[row["finding_type__category__name"]],
+                "domain": DOMAIN_LABEL_BY_CATEGORY[row["finding_type__issue_category"]],
                 "domain_key": domain_key,
                 "severity": row["severity"],
                 "severity_rank": SEVERITY_RANK.get(row["severity"], 0),
@@ -521,7 +516,7 @@ def build_client_workspace(client, existing: dict, *, device_policy: dict | None
                 {"label": f"{_count(inventory, 'device_unenrolled'):,} lifecycle items"},
                 {"label": f"{locations.get(client.id, 0):,} locations represented"},
             ],
-            href=f"{reverse('findings_queue')}?client={client.slug}&category=identity",
+            href=f"{reverse('findings_queue')}?client={client.slug}&category=inventory",
             updated_at=latest_update,
             stats=inventory,
             has_data=total > 0,
@@ -560,7 +555,7 @@ def build_client_workspace(client, existing: dict, *, device_policy: dict | None
                 },
                 {"label": f"{compliance['new']:,} new since yesterday"},
             ],
-            href=f"{reverse('findings_queue')}?client={client.slug}&category=coverage",
+            href=f"{reverse('findings_queue')}?client={client.slug}&category=agents_reporting",
             updated_at=latest_update,
             stats=compliance,
             has_data=total > 0 and bool(source_updates),
@@ -670,7 +665,7 @@ def build_client_directory(clients: list) -> dict:
                 "compliance",
                 "Compliance",
                 client.device_count > 0 and bool(source_names),
-                f"{reverse('findings_queue')}?client={client.slug}&category=coverage",
+                f"{reverse('findings_queue')}?client={client.slug}&category=agents_reporting",
             ),
             (
                 "software",
@@ -682,7 +677,7 @@ def build_client_directory(clients: list) -> dict:
                 "inventory",
                 "Inventory",
                 client.device_count > 0,
-                f"{reverse('findings_queue')}?client={client.slug}&category=identity",
+                f"{reverse('findings_queue')}?client={client.slug}&category=inventory",
             ),
         )
         for key, name, has_data, href in domain_specs:

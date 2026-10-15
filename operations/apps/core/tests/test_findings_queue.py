@@ -18,33 +18,6 @@ from apps.core.finding_actions import (
 from apps.core.templatetags.human_labels import finding_drilldown_query, humanize_label
 
 
-def test_finding_type_groups_preserve_category_order_and_other_bucket():
-    categories = [
-        SimpleNamespace(id=2, name="software"),
-        SimpleNamespace(id=1, name="lifecycle"),
-    ]
-    finding_types = [
-        SimpleNamespace(category_id=1, name="windows_servicing_eol"),
-        SimpleNamespace(category_id=2, name="vulnerable_software"),
-        SimpleNamespace(category_id=None, name="legacy_finding"),
-    ]
-
-    assert views._finding_type_groups(categories, finding_types) == [
-        {
-            "label": "software",
-            "types": [SimpleNamespace(category_id=2, name="vulnerable_software")],
-        },
-        {
-            "label": "lifecycle",
-            "types": [SimpleNamespace(category_id=1, name="windows_servicing_eol")],
-        },
-        {
-            "label": "Other",
-            "types": [SimpleNamespace(category_id=None, name="legacy_finding")],
-        },
-    ]
-
-
 def test_operator_issue_type_groups_sort_by_operator_label():
     groups = {
         "zeta": {"value": "zeta", "label": "Zeta type", "types": {"zeta_issue"}},
@@ -353,7 +326,15 @@ def test_client_patching_compliance_breakdowns_use_the_shared_definition():
     assert "By operating system" in template
 
 
-def test_patching_workflows_use_human_labels_and_actions():
+def test_patching_workflows_use_human_labels_and_actions(monkeypatch):
+    import importlib
+
+    from apps.core import finding_registry
+
+    seed = importlib.import_module("apps.core.migrations.0295_finding_types_registry").ROWS
+    monkeypatch.setattr(
+        finding_registry, "_load_names", lambda: {row[0]: row[1] for row in seed}
+    )
     assert humanize_label("device_never_patched") == "No patch installed yet"
     assert humanize_label("patching_stalled") == "No recent patch activity"
     assert humanize_label("reboot_pending") == "Restart required"
@@ -544,11 +525,11 @@ def test_findings_queue_includes_pending_record_matches_without_promoting_eviden
     assert "Records needing a match" in client_template
 
 
-def test_findings_queue_canonicalizes_legacy_category_urls():
+def test_findings_queue_has_one_category_scheme_and_no_legacy_url_shims():
     source = Path("apps/core/views.py").read_text(encoding="utf-8")
-    assert "requested_category_filter = category_filter" in source
-    assert 'params["category"] = category_filter' in source
-    assert "reverse('findings_queue')}?{params.urlencode()" in source
+    assert "requested_category_filter" not in source
+    assert "finding_type__category__name" not in source
+    assert "finding_categories" not in source
 
 
 def test_findings_queue_retains_offline_evidence_for_explicit_review():

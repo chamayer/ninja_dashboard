@@ -20,6 +20,8 @@ from urllib.parse import urlencode
 
 from django import template
 
+from apps.core import finding_registry
+
 register = template.Library()
 
 
@@ -46,59 +48,14 @@ def finding_drilldown_query(finding, subject_id):
 
 _LABELS: dict[str, str] = {
     # ── Finding types — patching ─────────────────────────────
-    "device_never_patched": "No patch installed yet",
-    "patching_stalled": "No recent patch activity",
-    "reboot_pending": "Restart required",
-    "patch_failing_repeatedly": "Update repeatedly failing",
-    "patch_approval_backlog": "Approved updates not installed",
     # ── Finding types — software ─────────────────────────────
-    "suspicious_name": "Suspicious name",
-    "install_path_suspicious": "Installed from suspicious location",
-    "unauthorized_av": "Unauthorized AV product",
-    "unauthorized_rmm": "Unauthorized RMM tool",
-    "unauthorized_remote_access": "Unauthorized remote access tool",
-    "multi_av_conflict": "Multiple AV products installed",
-    "rare_recent": "Rare software",
-    "eol_runtime": "End-of-life runtime",
-    "windows_servicing_eol": "Windows build out of support",
-    "windows_servicing_approaching_eol": "Windows support ending soon",
-    "windows_servicing_unknown": "Windows support state unknown",
     # ── Finding types — coverage / lifecycle ─────────────────
-    "missing_required_platform": "Required agent not installed",
-    "stale_required_platform": "Required agent not checking in",
-    "device_offline": "Device offline",
-    "device_stale_data": "No recent data",
-    "device_unenrolled": "No management agent installed",
-    "duplicate_platform_record": "Possible duplicate records",
-    "identity_conflict": "Possible duplicate records",
-    "duplicate_device_records": "Possible duplicate records",
-    "shared_serial": "Shared identifier",
-    "cross_client_serial": "Shared identifier across clients",
-    "placeholder_serial": "Placeholder serial number",
-    "placeholder_mac": "Placeholder MAC address",
-    "source_failure": "Data source not responding",
-    "device_missing_from_source": "No sources currently report this Computer",
-    "device_source_record_withdrawn": "Source record withdrawn",
-    "device_role_conflict": "Device role changed",
-    "device_long_offline": "Offline for an extended period",
-    "cmdb_asset_stale": "Hudu archive candidate",
-    "cmdb_link_incorrect": "Hudu record linked to different Computers",
-    "cross_client_conflict": "Same hostname on two clients",
-    "unmapped_node_class": "Unrecognized device type",
     "supported": "Supported",
     "security_support": "Security support only",
     "approaching_eol": "Support ending soon",
     "eol_esu_available": "Out of support — ESU available",
     # ── Finding types — platform / identity health ───────────
-    "identity_resolution_pending": "Awaiting device identity match",
-    "software_queue_stalled": "Software scan queue stalled",
-    "stale_collector_binding": "Ingest connector stopped",
-    "unlinked_external_identity": "Unresolved device from source",
     # ── Finding types — client resolver ──────────────────────
-    "client_name_conflict": "Client renamed at source",
-    "client_link_collision": "Multiple clients claim this name",
-    "client_source_group_merge": "Duplicate source groups mapped to one client",
-    "client_unattached_group": "Group not attached to a client",
     # ── Scope values ─────────────────────────────────────────
     "Included": "In scope",
     "Excluded": "Excluded",
@@ -230,6 +187,10 @@ def humanize_label(value):
     key = str(value)
     if key in _LABELS:
         return _LABELS[key]
+    # A finding type's one display name comes from the registry.
+    registry_name = finding_registry.finding_type_name(key)
+    if registry_name != key:
+        return registry_name
     for pattern, tmpl in _PREFIX_TEMPLATES:
         m = pattern.match(key)
         if m:
@@ -392,7 +353,7 @@ def finding_display_label(finding):
     """
     ft_name = getattr(getattr(finding, "finding_type", None), "name", None) or ""
     details = getattr(finding, "finding_details", None) or {}
-    base = _LABELS.get(ft_name, ft_name)
+    base = finding_registry.finding_type_name(ft_name)
 
     platform = details.get("platform")
     if platform and ft_name in (

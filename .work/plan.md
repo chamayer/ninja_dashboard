@@ -6,6 +6,13 @@
 `.work/central-work-queue-design.md` (principles, verified facts, work items W1-W9, phases, safeguards,
 decisions), with `.work/finding-type-review.md` and `.work/finding-dependency-review.md`.
 
+**Registry build 2026-10-15 (uncommitted, migration 0295):** `finding_types` is now the one registry: `display_name`,
+`issue_category`, `issue_group`, `sort_order`, `covered_by`, `cover_note` (spec: `.work/finding-types-registry-spec.md`,
+names: `.work/finding-type-labels.md`, covers approach: `.work/w5-dependency-engine-proposal.md`). The Issues taxonomy
+is built from it; one lookup supplies every name; the Finding types page (`/admin/finding-types/`) replaces the alert
+and dependency pages; the old 7-row category table and legacy URL shims are gone; notifications and the digest use the
+display name. Next: slim policy and `parent_open` signal (0296), then the Issues covered state.
+
 **Goal:** one Issues queue for all waiting work (including admin findings), grouped in the five existing
 categories; dependency suppression that keeps findings but hides them under their parent; alerting as a
 per-type property, default off; decisions made as queue actions.
@@ -19,8 +26,8 @@ vanished security agent left open.
 default 7 days (recommendation presented; awaiting confirmation). D2: 21 alertable types presented.
 
 **Phase 1 checkpoint:** migration 0291 `finding_types.alertable` (seeds 21 true), `ingest/notification_scope.py`
-`alertable_clause` used at 4 notifier sites and 1 digest site, admin page `/admin/alert-eligibility/`
-(`apps/core/finding_alerts.py`), W2: Issues tile and Software page count open rare_recent + whitelist_suggestion
+`alertable_clause` used at 4 notifier sites and 1 digest site, admin page now `/admin/finding-types/`
+(`apps/core/finding_types_admin.py`, replaced the alert-eligibility page), W2: Issues tile and Software page count open rare_recent + whitelist_suggestion
 titles (`_SOFTWARE_DECISION_PROMPT_TYPES`). Operations tests: 334 passed, 4 known failures. Not yet: commit,
 Postgres run of migration 0291.
 
