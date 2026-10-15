@@ -12,6 +12,7 @@ import pytest
 
 _MIGRATION = importlib.import_module("apps.core.migrations.0297_finding_attention")
 _VIEW = importlib.import_module("apps.core.migrations.0298_finding_states_view")
+_VIEW2 = importlib.import_module("apps.core.migrations.0299_finding_states_view_set_based")
 TENANT = 1
 OPEN = "open"
 
@@ -59,6 +60,7 @@ def conn():
             connection.execute(SCHEMA)
             connection.execute(_MIGRATION.FORWARD_SQL)
             connection.execute(_VIEW.FORWARD_SQL)
+            connection.execute(_VIEW2.FORWARD_SQL)
             yield connection
 
 
