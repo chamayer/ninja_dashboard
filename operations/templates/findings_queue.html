@@ -419,6 +419,7 @@
                     <td>
                         <span class="badge">{{ row.work_status_label }}</span>
                         {% if row.operator_status_note %}<br><span class="muted" style="font-size:0.7rem;">{{ row.operator_status_note }}</span>{% endif %}
+                        {% if row.covered_count %}<br><a class="muted" style="font-size:0.7rem;" href="?status=active&amp;covered=1&amp;subject_id={{ f.subject_id }}">{{ row.covered_count }} covered{% if row.covered_high %} ({{ row.covered_high }} high){% endif %}</a>{% endif %}
                         {% if f.snoozed_until %}<br><span class="muted" style="font-size:0.7rem;">Paused until {{ f.snoozed_until|date:"Y-m-d" }}</span>{% endif %}
                     </td>
                     <td>

@@ -73,6 +73,7 @@ from .client_workspace import (
 from .conditions.live import load_active_profile
 from .conditions.operator import (
     ATTENTION_BLOCKED,
+    ATTENTION_COVERED,
     ATTENTION_NEEDS_ACTION,
     ATTENTION_PAUSED,
     ATTENTION_PENDING,
@@ -371,7 +372,7 @@ def _condition_assessment_display(row_kind: str, finding_ids) -> dict[str, dict]
 def _condition_response_ids(finding_ids) -> dict[str, set[str]]:
     """Classify entity findings using current assessments and required scopes."""
     ids = [str(value) for value in finding_ids if value]
-    result = {key: set() for key in ("actionable", "blocked", "pending")}
+    result = {key: set() for key in ("actionable", "blocked", "pending", "covered")}
     if not ids:
         return result
     with connection.cursor() as cursor:
@@ -446,7 +447,11 @@ def _condition_response_ids(finding_ids) -> dict[str, set[str]]:
                            ARRAY[]::text[]
                        ) AS executable_participants,
                        bool_or(a.response->>'disposition' = 'blocked') AS blocked,
-                       bool_or(a.response->>'disposition' = 'unknown') AS unknown
+                       bool_or(a.response->>'disposition' = 'unknown') AS unknown,
+                       bool_or(EXISTS (
+                           SELECT 1 FROM jsonb_array_elements_text(a.response->'reasons') r
+                            WHERE r LIKE 'covered_by:%%'
+                       )) AS covered
                   FROM operations.condition_assessments a
                  WHERE a.tenant_id = 1 AND a.row_kind = 'entity'
                    AND a.finding_id = ANY(%s::uuid[])
@@ -457,7 +462,7 @@ def _condition_response_ids(finding_ids) -> dict[str, set[str]]:
             )
             SELECT e.id, e.expected_participants, a.condition_execute,
                    a.assessed_participants, a.executable_participants,
-                   a.blocked, a.unknown
+                   a.blocked, a.unknown, a.covered
               FROM expected e LEFT JOIN assessed a ON a.finding_id = e.id
                 """,
                 [batch, batch],
@@ -471,6 +476,7 @@ def _condition_response_ids(finding_ids) -> dict[str, set[str]]:
                 participant_execute,
                 blocked,
                 _unknown,
+                covered,
             ) in rows:
                 key = str(finding_id)
                 complete = (
@@ -478,7 +484,9 @@ def _condition_response_ids(finding_ids) -> dict[str, set[str]]:
                     if not expected
                     else assessed == expected and participant_execute == expected
                 )
-                if complete:
+                if covered:
+                    result["covered"].add(key)
+                elif complete:
                     result["actionable"].add(key)
                 elif blocked:
                     result["blocked"].add(key)
@@ -488,6 +496,63 @@ def _condition_response_ids(finding_ids) -> dict[str, set[str]]:
         if not any(key in values for values in result.values()):
             result["pending"].add(key)
     return result
+
+
+_COVERED_FINDINGS_SQL = """
+    SELECT a.finding_id
+      FROM operations.condition_assessments a
+     WHERE a.tenant_id = 1 AND a.row_kind = 'entity'
+       AND a.policy_version = (SELECT version FROM operations.condition_policy_versions
+                                WHERE active ORDER BY version DESC LIMIT 1)
+       AND a.assessed_at >= now() - (SELECT (policy->>'freshness_hours')::integer * interval '1 hour'
+                                       FROM operations.condition_policy_versions
+                                      WHERE active ORDER BY version DESC LIMIT 1)
+       AND a.response->>'disposition' = 'suppressed'
+       AND EXISTS (SELECT 1 FROM jsonb_array_elements_text(a.response->'reasons') r
+                    WHERE r LIKE 'covered_by:%%')
+"""
+
+
+def _covered_finding_ids():
+    """Ids of findings another open finding on the same computer already explains."""
+    with connection.cursor() as cursor:
+        cursor.execute("SELECT to_regclass('operations.condition_assessments')")
+        if cursor.fetchone()[0] is None:
+            return []
+        cursor.execute(_COVERED_FINDINGS_SQL.replace("%%", "%"))
+        return [row[0] for row in cursor.fetchall()]
+
+
+def _covered_counts_by_parent(parent_ids) -> dict[str, dict[str, int]]:
+    """For each visible finding, how many findings it covers (and how many are high or critical)."""
+    ids = [str(value) for value in parent_ids if value]
+    if not ids:
+        return {}
+    sql = """
+        SELECT b.parent, count(DISTINCT f.id),
+               count(DISTINCT f.id) FILTER (WHERE f.severity IN ('critical', 'high'))
+          FROM operations.condition_assessments a
+          JOIN operations.findings f ON f.id = a.finding_id AND f.tenant_id = 1
+               AND f.status = ANY(%s)
+          CROSS JOIN LATERAL jsonb_array_elements_text(a.response->'blockers') b(parent)
+         WHERE a.tenant_id = 1 AND a.row_kind = 'entity'
+           AND a.policy_version = (SELECT version FROM operations.condition_policy_versions
+                                    WHERE active ORDER BY version DESC LIMIT 1)
+           AND a.assessed_at >= now() - (SELECT (policy->>'freshness_hours')::integer * interval '1 hour'
+                                           FROM operations.condition_policy_versions
+                                          WHERE active ORDER BY version DESC LIMIT 1)
+           AND a.response->>'disposition' = 'suppressed'
+           AND EXISTS (SELECT 1 FROM jsonb_array_elements_text(a.response->'reasons') r
+                        WHERE r LIKE 'covered_by:%%')
+           AND b.parent = ANY(%s)
+         GROUP BY b.parent
+    """
+    with connection.cursor() as cursor:
+        cursor.execute("SELECT to_regclass('operations.condition_assessments')")
+        if cursor.fetchone()[0] is None:
+            return {}
+        cursor.execute(sql, [list(_FINDING_ACTIVE_STATUSES), ids])
+        return {parent: {"n": n, "high": high} for parent, n, high in cursor.fetchall()}
 
 
 def _fleet_condition_state_counts() -> dict[str, dict[str, int]]:
@@ -553,7 +618,10 @@ def _fleet_condition_state_counts() -> dict[str, dict[str, int]]:
                                ORDER BY a.participant_kind || ':' || a.participant_id::text || ':' || a.participant_role)
                                FILTER (WHERE a.participant_kind <> 'condition'
                                    AND (a.response->>'may_execute')::boolean IS TRUE), ARRAY[]::text[]) AS executable_participants,
-                           bool_or(a.response->>'disposition' = 'blocked') AS blocked
+                           bool_or(a.response->>'disposition' = 'blocked') AS blocked,
+                           bool_or(a.response->>'disposition' = 'suppressed' AND EXISTS (
+                               SELECT 1 FROM jsonb_array_elements_text(a.response->'reasons') r
+                                WHERE r LIKE 'covered_by:%%')) AS covered
                       FROM operations.condition_assessments a
                       JOIN active f ON f.id = a.finding_id
                      WHERE a.tenant_id = 1 AND a.row_kind = 'entity'
@@ -564,6 +632,7 @@ def _fleet_condition_state_counts() -> dict[str, dict[str, int]]:
                 ), classified AS MATERIALIZED (
                     SELECT f.*, CASE
                         WHEN f.snoozed_until > now() THEN 'paused'
+                        WHEN COALESCE(a.covered, false) THEN 'covered'
                         WHEN (e.participants = ARRAY[]::text[] AND COALESCE(a.condition_execute, false))
                           OR (e.participants <> ARRAY[]::text[] AND a.participants = e.participants AND a.executable_participants = e.participants)
                             THEN 'needs_action'
@@ -632,6 +701,7 @@ def _condition_operator_states(finding_ids, *, now=None) -> dict[str, dict[str, 
     response_by_id = {key: ATTENTION_NEEDS_ACTION for key in response_ids["actionable"]}
     response_by_id.update({key: ATTENTION_BLOCKED for key in response_ids["blocked"]})
     response_by_id.update({key: ATTENTION_PENDING for key in response_ids["pending"]})
+    response_by_id.update({key: ATTENTION_COVERED for key in response_ids["covered"]})
     rows = list(
         Finding.objects.filter(tenant_id=1, id__in=assessment_ids).values(
             "id",
@@ -677,6 +747,7 @@ def _condition_operator_states(finding_ids, *, now=None) -> dict[str, dict[str, 
                 ATTENTION_BLOCKED: "Blocked by current evidence",
                 ATTENTION_PENDING: "Pending current assessment",
                 ATTENTION_PAUSED: "Paused by operator",
+                ATTENTION_COVERED: "Covered by another finding",
             }.get(attention, ""),
         }
         states[key].update(
@@ -728,7 +799,8 @@ def _condition_operator_states(finding_ids, *, now=None) -> dict[str, dict[str, 
                     Finding.Severity.LOW,
                     Finding.Severity.INFO,
                 }
-                or state["attention"] in {ATTENTION_PAUSED, ATTENTION_PENDING, ATTENTION_BLOCKED}
+                or state["attention"]
+                in {ATTENTION_PAUSED, ATTENTION_PENDING, ATTENTION_BLOCKED, ATTENTION_COVERED}
             ):
                 continue
             same_subject = (row["subject_type"], str(row["subject_id"])) in critical_subjects
@@ -4011,7 +4083,7 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
             "paused": "paused",
             "all": "",
         }.get(legacy_response_filter, "")
-    if attention_filter not in {"", "needs_action", "blocked", "pending"}:
+    if attention_filter not in {"", "needs_action", "blocked", "pending", "covered"}:
         attention_filter = ""
     subject_id_filter = (request.GET.get("subject_id") or "").strip()
     requested_device_id_filter = (request.GET.get("device_id") or "").strip()
@@ -4075,6 +4147,12 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
         )
     if not show_snoozed:
         qs = qs.filter(Q(snoozed_until__isnull=True) | Q(snoozed_until__lt=timezone.now()))
+    # A finding another open finding on the same computer already explains is
+    # covered: still evaluated and counted on its own tile, but not separate
+    # work, so the queue leaves it out unless it is asked for.
+    show_covered = attention_filter == ATTENTION_COVERED or request.GET.get("covered") == "1"
+    if not show_covered:
+        qs = qs.exclude(id__in=_covered_finding_ids())
 
     if category_filter:
         category_types = next(
@@ -4258,6 +4336,7 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
                 ATTENTION_BLOCKED,
                 ATTENTION_PENDING,
                 ATTENTION_PAUSED,
+                ATTENTION_COVERED,
             )
         }
     else:
@@ -4270,6 +4349,7 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
                 ATTENTION_BLOCKED,
                 ATTENTION_PENDING,
                 ATTENTION_PAUSED,
+                ATTENTION_COVERED,
             )
         }
     fleet_policy_qs = Finding.objects.filter(
@@ -4307,6 +4387,13 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
             "note": "assessment or source data is missing",
             "href": "?status=active&attention=pending",
             "tile_class": "tile-medium",
+        },
+        {
+            "label": "Covered",
+            "value": fleet_counts[ATTENTION_COVERED],
+            "note": "already explained by another open Issue",
+            "href": "?status=active&attention=covered",
+            "tile_class": "tile-low",
         },
         {
             "label": "Paused",
@@ -5301,6 +5388,12 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
         row["refresh_title"] = "Refresh the relevant current information for this Issue"
         row["refresh_available"] = row["operator_attention"] == ATTENTION_PENDING
         row["refresh_title"] = "Refresh the most relevant current information for this Issue"
+
+    covered_counts = _covered_counts_by_parent(row["f"].id for row in findings_with_detail)
+    for row in findings_with_detail:
+        counts = covered_counts.get(str(row["f"].id))
+        row["covered_count"] = counts["n"] if counts else 0
+        row["covered_high"] = counts["high"] if counts else 0
 
     # A duplicate-Computer Finding carries the whole collision group.  Resolve
     # the IDs once here so operators can inspect or compare the actual

@@ -10,6 +10,11 @@ from pathlib import Path
 from typing import Any
 
 
+# Reporting fallback only: schema 2 policies carry no offline threshold (the tenant's
+# Device status setting owns it), so shadow reports that still ask use this.
+DEFAULT_OFFLINE_DAYS = 7
+
+
 @dataclass(frozen=True)
 class Profile:
     version: str
@@ -36,7 +41,11 @@ def load_profile(path: Path | None = None) -> Profile:
 
 
 def parse_profile(data: dict) -> Profile:
-    if not isinstance(data, dict) or data.get("schema_version") != 1:
+    # Schema 1 carried presentation (labels, categories, taxonomy) and an offline
+    # threshold; schema 2 holds only behavior: rules, which rules apply to which
+    # type, and freshness. Stored schema 1 versions still load.
+    schema = data.get("schema_version") if isinstance(data, dict) else None
+    if schema not in (1, 2):
         raise ValueError("Unsupported or unversioned shadow profile")
     version = data.get("version")
     if not isinstance(version, str) or not version.strip():
@@ -77,10 +86,13 @@ def parse_profile(data: dict) -> Profile:
 
     for name in rules:
         visit(name)
-    definitions = _definitions(data, rules)
-    for key in ("offline_days", "freshness_hours"):
+    definitions = _definitions(data, rules, schema)
+    required_numbers = ("offline_days", "freshness_hours") if schema == 1 else ("freshness_hours",)
+    for key in required_numbers:
         if type(data.get(key)) is not int or data[key] <= 0:
             raise ValueError(f"{key} must be a positive integer")
+    if schema == 2 and "offline_days" in data:
+        raise ValueError("A schema 2 policy must not carry offline_days")
     consumers_value = data.get("consumers")
     if not isinstance(consumers_value, list):
         raise ValueError("Consumers must be a list")
@@ -97,14 +109,20 @@ def parse_profile(data: dict) -> Profile:
     ):
         raise ValueError("Invalid identity evidence mapping")
     taxonomy_value = data.get("issue_taxonomy")
-    if taxonomy_value is None and isinstance(data.get("issue_categories"), list):
+    if schema == 2:
+        if any(key in data for key in ("issue_taxonomy", "issue_categories", "issue_type_aliases")):
+            raise ValueError("A schema 2 policy must not carry presentation")
+        issue_taxonomy = ()
+    elif taxonomy_value is None and isinstance(data.get("issue_categories"), list):
         # Read old immutable policies while the reviewed taxonomy version is
         # awaiting activation. The Issues projection supplies the packaged
         # taxonomy during this compatibility window.
         issue_taxonomy = ()
     else:
         issue_taxonomy = _issue_taxonomy(taxonomy_value, definitions)
-    issue_type_aliases = _issue_type_aliases(data.get("issue_type_aliases", []), definitions)
+    issue_type_aliases = (
+        () if schema == 2 else _issue_type_aliases(data.get("issue_type_aliases", []), definitions)
+    )
     issue_categories = tuple(
         {
             "key": category["key"],
@@ -128,7 +146,7 @@ def parse_profile(data: dict) -> Profile:
         definitions,
         rules,
         consumers,
-        data["offline_days"],
+        data.get("offline_days", DEFAULT_OFFLINE_DAYS),
         data["freshness_hours"],
         data["identity_member_field"],
         data["identity_group_type"],
@@ -138,7 +156,7 @@ def parse_profile(data: dict) -> Profile:
     )
 
 
-def _definitions(data, rules):
+def _definitions(data, rules, schema=1):
     definitions = {}
     definitions_value = data.get("definitions")
     if not isinstance(definitions_value, list) or not definitions_value:
@@ -150,8 +168,12 @@ def _definitions(data, rules):
         if not isinstance(name, str) or not _KEY_RE.fullmatch(name) or name in definitions:
             raise ValueError("Duplicate or empty condition definition")
         required_keys = ("category", "type", "label", "lifecycle", "rules")
-        if any(not isinstance(definition.get(key), str) for key in required_keys[:3]):
+        if schema == 1 and any(
+            not isinstance(definition.get(key), str) for key in required_keys[:3]
+        ):
             raise ValueError(f"Missing operator classification: {name}")
+        if schema == 2 and any(key in definition for key in required_keys[:3]):
+            raise ValueError(f"A schema 2 definition must not carry presentation: {name}")
         definition_rules = definition.get("rules")
         if not isinstance(definition_rules, list) or any(
             not isinstance(rule, str) for rule in definition_rules
@@ -163,7 +185,11 @@ def _definitions(data, rules):
             raise ValueError(f"Unknown dependency for {name}")
         if definition["lifecycle"] not in {"active", "historical", "unverified", "disabled"}:
             raise ValueError(f"Invalid definition lifecycle: {name}")
-        if not definition["category"].strip() or not definition["type"].strip() or not definition["label"].strip():
+        if schema == 1 and (
+            not definition["category"].strip()
+            or not definition["type"].strip()
+            or not definition["label"].strip()
+        ):
             raise ValueError(f"Missing operator classification: {name}")
         definitions[name] = definition
     return definitions

@@ -11,6 +11,7 @@ from typing import Any
 
 from psycopg.types.json import Jsonb
 
+from ingest import finding_cover
 from shared.conditions.contracts import (
     Condition,
     EvaluationCoverage,
@@ -38,6 +39,9 @@ def record_assessment(
     _validate_participants(cur, condition)
     profile = load_active_profile(cur)
     signals = tuple(signals)
+    if finding_cover.RULE in profile.rules:
+        # Covered while a parent type has an open finding on the same computer.
+        signals += finding_cover.cover_signals(cur, condition)
     decision = assess(condition, profile, signals, now, participant)
     signal_watermark = hashlib.sha256(
         json.dumps(

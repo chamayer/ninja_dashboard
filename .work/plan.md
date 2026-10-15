@@ -11,7 +11,16 @@ decisions), with `.work/finding-type-review.md` and `.work/finding-dependency-re
 names: `.work/finding-type-labels.md`, covers approach: `.work/w5-dependency-engine-proposal.md`). The Issues taxonomy
 is built from it; one lookup supplies every name; the Finding types page (`/admin/finding-types/`) replaces the alert
 and dependency pages; the old 7-row category table and legacy URL shims are gone; notifications and the digest use the
-display name. Next: slim policy and `parent_open` signal (0296), then the Issues covered state.
+display name. Pushed as e7de3fb.
+
+**Slim policy + covered state (2026-10-15, uncommitted, migration 0296):** policy schema 2
+(behavior only: rules, per-type rule lists, freshness; no labels, categories, taxonomy, aliases or offline_days);
+migration 0296 installs and activates `conditions-registry-1` with a generic `parent_open` rule. `ingest/finding_cover.py`
+emits a blocked `parent_open` signal when a parent type in `finding_types.covered_by` is open on the same computer.
+Issues: new "Covered" attention, hidden from the queue unless `attention=covered` or `covered=1`, Covered tile, parent
+rows show "N covered (K high)" linking to the computer's findings. Validated locally (unit tests; known failures
+unchanged). After deploy: evaluators must rerun once (platform, patch, software) because activation makes earlier
+assessments non-current; needs user approval. Parent display at highest covered severity: not built.
 
 **Goal:** one Issues queue for all waiting work (including admin findings), grouped in the five existing
 categories; dependency suppression that keeps findings but hides them under their parent; alerting as a
