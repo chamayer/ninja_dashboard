@@ -756,7 +756,7 @@ def _execute(job_key: str, progress: V1JobProgress) -> int | JobExecutionResult 
         "patch-classify": ("Classifying changed patch state", lambda: main.patch_classify(tenant_id=1, incremental=True)),
         "platform-evaluate": (
             "Evaluating platform conditions",
-            lambda: main.platform_evaluate(tenant_id=1),
+            lambda: _platform_evaluate_and_check(),
         ),
         "cmdb-evaluate": (
             "Evaluating CMDB conditions",
@@ -879,6 +879,16 @@ def _request_whole_fleet_findings(source: str) -> None:
     with db.transaction() as cur:
         cur.execute("SET LOCAL operations.tenant_id = 1")
         software_reconcile.record_whole_fleet(cur, 1, source)
+
+
+def _platform_evaluate_and_check():
+    """Platform evaluation, then the stored-attention consistency check (see finding_attention)."""
+    from ingest import db, finding_attention, main
+
+    affected = main.platform_evaluate(tenant_id=1)
+    with db.transaction() as cur:
+        finding_attention.check_and_repair(cur, 1)
+    return affected
 
 
 def _software_reconcile(progress: V1JobProgress, *, whole_fleet: bool) -> JobExecutionResult:

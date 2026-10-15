@@ -11,7 +11,7 @@ from typing import Any
 
 from psycopg.types.json import Jsonb
 
-from ingest import finding_cover
+from ingest import finding_attention, finding_cover
 from shared.conditions.contracts import (
     Condition,
     EvaluationCoverage,
@@ -134,6 +134,8 @@ def record_assessment(
         (condition.tenant_id, condition.row_kind, condition.row_id,
          json.dumps([_as_json(item) for item in condition.participants])),
     )
+    if condition.row_kind == "entity":
+        finding_attention.refresh(cur, [str(condition.row_id)])
     return response
 
 

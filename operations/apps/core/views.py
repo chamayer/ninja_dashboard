@@ -16,6 +16,7 @@ from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied
 from django.core.paginator import Paginator
+from django.conf import settings
 from django.db import DatabaseError, IntegrityError, connection, transaction
 from django.db.models import (
     Case,
@@ -369,6 +370,47 @@ def _condition_assessment_display(row_kind: str, finding_ids) -> dict[str, dict]
     return result
 
 
+def _stored_response_ids(finding_ids) -> dict[str, set[str]]:
+    """The same classification as ``_condition_response_ids``, read from findings.attention.
+
+    The value is written with each assessment (migration 0297). One older than the policy's
+    freshness window, or never written, reads as pending, as a missing assessment does.
+    """
+    ids = {str(value) for value in finding_ids if value}
+    result = {key: set() for key in ("actionable", "blocked", "pending", "covered")}
+    if not ids:
+        return result
+    bucket = {
+        "needs_action": "actionable",
+        "blocked": "blocked",
+        "pending": "pending",
+        "covered": "covered",
+    }
+    with connection.cursor() as cursor:
+        cursor.execute(
+            """
+            SELECT f.id::text,
+                   CASE WHEN f.attention IS NULL
+                          OR f.attention_at IS NULL
+                          OR f.attention_at < now() - (
+                              SELECT (policy->>'freshness_hours')::integer * interval '1 hour'
+                                FROM operations.condition_policy_versions
+                               WHERE active ORDER BY version DESC LIMIT 1)
+                        THEN 'pending' ELSE f.attention END
+              FROM operations.findings f
+             WHERE f.tenant_id = 1 AND f.status = ANY(%s)
+            """,
+            [list(_FINDING_ACTIVE_STATUSES)],
+        )
+        for finding_id, attention in cursor.fetchall():
+            if finding_id in ids:
+                result[bucket[attention]].add(finding_id)
+    for key in ids:
+        if not any(key in values for values in result.values()):
+            result["pending"].add(key)
+    return result
+
+
 def _condition_response_ids(finding_ids) -> dict[str, set[str]]:
     """Classify entity findings using current assessments and required scopes."""
     ids = [str(value) for value in finding_ids if value]
@@ -507,7 +549,6 @@ _COVERED_FINDINGS_SQL = """
        AND a.assessed_at >= now() - (SELECT (policy->>'freshness_hours')::integer * interval '1 hour'
                                        FROM operations.condition_policy_versions
                                       WHERE active ORDER BY version DESC LIMIT 1)
-       AND a.response->>'disposition' = 'suppressed'
        AND EXISTS (SELECT 1 FROM jsonb_array_elements_text(a.response->'reasons') r
                     WHERE r LIKE 'covered_by:%%')
 """
@@ -541,7 +582,6 @@ def _covered_counts_by_parent(parent_ids) -> dict[str, dict[str, int]]:
            AND a.assessed_at >= now() - (SELECT (policy->>'freshness_hours')::integer * interval '1 hour'
                                            FROM operations.condition_policy_versions
                                           WHERE active ORDER BY version DESC LIMIT 1)
-           AND a.response->>'disposition' = 'suppressed'
            AND EXISTS (SELECT 1 FROM jsonb_array_elements_text(a.response->'reasons') r
                         WHERE r LIKE 'covered_by:%%')
            AND b.parent = ANY(%s)
@@ -619,7 +659,7 @@ def _fleet_condition_state_counts() -> dict[str, dict[str, int]]:
                                FILTER (WHERE a.participant_kind <> 'condition'
                                    AND (a.response->>'may_execute')::boolean IS TRUE), ARRAY[]::text[]) AS executable_participants,
                            bool_or(a.response->>'disposition' = 'blocked') AS blocked,
-                           bool_or(a.response->>'disposition' = 'suppressed' AND EXISTS (
+                           bool_or(EXISTS (
                                SELECT 1 FROM jsonb_array_elements_text(a.response->'reasons') r
                                 WHERE r LIKE 'covered_by:%%')) AS covered
                       FROM operations.condition_assessments a
@@ -697,7 +737,10 @@ def _condition_operator_states(finding_ids, *, now=None) -> dict[str, dict[str, 
         ).values_list("id", flat=True)
     )
     assessment_ids = list(dict.fromkeys([*ids, *(str(value) for value in critical_candidate_ids)]))
-    response_ids = _condition_response_ids(assessment_ids)
+    if settings.ISSUES_STORED_ATTENTION:
+        response_ids = _stored_response_ids(assessment_ids)
+    else:
+        response_ids = _condition_response_ids(assessment_ids)
     response_by_id = {key: ATTENTION_NEEDS_ACTION for key in response_ids["actionable"]}
     response_by_id.update({key: ATTENTION_BLOCKED for key in response_ids["blocked"]})
     response_by_id.update({key: ATTENTION_PENDING for key in response_ids["pending"]})

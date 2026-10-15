@@ -13,6 +13,14 @@ is built from it; one lookup supplies every name; the Finding types page (`/admi
 and dependency pages; the old 7-row category table and legacy URL shims are gone; notifications and the digest use the
 display name. Pushed as e7de3fb.
 
+**Stored finding attention (2026-10-15, built locally, uncommitted, migration 0297):** spec in
+`.work/finding-attention-spec.md` (approved). `findings.attention`/`attention_at`, `compute_finding_attention` +
+`refresh_finding_attention` (the one rule, one writer), row triggers on status change/insert (refresh the finding and
+what it covers), `finding_attention_drift` table, consistency check after the platform-evaluate job, one-time fill.
+Issues reads it by default (`ISSUES_STORED_ATTENTION=0` falls back to the live roll-up). Validated: rule vs live roll-up on production,
+39,391 findings, 0 mismatches, 7.4 s; migration + triggers + check on disposable Postgres (8 tests). Next: approval to
+push (names 0297; the page reads the stored value on deploy), re-compare after the fill; later remove the live roll-up.
+
 **Slim policy + covered state (2026-10-15, uncommitted, migration 0296):** policy schema 2
 (behavior only: rules, per-type rule lists, freshness; no labels, categories, taxonomy, aliases or offline_days);
 migration 0296 installs and activates `conditions-registry-1` with a generic `parent_open` rule. `ingest/finding_cover.py`

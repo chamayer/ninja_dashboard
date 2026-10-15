@@ -4121,6 +4121,10 @@ class Finding(UUIDTenantScopedModel):
     last_detected_at = models.DateTimeField(null=True, blank=True)
     last_reviewed_at = models.DateTimeField(null=True, blank=True)
     snoozed_until = models.DateTimeField(null=True, blank=True)
+    # Rolled-up assessment state, written only by operations.refresh_finding_attention
+    # (migration 0297). Null for closed findings and before the first refresh.
+    attention = models.CharField(max_length=16, null=True, blank=True)
+    attention_at = models.DateTimeField(null=True, blank=True)
     # First time an operator acknowledged this issue. Set once; a
     # re-ack after resolve/reopen would leave the original ack
     # timestamp. Enables MTTA (mean time to acknowledge) metrics.
