@@ -6024,7 +6024,7 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
         sort_links[candidate] = "?" + params.urlencode()
 
     # Type dropdown cascades: if category selected, only show types in it.
-    ft_qs = FindingType.objects.select_related("category").order_by("name")
+    ft_qs = FindingType.objects.order_by("name")
     categories = [{"name": item["key"], "label": item["label"]} for item in issue_categories]
     finding_type_groups = _operator_issue_type_groups(
         list(ft_qs), category_filter, issue_categories, issue_type_groups
