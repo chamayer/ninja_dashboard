@@ -26,8 +26,8 @@ from django.db import migrations, models
 FORWARD_SQL = r"""
 CREATE TABLE IF NOT EXISTS operations.finding_state (
     finding_id uuid PRIMARY KEY REFERENCES operations.findings(id) ON DELETE CASCADE,
-    tenant_id integer NOT NULL,
-    finding_type_id integer NOT NULL,
+    tenant_id bigint NOT NULL,
+    finding_type_id smallint NOT NULL,
     attention text CHECK (attention IN ('needs_action', 'blocked', 'pending', 'covered')),
     reason text NOT NULL,
     covered_by uuid[] NOT NULL DEFAULT ARRAY[]::uuid[],
@@ -52,7 +52,7 @@ GRANT SELECT ON operations.finding_state TO operations_app, ninja_ingest, operat
 /* Every disagreement the consistency check finds, with when and what it replaced. */
 CREATE TABLE IF NOT EXISTS operations.finding_state_drift (
     id bigserial PRIMARY KEY,
-    tenant_id integer NOT NULL,
+    tenant_id bigint NOT NULL,
     finding_id uuid NOT NULL,
     finding_type text NOT NULL,
     stored_attention text,
@@ -77,7 +77,7 @@ GRANT USAGE ON SEQUENCE operations.finding_state_drift_id_seq TO ninja_ingest;
  * assessment whose covering finding is still open -> covered; otherwise pending. */
 CREATE OR REPLACE FUNCTION operations.compute_finding_state(p_ids uuid[])
 RETURNS TABLE (
-    finding_id uuid, tenant_id integer, finding_type_id integer,
+    finding_id uuid, tenant_id bigint, finding_type_id smallint,
     attention text, reason text, covered_by uuid[], policy_version text
 )
 LANGUAGE plpgsql

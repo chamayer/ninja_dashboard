@@ -23,21 +23,21 @@ CREATE ROLE metabase_ro; CREATE ROLE operations_migrate;
 CREATE SCHEMA operations AUTHORIZATION operations_migrate;
 GRANT ALL ON SCHEMA operations TO CURRENT_USER;
 CREATE TABLE operations.finding_types (
-    id serial PRIMARY KEY, name varchar(120) UNIQUE NOT NULL, covered_by jsonb NOT NULL DEFAULT '[]');
+    id smallserial PRIMARY KEY, name varchar(120) UNIQUE NOT NULL, covered_by jsonb NOT NULL DEFAULT '[]');
 CREATE TABLE operations.findings (
-    id uuid PRIMARY KEY DEFAULT gen_random_uuid(), tenant_id integer NOT NULL,
-    finding_type_id integer NOT NULL REFERENCES operations.finding_types(id),
-    status text NOT NULL DEFAULT 'open', snoozed_until timestamptz,
-    severity text NOT NULL DEFAULT 'medium',
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(), tenant_id bigint NOT NULL,
+    finding_type_id smallint NOT NULL REFERENCES operations.finding_types(id),
+    status varchar(24) NOT NULL DEFAULT 'open', snoozed_until timestamptz,
+    severity varchar(16) NOT NULL DEFAULT 'medium',
     subject_type text NOT NULL DEFAULT 'device', subject_id uuid NOT NULL,
     last_seen_at timestamptz);
 CREATE TABLE operations.condition_policy_versions (
     version text PRIMARY KEY, policy jsonb NOT NULL, active boolean NOT NULL DEFAULT false);
 CREATE TABLE operations.condition_participants (
-    tenant_id integer, row_kind text, finding_id uuid, participant_kind text,
+    tenant_id bigint, row_kind text, finding_id uuid, participant_kind text,
     participant_id uuid, participant_role text);
 CREATE TABLE operations.condition_assessments (
-    tenant_id integer, row_kind text, finding_id uuid, participant_kind text,
+    tenant_id bigint, row_kind text, finding_id uuid, participant_kind text,
     participant_id uuid, participant_role text, policy_version text,
     response jsonb, assessed_at timestamptz NOT NULL DEFAULT now());
 GRANT ALL ON ALL TABLES IN SCHEMA operations TO operations_migrate;
