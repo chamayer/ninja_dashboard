@@ -11,6 +11,7 @@ import psycopg
 import pytest
 
 _MIGRATION = importlib.import_module("apps.core.migrations.0297_finding_attention")
+_VIEW = importlib.import_module("apps.core.migrations.0298_finding_states_view")
 TENANT = 1
 OPEN = "open"
 
@@ -25,6 +26,7 @@ CREATE TABLE operations.findings (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(), tenant_id integer NOT NULL,
     finding_type_id integer NOT NULL REFERENCES operations.finding_types(id),
     status text NOT NULL DEFAULT 'open', snoozed_until timestamptz,
+    severity text NOT NULL DEFAULT 'medium',
     subject_type text NOT NULL DEFAULT 'device', subject_id uuid NOT NULL,
     last_seen_at timestamptz);
 CREATE TABLE operations.condition_policy_versions (
@@ -56,14 +58,15 @@ def conn():
         with psycopg.connect(dsn, autocommit=True) as connection:
             connection.execute(SCHEMA)
             connection.execute(_MIGRATION.FORWARD_SQL)
+            connection.execute(_VIEW.FORWARD_SQL)
             yield connection
 
 
-def _finding(conn, type_name, subject, status=OPEN):
+def _finding(conn, type_name, subject, status=OPEN, severity="medium"):
     return conn.execute(
-        """INSERT INTO operations.findings(tenant_id, finding_type_id, status, subject_id)
-           SELECT %s, id, %s, %s FROM operations.finding_types WHERE name = %s RETURNING id""",
-        (TENANT, status, subject, type_name),
+        """INSERT INTO operations.findings(tenant_id, finding_type_id, status, subject_id, severity)
+           SELECT %s, id, %s, %s, %s FROM operations.finding_types WHERE name = %s RETURNING id""",
+        (TENANT, status, subject, severity, type_name),
     ).fetchone()[0]
 
 
@@ -200,3 +203,81 @@ def test_the_consistency_check_records_then_repairs_a_wrong_value(conn):
     assert kept == ("blocked", "needs_action")
     with conn.cursor() as cursor:
         assert finding_attention.check_and_repair(cursor, TENANT) == 0
+
+
+def _state(conn, finding):
+    return conn.execute(
+        """SELECT attention, critical_finding_id, critical_type
+             FROM operations.finding_states WHERE id = %s""",
+        (finding,),
+    ).fetchone()
+
+
+def _ready(conn, severity, device, type_name="plain"):
+    finding = _finding(conn, type_name, device, severity=severity)
+    _participant(conn, finding, device)
+    _assess(conn, finding, device)
+    conn.execute("SELECT operations.refresh_finding_attention(%s)", ([finding],))
+    return finding
+
+
+def test_the_view_reads_the_stored_value_and_applies_pause_closed_and_freshness_live(conn):
+    device = uuid.uuid4()
+    finding = _ready(conn, "medium", device)
+    assert _state(conn, finding)[0] == "needs_action"
+    conn.execute(
+        "UPDATE operations.findings SET snoozed_until = now() + interval '1 day' WHERE id = %s",
+        (finding,),
+    )
+    assert _state(conn, finding)[0] == "paused"
+    conn.execute("UPDATE operations.findings SET snoozed_until = NULL WHERE id = %s", (finding,))
+    conn.execute(
+        "UPDATE operations.findings SET attention_at = now() - interval '3 days' WHERE id = %s",
+        (finding,),
+    )
+    assert _state(conn, finding)[0] == "pending"
+    conn.execute("UPDATE operations.findings SET status = 'resolved' WHERE id = %s", (finding,))
+    assert _state(conn, finding)[0] == ""
+
+
+def test_a_critical_finding_on_the_same_computer_blocks_lower_severity_and_is_named(conn):
+    device = uuid.uuid4()
+    critical = _ready(conn, "critical", device)
+    low = _ready(conn, "low", device)
+    high = _ready(conn, "high", device)
+    elsewhere = _ready(conn, "medium", uuid.uuid4())
+    assert _state(conn, critical) == ("needs_action", None, None)
+    assert _state(conn, low) == ("blocked", critical, "plain")
+    assert _state(conn, high)[0] == "needs_action"  # only medium, low and info are held back
+    assert _state(conn, elsewhere)[0] == "needs_action"
+
+
+def test_a_shared_participant_blocks_across_computers(conn):
+    shared = uuid.uuid4()
+    critical = _ready(conn, "critical", uuid.uuid4())
+    _participant(conn, critical, shared)
+    other = _finding(conn, "plain", uuid.uuid4(), severity="medium")
+    _participant(conn, other, shared)
+    _assess(conn, other, shared)
+    conn.execute("SELECT operations.refresh_finding_attention(%s)", ([other],))
+    assert _state(conn, other) == ("blocked", critical, "plain")
+
+
+def test_a_paused_critical_finding_does_not_block(conn):
+    device = uuid.uuid4()
+    critical = _ready(conn, "critical", device)
+    low = _ready(conn, "low", device)
+    conn.execute(
+        "UPDATE operations.findings SET snoozed_until = now() + interval '1 day' WHERE id = %s",
+        (critical,),
+    )
+    assert _state(conn, low)[0] == "needs_action"
+
+
+def test_the_view_is_read_only_for_the_runtime_roles(conn):
+    privileges = conn.execute(
+        """SELECT grantee, privilege_type FROM information_schema.role_table_grants
+            WHERE table_schema = 'operations' AND table_name = 'finding_states'"""
+    ).fetchall()
+    writes = {g for g in privileges if g[1] in {"INSERT", "UPDATE", "DELETE", "TRUNCATE"}}
+    assert not {g for g in writes if g[0] in {"operations_app", "ninja_ingest", "PUBLIC"}}

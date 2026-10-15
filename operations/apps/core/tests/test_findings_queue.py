@@ -246,26 +246,27 @@ def test_collapsed_queue_skips_affected_device_rollup_until_a_type_is_opened():
     assert "_affected_device_rows(matching_qs) if needs_affected_devices else []" in source
 
 
-def test_collapsed_queue_uses_set_based_fleet_state_summary():
+def test_collapsed_queue_counts_state_in_the_database():
     source = Path("apps/core/views.py").read_text(encoding="utf-8")
 
-    assert "def _fleet_condition_state_counts()" in source
     summary = source[
-        source.index("def _fleet_condition_state_counts()") : source.index(
-            "def _condition_operator_states"
-        )
+        source.index("def _fleet_state_counts()") : source.index("def _state_counts_for(")
     ]
-    assert 'cursor.execute("SET LOCAL jit = off")' in summary
-    assert "needs_per_finding_states = (" in source
-    assert "else _fleet_condition_state_counts()" in source
+    assert "FindingState.objects.filter(tenant_id=1, status__in=_FINDING_ACTIVE_STATUSES)" in summary
+    assert ".annotate(n=Count(\"id\"))" in summary
+    assert "fleet_state_counts_by_type = _fleet_state_counts()" in source
 
 
-def test_filtered_issue_queue_reuses_the_fleet_operator_state_projection():
+def test_filtered_issue_queue_filters_and_counts_state_in_the_database():
     source = Path("apps/core/views.py").read_text(encoding="utf-8")
 
-    assert "fleet_states = _condition_operator_states(fleet_ids)" in source
-    assert "if governed_id_keys.issubset(fleet_id_keys)" in source
-    assert "{finding_id: fleet_states[finding_id] for finding_id in governed_id_keys}" in source
+    assert (
+        "qs = qs.filter(id__in=FindingState.objects.filter(attention=attention_filter).values(\"id\"))"
+        in source
+    )
+    assert "state_counts_by_type = _state_counts_for(database_qs)" in source
+    assert "fleet_states" not in source
+    assert "governed_ids" not in source
 
 
 def test_single_condition_type_uses_a_cheap_default_group_tie_breaker():
@@ -406,7 +407,6 @@ def test_bulk_retirement_fails_closed_without_lifecycle_permission():
 def test_findings_scope_cards_compare_filtered_counts_with_labeled_baselines():
     source = Path("apps/core/views.py").read_text(encoding="utf-8")
 
-    assert "fleet_governed_qs" in source
     assert "fleet_policy_qs" in source
     assert "current_result_summary" in source
     assert '"total_label": total_label' not in source
@@ -542,10 +542,8 @@ def test_findings_queue_retains_offline_evidence_for_explicit_review():
 def test_findings_queue_summary_cards_use_fleet_wide_operator_counts():
     source = Path("apps/core/views.py").read_text(encoding="utf-8")
     template = Path("templates/findings_queue.html").read_text(encoding="utf-8")
-    assert "fleet_governed_qs = Finding.objects.filter" in source
-    assert "fleet_id_keys = {str(finding_id) for finding_id in fleet_ids}" in source
-    assert "fleet_states = _condition_operator_states(fleet_ids)" in source
-    assert "if governed_id_keys.issubset(fleet_id_keys)" in source
+    assert "fleet_total = sum(sum(counts.values()) for counts in fleet_state_counts_by_type.values())" in source
+    assert '"value": fleet_total,' in source
     assert '"label": "Pending"' in source
     assert "Review by state" in template
     assert "operator_owner" not in source
@@ -745,16 +743,16 @@ def test_condition_response_reads_are_batched():
     assert "[batch, batch]" in source
 
 
-def test_operator_state_uses_an_id_index_for_critical_priority():
+def test_row_states_come_from_the_state_view_not_a_per_finding_projection():
     source = Path("apps/core/views.py").read_text(encoding="utf-8")
     section = source[
         source.index("def _condition_operator_states") : source.index(
             "def _operator_issue_type_groups"
         )
     ]
-    assert 'row_by_id = {str(row["id"]): row for row in rows}' in section
-    assert 'row_by_id[key]["severity"]' in section
-    assert 'next((row["severity"] for row in rows' not in section
+    assert "FindingState.objects.filter(id__in=ids[offset : offset + 1000])" in section
+    assert "operator_states = _condition_operator_states([f.id for f in findings])" in source
+    assert "_condition_response_ids" not in section
 
 
 def test_findings_queue_template_compiles():

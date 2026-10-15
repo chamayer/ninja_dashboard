@@ -188,10 +188,6 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 # Brand (BLUEPRINT §4.16 appliance rebrand path)
 # ---------------------------------------------------------------------------
 
-# Issues reads each finding's stored attention (migration 0297). On by default; set
-# ISSUES_STORED_ATTENTION=0 to fall back to the live roll-up, which stays until the stored
-# value has run clean for a period and is then removed.
-ISSUES_STORED_ATTENTION = os.environ.get("ISSUES_STORED_ATTENTION", "1") != "0"
 OPERATIONS_BRAND_NAME = os.environ.get("OPERATIONS_BRAND_NAME", "AMRose Operations")
 OPERATIONS_BRAND_SHORT = os.environ.get("OPERATIONS_BRAND_SHORT", "Operations")
 OPERATIONS_BRAND_TAGLINE = os.environ.get("OPERATIONS_BRAND_TAGLINE", "")

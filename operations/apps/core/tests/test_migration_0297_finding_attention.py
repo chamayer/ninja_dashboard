@@ -48,7 +48,7 @@ def test_the_fill_runs_in_tenant_context():
     assert "refresh_finding_attention" in _MIGRATION.FILL_SQL
 
 
-def test_issues_reads_the_stored_value_only_behind_the_setting():
-    assert "if settings.ISSUES_STORED_ATTENTION:" in _VIEWS
-    assert "response_ids = _stored_response_ids(assessment_ids)" in _VIEWS
-    assert "response_ids = _condition_response_ids(assessment_ids)" in _VIEWS
+def test_issues_reads_state_from_the_view_with_one_path():
+    assert "ISSUES_STORED_ATTENTION" not in _VIEWS
+    assert "_stored_response_ids" not in _VIEWS
+    assert "FindingState" in _VIEWS

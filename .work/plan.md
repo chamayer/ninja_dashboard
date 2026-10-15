@@ -17,7 +17,7 @@ display name. Pushed as e7de3fb.
 `.work/finding-attention-spec.md` (approved). `findings.attention`/`attention_at`, `compute_finding_attention` +
 `refresh_finding_attention` (the one rule, one writer), row triggers on status change/insert (refresh the finding and
 what it covers), `finding_attention_drift` table, consistency check after the platform-evaluate job, one-time fill.
-Issues reads it by default (`ISSUES_STORED_ATTENTION=0` falls back to the live roll-up). Validated: rule vs live roll-up on production,
+Issues reads state from the `finding_states` view (migration 0298: stored roll-up + live pause/closed/freshness/critical priority); filters, counts and labels run in the database, row states only for the rows shown. Validated: rule vs live roll-up on production,
 39,391 findings, 0 mismatches, 7.4 s; migration + triggers + check on disposable Postgres (8 tests). Next: approval to
 push (names 0297; the page reads the stored value on deploy), re-compare after the fill; later remove the live roll-up.
 
