@@ -535,13 +535,17 @@ def register_finding_type(apps, schema_editor):
     with schema_editor.connection.cursor() as cursor:
         cursor.execute(
             """
+            -- Every NOT NULL column without a default is listed (production,
+            -- 2026-10-16): id is an identity column; alertable, covered_by and
+            -- cover_note have no default.
             INSERT INTO operations.finding_types (
                 name, default_severity, finding_class, source_module, subject_scope,
                 creates_device_exposure, auto_resolvable, suppressed_by_approval,
                 concern_signal, default_decision_scope, drilldown_evidence_key, runbook_path,
-                description, display_name, issue_category, issue_group, sort_order
+                description, display_name, issue_category, issue_group, sort_order,
+                alertable, covered_by, cover_note
             ) VALUES (%s, 'medium', 'admin', 'evaluator', 'global', FALSE, TRUE, FALSE, FALSE,
-                      'global', '', '', %s, %s, %s, %s, %s)
+                      'global', '', '', %s, %s, %s, %s, %s, FALSE, '[]'::jsonb, '')
             ON CONFLICT (name) DO NOTHING
             """,
             (
