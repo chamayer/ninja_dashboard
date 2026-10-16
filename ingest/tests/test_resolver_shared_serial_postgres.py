@@ -64,9 +64,11 @@ def postgres_schema(postgres_connection):
                 last_seen_at timestamptz NOT NULL,
                 last_detected_at timestamptz NOT NULL
             );
-            CREATE UNIQUE INDEX findings_open_condition_key
+            -- Production index (2026-10-16): uq_findings_active_condition_key_scope.
+            CREATE UNIQUE INDEX uq_findings_active_condition_key_scope
                 ON operations.findings (tenant_id, condition_key)
-                WHERE condition_key > '' AND status IN ('open', 'acknowledged');
+                WHERE condition_key > ''
+                  AND status IN ('open', 'acknowledged', 'investigating', 'suppressed');
             CREATE TABLE operations.identity_value_rejections (
                 value_kind text NOT NULL,
                 normalized_value text NOT NULL,
@@ -79,6 +81,7 @@ def postgres_schema(postgres_connection):
                 canonical_data jsonb NOT NULL DEFAULT '{}'
             );
         """)
+    return postgres_connection
 
 
 def test_shared_serial_finding_uses_uuid_subject_and_refreshes(

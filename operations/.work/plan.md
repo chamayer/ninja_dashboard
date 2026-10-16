@@ -118,7 +118,18 @@ differences from the matcher.
 - First covered tables: `devices`, `entity_source_links` (action reference on
   its existing history), the merge relation.
 
-### 3. Identity inputs and matching (ADR-0032)
+### 3. Identity inputs and matching (ADR-0032) — built 2026-10-16
+- Done: Ninja BIOS serial unless a placeholder (`_ninja_serial`); matcher
+  rewrite (`resolve_match`: live candidates, empty ones as fallback, serial and
+  VM UUID from active records, name variants, hard conflicts, most recently
+  active choice); promotion matches every machine group in turn (no "kept
+  separate" Computers; MAC no longer proof); migration 0307 policy data and
+  constraint, recorded as one explicit action. Tests:
+  `test_identity_matching_postgres.py` (10), `test_migration_0307_postgres.py`.
+- Remaining here: the link evidence (matching rule and compared values on
+  links) moves with workstream 4's merge relation.
+- Incident 2026-10-16: 0306's finding-type insert omitted NOT NULL columns and
+  crash-looped Operations; fixed in `e29ed42`, test now runs the RunPython step.
 - Ninja BIOS serial first (`ingest/source_observations.py:320`,
   `ingest/core/devices.py:196`).
 - Name normalization: 15-character prefix rule and separator-insensitive

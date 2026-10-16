@@ -52,6 +52,38 @@ NINJA_VMWARE_GUEST_VMX_EXTERNAL_NAMESPACE = "vmware_guest_vmx_path"
 INTERNAL_COLLECTOR_INSTANCE_ID = uuid.UUID("00000000-0000-4000-8000-000000000001")
 
 
+_SERIAL_PLACEHOLDER_HINTS = (
+    "serial number",
+    "default string",
+    "to be filled",
+    "not specified",
+    "not applicable",
+    "invalid",
+    "none",
+    "n/a",
+)
+
+
+def _ninja_serial(system_data: dict) -> str | None:
+    """Ninja's BIOS serial, unless it is a placeholder (ADR-0032).
+
+    Where Ninja's ``serialNumber`` and ``biosSerialNumber`` differ, SentinelOne
+    and ScreenConnect report the BIOS value (all 7 measured agents,
+    2026-10-16). A placeholder BIOS value falls back to ``serialNumber``; the
+    shared rejection list still decides whether a serial may drive a match.
+    """
+    bios = (system_data.get("biosSerialNumber") or "").strip()
+    system = system_data.get("serialNumber")
+    lowered = bios.lower()
+    if (
+        not bios
+        or len(set(lowered)) <= 1
+        or any(hint in lowered for hint in _SERIAL_PLACEHOLDER_HINTS)
+    ):
+        return system
+    return bios
+
+
 def _normalized_vmx_path(value: object) -> str | None:
     """Return a comparison-safe VMware configuration path, if supplied.
 
@@ -193,7 +225,10 @@ def _run(client: NinjaClient, snapshot_at: datetime) -> tuple[int, int]:
                     "os_architecture": os_data.get("architecture"),
                     "os_build_number": os_data.get("buildNumber"),
                     "os_release_id": os_data.get("releaseId"),
-                    "serial_number": system_data.get("serialNumber"),
+                    # BIOS serial first (ADR-0032): where Ninja's two fields
+                    # differ, SentinelOne and ScreenConnect report the BIOS
+                    # value (all 7 measured agents, 2026-10-16).
+                    "serial_number": _ninja_serial(system_data),
                     "manufacturer": system_data.get("manufacturer"),
                     "model": system_data.get("model"),
                     "chassis_type": system_data.get("chassisType"),
@@ -637,6 +672,7 @@ def _write_ninja_observations(
                         macs=canonical_data["macs"],
                         client_id=client_id,
                         policies=identity_policies,
+                        is_online=canonical_data.get("is_online"),
                     )
                 obs_rows.append(
                     {

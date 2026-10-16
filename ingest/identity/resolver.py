@@ -30,6 +30,7 @@ from ingest.identity.matching import (
     IdentityMatchPolicy,
     load_identity_match_policies,
     resolve_device_by_policy,
+    resolve_match,
 )
 from ingest.normalize import (
     form_factor_for_node_class,
@@ -115,6 +116,7 @@ def drain_resolution(batch_size: int = 200, *, refresh_current: bool = True) -> 
                 macs=cd.get("macs") or [],
                 client_id=client_id,
                 policies=identity_policies,
+                is_online=cd.get("is_online"),
             )
             if device_id is not None:
                 _attach_observation(cur, obs_id, device_id)
@@ -225,7 +227,12 @@ def _load_finding_type_id(cur, name: str) -> int | None:
 
 def _entries_same_machine(cd_a: dict, cd_b: dict) -> bool:
     """Hard proof two platform records describe one machine: equal usable
-    serial, equal vm_uuid, or a shared MAC address."""
+    serial or equal vm_uuid.
+
+    A shared MAC address is not proof (ADR-0032): of 310 same-source pairs
+    sharing a MAC that serial could check, 4 were different machines
+    (Hyper-V virtual adapters, docks), and MAC alone decided only 2.
+    """
     sa, sb = cd_a.get("serial_number"), cd_b.get("serial_number")
     if (
         is_usable_serial(sa)
@@ -234,20 +241,17 @@ def _entries_same_machine(cd_a: dict, cd_b: dict) -> bool:
     ):
         return True
     ua, ub = cd_a.get("vm_uuid"), cd_b.get("vm_uuid")
-    if ua and ub and str(ua).lower() == str(ub).lower():
-        return True
-    macs_a = set(cd_a.get("macs") or [])
-    macs_b = set(cd_b.get("macs") or [])
-    return bool(macs_a & macs_b)
+    return bool(ua and ub and str(ua).lower() == str(ub).lower())
 
 
 def _group_same_machine(stream_entries: list[tuple]) -> list[list[tuple]]:
     """Partition one stream's entries into machine groups.
 
-    Entries proven to be the same machine (serial / vm_uuid / MAC) share a
-    group — duplicate agents on one box. Unproven entries stay singletons
-    (same hostname could be two real machines). Groups and entries are
-    ordered newest-first.
+    Entries proven to be the same machine (serial / vm_uuid) share a group —
+    duplicate agents on one box. Unproven entries stay singletons and are
+    matched one by one (ADR-0032), so a same-name record joins its machine
+    unless a hard conflict separates it. Groups and entries are ordered
+    newest-first.
     """
     ordered = sorted(stream_entries, key=lambda e: e[4] or e[3], reverse=True)
     groups: list[list[tuple]] = []
@@ -1079,73 +1083,32 @@ def _promote_unmatched_clusters(
 
     promoted = 0
     for (client_id, norm), entries in clusters.items():
-        # Hardware proof (serial / vm_uuid / MAC) is stream-agnostic, so the
-        # whole cluster partitions into machine groups first: a Ninja rmm
-        # record, its vm.guest twin, and both S1 agents sharing one MAC are
-        # ONE machine. Hostname-only correlation then merges at most one
-        # group per stream onto the cluster device (cross-stream rule);
-        # any further group re-using an already-covered stream is a
-        # potential duplicate machine/agent and gets its own device row so
-        # every platform row stays accounted for.
-        groups = _group_same_machine(entries)
-        primary_groups: list[list[tuple]] = []
-        extra_groups: list[list[tuple]] = []
-        covered_streams: set[tuple[str, str]] = set()
-        for group in groups:
-            streams = {(e[0], e[1]) for e in group}
-            if covered_streams & streams:
-                extra_groups.append(group)
-            else:
-                primary_groups.append(group)
-                covered_streams |= streams
-        primary: list[tuple] = [e for g in primary_groups for e in g]
-
-        # Re-check existing devices — the resolution loop only scans the
-        # newest batch, so an older match may exist that it never saw.
-        latest_cd = max(primary, key=lambda e: e[4])[5]
-        serial = latest_cd.get("serial_number")
-        if not is_usable_serial(serial):
-            serial = None
-        latest_head = max(primary, key=lambda entry: entry[4])
-        existing_device_id = resolve_device_by_policy(
-            cur,
-            tenant_id=TENANT_ID,
-            source_name=latest_head[0],
-            external_id=latest_head[2],
-            entity_type=latest_head[1],
-            serial=latest_cd.get("serial_number"),
-            vm_uuid=latest_cd.get("vm_uuid"),
-            hostname=norm,
-            macs=latest_cd.get("macs") or [],
-            client_id=client_id,
-            policies=identity_policies,
-        )
-        if existing_device_id is not None:
-            for group in primary_groups:
-                head = group[0]
-                platform, entity_type, entity_key, _first_seen, e_last, cd = head
-                group_device_id = resolve_device_by_policy(
-                    cur,
-                    tenant_id=TENANT_ID,
-                    source_name=platform,
-                    external_id=entity_key,
-                    entity_type=entity_type,
-                    serial=cd.get("serial_number"),
-                    vm_uuid=cd.get("vm_uuid"),
-                    hostname=norm,
-                    macs=cd.get("macs") or [],
-                    client_id=client_id,
-                    policies=identity_policies,
-                )
-                if group_device_id != existing_device_id:
-                    extra_groups.append(group)
-                    continue
-                # The `_attach_observation` call that stood here passed
-                # obs_id=None, so its only effect was the source-link upsert
-                # retired by migration 0121. The observation UPDATE below was
-                # already doing the attaching.
+        # ADR-0032: every machine group goes through the same matching as a
+        # single record, in turn. A group joins an existing Computer, or one
+        # an earlier group of this cluster just created, unless a hard
+        # conflict proves it is a different machine; only then is a new
+        # Computer created. Nothing is created without matching (the old
+        # "kept separate" path minted Computers for same-source records
+        # without looking at their serial).
+        for group in _group_same_machine(entries):
+            head = max(group, key=lambda entry: entry[4] or entry[3])
+            platform, entity_type, entity_key, _first, _last, cd = head
+            match = resolve_match(
+                cur,
+                tenant_id=TENANT_ID,
+                source_name=platform,
+                external_id=entity_key,
+                entity_type=entity_type,
+                serial=cd.get("serial_number"),
+                vm_uuid=cd.get("vm_uuid"),
+                hostname=norm,
+                macs=cd.get("macs") or [],
+                client_id=client_id,
+                policies=identity_policies,
+                is_online=cd.get("is_online"),
+            )
+            if match is not None:
                 for entry in group:
-                    platform, entity_type, entity_key = entry[0], entry[1], entry[2]
                     cur.execute(
                         """
                         UPDATE operations.entity_observation_current
@@ -1153,201 +1116,108 @@ def _promote_unmatched_clusters(
                         WHERE tenant_id = %s AND platform = %s AND entity_key = %s
                           AND device_id IS NULL
                         """,
-                        (existing_device_id, TENANT_ID, platform, entity_key),
+                        (match.device_id, TENANT_ID, entry[0], entry[2]),
                     )
-            promoted += _promote_entry_groups(
-                cur, agent_ids, client_id, norm, extra_groups
-            )
-            continue
-
-        # device_role is no longer derived here — the projector owns it. The
-        # layer entities below still need a form factor at creation time; the
-        # facet propagation reconciles it against the projector-owned cache on
-        # the next cycle.
-        device_type = _infer_form_factor(primary)
-        os_name = next(
-            (
-                e[5].get("os_name")
-                for e in sorted(primary, key=lambda e: e[4], reverse=True)
-                if e[5].get("os_name")
-            ),
-            None,
-        )
-        platforms = sorted({e[0] for e in primary})
-        device_id = uuid.uuid4()
-        promote_reason = f"auto-promoted from {', '.join(platforms)}"
-        _create_device_anchor(cur, device_id, client_id, promote_reason)
-        cur.execute(
-            """
-            -- ADR-0012: promotion creates the identity anchor only. The five
-            -- cache columns are NOT NULL, so they get neutral placeholders
-            -- here and `device_cache_projector` fills them later in this same
-            -- resolver cycle. Stamping the promoting observation's values
-            -- would make promotion a second producer, and the previous
-            -- hardcoded os_group='Unknown' is exactly how 17 devices ended up
-            -- stuck on a sentinel nothing ever revisited.
-            INSERT INTO operations.devices
-                (id, version, tenant_id, client_id, entity_id, canonical_hostname,
-                 canonical_serial, canonical_vm_uuid, device_type, device_role,
-                 lifecycle_status, os_name, os_family, os_group,
-                 created_at, created_reason, updated_at, updated_reason,
-                 stale_reason, deleted_reason)
-            VALUES (%s, 1, %s, %s, %s, %s, %s, %s, 'unknown', 'unknown',
-                    'active', '', '', 'Unknown',
-                    NOW(), %s, NOW(), '', '', '')
-            """,
-            (
-                device_id,
-                TENANT_ID,
-                client_id,
-                device_id,
-                norm,
-                serial or "",
-                latest_cd.get("vm_uuid") or "",
-                promote_reason[:120],
-            ),
-        )
-        _first_seen = min((e[3] for e in primary if e[3]), default=None)
-        _last_seen = max((e[4] for e in primary if e[4]), default=None)
-        _write_layer_entities_for_new_device(
-            cur,
-            device_id=device_id,
-            form_factor=device_type,
-            serial=serial or "",
-            vm_uuid=latest_cd.get("vm_uuid") or "",
-            os_name=os_name or "",
-            os_fam=os_family(os_name) if os_name else "",
-            os_group="Unknown",
-            first_seen=_first_seen,
-            last_seen=_last_seen,
-            entries=primary,
-            agent_ids=agent_ids,
-        )
-        # Attach every record in the promoted groups. The paired
-        # source-link INSERT is retired with migration 0121; the observation
-        # update below is now the whole attachment, and
-        # sync_entity_source_links_from_observations() derives the link.
-        for group in primary_groups:
-            for entry in group:
-                platform, _entity_type, entity_key = entry[0], entry[1], entry[2]
-                cur.execute(
-                    """
-                    UPDATE operations.entity_observation_current
-                    SET device_id = %s
-                    WHERE tenant_id = %s AND platform = %s AND entity_key = %s
-                      AND device_id IS NULL
-                    """,
-                    (device_id, TENANT_ID, platform, entity_key),
-                )
-        promoted += 1
-        log.info(
-            "resolver: promoted device %s hostname=%s client=%s platforms=%s",
-            device_id,
-            norm,
-            client_id,
-            platforms,
-        )
-        promoted += _promote_entry_groups(cur, agent_ids, client_id, norm, extra_groups)
+                continue
+            _create_device_for_group(cur, agent_ids, client_id, norm, group)
+            promoted += 1
 
     if promoted:
         log.info("resolver: promoted %d new devices", promoted)
     return promoted
 
 
-def _promote_entry_groups(
+def _create_device_for_group(
     cur,
     agent_ids: dict[str, int],
     client_id,
     norm: str,
-    groups: list[list[tuple]],
-) -> int:
-    """One device per machine group.
-
-    A multi-entry group is one machine with duplicate agents (proven by
-    serial / vm_uuid / MAC) — one device row, one link per record. A
-    singleton is a same-hostname record with no proof either way — its own
-    device row. Every platform record stays an accounted row; the evaluator
-    flags groups as duplicate_platform_record.
-    """
-    promoted = 0
-    for group in groups:
-        head = group[0]
-        platform, entity_type, entity_key, first_seen, last_seen, cd = head
-        serial = cd.get("serial_number")
-        if not is_usable_serial(serial):
-            serial = None
-        os_name = cd.get("os_name")
-        device_id = uuid.uuid4()
-        reason = (
-            f"duplicate {platform} {entity_type} record — kept separate"
-            if len(group) == 1
-            else f"{platform} {entity_type} duplicate agents on one machine ({len(group)} records)"
-        )
-        _create_device_anchor(cur, device_id, client_id, reason)
-        cur.execute(
-            """
-            -- ADR-0012: neutral placeholders only. See the sibling INSERT in
-            -- _promote_unmatched_clusters; device_cache_projector fills these
-            -- later in the same cycle.
-            INSERT INTO operations.devices
-                (id, version, tenant_id, client_id, entity_id, canonical_hostname,
-                 canonical_serial, canonical_vm_uuid, device_type, device_role,
-                 lifecycle_status, os_name, os_family, os_group,
-                 created_at, created_reason, updated_at, updated_reason,
-                 stale_reason, deleted_reason)
-            VALUES (%s, 1, %s, %s, %s, %s, %s, %s, 'unknown', 'unknown',
-                    'active', '', '', 'Unknown',
-                    NOW(), %s, NOW(), '', '', '')
-            """,
-            (
-                device_id,
-                TENANT_ID,
-                client_id,
-                device_id,
-                norm,
-                serial or "",
-                cd.get("vm_uuid") or "",
-                reason[:120],
-            ),
-        )
-        _group_first = min((e[3] for e in group if e[3]), default=None)
-        _group_last = max((e[4] for e in group if e[4]), default=None)
-        _write_layer_entities_for_new_device(
-            cur,
-            device_id=device_id,
-            form_factor=_infer_form_factor(group),
-            serial=serial or "",
-            vm_uuid=cd.get("vm_uuid") or "",
-            os_name=os_name or "",
-            os_fam=os_family(os_name) if os_name else "",
-            os_group="Unknown",
-            first_seen=_group_first,
-            last_seen=_group_last,
-            entries=group,
-            agent_ids=agent_ids,
-        )
-        # As above: the source-link INSERT that paired with this update is
-        # retired with migration 0121.
-        for entry in group:
-            platform, entity_type, entity_key = entry[0], entry[1], entry[2]
-            cur.execute(
-                """
-                UPDATE operations.entity_observation_current
-                SET device_id = %s
-                WHERE tenant_id = %s AND platform = %s AND entity_key = %s
-                  AND device_id IS NULL
-                """,
-                (device_id, TENANT_ID, platform, entity_key),
+    group: list[tuple],
+) -> uuid.UUID:
+    """Create one Computer for a machine group no existing Computer matched."""
+    # device_role is not derived here — the projector owns it. The layer
+    # entities below still need a form factor at creation time; the facet
+    # propagation reconciles it against the projector-owned cache on the next
+    # cycle.
+    latest_cd = max(group, key=lambda entry: entry[4] or entry[3])[5]
+    serial = latest_cd.get("serial_number")
+    if not is_usable_serial(serial):
+        serial = None
+    os_name = next(
+        (
+            entry[5].get("os_name")
+            for entry in sorted(
+                group, key=lambda entry: entry[4] or entry[3], reverse=True
             )
-        promoted += 1
-        log.info(
-            "resolver: promoted duplicate-record device %s hostname=%s platform=%s records=%d",
+            if entry[5].get("os_name")
+        ),
+        None,
+    )
+    platforms = sorted({entry[0] for entry in group})
+    device_id = uuid.uuid4()
+    reason = f"auto-promoted from {', '.join(platforms)}"
+    _create_device_anchor(cur, device_id, client_id, reason)
+    cur.execute(
+        """
+        -- ADR-0012: promotion creates the identity anchor only. The five
+        -- cache columns are NOT NULL, so they get neutral placeholders here
+        -- and `device_cache_projector` fills them later in this same resolver
+        -- cycle.
+        INSERT INTO operations.devices
+            (id, version, tenant_id, client_id, entity_id, canonical_hostname,
+             canonical_serial, canonical_vm_uuid, device_type, device_role,
+             lifecycle_status, os_name, os_family, os_group,
+             created_at, created_reason, updated_at, updated_reason,
+             stale_reason, deleted_reason)
+        VALUES (%s, 1, %s, %s, %s, %s, %s, %s, 'unknown', 'unknown',
+                'active', '', '', 'Unknown',
+                NOW(), %s, NOW(), '', '', '')
+        """,
+        (
+            device_id,
+            TENANT_ID,
+            client_id,
             device_id,
             norm,
-            platform,
-            len(group),
+            serial or "",
+            latest_cd.get("vm_uuid") or "",
+            reason[:120],
+        ),
+    )
+    _write_layer_entities_for_new_device(
+        cur,
+        device_id=device_id,
+        form_factor=_infer_form_factor(group),
+        serial=serial or "",
+        vm_uuid=latest_cd.get("vm_uuid") or "",
+        os_name=os_name or "",
+        os_fam=os_family(os_name) if os_name else "",
+        os_group="Unknown",
+        first_seen=min((entry[3] for entry in group if entry[3]), default=None),
+        last_seen=max((entry[4] for entry in group if entry[4]), default=None),
+        entries=group,
+        agent_ids=agent_ids,
+    )
+    # The observation update is the whole attachment;
+    # sync_entity_source_links_from_observations() derives the link.
+    for entry in group:
+        cur.execute(
+            """
+            UPDATE operations.entity_observation_current
+            SET device_id = %s
+            WHERE tenant_id = %s AND platform = %s AND entity_key = %s
+              AND device_id IS NULL
+            """,
+            (device_id, TENANT_ID, entry[0], entry[2]),
         )
-    return promoted
+    log.info(
+        "resolver: promoted device %s hostname=%s client=%s platforms=%s",
+        device_id,
+        norm,
+        client_id,
+        platforms,
+    )
+    return device_id
 
 
 def _upsert_shared_serial_findings(cur, finding_type_id: int) -> int:
@@ -1933,9 +1803,8 @@ def _write_layer_entities_for_new_device(
     """Open the initial Asset, OSInstance, and AgentInstance rows for
     a freshly-promoted Device.
 
-    Per ADR-0005 slice 2. Kept as a single helper so both Device
-    creation sites (`_promote_unmatched_clusters` primary path and
-    `_promote_entry_groups` duplicate-group path) stay in sync.
+    Per ADR-0005 slice 2. Called from `_create_device_for_group`, the
+    single Device creation site.
 
     - `assets` row is always opened (asset_type='endpoint_hardware',
       effective_to=NULL). form_factor may be 'unknown' — that's a

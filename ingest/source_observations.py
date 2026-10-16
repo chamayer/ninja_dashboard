@@ -395,6 +395,7 @@ def _write_observations(
                     macs=canonical_data["macs"],
                     client_id=client_id,
                     policies=identity_policies,
+                    is_online=canonical_data.get("is_online"),
                 )
             else:
                 # Non-identity source: the connector already knows its device
