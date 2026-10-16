@@ -5,6 +5,10 @@ Per ADR-0012 no evidence producer — connector, resolver, evaluator or UI
 action — may write these; they are projected here from the generic
 effective-value contract and nowhere else.
 
+    canonical_hostname  <- effective ``hostname``, normalized as at creation
+                           (trailing "(...)" label, domain and whitespace
+                           removed); kept when the result is not a machine
+                           name (ADR-0032 "Stored values follow the records")
     os_name, os_family  <- effective attributes of the same name
     os_group            <- derived from os_family via operations.os_group_mappings
     device_role         <- effective attribute
@@ -54,9 +58,18 @@ log = logging.getLogger(__name__)
 
 TENANT_ID = 1
 
+# ingest.normalize.normalize_hostname in SQL: trailing "(...)" label, domain
+# and whitespace removed, lower case. The result is used only when it is a
+# machine name (letters, digits, '-' and '_').
+NORMALIZED_HOSTNAME_SQL = (
+    r"regexp_replace(lower(btrim(split_part("
+    r"regexp_replace({value}, '\s*\(.*?\)\s*$', ''), '.', 1))), '[\s''`‘’]', '', 'g')"
+)
+MACHINE_NAME_RE = r"^[a-z0-9][a-z0-9_-]*$"
+
 # Shared by the dry-run preview and the write. Produces one target row per
 # device that has an entity anchor, with every cache column resolved.
-_TARGET_SQL = """
+_TARGET_SQL = r"""
 WITH eff AS (
     SELECT e.entity_id, ad.key, e.value_text, e.value_boolean
       FROM operations.entity_attribute_effective_current e
@@ -64,11 +77,13 @@ WITH eff AS (
         ON ad.id = e.attribute_definition_id
      WHERE e.tenant_id = %(tenant)s
        AND e.status = 'selected'
-       AND ad.key IN ('os_name', 'os_family', 'device_role',
+       AND ad.key IN ('hostname', 'os_name', 'os_family', 'device_role',
                       'node_class', 'is_virtual_machine')
 ),
 pivot AS (
     SELECT entity_id,
+           max(""" + NORMALIZED_HOSTNAME_SQL.format(value="value_text") + r""")
+               FILTER (WHERE key = 'hostname') AS hostname,
            max(value_text) FILTER (WHERE key = 'os_name')     AS os_name,
            max(value_text) FILTER (WHERE key = 'os_family')   AS os_family,
            max(value_text) FILTER (WHERE key = 'device_role') AS device_role,
@@ -103,6 +118,8 @@ types AS (
      GROUP BY l.entity_id
 )
 SELECT d.id AS device_id,
+       CASE WHEN p.hostname ~ '""" + MACHINE_NAME_RE + r"""' THEN p.hostname
+            ELSE d.canonical_hostname END AS canonical_hostname,
        COALESCE(p.os_name,     d.os_name)     AS os_name,
        COALESCE(p.os_family,   d.os_family)   AS os_family,
        COALESCE(
@@ -149,7 +166,8 @@ SELECT d.id AS device_id,
 """
 
 _CHANGED_PREDICATE = """
-       t.os_name     IS DISTINCT FROM d.os_name
+       t.canonical_hostname IS DISTINCT FROM d.canonical_hostname
+    OR t.os_name     IS DISTINCT FROM d.os_name
     OR t.os_family   IS DISTINCT FROM d.os_family
     OR t.os_group    IS DISTINCT FROM d.os_group
     OR t.device_role IS DISTINCT FROM d.device_role
@@ -171,6 +189,7 @@ def project(*, dry_run: bool = True, tenant_id: int = TENANT_ID) -> dict[str, in
             f"""
             WITH target AS ({_TARGET_SQL})
             SELECT
+                count(*) FILTER (WHERE t.canonical_hostname IS DISTINCT FROM d.canonical_hostname),
                 count(*) FILTER (WHERE t.os_name     IS DISTINCT FROM d.os_name),
                 count(*) FILTER (WHERE t.os_family   IS DISTINCT FROM d.os_family),
                 count(*) FILTER (WHERE t.os_group    IS DISTINCT FROM d.os_group),
@@ -200,11 +219,12 @@ def project(*, dry_run: bool = True, tenant_id: int = TENANT_ID) -> dict[str, in
             params,
         )
         (
-            os_name, os_family, os_group, device_role,
+            hostname, os_name, os_family, os_group, device_role,
             device_type, evidence_missing, considered,
         ) = cur.fetchone()
         counts = {
             "considered": considered,
+            "canonical_hostname": hostname,
             "os_name": os_name,
             "os_family": os_family,
             "os_group": os_group,
@@ -221,7 +241,8 @@ def project(*, dry_run: bool = True, tenant_id: int = TENANT_ID) -> dict[str, in
                 f"""
                 WITH target AS ({_TARGET_SQL})
                 UPDATE operations.devices d
-                   SET os_name        = t.os_name,
+                   SET canonical_hostname = t.canonical_hostname,
+                       os_name        = t.os_name,
                        os_family      = t.os_family,
                        os_group       = t.os_group,
                        device_role    = t.device_role,

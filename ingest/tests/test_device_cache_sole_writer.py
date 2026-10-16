@@ -148,6 +148,17 @@ def test_only_projector_writes_device_cache_columns() -> None:
     )
 
 
+def test_projector_keeps_the_stored_name_following_the_records() -> None:
+    """ADR-0032: the stored name is projected from the effective hostname.
+
+    Promotion still names a new Computer from its first record (matching needs
+    a name at once); afterwards only the projector changes it.
+    """
+    text = (_REPO_ROOT / _PROJECTOR).read_text(encoding="utf-8")
+    update_block = text[text.find("UPDATE operations.devices") :]
+    assert re.search(r"\bcanonical_hostname\s*=\s*t\.canonical_hostname", update_block)
+
+
 @pytest.mark.parametrize("column", CACHE_COLUMNS)
 def test_projector_writes_every_cache_column(column: str) -> None:
     """The converse: the projector must actually own all five.
