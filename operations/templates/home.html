@@ -171,11 +171,21 @@
 
 <section class="dashboard-fleet" aria-label="Operations at a glance">
   {% for kpi in kpis %}
+  {% if kpi.links %}
+  <div class="fleet-stat">
+    <a href="{{ kpi.href }}" style="color:inherit; text-decoration:none;">
+      <span class="fleet-stat-label">{{ kpi.name }}</span>
+      <span class="fleet-stat-value">{{ kpi.value }}</span>
+    </a>
+    <span class="fleet-stat-detail">{% for label, url in kpi.links %}<a href="{{ url }}">{{ label }}</a>{% if not forloop.last %} · {% endif %}{% endfor %}</span>
+  </div>
+  {% else %}
   <a class="fleet-stat" href="{{ kpi.href }}">
     <span class="fleet-stat-label">{{ kpi.name }}</span>
     <span class="fleet-stat-value">{{ kpi.value }}</span>
     <span class="fleet-stat-detail">{{ kpi.detail }}</span>
   </a>
+  {% endif %}
   {% endfor %}
 </section>
 

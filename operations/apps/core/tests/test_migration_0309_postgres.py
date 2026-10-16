@@ -280,6 +280,27 @@ def test_the_resolver_and_the_issue_actions_call_the_functions_as_defined(conn, 
         assert _apply(cur, merge, MERGE_COMPUTERS, "same machine", 7) == "Merged 1 Computer."
 
 
+def test_search_finds_a_computer_by_what_any_of_its_records_reported(conn):
+    from apps.core.views import SEARCH_IDENTITY_SQL
+
+    device = _computer(conn, "pc-now")
+    conn.execute(
+        """INSERT INTO operations.entity_observation_current VALUES
+               (%s, 1, %s, 'LogMeIn', 'lmi-old', false, '{"hostname": "OLD-NAME-77"}'),
+               (%s, 1, %s, 'Ninja', 'device-health:1', true, '{"hostname": "health-only-77"}')""",
+        (uuid.uuid4(), device, uuid.uuid4(), device),
+    )
+
+    def search(text):
+        return dict(
+            conn.execute(SEARCH_IDENTITY_SQL, {"p": f"%{text}%", "limit": 300}).fetchall()
+        )
+
+    assert search("old-name-77") == {device: "name in LogMeIn (earlier record)"}
+    assert search("pc-now") == {device: "name"}
+    assert search("health-only-77") == {}
+
+
 def test_ingest_cannot_call_the_operator_actions(conn):
     device = _computer(conn, "pc-ingest")
     with pytest.raises(psycopg.errors.InsufficientPrivilege), conn.transaction():

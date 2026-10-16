@@ -6,14 +6,9 @@
 <div class="card">
     <h1>Search</h1>
     {% if q %}
-        <p class="muted">Results for <code>{{ q }}</code></p>
-        <form method="get" style="display:flex; gap:0.5rem; align-items:center; font-size:0.85rem;">
-            <input type="hidden" name="q" value="{{ q }}">
-            <label><input type="checkbox" name="include_retired" value="1"{% if include_retired %} checked{% endif %}> Include retired Computers</label>
-            <button type="submit">Update</button>
-        </form>
+        <p class="muted">Results for <code>{{ q }}</code>. Names, serial numbers and VM UUIDs from every record a Computer has had are searched; retired Computers are listed last.</p>
     {% else %}
-        <p class="muted">Enter a hostname, serial number, client name, or slug in the search box above.</p>
+        <p class="muted">Enter a name, serial number, VM UUID, client name, or slug in the search box above.</p>
     {% endif %}
 </div>
 
@@ -48,7 +43,7 @@
 
     {% if devices %}
     <div class="card">
-        <h2>Devices ({{ devices|length }}{% if devices|length == 100 %}+{% endif %})</h2>
+        <h2>Computers ({{ devices|length }}{% if devices|length >= 300 %}+{% endif %})</h2>
         <table data-sortable class="ops-table">
             <thead>
                 <tr>
@@ -56,6 +51,7 @@
                     <th>Serial</th>
                     <th>Client</th>
                     <th>Lifecycle</th>
+                    <th>Matched on</th>
                 </tr>
             </thead>
             <tbody>
@@ -76,7 +72,8 @@
                             <span class="muted">—</span>
                         {% endif %}
                     </td>
-                    <td>{{ d.get_lifecycle_status_display }}</td>
+                    <td>{% if d.lifecycle_status == "retired" %}<span class="badge">Retired</span>{% else %}{{ d.get_lifecycle_status_display }}{% endif %}</td>
+                    <td class="muted">{{ d.search_matched }}</td>
                 </tr>
                 {% endfor %}
             </tbody>

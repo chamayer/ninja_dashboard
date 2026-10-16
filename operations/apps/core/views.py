@@ -933,6 +933,7 @@ def home(request: HttpRequest) -> HttpResponse:  # noqa: PLR0912, PLR0915
     device_counts: dict = {}
     device_mix = {"workstations": 0, "servers": 0, "virtual": 0, "other": 0}
     retired_devices = 0
+    review_devices = 0
     device_rollup = (
         Device.objects.filter(tenant_id=1, deleted_at__isnull=True)
         .values("client_id", "lifecycle_status", "device_role", "device_type")
@@ -943,6 +944,8 @@ def home(request: HttpRequest) -> HttpResponse:  # noqa: PLR0912, PLR0915
         if row["lifecycle_status"] == Device.LifecycleStatus.RETIRED:
             retired_devices += count
             continue
+        if row["lifecycle_status"] == Device.LifecycleStatus.PENDING_CLEANUP:
+            review_devices += count
         client_id = row["client_id"]
         device_counts[client_id] = device_counts.get(client_id, 0) + count
         if row["device_type"] == Device.DeviceType.VM:
@@ -1443,6 +1446,15 @@ def home(request: HttpRequest) -> HttpResponse:  # noqa: PLR0912, PLR0915
             "value": f"{total_devices:,}",
             "detail": f"{active_devices:,} active · {retired_devices:,} retired",
             "href": reverse("devices_page"),
+            # ADR-0032: each count opens the matching list.
+            "links": [
+                (f"{active_devices:,} active", reverse("devices_page") + "?state=active"),
+                (
+                    f"{review_devices:,} need review",
+                    reverse("devices_page") + "?lifecycle=pending_cleanup",
+                ),
+                (f"{retired_devices:,} retired", reverse("devices_page") + "?lifecycle=retired"),
+            ],
         },
         {
             "name": "Issues",
@@ -3852,31 +3864,34 @@ def client_switch(request: HttpRequest) -> HttpResponse:
 
 @login_required
 def search(request: HttpRequest) -> HttpResponse:
-    """Fleet-wide search — hostname / serial / client name / slug.
+    """Fleet-wide search — Computer identity data, client name / slug.
+
+    A Computer matches on its name or serial, or on the name, serial or VM
+    UUID any of its records reports now or reported before (a withdrawn or
+    merged-in record still finds the Computer it belonged to). Each Computer
+    is listed once with what matched; retired Computers are included, labeled,
+    after the others (ADR-0032).
 
     - Unique device match → redirect straight to device_detail.
     - Unique client match → redirect to client's org_index page.
     - Ambiguous or empty → render a results page.
     """
     q = (request.GET.get("q") or "").strip()
-    include_retired = request.GET.get("include_retired") == "1"
     if not q:
-        return render(
-            request,
-            "search_results.html",
-            {"q": "", "devices": [], "clients": [], "include_retired": include_retired},
-        )
+        return render(request, "search_results.html", {"q": "", "devices": [], "clients": []})
 
-    devices_qs = Device.objects.filter(
-        tenant_id=1,
-        deleted_at__isnull=True,
-    )
-    if not include_retired:
-        devices_qs = devices_qs.exclude(lifecycle_status=Device.LifecycleStatus.RETIRED)
+    matched = _search_computer_identity(q)
     devices = list(
-        devices_qs.filter(Q(canonical_hostname__icontains=q) | Q(canonical_serial__icontains=q))
+        Device.objects.filter(tenant_id=1, deleted_at__isnull=True, id__in=matched)
         .select_related("client")
-        .order_by("canonical_hostname")[:100]
+    )
+    for device in devices:
+        device.search_matched = matched[device.id]
+    devices.sort(
+        key=lambda d: (
+            d.lifecycle_status == Device.LifecycleStatus.RETIRED,
+            d.canonical_hostname.lower(),
+        )
     )
 
     clients = list(
@@ -3899,13 +3914,58 @@ def search(request: HttpRequest) -> HttpResponse:
     return render(
         request,
         "search_results.html",
-        {
-            "q": q,
-            "devices": devices,
-            "clients": clients,
-            "include_retired": include_retired,
-        },
+        {"q": q, "devices": devices, "clients": clients},
     )
+
+
+_SEARCH_LIMIT = 100
+
+# Computers by name, serial or VM UUID, from the Computer and from every record
+# it has had (withdrawn and merged-in records included).
+SEARCH_IDENTITY_SQL = """
+            SELECT DISTINCT ON (device_id) device_id, matched
+              FROM (
+                  SELECT d.id AS device_id, 1 AS rank, 'name' AS matched
+                    FROM operations.devices d
+                   WHERE d.tenant_id = 1 AND d.deleted_at IS NULL
+                     AND d.canonical_hostname ILIKE %(p)s
+                  UNION ALL
+                  SELECT d.id, 2, 'serial number'
+                    FROM operations.devices d
+                   WHERE d.tenant_id = 1 AND d.deleted_at IS NULL
+                     AND d.canonical_serial ILIKE %(p)s
+                  UNION ALL
+                  SELECT eo.device_id, 3,
+                         CASE WHEN eo.canonical_data ->> 'hostname' ILIKE %(p)s
+                                   THEN 'name in ' || eo.platform
+                              WHEN eo.canonical_data ->> 'serial_number' ILIKE %(p)s
+                                   THEN 'serial number in ' || eo.platform
+                              ELSE 'VM UUID in ' || eo.platform END
+                         || CASE WHEN eo.active THEN '' ELSE ' (earlier record)' END
+                    FROM operations.entity_observation_current eo
+                    JOIN operations.devices d
+                      ON d.tenant_id = eo.tenant_id AND d.id = eo.device_id
+                     AND d.deleted_at IS NULL
+                   WHERE eo.tenant_id = 1 AND eo.entity_key NOT LIKE 'device-health:%%'
+                     AND (eo.canonical_data ->> 'hostname' ILIKE %(p)s
+                          OR eo.canonical_data ->> 'serial_number' ILIKE %(p)s
+                          OR eo.canonical_data ->> 'vm_uuid' ILIKE %(p)s)
+              ) hits
+             ORDER BY device_id, rank
+             LIMIT %(limit)s
+            """
+
+
+def _search_computer_identity(q: str) -> dict[uuid.UUID, str]:
+    """Current Computers matching ``q``, each with what matched (first match wins)."""
+    pattern = "%" + q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+    with connection.cursor() as cur:
+        cur.execute("SET LOCAL operations.tenant_id = 1")
+        cur.execute(
+            SEARCH_IDENTITY_SQL,
+            {"p": pattern, "limit": _SEARCH_LIMIT * 3},
+        )
+        return dict(cur.fetchall())
 
 
 @login_required
@@ -11056,6 +11116,9 @@ def devices_page(request: HttpRequest) -> HttpResponse:
     online_filter = request.GET.get("online", "")  # online | offline
     state_filter = request.GET.get("state", "")  # active | not-reporting
     client_filter = request.GET.get("client", "")  # slug
+    lifecycle_filter = request.GET.get("lifecycle", "")  # retired | pending_cleanup
+    if lifecycle_filter not in ("retired", "pending_cleanup"):
+        lifecycle_filter = ""
     # Software drill-through: click a device/client count on a Products,
     # title-detail, or publisher-detail page and land here scoped to exactly
     # that slice, reusing this page's existing device list rather than a new
@@ -11130,8 +11193,16 @@ def devices_page(request: HttpRequest) -> HttpResponse:
         )
         os_rows = cur.fetchall()
 
-        # Device table — v_device + client name. Apply filters.
-        where = ["v.tenant_id = 1", "v.lifecycle_status <> 'retired'"]
+        # Device table — v_device + client name. Apply filters. Retired
+        # Computers are listed only when asked for (the home Computers card).
+        where = [
+            "v.tenant_id = 1",
+            "v.lifecycle_status = 'retired'"
+            if lifecycle_filter == "retired"
+            else "v.lifecycle_status <> 'retired'",
+        ]
+        if lifecycle_filter == "pending_cleanup":
+            where.append("v.lifecycle_status = 'pending_cleanup'")
         params: list = []
         if q_filter:
             where.append("(v.canonical_hostname ILIKE %s OR v.canonical_serial ILIKE %s)")
@@ -11329,6 +11400,7 @@ def devices_page(request: HttpRequest) -> HttpResponse:
             "active_role": role_filter,
             "active_online": online_filter,
             "active_state": state_filter,
+            "active_lifecycle": lifecycle_filter,
             "active_client": client_filter,
             "active_software": software_filter,
             "active_version": version_filter,

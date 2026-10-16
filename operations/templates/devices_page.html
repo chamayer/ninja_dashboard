@@ -138,12 +138,20 @@
                 <option value="not-reporting" {% if active_state == 'not-reporting' %}selected{% endif %}>Not reporting</option>
             </select>
         </div>
+        <div>
+            <label>Lifecycle</label>
+            <select name="lifecycle">
+                <option value="">Not retired</option>
+                <option value="pending_cleanup" {% if active_lifecycle == 'pending_cleanup' %}selected{% endif %}>Needs review</option>
+                <option value="retired" {% if active_lifecycle == 'retired' %}selected{% endif %}>Retired</option>
+            </select>
+        </div>
         {% if active_os %}<input type="hidden" name="os" value="{{ active_os }}">{% endif %}
         {% if active_software %}<input type="hidden" name="software" value="{{ active_software }}">{% endif %}
         {% if active_version %}<input type="hidden" name="version" value="{{ active_version }}">{% endif %}
         {% if active_software_publisher %}<input type="hidden" name="software_publisher" value="{{ active_software_publisher }}">{% endif %}
         <div><button type="submit">Apply</button></div>
-        {% if active_q or active_client or active_role or active_online or active_state %}
+        {% if active_q or active_client or active_role or active_online or active_state or active_lifecycle %}
             <div><a href="?{% if active_os %}os={{ active_os }}{% endif %}" class="reset">Clear</a></div>
         {% endif %}
     </form>
