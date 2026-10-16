@@ -236,7 +236,17 @@ archived (one archived asset beside a current one is superseded
 documentation: 54 measured, 48 of them with an active agent). Without Hudu,
 retirement waits for the review period. Retirement keeps every record and the
 full history, is shown on the timeline with its reason, and is reversed
-automatically when any record of the machine reappears. Retired Computers are
+automatically when the machine reports again (an agent online or contacted
+within 30 days, or a running VM). A record that is listed again but silent
+does not restore it, so an operator's retirement of a silent machine stands
+(implementation note 2026-10-16).
+
+Enforcement: `ingest/computer_listing.py` classifies each Computer;
+documentation and stopped VMs are `source_record_lifecycle_mappings` rows
+(migration 0310, lifecycles `documentation` and `stopped`), not code.
+Retirement and restore are explicit change actions
+(`computer.retire.automatic`, `computer.restore.automatic`); tests in
+`ingest/tests/test_evaluator_lifecycle_single_transition_postgres.py`. Retired Computers are
 shown in search, labeled, and listed after active ones.
 
 While something still lists the machine, it is not retired; the state raises

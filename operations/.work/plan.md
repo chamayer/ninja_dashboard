@@ -184,7 +184,19 @@ differences from the matcher.
   incomplete source record (24 hours), empty Computer; existing
   `identity_conflict` and `duplicate_platform_record` kept.
 
-### 5. Remediation of the existing population (dry run first)
+### 5. Retirement, evidence and remediation
+- 4b shipped as `b9937b9` (0309 applied 2026-10-16 23:14; JIT off for
+  `compute_finding_state`, policy registry-3, 92 old duplicate rows closed).
+  Its merge-signature fix lets the automatic merges run on the next resolver.
+- 5a built: `ingest/computer_listing.py` states drive lifecycle and findings;
+  migration 0310 (lifecycles `documentation` / `stopped` as mapping rows,
+  `archived_but_reporting`, policy registry-4). Measured states (read-only,
+  2026-10-16): 152 retire, 66 documentation only, 127 stopped VM only,
+  104 archived but still listed, 42 archived but reporting, 656 silent.
+- 5b next: "still in use" action returns a Computer to the coverage check
+  (75 Computers / 176 agent removals missed today); 5c Hudu documentation
+  requirement (archived does not satisfy); 5d retire
+  `device_source_record_withdrawn` after verifying the new findings.
 - 26 Computers whose record serial is stored on another Computer; 13
   complementary same-name groups (36 Computers); 30 conflict-free same-name
   live groups (20 share one serial, 10 have no serial at all); 2 two-machine

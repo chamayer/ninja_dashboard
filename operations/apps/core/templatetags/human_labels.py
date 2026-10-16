@@ -205,6 +205,15 @@ def humanize_label(value):
     return key
 
 
+# device_missing_from_source reasons (ingest.computer_listing, ADR-0032).
+_MISSING_REASONS = {
+    "documentation_only": "only documented in Hudu; nothing reports for it",
+    "stopped_vm_only": "only a stopped VM is left",
+    "archived_still_listed": "archived in Hudu but still listed in a source",
+    "nothing_listed": "no source lists it any more",
+}
+
+
 @register.simple_tag(name="finding_detail_text")
 def finding_detail_text(finding):
     """Compact per-type detail string for a Finding.
@@ -253,6 +262,11 @@ def finding_detail_text(finding):
         if end:
             pieces.append(f"support ended {end}" if name.endswith("_eol") else f"ends {end}")
         return " · ".join(pieces)
+    if name == "device_missing_from_source" and d.get("reason") in _MISSING_REASONS:
+        return _MISSING_REASONS[d["reason"]]
+    if name == "archived_but_reporting":
+        last_source = d.get("last_source")
+        return f"archived in Hudu, still reporting{f' in {last_source}' if last_source else ''}"
     if name == "device_missing_from_source":
         last_source = d.get("last_source")
         last_seen = d.get("last_seen_at")

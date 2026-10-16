@@ -1814,6 +1814,10 @@ class SourceRecordLifecycleMapping(models.Model):
         ARCHIVED = "archived", "Archived"
         RETIRED = "retired", "Retired"
         DECOMMISSIONED = "decommissioned", "Decommissioned"
+        # ADR-0032: documentation (a current CMDB asset) and a stopped VM are
+        # listed but are not evidence that the machine exists.
+        DOCUMENTATION = "documentation", "Documentation"
+        STOPPED = "stopped", "Stopped"
         UNKNOWN = "unknown", "Unknown"
 
     id = models.BigAutoField(primary_key=True)

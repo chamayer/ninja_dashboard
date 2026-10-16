@@ -38,7 +38,7 @@ from typing import Any
 
 from ingest import db
 from ingest.condition_evidence import preserve_operator_episode
-from ingest import device_status_settings
+from ingest import computer_listing, device_status_settings
 from ingest.conditions import record_assessment
 from ingest.identity import findings as identity_findings
 from ingest.intel.windows_servicing import sync as sync_windows_servicing
@@ -104,13 +104,14 @@ def evaluate(tenant_id: int, device_id: uuid.UUID | None = None) -> int:
             with conn.cursor() as cur:
                 cur.execute(f"SET LOCAL operations.tenant_id = {tenant_id}")
                 source_problems = _source_failure_guard(cur, tenant_id, now)
+                listing_owned: set[uuid.UUID] = set()
                 affected += _sync_source_withdrawal_lifecycle(
-                    cur, tenant_id, now, evaluator_run_id, device_id
+                    cur, tenant_id, now, evaluator_run_id, device_id, listing_owned
                 )
                 if device_id is None:
                     affected += _sync_device_roles(cur, tenant_id, now)
                     affected += _sync_lifecycle_status(
-                        cur, tenant_id, now, evaluator_run_id
+                        cur, tenant_id, now, evaluator_run_id, skip=listing_owned
                     )
                     affected += _evaluate_unknown_entities(cur, tenant_id, now)
                     affected += _evaluate_change_history_registry(cur, tenant_id, now)
@@ -520,8 +521,13 @@ def _load_lifecycle_evidence(
     cur: Any,
     tenant_id: int,
     device_ids: list[uuid.UUID] | None = None,
+    *,
+    include_retired: bool = False,
 ) -> dict[uuid.UUID, dict[str, Any]]:
-    """Qualified lifecycle evidence rows per Computer (all, or only ``device_ids``)."""
+    """Qualified lifecycle evidence rows per Computer (all, or only ``device_ids``).
+
+    ``include_retired`` is for restoring a retired Computer that reports again.
+    """
     cur.execute(
         """
         SELECT d.id, d.client_id, d.lifecycle_status,
@@ -553,7 +559,7 @@ def _load_lifecycle_evidence(
           ) latest ON TRUE
          WHERE d.tenant_id = %s
            AND d.deleted_at IS NULL
-           AND d.lifecycle_status <> 'retired'
+           AND (%s OR d.lifecycle_status <> 'retired')
            AND et.lifecycle_evidence_mode <> 'none'
            AND (%s::uuid[] IS NULL OR d.id = ANY(%s::uuid[]))
            AND EXISTS (
@@ -564,7 +570,7 @@ def _load_lifecycle_evidence(
                   AND current_observation.active
            )
         """,
-        (tenant_id, device_ids, device_ids),
+        (tenant_id, include_retired, device_ids, device_ids),
     )
     per_device: dict[uuid.UUID, dict[str, Any]] = {}
     for row in cur.fetchall():
@@ -838,72 +844,51 @@ def _sync_source_withdrawal_lifecycle(
     now: datetime,
     evaluator_run_id: uuid.UUID,
     device_id: uuid.UUID | None,
+    owned: set[uuid.UUID] | None = None,
 ) -> int:
-    """Move a known Computer to review when no source record qualifies as current.
+    """Set each Computer's lifecycle from what lists it now (ADR-0032).
 
-    This is review state, not retirement.  When current source evidence
-    returns (CMDB evidence included), the Computer leaves review for the state
-    the contact policy selects from its qualified lifecycle evidence, or for
-    active when it has none; one transition, never an intermediate active
-    that the contact policy reverses in the same run.  A source record's withdrawal is
-    evidence; the derived lifecycle transition and audit event remain owned by
-    this evaluator's lifecycle policy.  A current source record that is
-    reported as archived/retired remains visible evidence, but its lifecycle
-    mapping does not qualify it as current Computer evidence.
+    ``computer_listing`` decides the state. A Computer something reports for
+    (or whose agents are only silent) gets the state the contact policy
+    selects, in one transition. A Computer only documentation, a stopped VM or
+    archived documentation still lists goes to review (``pending_cleanup``);
+    one nothing lists any more is retired, and a retired Computer that reports
+    again is restored. The ids whose lifecycle this step decided are added to
+    ``owned``, so the contact policy later in the run leaves them alone (it
+    would otherwise move a stopped VM straight back out of review).
     """
-    cur.execute(
-        """
-        SELECT d.id, d.lifecycle_status,
-               EXISTS (
-                   SELECT 1
-                     FROM operations.v_device_source_record_lifecycle_current record
-                    WHERE record.tenant_id = d.tenant_id
-                      AND record.device_id = d.id
-                      AND record.counts_as_current_computer_evidence
-               ) AS has_current_evidence
-          FROM operations.devices d
-         WHERE d.tenant_id = %s
-           AND d.deleted_at IS NULL
-           AND d.lifecycle_status <> 'retired'
-           AND (%s::uuid IS NULL OR d.id = %s)
-           AND EXISTS (
-               SELECT 1
-                 FROM operations.v_device_source_record_lifecycle_current record
-                WHERE record.tenant_id = d.tenant_id
-                  AND record.device_id = d.id
-           )
-        """,
-        (tenant_id, device_id, device_id),
-    )
-    rows = cur.fetchall()
-    # A Computer whose source evidence is current again is handed to the
-    # contact policy, not forced to active. Forcing active made the contact
-    # policy (_sync_lifecycle_status, later in the same run) move it straight
-    # back, writing two opposite transitions every run for every Computer whose
-    # records are still listed but silent (~1,050 Computers, 2026-10).
-    restoring = [
-        current_device_id
-        for current_device_id, previous, has_current_evidence in rows
-        if has_current_evidence and previous != "active"
+    offline_after_days, retire_review_days = device_status_settings.load(cur, tenant_id)
+    client_offline_days = device_status_settings.client_overrides(cur, tenant_id)
+    listings = computer_listing.load(cur, tenant_id, now, device_id)
+    states = {item.device_id: item.state(now, retire_review_days) for item in listings}
+    contact_ids = [
+        item.device_id
+        for item in listings
+        if states[item.device_id] in computer_listing.CONTACT_POLICY_STATES
+        and item.lifecycle_status != "active"
+        and (item.lifecycle_status != "retired" or item.reporting)
     ]
-    contact_evidence: dict[uuid.UUID, dict[str, Any]] = {}
-    offline_after_days = retire_review_days = 0
-    client_offline_days: dict[str, int] = {}
-    if restoring:
-        offline_after_days, retire_review_days = device_status_settings.load(
-            cur, tenant_id
-        )
-        client_offline_days = device_status_settings.client_overrides(cur, tenant_id)
-        contact_evidence = _load_lifecycle_evidence(cur, tenant_id, restoring)
+    contact_evidence = (
+        _load_lifecycle_evidence(cur, tenant_id, contact_ids, include_retired=True)
+        if contact_ids
+        else {}
+    )
 
     affected = 0
-    for current_device_id, previous, has_current_evidence in rows:
+    for item in listings:
+        state = states[item.device_id]
+        previous = item.lifecycle_status
         evidence = None
-        if not has_current_evidence:
+        if state == "retire":
+            target = "retired"
+        elif state in computer_listing.CLEANUP_STATES:
             target = "pending_cleanup"
+        elif previous == "retired" and not item.reporting:
+            # A source lists it again but it does not report: stays retired.
+            continue
         else:
             target = "active"
-            device = contact_evidence.get(current_device_id)
+            device = contact_evidence.get(item.device_id)
             if device is not None:
                 selected, has_conflict = _select_lifecycle_evidence(device["rows"])
                 if selected is not None and not has_conflict:
@@ -916,23 +901,84 @@ def _sync_source_withdrawal_lifecycle(
                         retire_review_days,
                         client_offline_days,
                     )
+        if owned is not None and (state not in computer_listing.CONTACT_POLICY_STATES
+                                  or previous == "retired"):
+            owned.add(item.device_id)
         if target == previous:
             continue
+        if _transition_lifecycle(
+            cur, tenant_id, item, previous, target, state, evidence, now, evaluator_run_id
+        ):
+            affected += 1
+    return affected
+
+
+_RETIRE_REASONS = {
+    "retire": "Nothing lists this machine any more (ADR-0032).",
+}
+
+
+def _transition_lifecycle(
+    cur: Any,
+    tenant_id: int,
+    item: Any,
+    previous: str,
+    target: str,
+    state: str,
+    evidence: dict[str, Any] | None,
+    now: datetime,
+    evaluator_run_id: uuid.UUID,
+) -> bool:
+    """Apply one lifecycle change with its audit row; retire and restore are explicit actions."""
+    explicit = "retired" in (previous, target)
+    if explicit:
+        retiring = target == "retired"
+        cur.execute(
+            "SELECT operations.begin_change(%s, %s, %s::jsonb, 'process', NULL::bigint, "
+            "'ingest.evaluator', '', %s::bigint, true)",
+            (
+                "computer.retire.automatic" if retiring else "computer.restore.automatic",
+                "Nothing lists this machine any more."
+                if retiring
+                else "A source reports this machine again.",
+                json.dumps({"state": state, "last_source": item.last_source}),
+                tenant_id,
+            ),
+        )
+    try:
         cur.execute(
             """
             UPDATE operations.devices
                SET lifecycle_status = %s
-             WHERE id = %s
-               AND tenant_id = %s
-               AND deleted_at IS NULL
+             WHERE id = %s AND tenant_id = %s AND deleted_at IS NULL
                AND lifecycle_status = %s
-               AND lifecycle_status <> 'retired'
-            RETURNING id
+            RETURNING entity_id
             """,
-            (target, current_device_id, tenant_id, previous),
+            (target, item.device_id, tenant_id, previous),
         )
-        if cur.fetchone() is None:
-            continue
+        row = cur.fetchone()
+        if row is None:
+            return False
+        if explicit:
+            cur.execute(
+                """
+                UPDATE operations.entities
+                   SET retired_at = CASE WHEN %s THEN %s::timestamptz END,
+                       retired_reason = CASE WHEN %s THEN %s ELSE '' END,
+                       updated_at = %s, updated_reason = %s
+                 WHERE id = %s AND tenant_id = %s
+                """,
+                (
+                    target == "retired",
+                    now,
+                    target == "retired",
+                    _RETIRE_REASONS["retire"],
+                    now,
+                    "lifecycle.retire.automatic" if target == "retired" else "lifecycle.restore.automatic",
+                    row[0],
+                    tenant_id,
+                ),
+            )
         cur.execute(
             """
             INSERT INTO operations.audit_log (
@@ -947,16 +993,12 @@ def _sync_source_withdrawal_lifecycle(
             """,
             (
                 tenant_id,
-                current_device_id,
+                item.device_id,
                 json.dumps({"lifecycle_status": previous}),
                 json.dumps(
                     {
                         "lifecycle_status": target,
-                        "evidence_kind": (
-                            "source_evidence_restored"
-                            if has_current_evidence
-                            else "no_current_source_evidence"
-                        ),
+                        "evidence_kind": state,
                         **(
                             {
                                 "contact_evidence_kind": evidence["kind"],
@@ -974,8 +1016,11 @@ def _sync_source_withdrawal_lifecycle(
                 now,
             ),
         )
-        affected += 1
-    return affected
+        return True
+    finally:
+        if explicit:
+            # The action covers this Computer only; later evaluator writes are implicit.
+            cur.execute("SELECT set_config('operations.change_action_id', '', true)")
 
 
 def _sync_lifecycle_status(
@@ -983,6 +1028,7 @@ def _sync_lifecycle_status(
     tenant_id: int,
     now: datetime,
     evaluator_run_id: uuid.UUID,
+    skip: set[uuid.UUID] | None = None,
 ) -> int:  # noqa: PLR0912 - policy branches map to explicit approved outcomes.
     """Apply explicit lifecycle policy and append transition audit events.
 
@@ -1068,6 +1114,9 @@ def _sync_lifecycle_status(
                 )
             continue
         if evidence is None:
+            continue
+        if skip and device_id in skip:
+            # computer_listing decided this Computer's lifecycle (review or retired).
             continue
 
         target = _device_lifecycle_target(
@@ -1890,61 +1939,40 @@ def _evaluate_device_lifecycle(
                 },
             )
 
+    # ADR-0032: what still lists a Computer that nothing reports for. One
+    # finding per Computer; its reason follows the state (each change is
+    # recorded in the finding's history).
     missing_type_id = _get_finding_type_id(cur, "device_missing_from_source")
+    archived_type_id = _get_finding_type_id(cur, "archived_but_reporting")
     no_current_evidence_keys: set[str] = set()
-    if missing_type_id:
-        cur.execute(
-            """
-            SELECT d.id, d.client_id, last_observation.source_name,
-                   last_observation.last_seen_at
-              FROM operations.devices d
-              LEFT JOIN LATERAL (
-                  SELECT record.source_name, record.last_seen_at
-                    FROM operations.v_device_source_record_lifecycle_current record
-                   WHERE record.tenant_id = d.tenant_id
-                     AND record.device_id = d.id
-                     AND record.record_lifecycle IN ('active', 'unknown')
-                   ORDER BY record.last_seen_at DESC NULLS LAST,
-                            record.observation_id DESC
-                   LIMIT 1
-              ) last_observation ON TRUE
-             WHERE d.tenant_id = %s
-              AND d.deleted_at IS NULL
-              AND (%s::uuid IS NULL OR d.id = %s)
-              AND EXISTS (
-                  SELECT 1 FROM operations.v_device_source_record_lifecycle_current record
-                   WHERE record.tenant_id = d.tenant_id
-                     AND record.device_id = d.id
-              )
-              AND NOT EXISTS (
-                  SELECT 1 FROM operations.v_device_source_record_lifecycle_current record
-                   WHERE record.tenant_id = d.tenant_id
-                     AND record.device_id = d.id
-                     AND record.counts_as_current_computer_evidence
-              )
-            """,
-            (tenant_id, device_id, device_id),
-        )
-        for dev_id, dev_client_id, last_source, last_seen_at in cur.fetchall():
-            ckey = _condition_key(
-                tenant_id, dev_client_id, dev_id, "device_missing_from_source", ""
-            )
-            no_current_evidence_keys.add(ckey)
-            count += _upsert_lifecycle_finding(
-                cur,
-                tenant_id,
-                missing_type_id,
-                dev_client_id,
-                dev_id,
-                ckey,
-                "high",
-                "confirmed",
-                now,
-                {
-                    "last_source": last_source,
-                    "last_seen_at": last_seen_at.isoformat() if last_seen_at else None,
-                },
-            )
+    archived_keys: set[str] = set()
+    if missing_type_id or archived_type_id:
+        _offline_days, review_days = device_status_settings.load(cur, tenant_id)
+        for item in computer_listing.load(cur, tenant_id, now, device_id):
+            state = item.state(now, review_days)
+            details = {
+                "last_source": item.last_source,
+                "last_seen_at": item.last_seen_at.isoformat() if item.last_seen_at else None,
+            }
+            if missing_type_id and state in computer_listing.CLEANUP_STATES:
+                ckey = _condition_key(
+                    tenant_id, item.client_id, item.device_id, "device_missing_from_source", ""
+                )
+                no_current_evidence_keys.add(ckey)
+                count += _upsert_lifecycle_finding(
+                    cur, tenant_id, missing_type_id, item.client_id, item.device_id, ckey,
+                    "high", "confirmed", now,
+                    {"reason": computer_listing.CLEANUP_REASONS[state], **details},
+                )
+            elif archived_type_id and state == "archived_but_reporting":
+                ckey = _condition_key(
+                    tenant_id, item.client_id, item.device_id, "archived_but_reporting", ""
+                )
+                archived_keys.add(ckey)
+                count += _upsert_lifecycle_finding(
+                    cur, tenant_id, archived_type_id, item.client_id, item.device_id, ckey,
+                    "medium", "confirmed", now, details,
+                )
 
     if source_withdrawn_type_id:
         _resolve_lifecycle_findings_absent(
@@ -1953,6 +1981,10 @@ def _evaluate_device_lifecycle(
     if missing_type_id:
         _resolve_lifecycle_findings_absent(
             cur, tenant_id, missing_type_id, no_current_evidence_keys, now, device_id
+        )
+    if archived_type_id:
+        _resolve_lifecycle_findings_absent(
+            cur, tenant_id, archived_type_id, archived_keys, now, device_id
         )
 
     if device_id is None:
@@ -2437,33 +2469,10 @@ def _auto_resolve(
         )
         count += cur.rowcount or 0
 
-    # Resolve the Computer-level review finding only after a source record
-    # qualifies as current Computer evidence.  Raw source presence alone is
-    # not enough: a current archived/retired record remains historical.
-    missing_ft_id = _get_finding_type_id(cur, "device_missing_from_source")
-    if missing_ft_id:
-        cur.execute(
-            f"""
-            UPDATE operations.findings f
-            SET status = 'resolved',
-                last_seen_at = %s
-            WHERE f.tenant_id = %s
-              AND f.finding_type_id = %s
-              AND f.status IN ('open', 'acknowledged')
-              AND (%s::uuid IS NULL OR f.subject_id = %s)
-              AND EXISTS (
-                  SELECT 1
-                    FROM operations.v_device_source_record_lifecycle_current record
-                   WHERE record.device_id = f.subject_id
-                     AND record.tenant_id = f.tenant_id
-                     AND record.counts_as_current_computer_evidence
-              )
-            {clear_assessment}
-            """,
-            (now, tenant_id, missing_ft_id, device_id, device_id),
-        )
-        count += cur.rowcount or 0
-
+    # device_missing_from_source and archived_but_reporting are cleared by
+    # their producer (_evaluate_device_lifecycle) when the Computer's listing
+    # state changes (ADR-0032); a single evidence record is not enough, since
+    # archived documentation beside silent agents is still a cleanup state.
     return count
 
 
