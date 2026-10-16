@@ -8,6 +8,7 @@ import uuid
 import psycopg
 import pytest
 
+from ingest.identity import resolver
 from ingest.identity.resolver import (
     _upsert_cross_client_serial_findings,
     _upsert_shared_serial_findings,
@@ -78,47 +79,77 @@ def postgres_schema(postgres_connection):
                 tenant_id bigint NOT NULL,
                 device_id uuid NOT NULL,
                 active boolean NOT NULL DEFAULT true,
+                entity_type varchar(64) NOT NULL DEFAULT 'agent.rmm',
+                entity_key text NOT NULL DEFAULT '',
                 canonical_data jsonb NOT NULL DEFAULT '{}'
             );
         """)
     return postgres_connection
 
 
-def test_shared_serial_finding_uses_uuid_subject_and_refreshes(
-    postgres_schema,
+def test_shared_serial_finding_uses_reported_serials_and_refreshes(
+    postgres_schema, monkeypatch
 ) -> None:
+    measured: list[str] = []
+    cleared: list[list[str]] = []
+    monkeypatch.setattr(
+        resolver.identity_findings,
+        "record_measured",
+        lambda cur, tenant, fid, ftid, key, subject, now: measured.append(key),
+    )
+    monkeypatch.setattr(
+        resolver.identity_findings,
+        "resolve_absent",
+        lambda cur, tenant, ftid, keys, now: cleared.append(keys),
+    )
     client_id = uuid.uuid4()
     first_device_id = uuid.UUID("00000000-0000-0000-0000-000000000001")
     second_device_id = uuid.UUID("00000000-0000-0000-0000-000000000002")
+    third_device_id = uuid.UUID("00000000-0000-0000-0000-000000000003")
 
     with postgres_schema.cursor() as cur:
+        # Stored serials disagree with what the records report: the records count.
         cur.execute(
             """
             INSERT INTO operations.devices (
                 id, tenant_id, client_id, canonical_serial, canonical_hostname
             ) VALUES
-                (%s, 1, %s, 'shared-serial', 'first-host'),
-                (%s, 1, %s, 'shared-serial', 'second-host')
+                (%s, 1, %s, 'stale-stored', 'first-host'),
+                (%s, 1, %s, 'Shared-Serial', 'second-host'),
+                (%s, 1, %s, 'Shared-Serial', 'third-host')
             """,
-            (first_device_id, client_id, second_device_id, client_id),
+            (first_device_id, client_id, second_device_id, client_id, third_device_id, client_id),
+        )
+        cur.execute(
+            """
+            INSERT INTO operations.entity_observation_current
+                (tenant_id, device_id, entity_type, canonical_data, active)
+            VALUES (1, %s, 'agent.rmm', '{"serial_number": "shared-serial"}', true),
+                   (1, %s, 'agent.edr', '{"serial_number": "SHARED-SERIAL "}', true),
+                   (1, %s, 'cmdb.asset', '{"serial_number": "Shared-Serial"}', true),
+                   (1, %s, 'agent.rmm', '{"serial_number": "Shared-Serial"}', false)
+            """,
+            (first_device_id, second_device_id, third_device_id, third_device_id),
         )
 
         assert _upsert_shared_serial_findings(cur, 1) == 1
         cur.execute("""
-            SELECT subject_id, pg_typeof(subject_id)::text,
+            SELECT subject_id, pg_typeof(subject_id)::text, condition_key,
                    finding_details ->> 'device_count',
                    finding_details -> 'device_ids'
               FROM operations.findings
         """)
-        subject_id, subject_type, device_count, device_ids = cur.fetchone()
+        subject_id, subject_type, key, device_count, device_ids = cur.fetchone()
         assert subject_id == first_device_id
         assert subject_type == "uuid"
+        assert key == f"shared_serial:{client_id}:Shared-Serial"
         assert device_count == "2"
         assert device_ids == [str(first_device_id), str(second_device_id)]
 
         assert _upsert_shared_serial_findings(cur, 1) == 1
         cur.execute("SELECT COUNT(*) FROM operations.findings")
         assert cur.fetchone()[0] == 1
+        assert measured == [key, key] and cleared == [[key], [key]]
 
 
 def test_cross_client_serial_emits_one_finding_per_device(

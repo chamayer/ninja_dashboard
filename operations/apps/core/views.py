@@ -98,11 +98,13 @@ from .finding_actions import (
     CAPABILITY_CONFIRM,
     CAPABILITY_REJECT,
     FINDING_ACTIONS,
+    IDENTITY_ACTIONS,
     available_finding_actions,
     can_manage_lifecycle,
     can_run_action,
 )
 from .forms import ClientPolicyForm
+from .identity_actions import run_identity_action
 from .models import (
     AdminFinding,
     Agent,
@@ -6469,6 +6471,8 @@ def findings_bulk_action(request: HttpRequest) -> HttpResponse:
             return approve_remote_access(request, ids, registered_action)
         if registered_action.key in (CAPABILITY_CONFIRM.key, CAPABILITY_REJECT.key):
             return decide_capability(request, ids, registered_action)
+        if registered_action.key in IDENTITY_ACTIONS:
+            return run_identity_action(request, ids, registered_action)
         if decision_for(registered_action.key) is not None:
             return decide_software(request, ids, registered_action)
     if action not in ("refresh", "snooze", "suppress"):
@@ -16835,8 +16839,8 @@ def _merge_devices(cur, survivor_id, loser_id, reason: str, *, actor_id: int | N
     """
     cur.execute(
         """
-        SELECT operations.merge_computers(%s, %s, %s, '{}'::jsonb, 'operator', %s,
-                                          'operations.ui')
+        SELECT operations.merge_computers(%s::uuid, %s::uuid, %s::text, '{}'::jsonb,
+                                          'operator', %s::bigint, 'operations.ui')
         """,
         (survivor_id, loser_id, reason, actor_id),
     )

@@ -40,9 +40,10 @@ from ingest import db
 from ingest.condition_evidence import preserve_operator_episode
 from ingest import device_status_settings
 from ingest.conditions import record_assessment
-from ingest.identity import identity_entity_types
+from ingest.identity import findings as identity_findings
 from ingest.intel.windows_servicing import sync as sync_windows_servicing
-from ingest.normalize import normalize_hostname
+from ingest import normalize
+from ingest.normalize import is_usable_serial, load_identity_value_rejections
 from ingest.source_health import (
     SourceCollectionProblem,
     blockers_for_platform,
@@ -114,6 +115,7 @@ def evaluate(tenant_id: int, device_id: uuid.UUID | None = None) -> int:
                     affected += _evaluate_unknown_entities(cur, tenant_id, now)
                     affected += _evaluate_change_history_registry(cur, tenant_id, now)
                     affected += _evaluate_duplicate_records(cur, tenant_id, now)
+                    affected += identity_findings.evaluate(cur, tenant_id, now)
                 corroborated = _load_corroborated_devices(cur, tenant_id)
                 affected += _evaluate_coverage(
                     cur, tenant_id, device_id, now, source_problems, corroborated
@@ -1258,67 +1260,86 @@ def _evaluate_change_history_registry(cur: Any, tenant_id: int, now: datetime) -
 
 
 def _evaluate_duplicate_records(cur: Any, tenant_id: int, now: datetime) -> int:
-    """Admin finding per (client, platform, stream, hostname) with >1 records.
+    """Admin finding per Computer holding two records of one source (ADR-0032).
 
-    Identity keeps these as separate device rows (hostname correlation is
-    cross-source only); this surfaces each duplicate group for cleanup since
-    every extra platform record consumes a license.
+    Agent and VM records: two or more active records of one source and type on
+    one Computer, unless their usable serials differ (two machines, a
+    different finding). Hudu: two or more current (not archived) assets of one
+    layout with the same name on one Computer, unless their serials differ;
+    an archived asset beside a current one is replaced documentation, and a
+    Computer page beside a Servers page is normal.
     """
     ft_id = _get_finding_type_id(cur, "duplicate_platform_record")
     if ft_id is None:
         return 0
+    # Serials decide which groups are duplicates; without the rejection list
+    # every serial reads as unusable, so skip rather than guess.
+    load_identity_value_rejections(cur)
+    if normalize._serial_rejection_cache is None:
+        log.warning("evaluator: serial rejections unavailable, duplicate records skipped")
+        return 0
     cur.execute(
         """
-        SELECT DISTINCT ON (platform, entity_type, entity_key)
-               platform, entity_type, entity_key, client_id,
-               canonical_data ->> 'hostname',
-               canonical_data ->> 'is_online',
-               canonical_data ->> 'last_seen_at',
-               canonical_data ->> 'serial_number'
-        FROM operations.entity_observation_current
-        WHERE tenant_id = %s
-          -- Allowlist, not `<> 'software'`. This finding says "each extra
-          -- record consumes a license", which is only true of installed-agent
-          -- streams. CMDB pages consume nothing, and two pages sharing a name
-          -- is normal there (a machine legitimately has both a Computer Asset
-          -- and a Servers page). Left unfiltered this raised 572 false
-          -- "duplicate platform record" findings against Hudu.
-          AND entity_type = ANY(%s)
-          AND active = TRUE
-          AND observed_at > now() - INTERVAL '2 days'
-        ORDER BY platform, entity_type, entity_key, observed_at DESC
+        SELECT eo.device_id, d.client_id, d.canonical_hostname, eo.platform, eo.entity_type,
+               CASE WHEN eo.entity_type = 'cmdb.asset'
+                    THEN coalesce(eo.canonical_data ->> 'hudu_layout', '') || ':'
+                         || lower(coalesce(eo.canonical_data ->> 'hostname', ''))
+                    ELSE '' END AS page_group,
+               eo.entity_key, eo.canonical_data ->> 'hostname',
+               eo.canonical_data ->> 'is_online', eo.last_seen_at,
+               eo.canonical_data ->> 'serial_number'
+          FROM operations.entity_observation_current eo
+          JOIN operations.devices d ON d.tenant_id = eo.tenant_id AND d.id = eo.device_id
+         WHERE eo.tenant_id = %s AND eo.active AND d.deleted_at IS NULL
+           AND eo.entity_key NOT LIKE 'device-health:%%'
+           AND (eo.entity_type LIKE 'agent.%%' OR eo.entity_type LIKE 'vm.%%'
+                OR (eo.entity_type = 'cmdb.asset'
+                    AND coalesce((eo.canonical_data ->> 'archived')::boolean, false) = false
+                    AND coalesce(eo.canonical_data ->> 'hostname', '') <> ''))
         """,
-        (tenant_id, sorted(identity_entity_types(cur))),
+        (tenant_id,),
     )
     groups: dict[tuple, list[dict]] = {}
     for (
+        device_id,
+        client_id,
+        computer_name,
         platform,
         entity_type,
+        page_group,
         entity_key,
-        client_id,
         hostname,
         is_online,
         last_seen,
         serial,
     ) in cur.fetchall():
-        norm = normalize_hostname(hostname)
-        if not norm:
-            continue
-        groups.setdefault((platform, entity_type, str(client_id or ""), norm), []).append(
+        groups.setdefault(
+            (device_id, client_id, computer_name, platform, entity_type, page_group), []
+        ).append(
             {
                 "entity_key": entity_key,
+                "hostname": hostname,
                 "is_online": is_online,
-                "last_seen_at": last_seen,
+                "last_seen_at": last_seen.isoformat() if last_seen else None,
                 "serial_number": serial,
             }
         )
 
     count = 0
     present_keys: list[str] = []
-    for (platform, entity_type, client_key, norm), records in groups.items():
+    for (device_id, client_id, computer_name, platform, entity_type, page_group), records in (
+        groups.items()
+    ):
         if len(records) < 2:
             continue
-        ckey = f"duplicate_record:{platform}:{entity_type}:{client_key}:{norm}"
+        serials = {
+            r["serial_number"].strip().lower()
+            for r in records
+            if is_usable_serial(r["serial_number"])
+        }
+        if len(serials) > 1:
+            continue
+        ckey = f"duplicate_platform_record:{device_id}:{platform}:{entity_type}:{page_group}"
         present_keys.append(ckey)
         severity = "high" if entity_type.startswith("agent.") else "low"
         records.sort(key=lambda r: r["last_seen_at"] or "", reverse=True)
@@ -1330,10 +1351,11 @@ def _evaluate_duplicate_records(cur: Any, tenant_id: int, now: datetime) -> int:
             severity,
             now,
             {
+                "device_id": str(device_id),
                 "platform": platform,
                 "entity_type": entity_type,
-                "hostname": norm,
-                "client_id": client_key or None,
+                "hostname": computer_name,
+                "client_id": str(client_id),
             },
             {
                 "record_count": len(records),
@@ -1341,6 +1363,7 @@ def _evaluate_duplicate_records(cur: Any, tenant_id: int, now: datetime) -> int:
                 "records": records,
                 "offline_count": sum(1 for r in records if r["is_online"] in ("false", "False")),
             },
+            measured=True,
         )
         count += 1
     cur.execute(

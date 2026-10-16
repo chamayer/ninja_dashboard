@@ -317,7 +317,6 @@ def evaluate(*, dry_run: bool = True) -> dict[str, int]:
 
         ft_stale = _finding_type_id(cur, "cmdb_asset_stale")
         ft_wrong = _finding_type_id(cur, "cmdb_link_incorrect")
-        ft_dupe = _finding_type_id(cur, "duplicate_device_records")
         ft_unint = _finding_type_id(cur, "unintegrated_source_observed")
 
         # 1. stale — one actionable Hudu source record per finding.  A
@@ -387,13 +386,9 @@ def evaluate(*, dry_run: bool = True) -> dict[str, int]:
         counts["cmdb_link_incorrect"] = len(wrong_keys)
         counts["cmdb_link_incorrect_pages"] = sum(len(v) for v in wrong_by_client.values())
 
-        # A Hudu page that shares a name with multiple Computers is useful
-        # evidence, but not a distinct operational condition.  The identity
-        # resolver owns the one client-scoped duplicate-Computer Finding.  An
-        # empty key set retires legacy Hudu-only duplicate findings on this
-        # evaluator's next normal run.
-        dupe_keys: list[str] = []
-        counts["duplicate_device_records"] = 0
+        # A Hudu page that shares a name with multiple Computers is evidence,
+        # not a distinct condition: ingest.identity.findings owns
+        # duplicate_device_records (ADR-0032).
 
         # 4. unintegrated vendors seen through the aggregator
         cur.execute(_UNINTEGRATED, (TENANT_ID, _PLATFORM))
@@ -415,7 +410,6 @@ def evaluate(*, dry_run: bool = True) -> dict[str, int]:
         if not dry_run:
             _resolve_absent(cur, ft_stale, stale_keys, now, assessment_required=True)
             _resolve_absent(cur, ft_wrong, wrong_keys, now, assessment_required=True)
-            _resolve_absent(cur, ft_dupe, dupe_keys, now, assessment_required=True)
             _resolve_absent(cur, ft_unint, unint_keys, now, assessment_required=True)
         else:
             # Nothing was written, but be explicit rather than relying on it.

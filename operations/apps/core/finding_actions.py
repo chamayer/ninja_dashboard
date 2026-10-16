@@ -165,8 +165,57 @@ CAPABILITY_REJECT = FindingAction(
     eligibility_hint="Records the capability as not true for each selected product and closes the issue.",
 )
 
+# Computer identity (ADR-0032): each runs a recorded database operation.
+MERGE_COMPUTERS = FindingAction(
+    key="merge_computers",
+    label="Merge these Computers",
+    permission=LIFECYCLE_PERMISSION,
+    finding_types=frozenset({"duplicate_device_records"}),
+    requires_reason=True,
+    confirmation=(
+        "Merge the Computers each selected issue names into one? "
+        "Each merge is recorded and can be split again."
+    ),
+    eligibility_hint=(
+        "Not available when an issue names Computers proven to be different machines."
+    ),
+)
+
+CONFIRM_COMPUTERS_SEPARATE = FindingAction(
+    key="confirm_computers_separate",
+    label="Confirm separate machines",
+    permission=LIFECYCLE_PERMISSION,
+    finding_types=frozenset({"duplicate_device_records", "identity_conflict", "shared_serial"}),
+    requires_reason=True,
+    confirmation=(
+        "Record that the Computers each selected issue names are different machines? "
+        "They will not be proposed as duplicates or merged automatically again."
+    ),
+    eligibility_hint="Records an operator decision on each named Computer.",
+)
+
+SPLIT_COMPUTER_RECORDS = FindingAction(
+    key="split_computer_records",
+    label="Split as proposed",
+    permission=LIFECYCLE_PERMISSION,
+    finding_types=frozenset({"two_machines_on_one_computer"}),
+    requires_reason=True,
+    confirmation=(
+        "Split the proposed records off each selected Computer? They are matched again, "
+        "never to that Computer."
+    ),
+    eligibility_hint="The issue shows which machine stays and which records move.",
+)
+
+IDENTITY_ACTIONS = frozenset(
+    {MERGE_COMPUTERS.key, CONFIRM_COMPUTERS_SEPARATE.key, SPLIT_COMPUTER_RECORDS.key}
+)
+
 FINDING_ACTIONS = {
     BULK_RETIRE_COMPUTERS.key: BULK_RETIRE_COMPUTERS,
+    MERGE_COMPUTERS.key: MERGE_COMPUTERS,
+    CONFIRM_COMPUTERS_SEPARATE.key: CONFIRM_COMPUTERS_SEPARATE,
+    SPLIT_COMPUTER_RECORDS.key: SPLIT_COMPUTER_RECORDS,
     ARCHIVE_HUDU_ASSETS.key: ARCHIVE_HUDU_ASSETS,
     APPROVE_REMOTE_ACCESS_ALL.key: APPROVE_REMOTE_ACCESS_ALL,
     APPROVE_REMOTE_ACCESS_CLIENT.key: APPROVE_REMOTE_ACCESS_CLIENT,

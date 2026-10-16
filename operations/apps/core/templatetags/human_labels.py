@@ -297,6 +297,12 @@ def finding_detail_text(finding):
         return f"{n} candidates share hostname {d.get('hostname', '')}" if n else "hostname collision"
     if name == "duplicate_platform_record":
         return f"duplicate {d.get('platform', '?')} record"
+    if name == "two_machines_on_one_computer":
+        machines = d.get("machines") or []
+        names = [", ".join(m.get("hostnames") or []) or "?" for m in machines]
+        return f"{len(machines)} machines: {' / '.join(names)}" if machines else "two machines"
+    if name == "duplicate_device_records" and d.get("computer_count"):
+        return f"{d['computer_count']} Computers named {d.get('hostname', '')}"
     # ── software findings — canonical_name + publisher + reason ──
     if name in (
         "unauthorized_av", "unauthorized_rmm", "unauthorized_remote_access",

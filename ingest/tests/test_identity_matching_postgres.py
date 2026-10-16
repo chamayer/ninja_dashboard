@@ -64,6 +64,12 @@ CREATE TABLE operations.entity_observation_current (
     entity_key text NOT NULL, active boolean NOT NULL, last_seen_at timestamptz NOT NULL,
     canonical_data jsonb NOT NULL
 );
+CREATE TABLE operations.device_operator_decisions (
+    version integer NOT NULL, id uuid PRIMARY KEY, dimension varchar(80) NOT NULL,
+    value jsonb NOT NULL, reason text NOT NULL, set_by varchar(120) NOT NULL,
+    set_at timestamptz NOT NULL, tenant_id bigint NOT NULL, device_id uuid NOT NULL,
+    UNIQUE (tenant_id, device_id, dimension)
+);
 """
 
 
@@ -230,6 +236,19 @@ def test_duplicate_agents_on_one_serial_share_a_computer(cur):
     assert (
         match(cur, "pc-9", platform="SentinelOne", serial="GM13HWMH", online=True) == pc
     )
+
+
+def test_a_record_split_off_never_returns_to_that_computer(cur):
+    pc = computer(cur, "pc-split")
+    record(cur, pc, "Ninja")
+    cur.execute(
+        """INSERT INTO operations.device_operator_decisions
+           VALUES (1, %s, 'identity_excluded_records', '["LogMeIn|lmi-7"]', 'two machines',
+                   'user:7', now(), 1, %s)""",
+        (uuid.uuid4(), pc),
+    )
+    assert match(cur, "pc-split", key="lmi-7") is None
+    assert match(cur, "pc-split", key="lmi-8") == pc
 
 
 def test_placeholder_serials_never_match(cur):

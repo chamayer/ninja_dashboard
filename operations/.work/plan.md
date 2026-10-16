@@ -160,9 +160,20 @@ differences from the matcher.
   documentation serial). Production dry run 2026-10-16: 26 merges reviewed
   (6 excluded by those guards: Delfasco two machines, two clone pairs, two
   Hudu-only serials, one renamed pair online in both).
-- 4b remaining: finding producers (two machines on one Computer, name-only
-  groups as `duplicate_device_records`, `shared_serial` from active records,
-  `duplicate_platform_record`, `identity_conflict` wording) and their actions.
+- 4b built 2026-10-16 (uncommitted until 4a's first merges are verified):
+  migration 0309 (`two_machines_on_one_computer`, policy
+  `conditions-registry-3` reactivating `duplicate_device_records`, reworded
+  types, decision dimensions `identity_separate` / `identity_excluded_records`,
+  `split_computer_records`, `confirm_computers_separate`, old-keyed
+  `duplicate_platform_record` rows closed with a reason);
+  `ingest/identity/findings.py` (two machines with a proposed split; name-only
+  groups, with proven-different pairs listed); `shared_serial` from active
+  records with measured assessments; `duplicate_platform_record` per Computer
+  (Hudu: same layout and name, no differing serials); matcher and automatic
+  merges respect operator decisions; Issues actions Merge these Computers,
+  Confirm separate machines, Split as proposed (`identity_actions.py`).
+  Production dry run (read-only): 9 two-machine Computers (8 by serial, 1 by
+  name), 31 name-only groups (92 Computers, before the 26 automatic merges).
 - Re-check when a record's serial or VM UUID first appears or changes.
 - Merge relation and one merge operation for automatic and operator merges,
   extended from `views.py` `_merge_devices` (findings, participants and
@@ -240,7 +251,13 @@ before each push.
 
 ## Checkpoint and next action
 
-2026-10-16: ADR-0032 and ADR-0033 accepted (design commit `e778ef1`);
+2026-10-16 19:20 UTC: shipped `c4ed359`, `e29ed42`, `0b7af48`, `a44a834`
+(0306–0308 applied). Waiting for the first resolver run after 0308 to verify
+the automatic merges (about 26 expected); then commit and push 4b (0309), then
+workstream 5. Pre-existing test failures (same on HEAD): 11 ingest, 4
+Operations (condition catalog counts, admin form import).
+
+Earlier: ADR-0032 and ADR-0033 accepted (design commit `e778ef1`);
 lifecycle fix and migration 0305 pushed as `725f8ae` (deployment
 unverified). External review the same day: split semantics narrowed, history
 security and scope rules added, cleanup states given named finding types,

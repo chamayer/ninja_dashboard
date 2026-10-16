@@ -14,14 +14,16 @@ T0 = datetime(2026, 7, 13, tzinfo=UTC)
 
 
 class _Cursor:
-    def __init__(self, rows):
-        self.rows = rows
+    """Answers the operator-decision query, then PROVEN_SPLIT_SQL."""
+
+    def __init__(self, rows, separated=()):
+        self.results = [list(separated), rows]
 
     def execute(self, *_args, **_kwargs):
         pass
 
     def fetchall(self):
-        return self.rows
+        return self.results.pop(0)
 
 
 def _row(
@@ -81,6 +83,14 @@ def test_different_clients_and_empty_only_groups_never_merge():
         _row("e2", serials=["qqq111"], live=False, age=1),
     ]
     assert planned_proven_merges(_Cursor(rows)) == []
+
+
+def test_an_operator_decision_is_never_undone_by_a_merge():
+    rows = [
+        _row("a", serials=["abc123"]),
+        _row("b", serials=["abc123"], age=1),
+    ]
+    assert planned_proven_merges(_Cursor(rows, separated=[("b", "a")])) == []
 
 
 def test_an_empty_computer_with_the_same_last_known_serial_joins_the_live_one():

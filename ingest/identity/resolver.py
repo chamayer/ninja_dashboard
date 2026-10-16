@@ -19,12 +19,14 @@ from __future__ import annotations
 import hashlib
 import logging
 import uuid
+from datetime import UTC, datetime
 from typing import Any
 
 from psycopg.types.json import Json
 
 from ingest import db, device_cache_projector
 from ingest.conditions import record_assessment
+from ingest.identity import findings as identity_findings
 from ingest.identity import identity_entity_types
 from ingest.identity.matching import (
     IdentityMatchPolicy,
@@ -1196,6 +1198,7 @@ def planned_proven_merges(cur) -> list[tuple]:
     machines is never merged further (it raises "two machines on one
     Computer" instead). The oldest live Computer of each group survives.
     """
+    separated = _operator_separated_pairs(cur)
     cur.execute(PROVEN_SPLIT_SQL, (TENANT_ID,))
     rows = cur.fetchall()
     groups: dict[tuple, list[tuple]] = {}
@@ -1247,6 +1250,11 @@ def planned_proven_merges(cur) -> list[tuple]:
             seen |= member[5]
         if clash:
             continue
+        # An operator decision (confirmed separate, or records split off) is
+        # never undone by an automatic merge.
+        ids = [member[0] for member in members]
+        if any((a, b) in separated for a in ids for b in ids if a != b):
+            continue
         survivor = min(
             (member for member in members if member[2]), key=lambda m: (m[1], str(m[0]))
         )
@@ -1257,6 +1265,33 @@ def planned_proven_merges(cur) -> list[tuple]:
     return planned
 
 
+def _operator_separated_pairs(cur) -> set[tuple]:
+    """Computer pairs an operator kept apart, in both directions."""
+    cur.execute(
+        """
+        SELECT dec.device_id, k.value::uuid
+          FROM operations.device_operator_decisions dec,
+               jsonb_array_elements_text(dec.value) k
+         WHERE dec.tenant_id = %s AND dec.dimension = 'identity_separate'
+        UNION
+        SELECT dec.device_id, eo.device_id
+          FROM operations.device_operator_decisions dec,
+               jsonb_array_elements_text(dec.value) k
+          JOIN operations.entity_observation_current eo
+            ON eo.tenant_id = %s AND eo.platform = split_part(k.value, '|', 1)
+           AND eo.entity_key = substr(k.value, length(split_part(k.value, '|', 1)) + 2)
+         WHERE dec.tenant_id = %s AND dec.dimension = 'identity_excluded_records'
+           AND eo.device_id IS NOT NULL
+        """,
+        (TENANT_ID, TENANT_ID, TENANT_ID),
+    )
+    pairs: set[tuple] = set()
+    for a, b in cur.fetchall():
+        pairs.add((a, b))
+        pairs.add((b, a))
+    return pairs
+
+
 def merge_proven_splits(cur) -> int:
     """Merge Computers proven to be one machine; each merge is recorded."""
     planned = planned_proven_merges(cur)[:MAX_AUTOMATIC_MERGES_PER_RUN]
@@ -1264,7 +1299,8 @@ def merge_proven_splits(cur) -> int:
         label = "serial number" if kind == "serial" else "VM UUID"
         cur.execute(
             """
-            SELECT operations.merge_computers(%s, %s, %s, %s, 'process', NULL,
+            SELECT operations.merge_computers(%s::uuid, %s::uuid, %s::text, %s::jsonb,
+                                              'process', NULL::bigint,
                                               'ingest.identity.resolver')
             """,
             (
@@ -1375,13 +1411,44 @@ def _create_device_for_group(
 def _upsert_shared_serial_findings(cur, finding_type_id: int) -> int:
     """Upsert shared-serial findings with a UUID canonical subject.
 
-    JSON evidence retains text IDs for compatibility, but ``subject_id`` is a
-    typed Device UUID. Ordering by UUID text preserves the historical
-    deterministic subject selection without coercing the selected value to
-    text before insertion.
+    ADR-0032: the serials compared are those the active agent and VM records
+    of current Computers report now, not the stored Computer serial (which
+    missed 26 Computers). Automatic merges absorb most groups first; what
+    remains is two live installs of one source (a clone) or a Computer that
+    holds two machines. ``subject_id`` is the first Computer by UUID text.
+    Each finding gets a measured assessment and clears once its group is gone.
     """
     cur.execute(
         """
+        WITH reported AS (
+            -- The key keeps the Computer's stored spelling of the serial when
+            -- it is the same value, so existing findings keep their key.
+            SELECT DISTINCT d.tenant_id, d.client_id, d.id, d.canonical_hostname,
+                   lower(btrim(eo.canonical_data ->> 'serial_number')) AS serial_key,
+                   CASE WHEN lower(btrim(d.canonical_serial))
+                             = lower(btrim(eo.canonical_data ->> 'serial_number'))
+                        THEN btrim(d.canonical_serial)
+                        ELSE btrim(eo.canonical_data ->> 'serial_number') END AS serial
+              FROM operations.devices d
+              JOIN operations.entity_observation_current eo
+                ON eo.tenant_id = d.tenant_id AND eo.device_id = d.id
+             WHERE d.tenant_id = %s AND d.deleted_at IS NULL AND eo.active
+               AND (eo.entity_type LIKE 'agent.%%' OR eo.entity_type LIKE 'vm.%%')
+               AND eo.entity_key NOT LIKE 'device-health:%%'
+               AND LENGTH(BTRIM(eo.canonical_data ->> 'serial_number')) >= 4
+               AND LENGTH(REPLACE(
+                     LOWER(BTRIM(eo.canonical_data ->> 'serial_number')),
+                     LEFT(LOWER(BTRIM(eo.canonical_data ->> 'serial_number')), 1), ''
+                   )) > 0
+               AND NOT EXISTS (
+                   SELECT 1
+                   FROM operations.identity_value_rejections rejected
+                   WHERE rejected.value_kind = 'serial'
+                     AND rejected.enabled
+                     AND rejected.normalized_value
+                         = LOWER(BTRIM(eo.canonical_data ->> 'serial_number'))
+               )
+        )
         INSERT INTO operations.findings (
             id, version, tenant_id, finding_type_id, client_id,
             subject_type, subject_id, subject_layer,
@@ -1403,40 +1470,38 @@ def _upsert_shared_serial_findings(cur, finding_type_id: int) -> int:
             NOW(), NOW(), NOW()
         FROM (
             SELECT
-                d.tenant_id, d.client_id,
-                d.canonical_serial AS serial,
-                COUNT(*) AS device_count,
-                (ARRAY_AGG(d.id ORDER BY d.id::text))[1] AS first_device_id,
-                ARRAY_AGG(d.id::text ORDER BY d.id::text) AS device_ids,
-                ARRAY_AGG(d.canonical_hostname ORDER BY d.id::text) AS hostnames
-            FROM operations.devices d
-            WHERE d.tenant_id = %s
-              AND d.deleted_at IS NULL
-              AND COALESCE(d.canonical_serial, '') <> ''
-              AND LENGTH(BTRIM(d.canonical_serial)) >= 4
-              AND LENGTH(REPLACE(
-                    BTRIM(d.canonical_serial), LEFT(BTRIM(d.canonical_serial), 1), ''
-                  )) > 0
-              AND NOT EXISTS (
-                  SELECT 1
-                  FROM operations.identity_value_rejections rejected
-                  WHERE rejected.value_kind = 'serial'
-                    AND rejected.enabled
-                    AND rejected.normalized_value = LOWER(BTRIM(d.canonical_serial))
-              )
-            GROUP BY d.tenant_id, d.client_id, d.canonical_serial
-            HAVING COUNT(*) > 1
+                tenant_id, client_id,
+                min(serial COLLATE "C") AS serial,
+                COUNT(DISTINCT id) AS device_count,
+                (ARRAY_AGG(id ORDER BY id::text))[1] AS first_device_id,
+                ARRAY_AGG(DISTINCT id::text) AS device_ids,
+                ARRAY_AGG(DISTINCT canonical_hostname) AS hostnames
+            FROM (SELECT DISTINCT ON (id, serial_key) * FROM reported
+                   ORDER BY id, serial_key, serial COLLATE "C") per_computer
+            GROUP BY tenant_id, client_id, serial_key
+            HAVING COUNT(DISTINCT id) > 1
         ) sub
         ON CONFLICT (tenant_id, condition_key)
         WHERE condition_key > '' AND status IN ('open', 'acknowledged', 'investigating', 'suppressed')
         DO UPDATE SET
+            subject_id = EXCLUDED.subject_id,
             last_seen_at = NOW(),
             last_detected_at = NOW(),
             finding_details = EXCLUDED.finding_details
+        RETURNING id, condition_key, subject_id
         """,
-        (finding_type_id, TENANT_ID),
+        (TENANT_ID, finding_type_id),
     )
-    return cur.rowcount
+    rows = cur.fetchall()
+    now = datetime.now(UTC)
+    for finding_id, condition_key, subject_id in rows:
+        identity_findings.record_measured(
+            cur, TENANT_ID, finding_id, finding_type_id, condition_key, subject_id, now
+        )
+    identity_findings.resolve_absent(
+        cur, TENANT_ID, finding_type_id, [row[1] for row in rows], now
+    )
+    return len(rows)
 
 
 def _upsert_cross_client_serial_findings(cur, finding_type_id: int) -> int:

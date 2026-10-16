@@ -14,7 +14,8 @@ candidate selection:
 * Only a hard conflict excludes a candidate: a different usable serial, a
   different VM UUID, or a record of the same source and type that is live on
   the candidate at the same time as the incoming record. For an empty Computer
-  its last-known serial counts.
+  its last-known serial counts. A record an operator split off a Computer
+  never matches that Computer again.
 * Several candidates: the most recently active one is chosen (ties: the oldest
   Computer). The evaluator surfaces name-only groups as findings; nothing here
   creates a Computer to avoid a choice.
@@ -356,6 +357,17 @@ def _hard_conflict(
     is_online: bool | None,
 ) -> bool:
     """True when the candidate is proven to be a different machine."""
+    # An operator split this record off the candidate (migration 0309).
+    cur.execute(
+        """
+        SELECT 1 FROM operations.device_operator_decisions
+         WHERE tenant_id = %s AND device_id = %s AND dimension = 'identity_excluded_records'
+           AND value ? %s
+        """,
+        (tenant_id, device_id, f"{source_name}|{external_id}"),
+    )
+    if cur.fetchone() is not None:
+        return True
     cur.execute(
         """
         SELECT eo.active, eo.platform, eo.entity_type, eo.entity_key,

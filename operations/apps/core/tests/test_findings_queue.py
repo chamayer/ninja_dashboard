@@ -13,6 +13,9 @@ from apps.core.conditions.operator import operator_state
 from apps.core.finding_actions import (
     ARCHIVE_HUDU_ASSETS,
     BULK_RETIRE_COMPUTERS,
+    CONFIRM_COMPUTERS_SEPARATE,
+    MERGE_COMPUTERS,
+    SPLIT_COMPUTER_RECORDS,
     available_finding_actions,
 )
 from apps.core.templatetags.human_labels import finding_drilldown_query, humanize_label
@@ -373,6 +376,9 @@ def test_registered_retirement_action_requires_lifecycle_permission():
     assert _permissioned_actions(_FindingActionUser(may_manage_lifecycle=False)) == ()
     assert _permissioned_actions(_FindingActionUser(may_manage_lifecycle=True)) == (
         BULK_RETIRE_COMPUTERS,
+        MERGE_COMPUTERS,
+        CONFIRM_COMPUTERS_SEPARATE,
+        SPLIT_COMPUTER_RECORDS,
     )
 
 

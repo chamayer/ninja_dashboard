@@ -136,7 +136,9 @@ def test_cmdb_absent_closure_never_bypasses_missing_assessments():
     section = source[source.index("def _resolve_absent"):]
     assert "if not assessment_required:" in section
     assert "return" in section.split("if not assessment_required:", 1)[1]
-    assert section.count("assessment_required=True") >= 4
+    # Stale, incorrect link and unintegrated; duplicate Computers moved to
+    # ingest.identity.findings (ADR-0032), which also requires assessments.
+    assert section.count("assessment_required=True") >= 3
 
 
 def test_cmdb_client_findings_require_resolved_client_evidence():
