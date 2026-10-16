@@ -1,10 +1,42 @@
 # Active root implementation plan
 
+## Pointer — Computer identity and platform change history (design proposed 2026-10-16)
+
+Spans `ingest/identity`, `ingest/evaluator.py`, and Operations. Plan:
+`operations/.work/plan.md`; rules: `operations/docs/decisions/0032-*` and
+`0033-*`.
+That plan is authoritative for withdrawn-record and duplicate-agent behavior:
+central-work-queue **W6 is superseded** by it, and the duplicate-platform-record
+item of **W9 moved** into it. The rest of W9 stays below.
+
+## Carried-over unverified Jobs items (from historical Operations plan sections, 2026-10-15)
+
+Their code largely landed; these closing checks were never recorded as done.
+None is confirmed complete. Each needs a read-only check before it is closed
+or dropped.
+
+- J1 Jobs execution stabilization (`6a37b3c`, 0277): post-rollout check of
+  worker restarts, Run durations, queue drain, classifier batches.
+- J2 Jobs catalog consolidation (`4411b8a`, 0274): Jobs health after
+  rollout; report any remaining contained data claims.
+- J3 Software-update concurrency contract: confirm whether the writer-only
+  catalog/inventory contract exists or was overtaken by `577d611`/`d058249`.
+- J4 Jobs queue stabilization: contained-claim recovery, only if capacity is
+  still blocked.
+- J5 Jobs administration: durable schedule-override contract (no commit
+  found).
+- J6 Jobs schedule data correction (`f047eab`): confirm the live Jobs page
+  receives schedules.
+- J7 Jobs operator model (ADR-0027): final validation.
+- J8 Unified Jobs framework corrective (2026-09-30) and J9 Jobs dispatch and
+  capacity rework: confirm they are superseded by ADR-0026/0027 and later
+  capacity commits.
+
 ## Active plan — Central work queue (design awaiting approval)
 
 **Status (2026-10-15):** W1-W5 shipped and live (alertable, counts, decisions in the queue, one offline definition,
-dependency engine as the finding types registry + stored finding state, ADR 0031). Remaining: W6 withdrawn records, W7 jobs
-chain, W8 admin findings in the queue, W9 housekeeping. Open: severity of a vanished security agent; 922 stale-agent info
+dependency engine as the finding types registry + stored finding state, ADR 0031). Remaining: W7 jobs
+chain (W6 withdrawn records superseded 2026-10-15 by the Computer identity plan), W8 admin findings in the queue, W9 housekeeping. Open: severity of a vanished security agent; 922 stale-agent info
 findings unexplained; browser checks of the review table, Finding types page, comment prompts and Configuration field.
 `.work/central-work-queue-design.md` (principles, verified facts, work items W1-W9, phases, safeguards,
 decisions), with `.work/finding-type-review.md` and `.work/finding-dependency-review.md`.
@@ -85,8 +117,8 @@ runs already run hourly (40 completed, 1 failed by a DB restart, in 24 h; about 
 **Phase 2 W3 capability confirm/reject:** built, uncommitted (`capability_review_actions.py`); closes the 297 frozen
 `capability_review_candidate` findings with a recorded reason as each is judged. Nothing produces new ones yet.
 
-**W9 additions (2026-10-14):** duplicate-platform-record finding for same-class agent records linked to one computer
-(3 today); classify Hyper-V and VMware monitoring records so they never read as a second agent id (626 computers).
+**W9 additions (2026-10-14):** classify Hyper-V and VMware monitoring records so they never read as a second agent id
+(626 computers). The duplicate-platform-record finding moved to the Computer identity plan on 2026-10-15 (workstream 4).
 
 **Capability actions committed locally (593b5c0), not pushed.**
 

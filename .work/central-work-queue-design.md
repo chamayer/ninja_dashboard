@@ -55,10 +55,10 @@ acts on admin findings; whether `jobs_unmet_dependency` maps cleanly to the upst
 | W3 | Decisions in the queue | Register actions for undecided software (approve title, approve publisher, reject, investigate) and for capability review (confirm, reject), permission-gated, reusing the decision handlers and prompt resolution | M | no | none |
 | W4 | One offline definition | Decide and implement a single offline threshold for the agent and patching family (see D1) | S-M | maybe | decision D1 |
 | W5 | Dependency engine | `finding_type_dependencies` data (parent, dependent, kind) with an admin editor; a `dependency` rule in the policy (new policy version) attached to dependents; `record_assessment` adds a signal naming the open parent on the same scope; new "suppressed" attention state, an "N hidden" line on the parent and a reveal filter in the queue; tests for scope, chains and cycles | L | yes (+ policy version) | W4 |
-| W6 | Withdrawn records | Emitter computes the cause: replaced (timeline event, no finding), no source remains or a missing-agent finding exists (hidden under its parent), otherwise a low finding; details carry remaining sources and the replacement | M | no | W5 |
+| W6 | Withdrawn records — **superseded 2026-10-15** | Moved to the Computer identity plan (`operations/.work/plan.md`, workstream 7, ADR-0032); its replacement rule is an open decision there | — | — | — |
 | W7 | Jobs chain | `jobs_unmet_dependency` hidden under the upstream job's failure; retire the overlapping `software_queue_stalled` | M | no | W5 |
 | W8 | Admin findings in the queue | Spike first: a SQL view that gives both tables one row shape, read-only in the queue; then actions; no storage move | L | yes (view) | none |
-| W9 | Housekeeping | Retire the dormant and superseded types; find duplicate open rows across the two tables; look at the 2,534 withdrawn and the `unauthorized_remote_access` authorization gap | S-M | policy version | none; add a duplicate-platform-record finding for two same-class agent records linked to one computer (3 today, no finding); classify Hyper-V and VMware monitoring records so they never read as a second agent id (626 computers) |
+| W9 | Housekeeping | Retire the dormant and superseded types; find duplicate open rows across the two tables; look at the `unauthorized_remote_access` authorization gap | S-M | policy version | none; classify Hyper-V and VMware monitoring records so they never read as a second agent id (626 computers) |
 
 Also pending and separate: the local, uncommitted changes from this session (old classifier removal, ADR 0030,
 Issues context line, rare-limit preview).
@@ -69,7 +69,7 @@ Issues context line, rare-limit preview).
 |---|---|---|
 | 1 | W1, W2 | Safety first (nothing can alert by accident) and consistent numbers; small and independent |
 | 2 | W3 | Cuts the work: 15,193 undecided titles become actionable in the queue |
-| 3 | W4, W5, W6, W7 | Removes the noise (4,418 findings on 2,761 computers, 219 job symptoms, 2,534 withdrawn to about 63) |
+| 3 | W4, W5, W7 | Removes the noise (4,418 findings on 2,761 computers, 219 job symptoms); withdrawn records moved to the Computer identity plan |
 | 4 | W8 | Completes the single queue; the biggest and riskiest change to the page |
 | 5 | W9 | Clean up once the model is settled |
 
