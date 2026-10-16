@@ -495,6 +495,114 @@ def _lifecycle_target(
     return "active"
 
 
+def _device_lifecycle_target(
+    device: dict[str, Any],
+    evidence: dict[str, Any],
+    now: datetime,
+    offline_after_days: int,
+    retire_review_days: int,
+    client_offline_days: dict[str, int],
+) -> str:
+    """Apply the aging rules with the device's client override, if any."""
+    device_offline_days = client_offline_days.get(str(device["client_id"]), offline_after_days)
+    return _lifecycle_target(
+        evidence,
+        now,
+        device_offline_days,
+        max(retire_review_days, device_offline_days + 1),
+    )
+
+
+def _load_lifecycle_evidence(
+    cur: Any,
+    tenant_id: int,
+    device_ids: list[uuid.UUID] | None = None,
+) -> dict[uuid.UUID, dict[str, Any]]:
+    """Qualified lifecycle evidence rows per Computer (all, or only ``device_ids``)."""
+    cur.execute(
+        """
+        SELECT d.id, d.client_id, d.lifecycle_status,
+               apc.entity_type, apc.platform, et.lifecycle_evidence_mode,
+               apc.last_contact_at, apc.last_observed_at,
+               apc.last_power_state, apc.reported_online,
+               COALESCE(latest.canonical_data ? 'power_state', FALSE)
+                   AS has_power_state,
+               COALESCE(
+                   latest.canonical_data ? 'is_online'
+                   OR latest.canonical_data ? 'offline',
+                   FALSE
+               ) AS has_reported_online_state
+          FROM operations.devices d
+          JOIN operations.device_agent_presence_current apc
+            ON apc.tenant_id = d.tenant_id AND apc.device_id = d.id
+          JOIN operations.entity_types et
+            ON et.name = apc.entity_type
+          LEFT JOIN LATERAL (
+              SELECT o.canonical_data
+                FROM operations.entity_observation_current o
+               WHERE o.tenant_id = apc.tenant_id
+                 AND o.device_id = apc.device_id
+                 AND o.entity_type = apc.entity_type
+                 AND o.platform = apc.platform
+                 AND o.active
+               ORDER BY o.observed_at DESC, o.observation_id DESC
+               LIMIT 1
+          ) latest ON TRUE
+         WHERE d.tenant_id = %s
+           AND d.deleted_at IS NULL
+           AND d.lifecycle_status <> 'retired'
+           AND et.lifecycle_evidence_mode <> 'none'
+           AND (%s::uuid[] IS NULL OR d.id = ANY(%s::uuid[]))
+           AND EXISTS (
+               SELECT 1
+                 FROM operations.entity_observation_current current_observation
+                WHERE current_observation.tenant_id = d.tenant_id
+                  AND current_observation.device_id = d.id
+                  AND current_observation.active
+           )
+        """,
+        (tenant_id, device_ids, device_ids),
+    )
+    per_device: dict[uuid.UUID, dict[str, Any]] = {}
+    for row in cur.fetchall():
+        (
+            device_id,
+            client_id,
+            lifecycle_status,
+            entity_type,
+            platform,
+            mode,
+            last_contact_at,
+            last_observed_at,
+            last_power_state,
+            reported_online,
+            has_power_state,
+            has_reported_online_state,
+        ) = row
+        device = per_device.setdefault(
+            device_id,
+            {
+                "client_id": client_id,
+                "lifecycle_status": lifecycle_status,
+                "rows": [],
+            },
+        )
+        device["rows"].append(
+            {
+                "entity_type": entity_type,
+                "platform": platform,
+                "mode": mode,
+                "last_contact_at": last_contact_at,
+                "last_observed_at": last_observed_at,
+                "last_power_state": last_power_state,
+                "reported_online": reported_online,
+                "has_power_state": has_power_state,
+                "has_reported_online_state": has_reported_online_state,
+            }
+        )
+    return per_device
+
+
 def _resolve_lifecycle_findings_absent(
     cur: Any,
     tenant_id: int,
@@ -730,9 +838,11 @@ def _sync_source_withdrawal_lifecycle(
 ) -> int:
     """Move a known Computer to review when no source record qualifies as current.
 
-    This is review state, not retirement.  Any active observation, including
-    CMDB evidence, restores the Computer to active before qualified lifecycle
-    evidence can refine it to offline aging.  A source record's withdrawal is
+    This is review state, not retirement.  When current source evidence
+    returns (CMDB evidence included), the Computer leaves review for the state
+    the contact policy selects from its qualified lifecycle evidence, or for
+    active when it has none; one transition, never an intermediate active
+    that the contact policy reverses in the same run.  A source record's withdrawal is
     evidence; the derived lifecycle transition and audit event remain owned by
     this evaluator's lifecycle policy.  A current source record that is
     reported as archived/retired remains visible evidence, but its lifecycle
@@ -762,9 +872,47 @@ def _sync_source_withdrawal_lifecycle(
         """,
         (tenant_id, device_id, device_id),
     )
+    rows = cur.fetchall()
+    # A Computer whose source evidence is current again is handed to the
+    # contact policy, not forced to active. Forcing active made the contact
+    # policy (_sync_lifecycle_status, later in the same run) move it straight
+    # back, writing two opposite transitions every run for every Computer whose
+    # records are still listed but silent (~1,050 Computers, 2026-10).
+    restoring = [
+        current_device_id
+        for current_device_id, previous, has_current_evidence in rows
+        if has_current_evidence and previous != "active"
+    ]
+    contact_evidence: dict[uuid.UUID, dict[str, Any]] = {}
+    offline_after_days = retire_review_days = 0
+    client_offline_days: dict[str, int] = {}
+    if restoring:
+        offline_after_days, retire_review_days = device_status_settings.load(
+            cur, tenant_id
+        )
+        client_offline_days = device_status_settings.client_overrides(cur, tenant_id)
+        contact_evidence = _load_lifecycle_evidence(cur, tenant_id, restoring)
+
     affected = 0
-    for current_device_id, previous, has_current_evidence in cur.fetchall():
-        target = "active" if has_current_evidence else "pending_cleanup"
+    for current_device_id, previous, has_current_evidence in rows:
+        evidence = None
+        if not has_current_evidence:
+            target = "pending_cleanup"
+        else:
+            target = "active"
+            device = contact_evidence.get(current_device_id)
+            if device is not None:
+                selected, has_conflict = _select_lifecycle_evidence(device["rows"])
+                if selected is not None and not has_conflict:
+                    evidence = selected
+                    target = _device_lifecycle_target(
+                        device,
+                        selected,
+                        now,
+                        offline_after_days,
+                        retire_review_days,
+                        client_offline_days,
+                    )
         if target == previous:
             continue
         cur.execute(
@@ -806,6 +954,16 @@ def _sync_source_withdrawal_lifecycle(
                             if has_current_evidence
                             else "no_current_source_evidence"
                         ),
+                        **(
+                            {
+                                "contact_evidence_kind": evidence["kind"],
+                                "evidence_at": evidence["at"].isoformat(),
+                                "evidence_entity_type": evidence["entity_type"],
+                                "evidence_platform": evidence["platform"],
+                            }
+                            if evidence is not None
+                            else {}
+                        ),
                         "policy_version": _LIFECYCLE_POLICY_VERSION,
                         "evaluator_run_id": str(evaluator_run_id),
                     }
@@ -832,86 +990,7 @@ def _sync_lifecycle_status(
     """
     offline_after_days, retire_review_days = device_status_settings.load(cur, tenant_id)
     client_offline_days = device_status_settings.client_overrides(cur, tenant_id)
-    cur.execute(
-        """
-        SELECT d.id, d.client_id, d.lifecycle_status,
-               apc.entity_type, apc.platform, et.lifecycle_evidence_mode,
-               apc.last_contact_at, apc.last_observed_at,
-               apc.last_power_state, apc.reported_online,
-               COALESCE(latest.canonical_data ? 'power_state', FALSE)
-                   AS has_power_state,
-               COALESCE(
-                   latest.canonical_data ? 'is_online'
-                   OR latest.canonical_data ? 'offline',
-                   FALSE
-               ) AS has_reported_online_state
-          FROM operations.devices d
-          JOIN operations.device_agent_presence_current apc
-            ON apc.tenant_id = d.tenant_id AND apc.device_id = d.id
-          JOIN operations.entity_types et
-            ON et.name = apc.entity_type
-          LEFT JOIN LATERAL (
-              SELECT o.canonical_data
-                FROM operations.entity_observation_current o
-               WHERE o.tenant_id = apc.tenant_id
-                 AND o.device_id = apc.device_id
-                 AND o.entity_type = apc.entity_type
-                 AND o.platform = apc.platform
-                 AND o.active
-               ORDER BY o.observed_at DESC, o.observation_id DESC
-               LIMIT 1
-          ) latest ON TRUE
-         WHERE d.tenant_id = %s
-           AND d.deleted_at IS NULL
-           AND d.lifecycle_status <> 'retired'
-           AND et.lifecycle_evidence_mode <> 'none'
-           AND EXISTS (
-               SELECT 1
-                 FROM operations.entity_observation_current current_observation
-                WHERE current_observation.tenant_id = d.tenant_id
-                  AND current_observation.device_id = d.id
-                  AND current_observation.active
-           )
-        """,
-        (tenant_id,),
-    )
-    per_device: dict[uuid.UUID, dict[str, Any]] = {}
-    for row in cur.fetchall():
-        (
-            device_id,
-            client_id,
-            lifecycle_status,
-            entity_type,
-            platform,
-            mode,
-            last_contact_at,
-            last_observed_at,
-            last_power_state,
-            reported_online,
-            has_power_state,
-            has_reported_online_state,
-        ) = row
-        device = per_device.setdefault(
-            device_id,
-            {
-                "client_id": client_id,
-                "lifecycle_status": lifecycle_status,
-                "rows": [],
-            },
-        )
-        device["rows"].append(
-            {
-                "entity_type": entity_type,
-                "platform": platform,
-                "mode": mode,
-                "last_contact_at": last_contact_at,
-                "last_observed_at": last_observed_at,
-                "last_power_state": last_power_state,
-                "reported_online": reported_online,
-                "has_power_state": has_power_state,
-                "has_reported_online_state": has_reported_online_state,
-            }
-        )
+    per_device = _load_lifecycle_evidence(cur, tenant_id)
 
     affected = 0
     unknown_keys: set[str] = set()
@@ -988,12 +1067,13 @@ def _sync_lifecycle_status(
         if evidence is None:
             continue
 
-        device_offline_days = client_offline_days.get(str(device["client_id"]), offline_after_days)
-        target = _lifecycle_target(
+        target = _device_lifecycle_target(
+            device,
             evidence,
             now,
-            device_offline_days,
-            max(retire_review_days, device_offline_days + 1),
+            offline_after_days,
+            retire_review_days,
+            client_offline_days,
         )
         previous = device["lifecycle_status"]
         if target == previous:

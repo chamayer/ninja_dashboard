@@ -154,6 +154,21 @@ auto-resolved only when their respective evidence returns. Every automatic
 lifecycle transition remains in the immutable audit log with its policy
 version and evidence kind.
 
+## Amendment — 2026-10-16: one lifecycle decision per Computer per run
+
+"Restores the Computer to `active` before the normal qualified contact/power
+policy refines its state" (amendment of 2026-09-09) was implemented as two
+separate writes in one evaluator run. For a Computer whose record was still
+listed but silent, the first write set `active` and the second set it straight
+back, so every run appended two opposite `lifecycle.transition` events
+describing no change: 485,220 of 490,211 lifecycle events by 2026-10-16. When
+current source evidence returns, the evaluator now applies the contact policy
+in the same step and writes at most one transition, to the state that policy
+selects, or to `active` when there is no qualified lifecycle evidence.
+Migration 0305 removed the false events and recorded the removal as one
+`audit_log.cleanup` event; this narrows the append-only rule above for events
+that recorded no change.
+
 ## Amendment — 2026-09-09: source-record lifecycle qualification
 
 Source-record **presence** and a source's reported record lifecycle are

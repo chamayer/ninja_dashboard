@@ -1,3 +1,190 @@
+# Computer identity and platform change history (2026-10-16)
+
+## Status
+
+Active — the only active Operations plan. Design written 2026-10-16 for
+review; nothing implemented. Durable rules:
+`docs/decisions/0032-computer-identity-matching-and-merge.md` and
+`docs/decisions/0033-every-platform-change-is-recorded.md` (both Proposed).
+Replaces the 2026-10-15 version of this plan, whose review-only name matching
+was withdrawn after measurement. Absorbs central-work-queue W6 and the
+duplicate-record part of W9 (root plan). Figures are read-only production
+measurements from 2026-10-15 and 2026-10-16.
+
+## Goal
+
+Every source record belongs to the right Computer, splits heal, wrong merges
+can be undone, and every change the platform or an operator makes is recorded
+and visible on one full timeline per entity.
+
+## Fixed decisions (user, 2026-10-16)
+
+- An exact name match in the same client attaches automatically. Only a hard
+  conflict (usable serial or VM UUID) blocks it. Domain was dropped after
+  measurement: sources report it in different forms (3,377 single-serial
+  Computers would have conflicted).
+- Prefer a merged Computer with a recorded reason over a split or duplicate.
+  Merges keep the absorbed Computer as a tombstone with a "merged into"
+  pointer and are reversible; they extend the existing `_merge_devices`.
+- No hold for incomplete records: a record attaches by name at once, and the
+  re-check merges when a serial or VM UUID arrives.
+- History covers every change made by an automated process or an operator;
+  source-reported changes are already recorded. History is stored with its
+  entity, grouped by action, and shown on a full timeline that includes
+  related entities; a record's history shows on every Computer it was part of.
+- The Computer Activity tab becomes History.
+- Withdrawn from the 2026-10-15 plan: the automatic allowlist (serial, VM
+  UUID, source identity only), review-only name matching, the identity-review
+  finding for weak matches, the historical review of the 754 moves (measured:
+  every move followed a tombstone of the old Computer, 423 by
+  `reconcile_ninja_vmware_guest_duplicates` on 2026-09-10 and 4 by operator
+  merges; none shown wrong), and "no new event store for Activity".
+
+## Open decisions
+
+- Decided 2026-10-16 (ADR-0032): name variants, hard conflicts, same-name
+  merges, empty Computers, Ninja BIOS serial, same-source records (the
+  2026-07-13 rule, MAC supporting only), withdrawn records as history plus the
+  Hudu-only / stopped-VM finding, retired Computers shown in search, Computers
+  card links for active / retired / needs review.
+- Decided 2026-10-16: automatic retirement only when nothing lists the
+  machine (ADR-0032 "Retirement"); cleanup findings for what is still listed.
+  Open: the definition of "offline" (central-work-queue D1) for machines whose
+  agents are only silent.
+- Coverage-registry exemptions (queues, heartbeats, locks, dirty flags):
+  presented for approval before enforcement.
+- Whether `audit_log` becomes the history for entities with no other home or
+  is replaced (decided when the registry is mapped).
+
+## Workstreams
+
+### 1. Measurements before building
+- Daily change rate per Operations table (history volume).
+- Measured 2026-10-16: 91 empty Computers (no active records), all
+  `pending_cleanup`.
+- Replacement by name for withdrawn records (open decision): how many
+  unconfirmed replacements share the withdrawn record's name.
+- Lifecycle oscillation cause: 130,094 active → needs review and 129,824
+  back; 112,139 active → offline aging and 111,640 back (`audit_log`,
+  2026-07-31 to 2026-10-16).
+- Dry-run lists for remediation (workstream 5).
+
+### 2. Change history foundation (ADR-0033)
+- Action table and `operations.begin_change(...)`; trigger function that
+  writes per-entity history and rejects changes without an action; coverage
+  registry and its test; append-only grants.
+- First covered tables: `devices`, `entity_source_links` (action reference on
+  its existing history), the merge relation.
+
+### 3. Identity inputs and matching (ADR-0032)
+- Ninja BIOS serial first (`ingest/source_observations.py:320`,
+  `ingest/core/devices.py:196`).
+- Name normalization: 15-character prefix rule and separator-insensitive
+  comparison.
+- LogMeIn `last_seen_at` is mapped from `hostStateChangeDate`
+  (`ingest/connectors/logmein.py:123`), the last online/offline change, not a
+  last-seen time; map it to a correctly named field and keep `is_online` as
+  the liveness signal. Measured: 627 online hosts carry a state change older
+  than 7 days; 503 hosts are offline for more than 7 days.
+- `ingest/identity/matching.py`: live-Computer counting; serial matched
+  against active records' current values, not `canonical_serial`; hard
+  conflicts from `blocking_signal_keys` (`serial`, `vm_uuid`);
+  same-source records no longer block.
+- `ingest/identity/resolver.py`: every record through matching (no
+  `_promote_entry_groups` shortcut); step 5 merge of conflict-free same-name
+  Computers.
+- Validated link writer for every link change, including
+  `sync_entity_source_links_from_observations`, `ingest/source_events.py`
+  withdrawal updates and `entity_candidate_decisions.py`; pre-rule rows marked
+  by migration.
+
+### 4. Re-check, merge and split
+- Re-check when a record's serial or VM UUID first appears or changes.
+- Merge relation and one merge operation for automatic and operator merges,
+  extended from `views.py` `_merge_devices` (findings, participants and
+  software move to the survivor, tombstone gains a "merged into" pointer);
+  split action; reconcile with the existing merge-candidate queue (53 open);
+  stored name and serial projected from active records.
+- Findings: Computer split, two machines on one Computer, ambiguous name,
+  incomplete source record (24 hours), empty Computer; existing
+  `identity_conflict` and `duplicate_platform_record` kept.
+
+### 5. Remediation of the existing population (dry run first)
+- 26 Computers whose record serial is stored on another Computer; 13
+  complementary same-name groups (36 Computers); 30 conflict-free same-name
+  live groups (20 share one serial, 10 have no serial at all); 2 two-machine
+  Computers to split (GF-12/GF-32, DEL-PC01/DEL-LT1); 91 empty Computers.
+- Each dry-run list reviewed before the merges run.
+
+### 6. Lifecycle oscillation fix (implemented 2026-10-16, not yet pushed)
+- Cause: `_sync_source_withdrawal_lifecycle` forced `active` whenever a record
+  was listed, and `_sync_lifecycle_status` reverted it in the same run (two
+  opposite `audit_log` rows per run, ~1,050 Computers).
+- Fix: `ingest/evaluator.py` applies the contact policy inside the withdrawal
+  step (shared `_load_lifecycle_evidence`, `_device_lifecycle_target`); one
+  transition at most. Test:
+  `ingest/tests/test_evaluator_lifecycle_single_transition_postgres.py` (fails
+  on the old code, passes on the fix).
+- Cleanup (user: delete, no need to keep): migration 0305 removes 485,220
+  opposite-pair rows, merges 286 two-step transitions, records one
+  `audit_log.cleanup` row. Test: `test_migration_0305_postgres.py` (runs as
+  the forced-RLS owner). Production dry run matched the counts.
+- After deploy: verify no new same-run pairs and count residue written by the
+  old ingest code between migration and ingest restart.
+- Known pre-existing failure: `ingest/tests/test_evaluator_lifecycle_postgres.py`
+  fails on unmodified HEAD (its hand schema lacks `evaluator_config` and the
+  condition-policy tables the lifecycle findings now require).
+
+### 7. Carried from the 2026-10-15 plan (approved, to re-verify against ADR-0032)
+- Withdrawn-record finding correction (`ingest/evaluator.py` ~1691) — see
+  open decision.
+- Duplicate-agent cardinality per source and type: SentinelOne `agent.edr`
+  (14 Computers with two agents on one serial, both reporting; the other 2 of
+  the 16 are the two-machine Computers above), ScreenConnect `agent.remote_access` (9), Ninja `agent.rmm`
+  (3); Hudu `cmdb.asset` (225 Computers) not enabled until measured.
+- Ninja `vm.guest` ineligible for hostname selection; dry run of the 181
+  substantive name changes before projection.
+- Search over structured identity data (current and historical), each
+  Computer once with what matched.
+
+### 8. History coverage rollout (ADR-0033)
+- Findings and admin findings, clients and mappings, policies and
+  configuration, software decisions, users and permissions, projected values.
+
+### 9. History page
+- Rename Activity to History; full timeline across all records ever attached,
+  related entities, merged Computers; period marking; grouping by action;
+  filters by origin; keyset paging. Today it reads only the first Ninja
+  record (`views.py` `device_detail`).
+
+## Validation
+
+- Resolver tests per matching step and hard conflict; merge, split and
+  re-check tests; finding tests including placeholder and Ninja-field
+  exclusions.
+- History trigger, registry and timeline tests; migration tests on production
+  column types.
+- Dry-run reports reviewed before remediation; request smoke checks for
+  History; Django checks, ruff, `git diff --check`.
+
+## Rollout order
+
+1 measurements → 2 history foundation → 3 matching → 4 re-check, merge,
+split → 5 remediation → 6 lifecycle fix → 7 carried items → 8 history
+coverage → 9 History page. Each step is its own commit; migrations reviewed
+before each push.
+
+## Checkpoint and next action
+
+2026-10-16: ADR-0032 rewritten and ADR-0033 written (both Proposed); the
+2026-10-15 draft ADR file removed (it was never committed). Assumption audit
+done the same day: domain conflict dropped, second two-machine Computer found,
+re-enrollment timing corrected, merge rebased on the existing operator merge,
+SentinelOne duplicates corrected to 14. No code, commit or push. Next: user
+review of both ADRs, then workstream 1 measurements.
+
+---
+
 # Admin Health intervention experience (2026-10-12)
 
 ## Status
@@ -69,7 +256,10 @@ capability without changing Operations data models or navigation.
 
 ## Status
 
-In progress — complete the remaining live Jobs recovery and remove stale work
+**Historical (2026-10-15)** — not active, not verified complete. Code landed
+in `6a37b3c` (migration 0277); the post-rollout live checks below were not
+confirmed here and are carried to the root plan (J1).
+Original status: In progress — complete the remaining live Jobs recovery and remove stale work
 that can no longer run under the accepted Jobs model. The Metabase reporting
 parity audit below is paused at the user's direction while Jobs is completed.
 
@@ -192,7 +382,10 @@ or production data.
 
 ## Status
 
-In progress — consolidate the Jobs control plane around one registry and
+**Historical (2026-10-15)** — not active, not verified complete. Related code
+landed in `4411b8a` (0274) and `9fb33bd`; the Jobs-health check after rollout
+and the contained-data-claims report are carried to the root plan (J2).
+Original status: In progress — consolidate the Jobs control plane around one registry and
 validate the deployed scheduler, worker, and active Runs without a manual
 deployment.
 
@@ -706,7 +899,11 @@ authorization; automatic GitOps will roll it out.
 
 ## Status
 
-In progress — replace the conservative whole-run software catalog/inventory
+**Historical (2026-10-15)** — not active, not verified complete. Later work
+(`f1fae45`, `577d611` inventory rebuild, `d058249` classifier removal) may
+have overtaken it; whether the writer-only contract exists is carried to the
+root plan (J3).
+Original status: In progress — replace the conservative whole-run software catalog/inventory
 claims with a writer-only contract, while retaining durable execution safety.
 
 ## Jobs current-status clarity (2026-10-07)
@@ -1086,7 +1283,11 @@ loading, and `git diff --check` pass.
 
 ## Status
 
-In progress — production diagnosis found 17 queued Jobs, no running Jobs, and
+**Historical (2026-10-15)** — not active, not verified complete. Later capacity
+work (`76d5a20`, `d5be94c`) and the 2026-10-09 stabilization addressed the
+same area; the conditional contained-claim recovery is carried to the root
+plan (J4).
+Original status: In progress — production diagnosis found 17 queued Jobs, no running Jobs, and
 six contained resource claims from two interrupted source collectors. The
 worker and scheduler have current heartbeats, but the idle worker cannot make
 progress because capacity admission is not selecting runnable work.
@@ -1196,7 +1397,10 @@ Focused Issues tests (59), Django checks, targeted Ruff, template loading, and
 
 ## Status
 
-In progress — replace the diagnostic-first Job configuration page with an
+**Historical (2026-10-15)** — not active, not verified complete. No commit for
+the durable schedule-override contract was found; carried to the root plan
+(J5).
+Original status: In progress — replace the diagnostic-first Job configuration page with an
  administrator-facing Jobs administration page. It will show each Job's start
  method, current schedule, next run, latest outcome, enablement, capacity, and
  safe controls. Services is a parallel administrator surface for the scheduler
@@ -1230,7 +1434,10 @@ In progress — replace the diagnostic-first Job configuration page with an
 
 ## Status
 
-In progress — the Jobs list used direct reads of the protected schedule table.
+**Historical (2026-10-15)** — not active, not verified complete. The fix
+landed in `f047eab`; the live-page confirmation is carried to the root plan
+(J6).
+Original status: In progress — the Jobs list used direct reads of the protected schedule table.
 The Operations role correctly rejects those reads, but the page caught the
 error broadly and erased both schedule and historical-run summaries, producing
 false “Run manually” and “Not run yet” results. Use the existing restricted
@@ -1346,7 +1553,10 @@ separate contained-claim recovery under explicit safety review.
 
 ## Status
 
-Implementation in progress — ADR-0027 is accepted as the implementation-
+**Historical (2026-10-15)** — not active, not verified complete. ADR-0027 is
+accepted and later Jobs commits (`c1b9f10` and others) followed; its final
+validation is carried to the root plan (J7).
+Original status: Implementation in progress — ADR-0027 is accepted as the implementation-
 independent product and execution model. The Jobs list, Job detail/history,
 Job configuration, registry classification, and compatibility redirects are
 implemented in the working tree; focused validation is in progress.
@@ -1536,7 +1746,10 @@ interactive production operation.
 
 ## Status
 
-**Corrective implementation in progress.** Live validation on 2026-09-30
+**Historical (2026-10-15)** — not active, not verified complete. Later Jobs
+plans and ADR-0026/0027 likely supersede this direction; carried to the root
+plan for confirmation (J8).
+Original status: **Corrective implementation in progress.** Live validation on 2026-09-30
 found that an older stalled v1 run retained three `held` resource claims, and
 the claim query stopped at a resource-blocked head-of-line row. This prevented
 the worker from draining the durable queue and caused schedules whose retained
@@ -3377,7 +3590,10 @@ resolution semantics.
 
 ## Status
 
-**Implementation in progress.** This plan supersedes the
+**Historical (2026-10-15)** — not active, not verified complete. Later
+capacity commits (`91703d5`, `d5be94c`) and ADR-0026 likely supersede it;
+carried to the root plan for confirmation (J9).
+Original status: **Implementation in progress.** This plan supersedes the
 earlier capacity-three implementation direction. Commit `185892a` and migration
 0254 remain immutable history, but their lane/global-capacity policy is not the
 target design. Production was last verified with migrations 0251--0253 and a
