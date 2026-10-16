@@ -447,6 +447,15 @@ def _match_and_upsert() -> int:
         )
         material_changed = bool(cur.fetchone()[0])
         if material_changed:
+            # Change history (ADR-0033): record the matches that were added or
+            # removed, not the delete-and-reinsert of the whole set.
+            cur.execute(
+                "SELECT to_regclass('operations.cve_match_change_history') IS NOT NULL"
+            )
+            if cur.fetchone()[0]:
+                cur.execute(
+                    "SELECT operations.record_cve_match_changes(%s)", (_TENANT_ID,)
+                )
             # Preserve the exact affected identity before the next matcher
             # refresh replaces this set. Version matches are exact; product
             # level matches safely target installations by canonical name.

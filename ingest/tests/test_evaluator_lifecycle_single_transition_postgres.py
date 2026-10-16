@@ -38,14 +38,6 @@ def postgres_connection():
                 # Production column types (read from production 2026-10-16).
                 cur.execute(
                     """
-                    CREATE TABLE operations.evaluator_config (
-                        id uuid PRIMARY KEY,
-                        tenant_id bigint NOT NULL,
-                        evaluator_name varchar(80) NOT NULL,
-                        config jsonb NOT NULL,
-                        updated_at timestamptz NOT NULL,
-                        updated_by_id bigint NULL
-                    );
                     CREATE TABLE operations.v_device_source_record_lifecycle_current (
                         observation_id uuid NOT NULL,
                         tenant_id bigint NOT NULL,

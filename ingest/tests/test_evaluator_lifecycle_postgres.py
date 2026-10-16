@@ -102,9 +102,11 @@ def _prepare_track_a_schema(conn) -> None:
                 last_seen_at timestamptz NOT NULL,
                 last_detected_at timestamptz NOT NULL
             );
-            CREATE UNIQUE INDEX findings_open_condition_key
+            -- Production index (2026-10-16): uq_findings_active_condition_key_scope.
+            CREATE UNIQUE INDEX uq_findings_active_condition_key_scope
                 ON operations.findings (tenant_id, condition_key)
-                WHERE condition_key > '' AND status IN ('open', 'acknowledged');
+                WHERE condition_key > ''
+                  AND status IN ('open', 'acknowledged', 'investigating', 'suppressed');
             CREATE TABLE operations.devices (
                 id uuid PRIMARY KEY,
                 tenant_id bigint NOT NULL,
@@ -136,6 +138,16 @@ def _prepare_track_a_schema(conn) -> None:
                 id smallint PRIMARY KEY,
                 kind varchar(80) NOT NULL,
                 entity_type varchar(80) NOT NULL DEFAULT ''
+            );
+            -- Device status settings (production types, 2026-10-16); empty
+            -- means the defaults: offline after 7 days, review after 30.
+            CREATE TABLE operations.evaluator_config (
+                id uuid PRIMARY KEY,
+                tenant_id bigint NOT NULL,
+                evaluator_name varchar(80) NOT NULL,
+                config jsonb NOT NULL,
+                updated_at timestamptz NOT NULL,
+                updated_by_id bigint NULL
             );
         """)
         cur.execute(
@@ -222,6 +234,7 @@ def _prepare_track_a_schema(conn) -> None:
                 operations.entity_types TO ninja_ingest;
             GRANT SELECT, INSERT, UPDATE ON operations.findings TO ninja_ingest;
             GRANT SELECT ON operations.finding_types TO ninja_ingest;
+            GRANT SELECT ON operations.evaluator_config TO ninja_ingest;
         """)
 
 
@@ -235,7 +248,20 @@ def _set_app_role(cur) -> None:
     cur.execute("SELECT set_config('operations.tenant_id', '1', true)")
 
 
-def test_track_a_postgres_permissions_rls_and_atomic_audit(postgres_connection) -> None:
+def test_track_a_postgres_permissions_rls_and_atomic_audit(
+    postgres_connection, monkeypatch
+) -> None:
+    # Clearing a lifecycle finding is governed by the condition policy (a fresh
+    # assessment that may clear it, ADR-0021); that machinery has its own tests.
+    # Here the assessment write and the governed clearing are stubbed so the
+    # transitions, RLS, append-only audit and finding refresh can be checked.
+    monkeypatch.setattr(
+        "ingest.evaluator._record_lifecycle_assessment", lambda *args, **kwargs: None
+    )
+    monkeypatch.setattr(
+        "ingest.evaluator._resolve_lifecycle_findings_absent",
+        lambda *args, **kwargs: None,
+    )
     _prepare_track_a_schema(postgres_connection)
     device_id = uuid.uuid4()
     retired_device_id = uuid.uuid4()
@@ -437,11 +463,9 @@ def test_track_a_postgres_permissions_rls_and_atomic_audit(postgres_connection) 
 
     with postgres_connection.transaction(), postgres_connection.cursor() as cur:
         _set_ingest_role(cur)
+        # Recognized evidence again: no unknown-state finding is refreshed and
+        # the Computer is already active, so nothing is written.
         assert _sync_lifecycle_status(cur, 1, now, uuid.uuid4()) == 0
-
-    with postgres_connection.cursor() as cur:
-        cur.execute("SELECT status FROM operations.findings")
-        assert cur.fetchone()[0] == "resolved"
 
     with postgres_connection.cursor() as cur:
         cur.execute(

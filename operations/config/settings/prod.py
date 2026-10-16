@@ -37,6 +37,9 @@ DATABASES = {
             # ninja_* schemas readable when granted (managed=False models).
             "options": "-c search_path=operations,public",
             "connect_timeout": 5,
+            # Names this process in change history (ADR-0033) when a change is
+            # written without an explicit action.
+            "application_name": "operations",
         },
     },
 }

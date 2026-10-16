@@ -1,6 +1,6 @@
 # 0033 — Every platform change is recorded, with a full timeline per entity
 
-Status: Proposed
+Status: Accepted 2026-10-16; not yet implemented (see `operations/.work/plan.md`)
 Date: 2026-10-16
 
 ## Context
@@ -49,6 +49,21 @@ an operator is recorded. Changes reported by sources are already recorded and
 are out of scope. Pure mechanics (work queues, heartbeats, locks, dirty flags)
 are excluded only through the reviewed exemption list below.
 
+Classification of what is recorded (decided 2026-10-16):
+
+- Source evidence (observations, claims, relationship evidence, source events,
+  software installations) already has history and is out of scope.
+- Pure mechanics (queues, dirty flags, heartbeats, locks and capacity claims,
+  caches, projection progress, run logs) are exempt, each listed in the
+  registry with the test "not visible to users and not a decision".
+- Decisions and state are recorded: Computers, clients, findings including
+  changes to their details, merges, links, policies, configuration, operator
+  decisions, users and permissions, displayed values, and `cve_match` on the
+  product it concerns.
+- `software_device_readiness` and `device_windows_servicing_current` are
+  exempt: every change that matters to the Computer's story appears as a
+  finding change or as source evidence.
+
 ### Shape
 
 - An action record per change: when, who (operator, or process and version),
@@ -59,6 +74,30 @@ are excluded only through the reviewed exemption list below.
   time of the change.
 - Existing history mechanisms stay and are listed in the coverage registry;
   they gain the action reference where the timeline needs it.
+
+### Security and scope of history
+
+- Recorded columns are an allowlist per table, held in the coverage registry.
+  A column not on the list is never copied into history; adding a table
+  means deciding its columns.
+- Secret values are never stored. For credentials, tokens, keys and similar
+  columns (for example `operations.secrets`), history records only that the
+  value changed, when, and by whom.
+- Restricted and personal values follow the entity's own visibility: a column
+  shown only with an explicit reveal (restricted evidence) is recorded
+  redacted, with the reveal itself recorded as an action.
+- History tables carry the entity's tenant and client and get the same
+  row-level security as the entity; runtime roles append, never update or
+  delete; reading history requires the permission that reads the entity.
+- Actions are tenant-scoped or global. A change to a table without a tenant
+  (catalog and policy rows such as `finding_types`, `entity_types`,
+  `eol_product_map`) is recorded once, without a tenant or client, and shown on
+  every timeline that relates to it. `cve_match` carries a tenant and is
+  recorded under it, without a client.
+- The registry covers every table the platform or an operator changes,
+  including those outside the `operations` schema (users, groups and
+  permissions in Django's tables, if they are used there); which schemas and
+  tables are in scope is listed during the measurement workstream.
 
 ### Full timeline per entity
 
@@ -77,22 +116,32 @@ are excluded only through the reviewed exemption list below.
 
 ### Lifecycle history
 
-The 484,016 existing rows are kept: they are a true record of what the
-evaluator did. The oscillation is fixed at its cause, which is diagnosed and
-measured before any change. Existing oscillation rows are marked with the fix
-that ended them so the timeline can collapse them. New lifecycle entries add a
-readable reason, the evidence values (source and time) and the process
-version.
+The oscillation was diagnosed and fixed at its cause (commit `725f8ae`): two
+lifecycle steps disagreed in every evaluator run and each wrote its move.
+Migration 0305 deleted the 485,220 false rows (they recorded no change; the
+user decided not to keep them), merged 286 real changes that had been written
+through a false step, and recorded the removal as one `audit_log.cleanup`
+row. The real transitions remain and are carried into Computer history. New
+lifecycle entries add a readable reason, the evidence values (source and
+time) and the process version.
 
 ## Enforcement
 
 - `operations.begin_change(...)` creates the action record and sets it for
   the transaction. Database triggers on every covered table write the history
-  row in the same transaction and reject a change that has no action.
-- A coverage registry lists every Operations table as covered, source history,
-  or exempt with a reason. A test fails when a table is missing from the
-  registry or a covered table has no trigger. The initial exemptions are
-  presented for approval before enforcement.
+  row in the same transaction. Until a table's writers open explicit actions,
+  a change without one is recorded under an implicit action naming the
+  database role and application (`application_name` is `ingest` or
+  `operations`); the registry's `enforce_action` then makes a missing action
+  an error for that table.
+- A table rebuilt by delete and re-insert records its real differences from
+  the writer instead of a row trigger (`cve_match`, through
+  `operations.record_cve_match_changes`).
+- A coverage registry (`operations.change_history_registry`, migration 0306)
+  lists every Operations table as covered, own history, history store, or
+  exempt with a reason. A table missing from it raises the admin finding
+  `change_history_unclassified`; the migration test asserts every covered
+  table gets its history table and trigger.
 - Runtime roles may append history and action records but not update or
   delete them.
 - Timeline tests cover a merge chain, a record that moved, a split, and the
@@ -113,9 +162,12 @@ ties together everything one change touched.
   not discovered.
 - Every write path must open an action first; code that writes without one
   fails, by design.
-- `audit_log` either becomes the history for entities with no other home or is
-  replaced by per-entity history; decided when the coverage registry is
-  mapped.
+- `audit_log` is replaced (decided 2026-10-16). Its real rows are carried
+  into the per-entity history and action records, so past lifecycle
+  transitions, merges and operator decisions appear on the timelines; the table
+  becomes read-only once every writer uses the action records, and is kept,
+  not dropped. The false lifecycle transitions it held were removed by
+  migration 0305 before the carry-over.
 
 ## Supersedes or superseded by
 

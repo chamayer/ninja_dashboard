@@ -33,7 +33,15 @@ def init(dsn: str, min_size: int = 1, max_size: int = 4) -> None:
     global pool
     if not isinstance(pool, _NotInitialized):
         return
-    pool = ConnectionPool(dsn, min_size=min_size, max_size=max_size, open=True)
+    # application_name names this process in change history (ADR-0033): a
+    # change written without an explicit action is attributed to it.
+    pool = ConnectionPool(
+        dsn,
+        min_size=min_size,
+        max_size=max_size,
+        open=True,
+        kwargs={"application_name": "ingest"},
+    )
     log.info("Postgres pool initialized (min=%d, max=%d)", min_size, max_size)
 
 

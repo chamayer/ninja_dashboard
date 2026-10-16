@@ -2,10 +2,12 @@
 
 ## Status
 
-Active — the only active Operations plan. Design written 2026-10-16 for
-review; nothing implemented. Durable rules:
+Active — the only active Operations plan. Durable rules:
 `docs/decisions/0032-computer-identity-matching-and-merge.md` and
-`docs/decisions/0033-every-platform-change-is-recorded.md` (both Proposed).
+`docs/decisions/0033-every-platform-change-is-recorded.md` (both Accepted
+2026-10-16). The identity and history framework is not built. The lifecycle
+prerequisite (workstream 6) is shipped in `725f8ae` with migration 0305,
+deployed and verified 2026-10-16. New migrations start at 0306.
 Replaces the 2026-10-15 version of this plan, whose review-only name matching
 was withdrawn after measurement. Absorbs central-work-queue W6 and the
 duplicate-record part of W9 (root plan). Figures are read-only production
@@ -23,6 +25,11 @@ and visible on one full timeline per entity.
   conflict (usable serial or VM UUID) blocks it. Domain was dropped after
   measurement: sources report it in different forms (3,377 single-serial
   Computers would have conflicted).
+- Existing same-name Computers merge automatically only on a shared serial or
+  VM UUID; name-only groups get `duplicate_device_records`. A new record
+  matching several name-only candidates attaches to the most recently active
+  non-conflicting one with that finding; no new Computer (user, after the
+  2026-10-16 review).
 - Prefer a merged Computer with a recorded reason over a split or duplicate.
   Merges keep the absorbed Computer as a tombstone with a "merged into"
   pointer and are reversible; they extend the existing `_merge_devices`.
@@ -49,12 +56,24 @@ and visible on one full timeline per entity.
   card links for active / retired / needs review.
 - Decided 2026-10-16: automatic retirement only when nothing lists the
   machine (ADR-0032 "Retirement"); cleanup findings for what is still listed.
-  Open: the definition of "offline" (central-work-queue D1) for machines whose
-  agents are only silent.
+  Silent agents use the single offline setting already shipped (D1, W4/W5);
+  monitoring/network records count like agents.
+- Decided 2026-10-16: ADR-0032 and ADR-0033 accepted.
+- Decided 2026-10-16: Hudu duplicates = two or more current same-name assets
+  in a client without differing serials; archived beside current = replaced,
+  not a duplicate.
+- Decided 2026-10-16: Hudu documentation is required. Add a Hudu
+  `cmdb.asset` requirement to the requirement profiles (presence already holds
+  5,056 Hudu rows, so `missing_required_platform` can evaluate it); code
+  change: an archived Hudu asset does not satisfy the requirement. About 262
+  running Computers have no Hudu asset today.
 - Coverage-registry exemptions (queues, heartbeats, locks, dirty flags):
   presented for approval before enforcement.
-- Whether `audit_log` becomes the history for entities with no other home or
-  is replaced (decided when the registry is mapped).
+- Decided 2026-10-16: `audit_log` is replaced (rows carried into per-entity
+  history, table read-only and kept); history scope A out / B exempt / C
+  recorded incl. finding detail changes; readiness and servicing exempt.
+- Decided 2026-10-16: `cve_match` changes are recorded on the product
+  timeline.
 
 ## Workstreams
 
@@ -62,14 +81,37 @@ and visible on one full timeline per entity.
 - Daily change rate per Operations table (history volume).
 - Measured 2026-10-16: 91 empty Computers (no active records), all
   `pending_cleanup`.
-- Replacement by name for withdrawn records (open decision): how many
-  unconfirmed replacements share the withdrawn record's name.
-- Lifecycle oscillation cause: 130,094 active → needs review and 129,824
-  back; 112,139 active → offline aging and 111,640 back (`audit_log`,
-  2026-07-31 to 2026-10-16).
+- Measured and decided 2026-10-16: withdrawn records are history, linked to
+  a same-source re-registration (1,477 of 2,542 open withdrawn findings).
+- Lifecycle oscillation: diagnosed and fixed (workstream 6).
+- History scope: list every table the platform or an operator changes,
+  including any outside the `operations` schema, with its recorded-column
+  allowlist, secret and restricted columns, and tenant or global scope
+  (ADR-0033 "Security and scope of history").
 - Dry-run lists for remediation (workstream 5).
 
-### 2. Change history foundation (ADR-0033)
+Workstream 1 results (2026-10-16, read-only): Postgres has no statistics
+reset date, so rates come from counter snapshots. The heaviest writers
+rewrite rows without changing meaning (`findings` about 8,000 updates per
+evaluator burst, `job_schedules` run bookkeeping, `devices` cache
+re-stamps), so the trigger records only allowlisted columns and skips
+no-op updates. Finding details are mostly stable; volatile ones change at
+most daily. All 155 `operations` tables are classified (78 covered); Django's
+auth tables live in `operations`, so one schema is the whole scope. Every
+connection logs in as one role with no `application_name`, so ingest and
+Operations now set `ingest` / `operations` to name the implicit writer.
+`cve_match` is rebuilt by delete and re-insert and records its real
+differences from the matcher.
+
+### 2. Change history foundation (ADR-0033) — built 2026-10-16
+- Migration 0306: `change_actions`, `begin_change`, `record_change` trigger,
+  registry with 155 rows, 78 `<table>_change_history` tables,
+  `record_cve_match_changes`, `change_history_unclassified()` and its admin
+  finding type (policy `conditions-registry-2`); evaluator producer
+  `_evaluate_change_history_registry`. Tests: `test_migration_0306_postgres.py`
+  (production types, runtime roles, secrets, RLS, enforcement, cve_match).
+  The old lifecycle Postgres test harness repaired (production findings index,
+  `evaluator_config`).
 - Action table and `operations.begin_change(...)`; trigger function that
   writes per-entity history and rejects changes without an action; coverage
   registry and its test; append-only grants.
@@ -116,7 +158,7 @@ and visible on one full timeline per entity.
   Computers to split (GF-12/GF-32, DEL-PC01/DEL-LT1); 91 empty Computers.
 - Each dry-run list reviewed before the merges run.
 
-### 6. Lifecycle oscillation fix (implemented 2026-10-16, not yet pushed)
+### 6. Lifecycle oscillation fix (shipped 2026-10-16 as `725f8ae`; deployment verified)
 - Cause: `_sync_source_withdrawal_lifecycle` forced `active` whenever a record
   was listed, and `_sync_lifecycle_status` reverted it in the same run (two
   opposite `audit_log` rows per run, ~1,050 Computers).
@@ -176,12 +218,15 @@ before each push.
 
 ## Checkpoint and next action
 
-2026-10-16: ADR-0032 rewritten and ADR-0033 written (both Proposed); the
-2026-10-15 draft ADR file removed (it was never committed). Assumption audit
-done the same day: domain conflict dropped, second two-machine Computer found,
-re-enrollment timing corrected, merge rebased on the existing operator merge,
-SentinelOne duplicates corrected to 14. No code, commit or push. Next: user
-review of both ADRs, then workstream 1 measurements.
+2026-10-16: ADR-0032 and ADR-0033 accepted (design commit `e778ef1`);
+lifecycle fix and migration 0305 pushed as `725f8ae` (deployment
+unverified). External review the same day: split semantics narrowed, history
+security and scope rules added, cleanup states given named finding types,
+documentation state reconciled, name-only merges now go to a finding (user
+decision) — all uncommitted. Deployment of 0305 verified 2026-10-16 18:03:
+485,220 removed, 286 merged, 4,707 lifecycle rows left, first evaluator run
+after deploy wrote 0 opposite pairs. Next: workstream 1 measurements, then
+the history foundation.
 
 ---
 
