@@ -300,6 +300,15 @@ with both, 48 of them with an active agent).
 Hudu documentation is a coverage requirement: a Computer without a current
 (not archived) Hudu asset raises `missing_required_platform` for Hudu.
 
+Enforcement (migration 0312): Hudu joins the requirement catalog
+(`operations.agents`, which migration 0092 had kept CMDB-free because a CMDB
+is not installed software; this decision supersedes that note, since only
+catalog entries can be required or disabled per profile and client), with a
+row in every requirement profile and a global row. A source whose every
+current record of the Computer is archived, retired or decommissioned does
+not satisfy a requirement (`ingest/evaluator.py` `_PRESENCE_SATISFIES`,
+tested against the production view).
+
 A Ninja record that never reports a serial is not a finding by itself: of 8
 measured, 4 were withdrawn by Ninja, 3 sit beside a proper Ninja record of the
 same machine (a duplicate), and 1 is the only record of its machine.

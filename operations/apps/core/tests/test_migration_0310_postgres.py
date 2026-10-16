@@ -160,6 +160,40 @@ def test_the_finding_type_and_policy_register_once(conn):
     ).fetchone()[0] == 2
 
 
+def test_an_archived_only_source_does_not_satisfy_a_requirement(conn):
+    """ingest.evaluator._PRESENCE_SATISFIES against the production view."""
+    from ingest.evaluator import _PRESENCE_SATISFIES
+
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS operations.device_agent_presence_current (
+               tenant_id bigint NOT NULL, device_id uuid NOT NULL,
+               entity_type varchar(80) NOT NULL, platform varchar(80) NOT NULL)"""
+    )
+
+    def satisfied(*assets):
+        device = uuid.uuid4()
+        for archived in assets:
+            conn.execute(
+                """INSERT INTO operations.entity_observation_current VALUES
+                       (%s, 1, %s, %s, 'Hudu', 'cmdb.asset', '', %s, true, now(), %s::jsonb)""",
+                (uuid.uuid4(), device, HUDU, str(uuid.uuid4()), json.dumps({"archived": archived})),
+            )
+        conn.execute(
+            "INSERT INTO operations.device_agent_presence_current VALUES (1, %s, 'cmdb.asset', 'Hudu')",
+            (device,),
+        )
+        return conn.execute(
+            f"""SELECT count(*) FROM operations.device_agent_presence_current apc
+                 WHERE apc.device_id = %s {_PRESENCE_SATISFIES}""",
+            (device,),
+        ).fetchone()[0] == 1
+
+    assert satisfied(False)
+    assert satisfied(True, False)  # an archived asset beside a current one: replaced
+    assert not satisfied(True)
+    assert not satisfied(True, True)
+
+
 def test_rerunning_the_mapping_insert_is_harmless(conn):
     migration = importlib.import_module("apps.core.migrations.0310_listing_evidence_and_retirement")
     with conn.transaction():

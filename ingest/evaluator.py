@@ -1458,6 +1458,26 @@ def _evaluate_duplicate_records(cur: Any, tenant_id: int, now: datetime) -> int:
 # --------------------------------------------------------------------------
 
 
+# A source whose every current record of this Computer is archived, retired or
+# decommissioned does not satisfy a requirement (ADR-0032: an archived Hudu
+# asset is not documentation). Records the source no longer lists keep the
+# existing presence semantics. ``apc`` is the presence row being tested.
+_PRESENCE_SATISFIES = """
+    AND NOT (
+        EXISTS (SELECT 1 FROM operations.v_device_source_record_lifecycle_current rec
+                 WHERE rec.tenant_id = apc.tenant_id AND rec.device_id = apc.device_id
+                   AND rec.entity_type = apc.entity_type AND rec.platform = apc.platform
+                   AND rec.source_record_current
+                   AND rec.record_lifecycle IN ('archived', 'retired', 'decommissioned'))
+        AND NOT EXISTS (SELECT 1 FROM operations.v_device_source_record_lifecycle_current rec
+                 WHERE rec.tenant_id = apc.tenant_id AND rec.device_id = apc.device_id
+                   AND rec.entity_type = apc.entity_type AND rec.platform = apc.platform
+                   AND rec.source_record_current
+                   AND rec.record_lifecycle NOT IN ('archived', 'retired', 'decommissioned'))
+    )
+"""
+
+
 def _load_corroborated_devices(cur: Any, tenant_id: int) -> set[uuid.UUID]:
     """Devices some source saw online recently — allows 'confirmed' gaps."""
     cur.execute(
@@ -1702,12 +1722,13 @@ def _evaluate_coverage(
             # last heard from the DEVICE. Fall back only when contact is
             # unpopulated (some sources don't distinguish).
             cur.execute(
-                """
+                f"""
                 SELECT MAX(COALESCE(apc.last_contact_at, apc.last_observed_at))
                 FROM operations.device_agent_presence_current apc
                 WHERE apc.tenant_id = %s AND apc.device_id = %s
                   AND apc.entity_type = %s
                   AND (%s = 'any' OR apc.platform = %s)
+                  {_PRESENCE_SATISFIES}
                 """,
                 (tenant_id, dev_id, entity_type, platform, platform),
             )
@@ -2402,6 +2423,7 @@ def _auto_resolve(
                     AND apc.entity_type = (f.finding_details->>'entity_type')
                     AND apc.platform = (f.finding_details->>'platform')
                     AND COALESCE(apc.last_contact_at, apc.last_observed_at) > now() - INTERVAL '48 hours'
+                    {_PRESENCE_SATISFIES}
               )
             {clear_assessment}
             """,
