@@ -59,6 +59,12 @@ def postgres_connection():
                         record_lifecycle varchar(24) NOT NULL,
                         counts_as_current_computer_evidence boolean NOT NULL
                     );
+                    CREATE TABLE operations.device_operator_decisions (
+                        tenant_id bigint NOT NULL, device_id uuid NOT NULL,
+                        dimension varchar(80) NOT NULL, value jsonb NOT NULL,
+                        reason text NOT NULL, set_by varchar(120) NOT NULL,
+                        set_at timestamptz NOT NULL, version integer NOT NULL
+                    );
                     CREATE TABLE operations.change_actions (
                         id uuid PRIMARY KEY DEFAULT gen_random_uuid(), action text NOT NULL
                     );
@@ -264,3 +270,30 @@ def test_nothing_listing_a_machine_retires_it_and_reporting_restores_it(
         ]
         cur.execute("SELECT current_setting('operations.change_action_id', true)")
         assert cur.fetchone()[0] == ""
+
+
+def test_a_computer_confirmed_in_use_stays_in_review_until_it_reports(
+    postgres_connection,
+) -> None:
+    with postgres_connection.transaction(), postgres_connection.cursor() as cur:
+        cur.execute("SELECT set_config('operations.tenant_id', '1', true)")
+        kept = _add_computer(cur, "pending_cleanup", records=False)
+        back = _add_computer(cur, "pending_cleanup", last_contact=NOW - timedelta(hours=1))
+        for device in (kept, back):
+            cur.execute(
+                """INSERT INTO operations.device_operator_decisions
+                   VALUES (1, %s, 'in_use_confirmed', 'true', 'needed', 'user:7', now(), 1)""",
+                (device,),
+            )
+        _run(cur)
+        assert _transitions(cur, kept) == []
+        assert _transitions(cur, back) == [("pending_cleanup", "active")]
+        cur.execute(
+            """SELECT device_id = %s, value, reason FROM operations.device_operator_decisions
+                ORDER BY 1""",
+            (back,),
+        )
+        assert cur.fetchall() == [
+            (False, True, "needed"),
+            (True, False, "Cleared: the machine reports again."),
+        ]

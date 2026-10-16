@@ -207,8 +207,26 @@ SPLIT_COMPUTER_RECORDS = FindingAction(
     eligibility_hint="The issue shows which machine stays and which records move.",
 )
 
+CONFIRM_COMPUTERS_IN_USE = FindingAction(
+    key="confirm_computers_in_use",
+    label="Still in use",
+    permission=LIFECYCLE_PERMISSION,
+    finding_types=frozenset({"device_missing_from_source"}),
+    requires_reason=True,
+    confirmation=(
+        "Confirm the selected Computers are still in use? Each missing required agent "
+        "will be reported, and they will not be retired automatically."
+    ),
+    eligibility_hint="Clears itself when the machine reports again.",
+)
+
 IDENTITY_ACTIONS = frozenset(
-    {MERGE_COMPUTERS.key, CONFIRM_COMPUTERS_SEPARATE.key, SPLIT_COMPUTER_RECORDS.key}
+    {
+        MERGE_COMPUTERS.key,
+        CONFIRM_COMPUTERS_SEPARATE.key,
+        SPLIT_COMPUTER_RECORDS.key,
+        CONFIRM_COMPUTERS_IN_USE.key,
+    }
 )
 
 FINDING_ACTIONS = {
@@ -216,6 +234,7 @@ FINDING_ACTIONS = {
     MERGE_COMPUTERS.key: MERGE_COMPUTERS,
     CONFIRM_COMPUTERS_SEPARATE.key: CONFIRM_COMPUTERS_SEPARATE,
     SPLIT_COMPUTER_RECORDS.key: SPLIT_COMPUTER_RECORDS,
+    CONFIRM_COMPUTERS_IN_USE.key: CONFIRM_COMPUTERS_IN_USE,
     ARCHIVE_HUDU_ASSETS.key: ARCHIVE_HUDU_ASSETS,
     APPROVE_REMOTE_ACCESS_ALL.key: APPROVE_REMOTE_ACCESS_ALL,
     APPROVE_REMOTE_ACCESS_CLIENT.key: APPROVE_REMOTE_ACCESS_CLIENT,

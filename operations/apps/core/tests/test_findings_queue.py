@@ -13,6 +13,7 @@ from apps.core.conditions.operator import operator_state
 from apps.core.finding_actions import (
     ARCHIVE_HUDU_ASSETS,
     BULK_RETIRE_COMPUTERS,
+    CONFIRM_COMPUTERS_IN_USE,
     CONFIRM_COMPUTERS_SEPARATE,
     MERGE_COMPUTERS,
     SPLIT_COMPUTER_RECORDS,
@@ -379,6 +380,7 @@ def test_registered_retirement_action_requires_lifecycle_permission():
         MERGE_COMPUTERS,
         CONFIRM_COMPUTERS_SEPARATE,
         SPLIT_COMPUTER_RECORDS,
+        CONFIRM_COMPUTERS_IN_USE,
     )
 
 

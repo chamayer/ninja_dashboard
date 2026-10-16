@@ -12,6 +12,9 @@
 * Split as proposed (``two_machines_on_one_computer``): detaches the records
   the issue proposes with ``operations.split_computer_records``; the resolver
   matches them again, never to this Computer.
+* Still in use (``device_missing_from_source``): records ``in_use_confirmed``
+  with ``operations.confirm_computers_in_use``; the Computer returns to the
+  coverage check and is not retired automatically until it reports again.
 
 Each database function opens its own recorded change action. The issue is
 closed with the resolution; the producer raises it again if the condition is
@@ -30,6 +33,7 @@ from django.shortcuts import redirect
 from django.utils import timezone
 
 from .finding_actions import (
+    CONFIRM_COMPUTERS_IN_USE,
     CONFIRM_COMPUTERS_SEPARATE,
     MERGE_COMPUTERS,
     SPLIT_COMPUTER_RECORDS,
@@ -115,6 +119,12 @@ def _apply(cur, finding: Finding, action: FindingAction, reason: str, actor) -> 
             (finding.subject_id, proposed, reason, actor),
         )
         return "Proposed records split off; they are matched again."
+    if action.key == CONFIRM_COMPUTERS_IN_USE.key:
+        cur.execute(
+            "SELECT operations.confirm_computers_in_use(%s::uuid[], %s::text, %s::bigint)",
+            ([finding.subject_id], reason, actor),
+        )
+        return "Confirmed in use; missing agents are reported."
     raise ValueError("That action is not available.")
 
 

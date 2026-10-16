@@ -21,6 +21,7 @@ archived_still_listed       pending_cleanup  device_missing_from_source
 stopped_vm_only             pending_cleanup  device_missing_from_source
 documentation_only          pending_cleanup  device_missing_from_source
 nothing_listed              pending_cleanup  device_missing_from_source
+confirmed_in_use            pending_cleanup  (coverage check: missing agents)
 retire                      retired          (none; restored when it reports)
 ==========================  ===============  ===================================
 
@@ -42,6 +43,8 @@ CONTACT_POLICY_STATES = frozenset({"reporting", "silent", "archived_but_reportin
 CLEANUP_STATES = frozenset(
     {"archived_still_listed", "stopped_vm_only", "documentation_only", "nothing_listed"}
 )
+# Review without a cleanup finding: the operator confirmed the machine in use.
+REVIEW_STATES = CLEANUP_STATES | {"confirmed_in_use"}
 CLEANUP_REASONS = {
     "archived_still_listed": "archived_still_listed",
     "stopped_vm_only": "stopped_vm_only",
@@ -65,7 +68,11 @@ SELECT d.id, d.client_id, d.lifecycle_status,
            AS stopped,
        max(r.last_seen_at) AS last_seen_at,
        (array_agg(r.source_name ORDER BY r.last_seen_at DESC NULLS LAST)
-            FILTER (WHERE r.observation_id IS NOT NULL))[1] AS last_source
+            FILTER (WHERE r.observation_id IS NOT NULL))[1] AS last_source,
+       EXISTS (SELECT 1 FROM operations.device_operator_decisions dec
+                WHERE dec.tenant_id = d.tenant_id AND dec.device_id = d.id
+                  AND dec.dimension = 'in_use_confirmed' AND dec.value = 'true'::jsonb)
+           AS in_use_confirmed
   FROM operations.devices d
   LEFT JOIN (
       -- Ninja's device-health rows describe a Computer; they are not a record of it.
@@ -96,8 +103,17 @@ class Listing:
     stopped: bool
     last_seen_at: datetime | None
     last_source: str | None
+    in_use_confirmed: bool = False
 
     def state(self, now: datetime, review_days: int) -> str:
+        state = self._listing_state(now, review_days)
+        # An operator confirmed it in use: it stays in review and in the
+        # coverage check instead of a cleanup finding or retirement.
+        if self.in_use_confirmed and (state in CLEANUP_STATES or state == "retire"):
+            return "confirmed_in_use"
+        return state
+
+    def _listing_state(self, now: datetime, review_days: int) -> str:
         if self.archived and not self.documentation:
             if self.reporting:
                 return "archived_but_reporting"

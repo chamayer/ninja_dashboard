@@ -881,7 +881,7 @@ def _sync_source_withdrawal_lifecycle(
         evidence = None
         if state == "retire":
             target = "retired"
-        elif state in computer_listing.CLEANUP_STATES:
+        elif state in computer_listing.REVIEW_STATES:
             target = "pending_cleanup"
         elif previous == "retired" and not item.reporting:
             # A source lists it again but it does not report: stays retired.
@@ -901,6 +901,8 @@ def _sync_source_withdrawal_lifecycle(
                         retire_review_days,
                         client_offline_days,
                     )
+        if item.in_use_confirmed and item.reporting:
+            _clear_in_use_confirmation(cur, tenant_id, item.device_id)
         if owned is not None and (state not in computer_listing.CONTACT_POLICY_STATES
                                   or previous == "retired"):
             owned.add(item.device_id)
@@ -911,6 +913,20 @@ def _sync_source_withdrawal_lifecycle(
         ):
             affected += 1
     return affected
+
+
+def _clear_in_use_confirmation(cur: Any, tenant_id: int, device_id: uuid.UUID) -> None:
+    """The machine reports again: the operator's confirmation has done its job."""
+    cur.execute(
+        """
+        UPDATE operations.device_operator_decisions
+           SET value = 'false'::jsonb, reason = %s, set_by = 'ingest.evaluator',
+               set_at = now(), version = version + 1
+         WHERE tenant_id = %s AND device_id = %s AND dimension = 'in_use_confirmed'
+           AND value = 'true'::jsonb
+        """,
+        ("Cleared: the machine reports again.", tenant_id, device_id),
+    )
 
 
 _RETIRE_REASONS = {
@@ -1618,9 +1634,15 @@ def _evaluate_coverage(
         SELECT d.id, d.client_id, d.canonical_hostname, d.device_role,
                COALESCE(op.value, '{}'::jsonb) AS exemptions,
                d.os_group,
-               EXISTS(SELECT 1 FROM operations.device_agent_presence_current apc
-                      WHERE apc.tenant_id = d.tenant_id AND apc.device_id = d.id
-                        AND apc.entity_type LIKE 'agent.%%') AS in_agent_universe
+               (EXISTS(SELECT 1 FROM operations.device_agent_presence_current apc
+                       WHERE apc.tenant_id = d.tenant_id AND apc.device_id = d.id
+                         AND apc.entity_type LIKE 'agent.%%')
+                -- ADR-0032: an operator confirmed it in use although no agent
+                -- is left, so every required agent is reported missing.
+                OR EXISTS(SELECT 1 FROM operations.device_operator_decisions dec
+                          WHERE dec.tenant_id = d.tenant_id AND dec.device_id = d.id
+                            AND dec.dimension = 'in_use_confirmed'
+                            AND dec.value = 'true'::jsonb)) AS in_agent_universe
         FROM operations.devices d
         LEFT JOIN operations.device_operator_decisions op
           ON op.tenant_id = d.tenant_id
@@ -2439,6 +2461,11 @@ def _auto_resolve(
                   WHERE apc.tenant_id = f.tenant_id
                     AND apc.device_id = f.subject_id
                     AND apc.entity_type LIKE 'agent.%%'
+              )
+              AND NOT EXISTS (
+                  SELECT 1 FROM operations.device_operator_decisions dec
+                  WHERE dec.tenant_id = f.tenant_id AND dec.device_id = f.subject_id
+                    AND dec.dimension = 'in_use_confirmed' AND dec.value = 'true'::jsonb
               )
             {clear_assessment}
             """,
