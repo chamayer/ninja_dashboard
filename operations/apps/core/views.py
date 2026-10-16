@@ -3534,6 +3534,7 @@ def device_detail(request: HttpRequest, org_slug: str, device_id: str) -> HttpRe
             users = dict(get_user_model().objects.filter(tenant_id=1).values_list("id", "username"))
             activity.extend(_change_history_events(cur, history_ids, history_before, users))
             activity.extend(_record_history_events(cur, history_ids, history_before))
+            activity.extend(_audit_history_events(cur, history_ids, history_before, users))
             cur.execute(
                 """SELECT DISTINCT eo.external_id FROM operations.entity_observation_current eo
                     WHERE eo.tenant_id = 1 AND eo.device_id = ANY(%s::uuid[])
@@ -17007,6 +17008,48 @@ def _change_history_events(cur, computer_ids, before, users) -> list[dict]:
             + (f" — {values}" if values else "")
         )
     return list(events.values())
+
+
+def _audit_history_events(cur, computer_ids, before, users) -> list[dict]:
+    """Rows from the earlier audit log (lifecycle transitions, operator actions).
+
+    ADR-0033 replaces ``audit_log``; until its writers move to the change
+    history, its rows for these Computers are part of the same timeline.
+    """
+    cur.execute(
+        """
+        SELECT occurred_at, action, actor_kind, actor_id, before_state, after_state
+          FROM operations.audit_log
+         WHERE tenant_id = 1 AND entity_type = 'device'
+           AND entity_id = ANY(%s::uuid[])
+           AND (%s::timestamptz IS NULL OR occurred_at < %s::timestamptz)
+         ORDER BY occurred_at DESC
+         LIMIT %s
+        """,
+        (computer_ids, before, before, HISTORY_PAGE_SIZE),
+    )
+    events = []
+    for at, action, actor_kind, actor_id, before_state, after_state in cur.fetchall():
+        before_state, after_state = before_state or {}, after_state or {}
+        detail = ""
+        if action == "lifecycle.transition":
+            detail = (
+                f"{before_state.get('lifecycle_status', '?')} → "
+                f"{after_state.get('lifecycle_status', '?')}"
+                + (f" ({after_state['evidence_kind']})" if after_state.get("evidence_kind") else "")
+            )
+        events.append(
+            {
+                "kind": "audit",
+                "at": at,
+                "label": action,
+                "detail": detail or after_state.get("reason", ""),
+                "origin": "operator" if actor_kind == "user" else "process",
+                "actor": users.get(actor_id) or ("Operations" if actor_kind != "user" else ""),
+                "changes": [],
+            }
+        )
+    return events
 
 
 def _record_history_events(cur, computer_ids, before) -> list[dict]:
