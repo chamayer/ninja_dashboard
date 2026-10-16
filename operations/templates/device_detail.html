@@ -178,8 +178,8 @@
        href="?tab=details">Details</a>
     <a class="dd-tab {% if active_tab == 'patching' %}active{% endif %}"
        href="?tab=patching">Patching</a>
-    <a class="dd-tab {% if active_tab == 'activity' %}active{% endif %}"
-       href="?tab=activity">Activity</a>
+    <a class="dd-tab {% if active_tab == 'history' %}active{% endif %}"
+       href="?tab=history">History</a>
     <a class="dd-tab {% if active_tab == 'software' %}active{% endif %}"
        href="?tab=software">Software</a>
     {% endwith %}
@@ -435,14 +435,27 @@
     {% else %}<p class="muted">No current patch evidence is reported for this Computer.</p>{% endif %}
 </div>
 
-{% elif active_tab == 'activity' %}
+{% elif active_tab == 'history' %}
 <div class="card">
-    <h2 style="margin-top:0;">Activity from Ninja and Operations</h2>
+    <h2 style="margin-top:0;">History</h2>
     <p class="muted" style="font-size:0.82rem; margin-top:-0.4rem;">
-        Patch-state and install evidence, Ninja's collected activity messages,
-        and Operations issue events. Expand an event to inspect its source
-        detail and collection time.
+        Every recorded change to this Computer and to any Computer merged into it,
+        grouped by the action that made it, with source records removed, Ninja
+        activity and patch evidence, and issue events. Newest first.
     </p>
+    <form method="get" style="display:flex; gap:0.5rem; align-items:center; font-size:0.82rem; margin-bottom:0.6rem;">
+        <input type="hidden" name="tab" value="history">
+        <label>Made by
+            <select name="origin">
+                <option value="">Anyone</option>
+                {% for key, label in history_origins.items %}
+                <option value="{{ key }}" {% if history_origin == key %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+            </select>
+        </label>
+        <button type="submit">Apply</button>
+        {% if history_before %}<a href="?tab=history{% if history_origin %}&amp;origin={{ history_origin }}{% endif %}">Newest</a>{% endif %}
+    </form>
     {% if activity %}
     {% for e in activity %}
     <div class="tl-row">
@@ -454,6 +467,12 @@
         <span>{{ e.label|humanize_label }}
             {% if e.status %}<span class="muted" style="font-size:0.78rem;">({{ e.status }})</span>{% endif %}
             {% if e.detail %}<span class="muted" style="font-size:0.78rem;">— {{ e.detail }}</span>{% endif %}
+            {% if e.actor %}<span class="muted" style="font-size:0.75rem;"> · {{ e.actor }}</span>{% endif %}
+            {% if e.changes %}
+            <details style="font-size:0.8rem;"><summary class="muted" style="cursor:pointer;">{{ e.changes|length }} change{{ e.changes|length|pluralize }}</summary>
+                <ul style="margin:0.3rem 0 0 1rem; padding:0;">{% for c in e.changes %}<li>{{ c }}</li>{% endfor %}</ul>
+            </details>
+            {% endif %}
         </span>
         <span style="text-align:right;">
             {% if e.finding_id %}
@@ -468,8 +487,11 @@
     </details>
     {% endif %}
     {% endfor %}
+    {% if history_next_before %}
+    <p style="margin-top:0.8rem;"><a href="?tab=history&amp;before={{ history_next_before|date:'c' }}{% if history_origin %}&amp;origin={{ history_origin }}{% endif %}">Older</a></p>
+    {% endif %}
     {% else %}
-    <p class="muted">No activity recorded.</p>
+    <p class="muted">Nothing recorded{% if history_origin or history_before %} for this selection{% endif %}.</p>
     {% endif %}
 </div>
 

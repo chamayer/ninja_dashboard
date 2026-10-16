@@ -13,6 +13,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode, urlsplit
 
 from django.contrib import messages
+from django.contrib.auth import get_user_model
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied
 from django.core.paginator import Paginator
@@ -2777,7 +2778,10 @@ def device_detail(request: HttpRequest, org_slug: str, device_id: str) -> HttpRe
     # Preserve existing Identity bookmarks while giving the tab a name that
     # describes what operators find there.
     active_tab = "details" if requested_tab == "identity" else requested_tab
-    if active_tab not in ("overview", "activity", "software", "details", "patching"):
+    # The Activity tab is now History (ADR-0033); old links keep working.
+    if active_tab == "activity":
+        active_tab = "history"
+    if active_tab not in ("overview", "history", "software", "details", "patching"):
         active_tab = "overview"
     same_name_devices = []
     same_name_device_count = 0
@@ -3515,109 +3519,130 @@ def device_detail(request: HttpRequest, org_slug: str, device_id: str) -> HttpRe
                     "severity": None,
                 }
             )
-    # Ninja activity feed — only when the Activity tab is active, to
-    # avoid an extra query on hot paths. Requires a Ninja device_link
-    # (any device without one just falls back to the finding-derived
-    # timeline).
-    if active_tab == "activity":
-        ninja_external_id = None
-        for link in links:
-            if link.source.name.lower() == "ninja":
-                ninja_external_id = link.external_id
-                break
-        if ninja_external_id:
-            try:
-                nid = int(ninja_external_id)
-            except (TypeError, ValueError):
-                nid = None
-            if nid is not None:
-                with transaction.atomic(), connection.cursor() as cur:
-                    cur.execute("SET LOCAL operations.tenant_id = 1")
-                    cur.execute(
-                        """
-                        SELECT activity_time, activity_type, source_name,
-                               severity, subject, message, data, ingested_at
-                        FROM ninja_activities.activities
-                        WHERE device_id = %s
-                        ORDER BY activity_time DESC
-                        LIMIT 100
-                        """,
-                        [nid],
+    # History (ADR-0033): only when the tab is open, to keep the hot path
+    # lean. Ninja activity and patch evidence are read for every Ninja
+    # record the Computer (or a Computer merged into it) has had.
+    history_before = _parse_history_before(request.GET.get("before"))
+    history_origin = request.GET.get("origin") or ""
+    if history_origin not in HISTORY_ORIGINS:
+        history_origin = ""
+    history_next_before = None
+    if active_tab == "history":
+        with transaction.atomic(), connection.cursor() as cur:
+            cur.execute("SET LOCAL operations.tenant_id = 1")
+            history_ids = _history_computer_ids(cur, device.id)
+            users = dict(get_user_model().objects.filter(tenant_id=1).values_list("id", "username"))
+            activity.extend(_change_history_events(cur, history_ids, history_before, users))
+            activity.extend(_record_history_events(cur, history_ids, history_before))
+            cur.execute(
+                """SELECT DISTINCT eo.external_id FROM operations.entity_observation_current eo
+                    WHERE eo.tenant_id = 1 AND eo.device_id = ANY(%s::uuid[])
+                      AND eo.platform = 'Ninja' AND eo.external_id ~ '^[0-9]+$'""",
+                (history_ids,),
+            )
+            ninja_ids = [int(row[0]) for row in cur.fetchall()]
+        if ninja_ids:
+            with transaction.atomic(), connection.cursor() as cur:
+                cur.execute("SET LOCAL operations.tenant_id = 1")
+                cur.execute(
+                    """
+                    SELECT activity_time, activity_type, source_name,
+                           severity, subject, message, data, ingested_at
+                    FROM ninja_activities.activities
+                    WHERE device_id = ANY(%s)
+                      AND (%s::timestamptz IS NULL OR activity_time < %s::timestamptz)
+                    ORDER BY activity_time DESC
+                    LIMIT 100
+                    """,
+                    [ninja_ids, history_before, history_before],
+                )
+                for at, atype, sname, sev, subj, msg, raw_data, ingested_at in cur.fetchall():
+                    activity.append(
+                        {
+                            "kind": "ninja_event",
+                            "at": at,
+                            "severity": (sev or "").lower() or None,
+                            "label": subj or atype or "Ninja event",
+                            "status": msg or atype,
+                            "source": sname,
+                            "collected_at": ingested_at,
+                            "raw_data": json.dumps(
+                                raw_data, indent=2, sort_keys=True, default=str
+                            ),
+                        }
                     )
-                    for at, atype, sname, sev, subj, msg, raw_data, ingested_at in cur.fetchall():
-                        activity.append(
-                            {
-                                "kind": "ninja_event",
-                                "at": at,
-                                "severity": (sev or "").lower() or None,
-                                "label": subj or atype or "Ninja event",
-                                "status": msg or atype,
-                                "source": sname,
-                                "collected_at": ingested_at,
-                                "raw_data": json.dumps(
-                                    raw_data, indent=2, sort_keys=True, default=str
-                                ),
-                            }
-                        )
 
-                    # Patch facts are Ninja's retained evidence of patch state
-                    # and install outcomes.  They answer a different question
-                    # from the generic activity feed, so keep both in the one
-                    # device timeline and preserve the original payload.
-                    cur.execute(
-                        """
-                        SELECT pf.fact_type, pf.status, pf.severity,
-                               pf.kb_number, pf.name, pf.type,
-                               pf.installed_at, pf.ninja_observed_at,
-                               pf.last_observed_at, pf.data
-                        FROM ninja_patches.patch_facts pf
-                        WHERE pf.device_id = %s
-                        ORDER BY COALESCE(pf.installed_at, pf.ninja_observed_at,
-                                          pf.last_observed_at) DESC NULLS LAST
-                        LIMIT 100
-                        """,
-                        [nid],
+                # Patch facts are Ninja's retained evidence of patch state
+                # and install outcomes.  They answer a different question
+                # from the generic activity feed, so keep both in the one
+                # device timeline and preserve the original payload.
+                cur.execute(
+                    """
+                    SELECT pf.fact_type, pf.status, pf.severity,
+                           pf.kb_number, pf.name, pf.type,
+                           pf.installed_at, pf.ninja_observed_at,
+                           pf.last_observed_at, pf.data
+                    FROM ninja_patches.patch_facts pf
+                    WHERE pf.device_id = ANY(%s)
+                      AND (%s::timestamptz IS NULL
+                           OR COALESCE(pf.installed_at, pf.ninja_observed_at,
+                                       pf.last_observed_at) < %s::timestamptz)
+                    ORDER BY COALESCE(pf.installed_at, pf.ninja_observed_at,
+                                      pf.last_observed_at) DESC NULLS LAST
+                    LIMIT 100
+                    """,
+                    [ninja_ids, history_before, history_before],
+                )
+                for (
+                    fact_type,
+                    status,
+                    severity,
+                    kb_number,
+                    name,
+                    patch_type,
+                    installed_at,
+                    ninja_observed_at,
+                    last_observed_at,
+                    raw_data,
+                ) in cur.fetchall():
+                    event_at = installed_at or ninja_observed_at or last_observed_at
+                    patch_label = name or kb_number or "Patch record"
+                    activity.append(
+                        {
+                            "kind": "patch",
+                            "at": event_at,
+                            "severity": (severity or "").lower() or None,
+                            "label": patch_label,
+                            "status": status,
+                            "source": "Ninja patch data",
+                            "detail": " · ".join(
+                                part
+                                for part in (
+                                    fact_type.replace("_", " "),
+                                    kb_number,
+                                    patch_type,
+                                )
+                                if part
+                            ),
+                            "collected_at": last_observed_at,
+                            "raw_data": json.dumps(
+                                raw_data, indent=2, sort_keys=True, default=str
+                            ),
+                        }
                     )
-                    for (
-                        fact_type,
-                        status,
-                        severity,
-                        kb_number,
-                        name,
-                        patch_type,
-                        installed_at,
-                        ninja_observed_at,
-                        last_observed_at,
-                        raw_data,
-                    ) in cur.fetchall():
-                        event_at = installed_at or ninja_observed_at or last_observed_at
-                        patch_label = name or kb_number or "Patch record"
-                        activity.append(
-                            {
-                                "kind": "patch",
-                                "at": event_at,
-                                "severity": (severity or "").lower() or None,
-                                "label": patch_label,
-                                "status": status,
-                                "source": "Ninja patch data",
-                                "detail": " · ".join(
-                                    part
-                                    for part in (
-                                        fact_type.replace("_", " "),
-                                        kb_number,
-                                        patch_type,
-                                    )
-                                    if part
-                                ),
-                                "collected_at": last_observed_at,
-                                "raw_data": json.dumps(
-                                    raw_data, indent=2, sort_keys=True, default=str
-                                ),
-                            }
-                        )
 
+    for event in activity:
+        event.setdefault(
+            "origin", "source" if event["kind"] in ("ninja_event", "patch", "reboot") else "process"
+        )
+    if history_before is not None:
+        activity = [e for e in activity if e["at"] and e["at"] < history_before]
+    if history_origin:
+        activity = [e for e in activity if e["origin"] == history_origin]
     activity.sort(key=lambda e: (e["at"] or timezone.now()), reverse=True)
-    activity = activity[:100]
+    if len(activity) > HISTORY_PAGE_SIZE:
+        activity = activity[:HISTORY_PAGE_SIZE]
+        history_next_before = activity[-1]["at"]
 
     try:
         load_active_profile()
@@ -3650,6 +3675,10 @@ def device_detail(request: HttpRequest, org_slug: str, device_id: str) -> HttpRe
             "severe_open": severe_open,
             "device_health": device_health,
             "activity": activity,
+            "history_origins": HISTORY_ORIGINS,
+            "history_origin": history_origin,
+            "history_before": history_before,
+            "history_next_before": history_next_before,
             "exemptions": exemptions,
             "entity_type_choices": entity_type_choices,
             "coverage_policy_rows": coverage_policy_rows,
@@ -12021,7 +12050,7 @@ def patching_queue(request: HttpRequest) -> HttpResponse:
                             "device_id": did,
                         },
                     )
-                    + "?tab=activity"
+                    + "?tab=history"
                     if cid in client_slug_by_id
                     else None
                 ),
@@ -16893,6 +16922,121 @@ def software_decision_create(request: HttpRequest) -> HttpResponse:
     if next_url.startswith("/") and not next_url.startswith("//"):
         return redirect(next_url)
     return redirect("software_decisions_queue")
+
+
+# ── Computer History (ADR-0033) ──────────────────────────────────────────
+
+
+def _parse_history_before(value: str | None):
+    """Keyset paging cursor: an ISO timestamp, or None for the newest page."""
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=dt_timezone.utc)
+
+HISTORY_PAGE_SIZE = 100
+HISTORY_ORIGINS = {
+    "operator": "Operators",
+    "process": "Platform",
+    "migration": "Upgrades",
+    "source": "Sources",
+}
+_HISTORY_TABLE_LABELS = {
+    "devices": "Computer",
+    "findings": "Issue",
+    "device_operator_decisions": "Decision",
+    "computer_merges": "Merge",
+}
+
+
+def _history_computer_ids(cur, device_id) -> list:
+    """The Computer and every Computer merged into it (chains followed)."""
+    cur.execute(
+        """
+        WITH RECURSIVE merged(id) AS (
+            SELECT %s::uuid
+            UNION
+            SELECT m.absorbed_id FROM operations.computer_merges m
+              JOIN merged ON m.survivor_id = merged.id
+             WHERE m.split_at IS NULL
+        )
+        SELECT id FROM merged
+        """,
+        (device_id,),
+    )
+    return [row[0] for row in cur.fetchall()]
+
+
+def _change_history_events(cur, computer_ids, before, users) -> list[dict]:
+    """Recorded changes, one event per action (a merge moving 40 rows is one line)."""
+    cur.execute(
+        "SELECT * FROM operations.computer_history(%s::uuid[], %s, %s)",
+        (computer_ids, before, HISTORY_PAGE_SIZE),
+    )
+    events: dict = {}
+    for (
+        recorded_at, table, entity_key, operation, changed, before_values, after_values,
+        action_id, action, actor_kind, actor_id, process, reason,
+    ) in cur.fetchall():
+        event = events.get(action_id)
+        if event is None:
+            event = events[action_id] = {
+                "kind": "change",
+                "at": recorded_at,
+                "label": action if action != "implicit" else "recorded change",
+                "detail": reason,
+                "origin": actor_kind,
+                "actor": users.get(actor_id) or process or actor_kind,
+                "changes": [],
+            }
+        event["at"] = max(event["at"], recorded_at)
+        verb = {"I": "added", "U": "changed", "D": "removed"}[operation]
+        fields = ", ".join(changed or [])
+        values = ""
+        if operation == "U" and changed and len(changed) <= 3:
+            values = "; ".join(
+                f"{col}: {(before_values or {}).get(col)} → {(after_values or {}).get(col)}"
+                for col in changed
+            )
+        event["changes"].append(
+            f"{_HISTORY_TABLE_LABELS.get(table, table.replace('_', ' '))} {verb}"
+            + (f" ({fields})" if fields and operation == "U" else "")
+            + (f" — {values}" if values else "")
+        )
+    return list(events.values())
+
+
+def _record_history_events(cur, computer_ids, before) -> list[dict]:
+    """Source records that stopped being listed, with when (ADR-0032 "Withdrawn records")."""
+    cur.execute(
+        """
+        SELECT eo.withdrawn_at, eo.platform, eo.entity_type,
+               coalesce(eo.canonical_data ->> 'hostname', eo.external_id)
+          FROM operations.entity_observation_current eo
+         WHERE eo.tenant_id = 1 AND eo.device_id = ANY(%s::uuid[])
+           AND eo.withdrawn_at IS NOT NULL
+           AND eo.entity_key NOT LIKE 'device-health:%%'
+           AND (%s::timestamptz IS NULL OR eo.withdrawn_at < %s::timestamptz)
+         ORDER BY eo.withdrawn_at DESC
+         LIMIT %s
+        """,
+        (computer_ids, before, before, HISTORY_PAGE_SIZE),
+    )
+    return [
+        {
+            "kind": "record_withdrawn",
+            "at": at,
+            "label": f"{platform} record removed",
+            "detail": f"{entity_type.replace('.', ' ')} {name}",
+            "origin": "source",
+            "actor": platform,
+            "changes": [],
+        }
+        for at, platform, entity_type, name in cur.fetchall()
+    ]
 
 
 # ── Device merge helper (called by device_merge view) ───────────────────
