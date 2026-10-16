@@ -826,22 +826,31 @@ def test_operator_resolution_and_retirement_preserve_explicit_reasons():
     )
 
 
-def test_device_merge_preserves_finding_merge_provenance():
-    source = Path("apps/core/views.py").read_text(encoding="utf-8")
-    section = source[
-        source.index("def _merge_devices") : source.index("def merge_candidate_group_review")
+def _merge_function_sql() -> str:
+    # The merge moved from views._merge_devices into one SQL function used by
+    # operator and automatic merges (migration 0308); its behavior is covered
+    # end to end by test_migration_0308_postgres.py.
+    source = Path("apps/core/migrations/0308_computer_merge_and_split.py").read_text(
+        encoding="utf-8"
+    )
+    return source[
+        source.index("CREATE FUNCTION operations.merge_computers") : source.index(
+            "CREATE FUNCTION operations.split_computer_merge"
+        )
     ]
+
+
+def test_device_merge_preserves_finding_merge_provenance():
+    views = Path("apps/core/views.py").read_text(encoding="utf-8")
+    assert "operations.merge_computers" in views
+    section = _merge_function_sql()
     assert "'merge'" in section
     assert "from_device_id" in section
     assert "into_device_id" in section
 
 
 def test_device_merge_reconciles_condition_scopes_before_downstream_use():
-    source = Path("apps/core/views.py").read_text(encoding="utf-8")
-    section = source[
-        source.index("def _merge_devices") : source.index("def merge_candidate_group_review")
-    ]
-    assert "condition_participants_reconciled" in section
+    section = _merge_function_sql()
     assert "condition_participants" in section
     assert "condition_assessments" in section
     assert "ON CONFLICT DO NOTHING" in section

@@ -151,7 +151,18 @@ differences from the matcher.
   withdrawal updates and `entity_candidate_decisions.py`; pre-rule rows marked
   by migration.
 
-### 4. Re-check, merge and split
+### 4. Re-check, merge and split — 4a built 2026-10-16
+- 4a done: migration 0308 (`computer_merges`, `merge_computers`,
+  `split_computer_merge`, merge-relation guard); operator merge pages call the
+  shared function; resolver `merge_proven_splits` merges Computers proven one
+  machine (same serial or VM UUID from agent/VM records; never a Computer
+  holding two machines, never two live installs of one source, never on a
+  documentation serial). Production dry run 2026-10-16: 26 merges reviewed
+  (6 excluded by those guards: Delfasco two machines, two clone pairs, two
+  Hudu-only serials, one renamed pair online in both).
+- 4b remaining: finding producers (two machines on one Computer, name-only
+  groups as `duplicate_device_records`, `shared_serial` from active records,
+  `duplicate_platform_record`, `identity_conflict` wording) and their actions.
 - Re-check when a record's serial or VM UUID first appears or changes.
 - Merge relation and one merge operation for automatic and operator merges,
   extended from `views.py` `_merge_devices` (findings, participants and

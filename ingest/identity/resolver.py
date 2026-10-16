@@ -149,6 +149,15 @@ def drain_resolution(batch_size: int = 200, *, refresh_current: bool = True) -> 
     except Exception:
         log.exception("resolver: device promotion failed — continuing")
 
+    merged_count = 0
+    try:
+        with db.transaction() as cur:
+            cur.execute(f"SET LOCAL operations.tenant_id = {TENANT_ID}")
+            merged_count = merge_proven_splits(cur)
+    except Exception:
+        log.exception("resolver: automatic merge of proven splits failed — continuing")
+    promoted_count += merged_count
+
     # ADR-0012: the projector is the sole writer of the five device cache
     # columns. It must run before _sync_device_attributes, which copies that
     # cache into the layer entities — otherwise the facets propagate the
@@ -1125,6 +1134,149 @@ def _promote_unmatched_clusters(
     if promoted:
         log.info("resolver: promoted %d new devices", promoted)
     return promoted
+
+
+MAX_AUTOMATIC_MERGES_PER_RUN = 500
+
+# One row per current Computer: the usable serials and VM UUIDs its records
+# report (active records; for a Computer with none active, what they last
+# reported), whether it is live, and its age.
+PROVEN_SPLIT_SQL = """
+WITH rej AS (
+    SELECT normalized_value AS v FROM operations.identity_value_rejections
+     WHERE value_kind = 'serial' AND enabled
+), recs AS (
+    -- Hardware evidence only: agent and VM records. Documentation (a CMDB
+    -- asset's typed-in serial) is never merge proof.
+    SELECT d.id AS device_id, d.client_id, d.created_at, eo.active,
+           eo.platform || ':' || eo.entity_type AS stream,
+           coalesce((eo.canonical_data ->> 'is_online')::boolean, false) AS online,
+           lower(split_part(coalesce(eo.canonical_data ->> 'hostname', ''), '.', 1)) AS host,
+           lower(trim(eo.canonical_data ->> 'serial_number')) AS sn,
+           lower(nullif(trim(eo.canonical_data ->> 'vm_uuid'), '')) AS vu
+      FROM operations.devices d
+      JOIN operations.entity_observation_current eo
+        ON eo.tenant_id = d.tenant_id AND eo.device_id = d.id
+     WHERE d.tenant_id = %s AND d.deleted_at IS NULL
+       AND (eo.entity_type LIKE 'agent.%%' OR eo.entity_type LIKE 'vm.%%')
+       AND eo.entity_key NOT LIKE 'device-health:%%'
+), live AS (
+    SELECT device_id, bool_or(active) AS live FROM recs GROUP BY device_id
+), two_machines AS (
+    -- Two records of one source online at once under different names: two
+    -- machines already share this Computer; it is never merged further.
+    SELECT DISTINCT x.device_id
+      FROM recs x JOIN recs y
+        ON y.device_id = x.device_id AND y.stream = x.stream
+       AND x.active AND y.active AND x.online AND y.online
+       AND x.host <> '' AND y.host <> '' AND x.host < y.host
+)
+SELECT r.device_id, r.client_id, min(r.created_at) AS created_at, l.live,
+       coalesce(array_agg(DISTINCT r.sn) FILTER (
+           WHERE r.sn IS NOT NULL AND length(r.sn) >= 4
+             AND r.sn !~ '^(.)\\1*$'
+             AND r.sn NOT IN (SELECT v FROM rej)
+             AND (r.active OR NOT l.live)), '{}') AS serials,
+       coalesce(array_agg(DISTINCT r.vu) FILTER (
+           WHERE r.vu IS NOT NULL AND (r.active OR NOT l.live)), '{}') AS vm_uuids,
+       coalesce(array_agg(DISTINCT r.stream) FILTER (WHERE r.active AND r.online), '{}')
+           AS online_streams,
+       EXISTS (SELECT 1 FROM two_machines t WHERE t.device_id = r.device_id) AS two_machines
+  FROM recs r JOIN live l ON l.device_id = r.device_id
+ GROUP BY r.device_id, r.client_id, l.live
+"""
+
+
+def planned_proven_merges(cur) -> list[tuple]:
+    """Merges the resolver would make: (survivor, absorbed, kind, value).
+
+    Computers in one client that report the same usable serial or VM UUID are
+    one machine split apart (ADR-0032). A Computer is merged only when it
+    reports exactly one serial and at most one VM UUID, so one that holds two
+    machines is never merged further (it raises "two machines on one
+    Computer" instead). The oldest live Computer of each group survives.
+    """
+    cur.execute(PROVEN_SPLIT_SQL, (TENANT_ID,))
+    rows = cur.fetchall()
+    groups: dict[tuple, list[tuple]] = {}
+    for (
+        device_id,
+        client_id,
+        created_at,
+        live,
+        serials,
+        vm_uuids,
+        online_streams,
+        two_machines,
+    ) in rows:
+        if two_machines or len(serials) > 1 or len(vm_uuids) > 1:
+            continue
+        for kind, values in (("serial", serials), ("vm_uuid", vm_uuids)):
+            if values:
+                groups.setdefault((client_id, kind, values[0]), []).append(
+                    (
+                        device_id,
+                        created_at,
+                        live,
+                        tuple(serials),
+                        tuple(vm_uuids),
+                        frozenset(online_streams),
+                    )
+                )
+    planned: list[tuple] = []
+    absorbed: set = set()
+    for (_client_id, kind, value), members in sorted(
+        groups.items(), key=lambda item: str(item[0])
+    ):
+        members = [member for member in members if member[0] not in absorbed]
+        if len(members) < 2 or not any(member[2] for member in members):
+            continue
+        # A serial group whose members carry different VM UUIDs (or the
+        # reverse) is not proven one machine.
+        other = 4 if kind == "serial" else 3
+        if len({member[other] for member in members if member[other]}) > 1:
+            continue
+        # Two members each online in the same source: two live installs, so
+        # two machines sharing a serial (a cloned VM), not a split.
+        seen: set = set()
+        clash = False
+        for member in members:
+            if seen & member[5]:
+                clash = True
+                break
+            seen |= member[5]
+        if clash:
+            continue
+        survivor = min(
+            (member for member in members if member[2]), key=lambda m: (m[1], str(m[0]))
+        )
+        for member in members:
+            if member[0] != survivor[0]:
+                planned.append((survivor[0], member[0], kind, value))
+                absorbed.add(member[0])
+    return planned
+
+
+def merge_proven_splits(cur) -> int:
+    """Merge Computers proven to be one machine; each merge is recorded."""
+    planned = planned_proven_merges(cur)[:MAX_AUTOMATIC_MERGES_PER_RUN]
+    for survivor, absorbed, kind, value in planned:
+        label = "serial number" if kind == "serial" else "VM UUID"
+        cur.execute(
+            """
+            SELECT operations.merge_computers(%s, %s, %s, %s, 'process', NULL,
+                                              'ingest.identity.resolver')
+            """,
+            (
+                survivor,
+                absorbed,
+                f"Both Computers report the same {label}.",
+                Json({kind: value}),
+            ),
+        )
+    if planned:
+        log.info("resolver: merged %d Computers proven to be one machine", len(planned))
+    return len(planned)
 
 
 def _create_device_for_group(

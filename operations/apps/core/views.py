@@ -16822,183 +16822,39 @@ def software_decision_create(request: HttpRequest) -> HttpResponse:
 # ── Device merge helper (called by device_merge view) ───────────────────
 
 
-def _merge_devices(cur, survivor_id, loser_id: str, reason: str) -> dict:
+def _merge_devices(cur, survivor_id, loser_id, reason: str, *, actor_id: int | None = None) -> dict:
     """Combine two anchors for one computer without discarding current data.
 
-    ``survivor_id`` is a stable technical anchor, never a winning source.  The
-    caller selects it deterministically; all source observations remain
-    evidence for the resulting computer.
+    ``survivor_id`` is a stable technical anchor, never a winning source. The
+    work is ``operations.merge_computers`` (migration 0308), the one merge the
+    automatic resolver pass also uses: it moves observations, device findings,
+    condition scope and software to the survivor, tombstones the other
+    Computer with reason ``merged``, records the merge relation (so it can be
+    split later) and writes it to the change history under one action.
+    Source links follow the observations on the next sync.
     """
-    counts = {}
-    # 1. Source links are no longer repointed here.
-    #
-    #    This step used to UPDATE and DELETE `operations.device_links`, which
-    #    migration 0121 retired. Writing `entity_source_links` in its place was
-    #    considered and rejected: that table is derived state, maintained by
-    #    sync_entity_source_links_from_observations(), which also closes and
-    #    reopens the matching `entity_source_link_history` interval. A bare
-    #    entity_id UPDATE here would repoint the current row and leave the open
-    #    history interval attributing the link to the tombstoned device, losing
-    #    the record of when and why attachment moved. Reproducing that SCD-2
-    #    handling here would be a second copy of the logic, and calling the sync
-    #    function directly would mean granting the web app EXECUTE on a
-    #    SECURITY DEFINER function owned by a superuser.
-    #
-    #    Moving the observations in step 2 is the authoritative action: the
-    #    links are derived from exactly that evidence, so the next sync
-    #    repoints them with correct history. This is the ADR-0012 rule the whole
-    #    retirement enforces — a producer moves evidence, derived state follows.
-    counts["source_links_converge_on_next_sync"] = True
-
-    # 2. entity_observations
     cur.execute(
         """
-        UPDATE operations.entity_observation_current observation
-           SET device_id = %s
-          FROM operations.v_entity_observation_admin_metadata metadata
-         WHERE observation.observation_id = metadata.observation_id
-           AND metadata.tenant_id = 1
-           AND metadata.device_id = %s
+        SELECT operations.merge_computers(%s, %s, %s, '{}'::jsonb, 'operator', %s,
+                                          'operations.ui')
         """,
-        (survivor_id, loser_id),
+        (survivor_id, loser_id, reason, actor_id),
     )
-    counts["observations_moved"] = cur.rowcount
-
-    # 3. findings — subject_id (only device-subject findings)
+    merge_id = cur.fetchone()[0]
     cur.execute(
         """
-        UPDATE operations.findings
-           SET subject_id=%s,
-               finding_details = finding_details || jsonb_build_object(
-                   'merge', jsonb_build_object(
-                       'reason', 'merged_device',
-                       'from_device_id', %s::text,
-                       'into_device_id', %s::text
-                   )
-               )
-        WHERE tenant_id=1 AND subject_id=%s AND subject_type='device'
+        SELECT cardinality(moved_observation_ids), cardinality(moved_finding_ids)
+          FROM operations.computer_merges WHERE id = %s
         """,
-        (survivor_id, loser_id, survivor_id, loser_id),
+        (merge_id,),
     )
-    counts["findings_moved"] = cur.rowcount
-
-    # 4. Re-key condition scope and assessment rows atomically with the
-    # finding move. If the survivor already has the same scope, retain its
-    # current assessment and remove only the duplicate loser scope. This
-    # prevents stale loser participants from authorizing downstream actions.
-    cur.execute(
-        """
-        INSERT INTO operations.condition_participants
-            (tenant_id, row_kind, finding_id, participant_kind, participant_id, participant_role)
-        SELECT tenant_id, row_kind, finding_id, participant_kind, %s, participant_role
-          FROM operations.condition_participants
-         WHERE tenant_id = 1 AND participant_kind = 'device' AND participant_id = %s
-        ON CONFLICT DO NOTHING
-        """,
-        (survivor_id, loser_id),
-    )
-    cur.execute(
-        """
-        DELETE FROM operations.condition_participants
-         WHERE tenant_id = 1 AND participant_kind = 'device' AND participant_id = %s
-        """,
-        (loser_id,),
-    )
-    cur.execute(
-        """
-        INSERT INTO operations.condition_assessments
-            (tenant_id, row_kind, finding_id, participant_kind, participant_id,
-             participant_role, condition_identity, policy_version, policy_digest,
-             coverage, response, reevaluation_key, currentness, assessed_at)
-        SELECT tenant_id, row_kind, finding_id, participant_kind, %s,
-               participant_role, condition_identity, policy_version, policy_digest,
-               coverage, response, reevaluation_key, currentness, assessed_at
-          FROM operations.condition_assessments
-         WHERE tenant_id = 1 AND participant_kind = 'device' AND participant_id = %s
-        ON CONFLICT DO NOTHING
-        """,
-        (survivor_id, loser_id),
-    )
-    cur.execute(
-        """
-        DELETE FROM operations.condition_assessments
-         WHERE tenant_id = 1 AND participant_kind = 'device' AND participant_id = %s
-        """,
-        (loser_id,),
-    )
-    counts["condition_participants_reconciled"] = cur.rowcount
-
-    # 5. Current software inventory has one row per device/product.  Fold a
-    # collision into the survivor's row first, then move the remaining rows.
-    # The old merge action deleted the loser rows outright, which could make a
-    # confirmed identity decision erase inventory.
-    cur.execute(
-        """
-        UPDATE operations.software_installations_current winner
-           SET publisher = COALESCE(winner.publisher, losing.publisher),
-               version = CASE
-                   WHEN losing.last_observed_at > winner.last_observed_at
-                   THEN COALESCE(losing.version, winner.version)
-                   ELSE winner.version
-               END,
-               install_location = COALESCE(
-                   winner.install_location, losing.install_location
-               ),
-               install_date = COALESCE(winner.install_date, losing.install_date),
-               first_observed_at = LEAST(
-                   winner.first_observed_at, losing.first_observed_at
-               ),
-               last_observed_at = GREATEST(
-                   winner.last_observed_at, losing.last_observed_at
-               ),
-               refreshed_at = GREATEST(winner.refreshed_at, losing.refreshed_at)
-          FROM operations.software_installations_current losing
-         WHERE winner.tenant_id = 1
-           AND winner.tenant_id = losing.tenant_id
-           AND winner.client_id = losing.client_id
-           AND winner.device_id = %s
-           AND losing.device_id = %s
-           AND winner.canonical_name = losing.canonical_name
-        """,
-        (survivor_id, loser_id),
-    )
-    counts["software_rows_reconciled"] = cur.rowcount
-    cur.execute(
-        """
-        DELETE FROM operations.software_installations_current losing
-         WHERE losing.tenant_id = 1
-           AND losing.device_id = %s
-           AND EXISTS (
-               SELECT 1
-                 FROM operations.software_installations_current winner
-                WHERE winner.tenant_id = losing.tenant_id
-                  AND winner.client_id = losing.client_id
-                  AND winner.device_id = %s
-                  AND winner.canonical_name = losing.canonical_name
-           )
-        """,
-        (loser_id, survivor_id),
-    )
-    cur.execute(
-        """
-        UPDATE operations.software_installations_current
-           SET device_id = %s
-         WHERE tenant_id = 1 AND device_id = %s
-        """,
-        (survivor_id, loser_id),
-    )
-    counts["software_rows_moved"] = cur.rowcount
-
-    # 6. Tombstone loser
-    cur.execute(
-        """
-        UPDATE operations.devices
-        SET deleted_at=NOW(), deleted_reason=%s
-        WHERE tenant_id=1 AND id=%s
-        """,
-        (reason[:120], loser_id),
-    )
-    return counts
+    observations_moved, findings_moved = cur.fetchone()
+    return {
+        "merge_id": str(merge_id),
+        "observations_moved": observations_moved,
+        "findings_moved": findings_moved,
+        "source_links_converge_on_next_sync": True,
+    }
 
 
 # ── Merge-candidate group review ────────────────────────────────────────────
@@ -17042,7 +16898,13 @@ def merge_candidate_group_review(request: HttpRequest, candidate_id) -> HttpResp
         with transaction.atomic(), connection.cursor() as cur:
             cur.execute("SET LOCAL operations.tenant_id = 1")
             for loser in devices[1:]:
-                counts = _merge_devices(cur, survivor.id, loser.id, "operator.merged")
+                counts = _merge_devices(
+                    cur,
+                    survivor.id,
+                    loser.id,
+                    "An operator confirmed these records describe one computer.",
+                    actor_id=request.user.id,
+                )
                 for key, value in counts.items():
                     if isinstance(value, int):
                         total_counts[key] = total_counts.get(key, 0) + value
@@ -17133,7 +16995,13 @@ def device_merge(
         )
         with transaction.atomic(), connection.cursor() as cur:
             cur.execute("SET LOCAL operations.tenant_id = 1")
-            counts = _merge_devices(cur, survivor.id, loser.id, "operator.merged")
+            counts = _merge_devices(
+                cur,
+                survivor.id,
+                loser.id,
+                "An operator confirmed these records describe one computer.",
+                actor_id=request.user.id,
+            )
             merged_ids = {str(device_a.id), str(device_b.id)}
             for candidate in MergeCandidate.objects.select_for_update().filter(
                 tenant_id=1,
