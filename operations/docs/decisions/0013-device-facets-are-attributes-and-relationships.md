@@ -1,6 +1,6 @@
 # 0013 — Device facets are attributes and relationships, not entities
 
-Status: Accepted
+Status: Accepted; identity rule partially superseded by ADR-0032 (2026-10-16: "hostname alone never merges" no longer applies to a same-client name match with no hard conflict)
 Date: 2026-08-05
 Accepted: 2026-08-05
 

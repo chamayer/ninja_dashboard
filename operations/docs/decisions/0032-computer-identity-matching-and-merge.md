@@ -1,6 +1,6 @@
 # 0032 — Computer identity: matching, merge over split, and re-check
 
-Status: Proposed
+Status: Accepted 2026-10-16; not yet implemented (see `operations/.work/plan.md`)
 Date: 2026-10-16
 
 ## Context
@@ -144,14 +144,14 @@ finding.
 3. Name in the same client: attach when exactly one live Computer has the name
    and there is no hard conflict.
 4. Name plus MAC address: unchanged; a MAC supports a match, never decides one.
-5. Two or more live Computers have the name: they are merged and the record
-   attaches when they share a usable serial or VM UUID, or when their records
-   come from different sources with no hard conflict. When the evidence does
-   neither (for example two records of one source with no serial), a
-   Computer-split finding asks a person to decide. When they conflict and the record has no
-   serial or VM UUID to choose between them, the record gets its own Computer
-   and an ambiguous-name finding with an attach action per candidate.
-6. No match, or the only candidate conflicts: a new Computer.
+5. Two or more live Computers have the name: they are merged automatically
+   and the record attaches only when they share a usable serial or VM UUID.
+   Otherwise (name only, 2026-10-16 review) the record attaches to the
+   candidate it does not conflict with that has the most recent activity from
+   any source (ties: the oldest Computer), and `duplicate_device_records` names
+   the candidates: merge them, or confirm they are separate and move the record
+   (one recorded action). No new Computer is created for it.
+6. No match, or every candidate conflicts: a new Computer.
 
 No record is ever left unattached: every outcome places it on a Computer.
 
@@ -193,8 +193,13 @@ existing `_merge_devices`:
   today, with the merge recorded on each moved finding.
 - The survivor's timeline shows both full histories (ADR-0033). Merge chains
   resolve to the final survivor.
-- A split reverses a merge exactly, using the record links tagged with that
-  merge; the reversal is itself a recorded action with its reason.
+- A split undoes a merge's memberships, not everything since. It restores
+  the record memberships captured by the merge action to the re-opened
+  Computer; it keeps all later history where it was written; it moves other
+  rows (findings, installations, decisions) only when their merge provenance
+  proves they came from the absorbed Computer; and it recomputes derived state
+  and findings for both Computers. The split is itself a recorded action with
+  its reason.
 - Deleting a Computer is no longer how duplicates are resolved.
 
 ### Withdrawn records
@@ -235,17 +240,24 @@ automatically when any record of the machine reappears. Retired Computers are
 shown in search, labeled, and listed after active ones.
 
 While something still lists the machine, it is not retired; the state raises
-the finding that says what to do:
+the finding that says what to do. Subject is always the Computer.
 
-| State | Finding and actions |
-|---|---|
-| Only Hudu (current) is left | Archive in Hudu, or investigate the missing agents |
-| Only a stopped VM is left | Remove the VM from the host, or investigate |
-| Every Hudu asset archived, but a VM is still on a host or agents are still listed | Remove it from those sources; retired once nothing lists it |
-| Every Hudu asset archived, but an agent is active or a VM is running | Archived in Hudu but still reporting: restore the asset in Hudu, or decommission |
+| State | Finding type | Resolves when | Actions |
+|---|---|---|---|
+| Only Hudu (current) is left | `device_missing_from_source`, reason `documentation_only` | An agent or running VM record attaches, or every Hudu asset is archived (then retired), or an operator confirms it in use (the Computer returns to the coverage check) | Archive in Hudu; investigate the missing agents |
+| Only a stopped VM is left | `device_missing_from_source`, reason `stopped_vm_only` | The VM runs or an agent attaches, or the VM record is withdrawn (then retired), or an operator confirms it in use | Remove the VM from the host; investigate |
+| Every Hudu asset archived, but a VM is still on a host or agents are still listed (none active) | `device_missing_from_source`, reason `archived_still_listed` | Nothing lists it (then retired), or a record becomes active (next row) | Remove it from those sources |
+| Every Hudu asset archived, but an agent is active or a VM is running | **New** `archived_but_reporting` | A current Hudu asset exists again, or nothing is active (previous row) | Restore the asset in Hudu; decommission |
 
-"Active" means online, or seen by the source within 30 days. Machines whose
-agents are only silent stay with the offline handling. Measured 2026-10-16:
+`device_missing_from_source` keeps one open finding per Computer; its
+`reason` detail changes with the state and each change is recorded
+(ADR-0033).
+
+"Active" means online, or seen by the source within 30 days; a monitoring or
+network record (for example R-U-ON) counts like an agent. Machines whose
+agents are only silent stay with the offline handling: `device_offline` after
+the single offline setting (default 7 days) and Needs review after the review
+setting (default 30 days); they are not retired while a source lists them. Measured 2026-10-16:
 152 Computers would be retired automatically (92 with nothing left, 60 with
 every Hudu asset archived), 304 get a cleanup finding (65 Hudu only, 230
 stopped VM only, 9 archived with silent agents), and 41 are archived in Hudu
@@ -256,16 +268,27 @@ agent that is still reporting.
 ### Findings
 
 Existing finding types are reused; their producers are corrected to detect
-the measured cases. Only one type is new.
+the measured cases. Two types are new: "two machines on one Computer" (below)
+and `archived_but_reporting` (Retirement).
 
 | Situation | Finding type | Producer change | Action |
 |---|---|---|---|
 | One machine on two or more Computers, same serial or VM UUID | `shared_serial` (1 open) | Compare the serials active records report, not only stored serials (26 Computers missed today) | Merge |
-| One machine on two or more Computers, same name, awaiting a person (step 5) | `duplicate_device_records` (0 open, last 2026-09-10) | Restore the producer for step 5 cases | Merge or confirm separate |
+| Same-name Computers with no serial or VM UUID linking them, including where a new record was attached to one of them (step 5) | `duplicate_device_records` (0 open, last 2026-09-10) | Restore the producer for step 5 cases; subject: the Computer that received the record or the oldest candidate; resolves on merge or on "confirmed separate" | Merge; confirm separate and move the record |
 | Same name, proven different machines, or a record that cannot be placed between them | `identity_conflict` (41 open) | Reword: it no longer cites "hostname alone never merges" | Rename at the source, confirm, or attach |
-| Two machines on one Computer | **New** | Different usable serials or VM UUIDs among active records, or two agents of one source reporting different names within one day with no shared serial (2 today) | Split |
+| Two machines on one Computer | **New** `two_machines_on_one_computer` (subject: the Computer; resolves when the records no longer show two machines, after a split or a source correction) | Different usable serials or VM UUIDs among active records, or two agents of one source reporting different names within one day with no shared serial (2 today) | Split |
 | No active records | `device_missing_from_source` (open on all 92 empty Computers) | Add "replaced by" context when a same-name live Computer has a different serial | Retire or merge |
 | Two or more active records of one source and type on one Computer, including Ninja re-enrollment stubs that never report a serial | `duplicate_platform_record` (never fired) | Restore the producer | Remove the duplicate at the source |
+
+Hudu: two or more current (not archived) Hudu assets with the same name in
+one client are duplicates (`duplicate_platform_record`, action: archive the
+extra asset), unless their usable serials differ (different hardware). An
+archived asset beside a current one is replaced documentation, not a
+duplicate; it appears on the timeline, not as a finding (54 Computers measured
+with both, 48 of them with an active agent).
+
+Hudu documentation is a coverage requirement: a Computer without a current
+(not archived) Hudu asset raises `missing_required_platform` for Hudu.
 
 A Ninja record that never reports a serial is not a finding by itself: of 8
 measured, 4 were withdrawn by Ninja, 3 sit beside a proper Ninja record of the
@@ -305,9 +328,10 @@ same-name machines, so they are the only blockers.
 
 ## Consequences
 
-- Same-name Computers with no hard conflict are merged automatically,
-  including existing ones during remediation, after a dry run, when they
-  share a serial or VM UUID or come from different sources without conflict.
+- Same-name Computers are merged automatically, including existing ones
+  during remediation after a dry run, only when they share a serial or VM
+  UUID. Name-only groups (about 7 today) get `duplicate_device_records` for a
+  person to merge or confirm separate.
 - Existing links stay; their history is marked pre-rule.
 - Name history from deleted Computers before this decision is incomplete;
   that cannot be recovered.

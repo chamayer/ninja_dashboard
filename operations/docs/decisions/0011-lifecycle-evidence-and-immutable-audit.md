@@ -1,6 +1,6 @@
 # 0011 — Lifecycle evidence and immutable transition audit
 
-Status: Accepted; activation release prepared
+Status: Accepted; activation release prepared. Amended by ADR-0032 (2026-10-16): Hudu evidence and stopped VM records no longer keep a Computer out of review; retirement can be automatic when nothing lists a machine; the per-record withdrawn finding is replaced. Amended by ADR-0033: `audit_log` is replaced by per-entity history.
 Date: 2026-07-31
 
 ## Context
