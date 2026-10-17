@@ -193,10 +193,22 @@ differences from the matcher.
   `archived_but_reporting`, policy registry-4). Measured states (read-only,
   2026-10-16): 152 retire, 66 documentation only, 127 stopped VM only,
   104 archived but still listed, 42 archived but reporting, 656 silent.
-- 5b next: "still in use" action returns a Computer to the coverage check
-  (75 Computers / 176 agent removals missed today); 5c Hudu documentation
-  requirement (archived does not satisfy); 5d retire
-  `device_source_record_withdrawn` after verifying the new findings.
+- 5a `a58587e`, 5b `ae410df` (0311 "Still in use" / `in_use_confirmed`), 5c
+  `81dd85b` (0312 Hudu requirement) pushed and applied 2026-10-16 23:28–23:34.
+- 5d (retire `device_source_record_withdrawn`) waits for the first evaluator
+  run after 5a–5c: pre-run check (`scratchpad verify_withdrawn.sql`) found 334
+  open withdrawals of required sources on 77 Computers covered by nothing.
+- Workstream 7 done locally: search over every record (`f572141`), Computers
+  card links, name projection with vm.guest ineligible (`8387d51`, 0313;
+  dry run 154 renames, 23 labels kept).
+- Workstream 9 done locally: History tab (`ba11885`, 0314
+  `computer_history`; `3e6fe91` adds audit_log rows).
+- Found and fixed (`2dbfcf2`, 0315): merges left source links on the
+  tombstone; relationship projection failed every batch since the first
+  automatic merges. Remediation moves the 18 links, retires 28 edges.
+- Workstream 8 remaining: move audit_log writers (lifecycle transitions,
+  `views._audit`) to explicit change actions, then `enforce_action` and
+  make `audit_log` read-only.
 - 26 Computers whose record serial is stored on another Computer; 13
   complementary same-name groups (36 Computers); 30 conflict-free same-name
   live groups (20 share one serial, 10 have no serial at all); 2 two-machine

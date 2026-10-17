@@ -1,5 +1,24 @@
 # Operations deferred work backlog
 
+## Computer identity and history follow-ups (2026-10-17)
+
+- **Unknown OS skips every agent requirement** (needs a policy decision).
+  `ingest/evaluator.py` `_evaluate_coverage` skips a requirement when the
+  Computer's `os_group` is not in the agent's `supported_os_groups`;
+  `Unknown` is in none. Measured 2026-10-17: 161 Computers in the coverage
+  check have `os_group = 'Unknown'` (61 active, 15 offline, 85 review), e.g.
+  cc-01 lost Ninja on 2026-08-30 and nothing reports the missing agent.
+  Options: treat `Unknown` as applicable for agents supported on every OS, or
+  raise a separate "OS unknown" finding. Revisit before relying on coverage
+  for those Computers.
+- **Workstream 8 of the identity plan: replace `audit_log` writers.** 57 write
+  sites (14 files; `views._audit` alone 28) still write `audit_log`; the
+  History tab shows those rows. Move each to an explicit change action
+  (`operations.begin_change` with reason and evidence), then enable
+  `change_history_registry.enforce_action` per table and make `audit_log`
+  read-only (ADR-0033). Risk: most sites lack tests; do it per module with a
+  request test each.
+
 ## Current operator-surface task list
 
 1. **Finish the Admin boundary correction** — completed in the active
