@@ -16,8 +16,8 @@ Pipeline per run (device_id=None means full sweep):
      threshold). Requirements filter on device_scope and skip exempted
      entity_types. Confidence is capped at 'probable' unless another
      source saw the device online recently (corroboration).
-  4. Lifecycle — device_source_record_withdrawn,
-     device_missing_from_source, device_offline,
+  4. Lifecycle — device_missing_from_source (with its reason),
+     archived_but_reporting, device_offline,
      device_stale_data. (cross_client_conflict removed 2026-07-14 —
      see BLUEPRINT §1.7.)
   5. Auto-resolve for all of the above once conditions clear.
@@ -59,7 +59,6 @@ from shared.conditions.contracts import (
 
 log = logging.getLogger(__name__)
 
-_DEVICE_MISSING_MIN_AGE_HOURS = 1
 _CORROBORATION_WINDOW_HOURS = 48
 _LONG_OFFLINE_DAYS = 7
 _STALE_DATA_DAYS = 7
@@ -1932,55 +1931,12 @@ def _evaluate_device_lifecycle(
     now: datetime,
     source_problems: list[SourceCollectionProblem],
 ) -> int:
-    """Withdrawal review, offline, and stale-data findings."""
+    """Cleanup, archived-but-reporting, offline and stale-data findings."""
     count = 0
 
-    source_withdrawn_type_id = _get_finding_type_id(
-        cur, "device_source_record_withdrawn"
-    )
-    source_withdrawn_keys: set[str] = set()
-    if source_withdrawn_type_id:
-        threshold = now - timedelta(hours=_DEVICE_MISSING_MIN_AGE_HOURS)
-        cur.execute(
-            """
-            SELECT d.id, d.client_id, source.name, link.external_id, link.missing_since
-              FROM operations.devices d
-              JOIN operations.v_device_source_link link
-                ON link.device_id = d.id AND link.tenant_id = d.tenant_id
-              JOIN operations.sources source ON source.id = link.source_id
-             WHERE d.tenant_id = %s
-               AND d.deleted_at IS NULL
-               AND link.missing_since IS NOT NULL
-               AND link.missing_since <= %s
-               AND (%s::uuid IS NULL OR d.id = %s)
-            """,
-            (tenant_id, threshold, device_id, device_id),
-        )
-        for dev_id, dev_client_id, source_name, external_id, withdrawn_at in cur.fetchall():
-            ckey = _condition_key(
-                tenant_id,
-                dev_client_id,
-                dev_id,
-                "device_source_record_withdrawn",
-                f"{source_name}:{external_id}",
-            )
-            source_withdrawn_keys.add(ckey)
-            count += _upsert_lifecycle_finding(
-                cur,
-                tenant_id,
-                source_withdrawn_type_id,
-                dev_client_id,
-                dev_id,
-                ckey,
-                "medium",
-                "confirmed",
-                now,
-                {
-                    "source": source_name,
-                    "external_id": external_id,
-                    "withdrawn_at": withdrawn_at.isoformat() if withdrawn_at else None,
-                },
-            )
+    # device_source_record_withdrawn was retired (migration 0316): a withdrawn
+    # record is History; missing agents, cleanup and retirement have their
+    # own findings below and in the coverage check (ADR-0032).
 
     # ADR-0032: what still lists a Computer that nothing reports for. One
     # finding per Computer; its reason follows the state (each change is
@@ -2017,10 +1973,6 @@ def _evaluate_device_lifecycle(
                     "medium", "confirmed", now, details,
                 )
 
-    if source_withdrawn_type_id:
-        _resolve_lifecycle_findings_absent(
-            cur, tenant_id, source_withdrawn_type_id, source_withdrawn_keys, now, device_id
-        )
     if missing_type_id:
         _resolve_lifecycle_findings_absent(
             cur, tenant_id, missing_type_id, no_current_evidence_keys, now, device_id
