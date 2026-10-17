@@ -27,6 +27,22 @@ CREATE TABLE operations.findings (
     closed_at timestamptz NULL, last_seen_at timestamptz NOT NULL,
     finding_details jsonb NOT NULL, tenant_id bigint NOT NULL
 );
+-- The production trigger shape; the stub records what was refreshed.
+CREATE TABLE operations.refreshed (id uuid, how text);
+CREATE FUNCTION operations.refresh_finding_state(p_ids uuid[]) RETURNS integer
+LANGUAGE sql AS $$
+    INSERT INTO operations.refreshed SELECT unnest(p_ids), 'batch';
+    SELECT cardinality(p_ids);
+$$;
+CREATE FUNCTION operations.finding_state_after_finding_change() RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+    INSERT INTO operations.refreshed VALUES (NEW.id, 'row');
+    RETURN NULL;
+END $$;
+CREATE TRIGGER finding_state_findings_change AFTER UPDATE OF status ON operations.findings
+    FOR EACH ROW WHEN (OLD.status IS DISTINCT FROM NEW.status)
+    EXECUTE FUNCTION operations.finding_state_after_finding_change();
 INSERT INTO operations.finding_types (name, default_severity, runbook_path, description,
     finding_class, source_module, auto_resolvable, subject_scope, suppressed_by_approval,
     drilldown_evidence_key, concern_signal, default_decision_scope, alertable, display_name,
@@ -93,6 +109,16 @@ def test_open_withdrawn_findings_close_with_the_reason_and_others_stay(conn):
         ],
         key=str,
     )
+
+
+def test_closed_findings_are_refreshed_once_in_a_batch_and_the_trigger_is_back(conn):
+    assert conn.execute(
+        "SELECT how, count(*) FROM operations.refreshed GROUP BY 1"
+    ).fetchall() == [("batch", 1)]
+    assert conn.execute(
+        """SELECT tgenabled FROM pg_trigger
+            WHERE tgname = 'finding_state_findings_change'"""
+    ).fetchone()[0] == "O"
 
 
 def test_the_policy_marks_the_type_historical(conn):

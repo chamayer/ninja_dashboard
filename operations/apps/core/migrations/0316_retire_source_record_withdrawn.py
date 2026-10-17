@@ -31,6 +31,17 @@ SELECT operations.begin_change(
     '{"migration": "0316_retire_source_record_withdrawn", "finding_type": "device_source_record_withdrawn"}'::jsonb,
     'migration', NULL, 'operations.migrations', '0316', NULL, true);
 
+CREATE TEMP TABLE retired_withdrawn_findings ON COMMIT DROP AS
+SELECT f.id
+  FROM operations.findings f
+  JOIN operations.finding_types ft ON ft.id = f.finding_type_id
+ WHERE ft.name = 'device_source_record_withdrawn'
+   AND f.status IN ('open', 'acknowledged', 'investigating', 'suppressed');
+
+-- About 2,600 rows: the per-row finding-state trigger would refresh them one
+-- at a time for minutes at startup, so it is paused for this statement only
+-- (the change-history trigger stays on) and they are refreshed in one call.
+ALTER TABLE operations.findings DISABLE TRIGGER finding_state_findings_change;
 UPDATE operations.findings f
    SET status = 'resolved',
        closed_at = coalesce(f.closed_at, now()),
@@ -40,9 +51,9 @@ UPDATE operations.findings f
            'detail', 'A withdrawn record is shown on the Computer''s History; missing agents, '
                      || 'cleanup and retirement have their own findings (ADR-0032).',
            'resolved_at', now()))
-  FROM operations.finding_types ft
- WHERE ft.id = f.finding_type_id AND ft.name = 'device_source_record_withdrawn'
-   AND f.status IN ('open', 'acknowledged', 'investigating', 'suppressed');
+ WHERE f.id IN (SELECT id FROM retired_withdrawn_findings);
+ALTER TABLE operations.findings ENABLE TRIGGER finding_state_findings_change;
+SELECT operations.refresh_finding_state(array_agg(id)) FROM retired_withdrawn_findings;
 """
 
 
