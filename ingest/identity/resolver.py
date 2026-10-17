@@ -475,6 +475,14 @@ WITH device_evidence AS (
            d.device_role,
            d.os_name,
            d.created_at,
+           CASE WHEN LENGTH(BTRIM(d.canonical_serial)) >= 4
+                 AND LENGTH(REPLACE(LOWER(BTRIM(d.canonical_serial)),
+                                    LEFT(LOWER(BTRIM(d.canonical_serial)), 1), '')) > 0
+                 AND NOT EXISTS (
+                     SELECT 1 FROM operations.identity_value_rejections rejected
+                      WHERE rejected.value_kind = 'serial' AND rejected.enabled
+                        AND rejected.normalized_value = LOWER(BTRIM(d.canonical_serial)))
+                THEN LOWER(BTRIM(d.canonical_serial)) END AS usable_serial,
            ARRAY_REMOVE(ARRAY_AGG(DISTINCT LOWER(mac.value)), NULL) AS macs
       FROM operations.devices d
       LEFT JOIN operations.entity_observation_current o
@@ -491,6 +499,22 @@ WITH device_evidence AS (
      GROUP BY d.id, d.client_id, d.canonical_hostname, d.canonical_serial,
               d.canonical_vm_uuid, d.device_type, d.device_role, d.os_name,
               d.created_at
+), separated AS (
+    -- Computers an operator confirmed are different machines (migration 0309).
+    SELECT dec.device_id AS a, k.value::uuid AS b
+      FROM operations.device_operator_decisions dec,
+           jsonb_array_elements_text(dec.value) k
+     WHERE dec.dimension = 'identity_separate'
+), undecided AS (
+    -- Groups with at least one pair no operator has confirmed separate.
+    SELECT a.client_id, a.canonical_hostname
+      FROM device_evidence a
+      JOIN device_evidence b
+        ON b.client_id = a.client_id AND b.canonical_hostname = a.canonical_hostname
+       AND a.id < b.id
+     WHERE NOT EXISTS (SELECT 1 FROM separated s
+                        WHERE (s.a = a.id AND s.b = b.id) OR (s.a = b.id AND s.b = a.id))
+     GROUP BY a.client_id, a.canonical_hostname
 ), collision_groups AS (
     SELECT client_id,
            canonical_hostname,
@@ -513,8 +537,11 @@ WITH device_evidence AS (
            COUNT(NULLIF(canonical_vm_uuid, '')) >= 2
              AND COUNT(DISTINCT NULLIF(LOWER(canonical_vm_uuid), '')) = 1 AS shared_vm_uuid
       FROM device_evidence
+     WHERE (client_id, canonical_hostname) IN (SELECT client_id, canonical_hostname FROM undecided)
      GROUP BY client_id, canonical_hostname
-    HAVING COUNT(*) >= %s
+    -- ADR-0032: same name, proven different machines (two usable serials).
+    -- Name-only groups are duplicate_device_records (ingest.identity.findings).
+    HAVING COUNT(*) >= %s AND COUNT(DISTINCT usable_serial) >= 2
 ), shared_mac AS (
     SELECT a.client_id, a.canonical_hostname
       FROM device_evidence a
@@ -688,11 +715,11 @@ def _record_identity_conflict_assessments(cur, finding_type_id: int) -> None:
                 cur,
                 condition,
                 (),
-                # The resolver knows the current candidate membership, but
-                # this path does not prove a complete negative evaluation for
-                # clearing. Keep the conflict visible until a measured clear
-                # assessment is available.
-                EvaluationCoverage(False, False, False, False),
+                # Groups are recomputed from every current Computer each run,
+                # so a group that is absent is a measured negative: the
+                # conflict may clear (ADR-0032; it never could before, which
+                # kept 41 open and blocked their Computers' other findings).
+                EvaluationCoverage(True, True, True, True),
                 now=now,
                 reevaluation_key=f"identity-resolver:{condition_key}",
                 participant=participant,
