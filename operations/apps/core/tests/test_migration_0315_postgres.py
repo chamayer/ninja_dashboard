@@ -18,11 +18,32 @@ from apps.core.tests.test_migration_0306_postgres import SCHEMA as FOUNDATION_SC
 from apps.core.tests.test_migration_0308_postgres import TABLES, _computer, _observation
 
 LINKS = """
+CREATE TABLE operations.tenants (id bigint PRIMARY KEY);
+INSERT INTO operations.tenants VALUES (1);
 CREATE TABLE operations.entity_source_links (
     version integer NOT NULL, id uuid PRIMARY KEY, external_namespace varchar(120) NOT NULL,
-    external_id text NOT NULL, missing_since timestamptz NULL, reason varchar(120) NOT NULL,
-    entity_id uuid NOT NULL, tenant_id bigint NOT NULL
+    parent_external_namespace varchar(120) NOT NULL DEFAULT '',
+    parent_external_id text NOT NULL DEFAULT '', external_id text NOT NULL,
+    missing_since timestamptz NULL, reason varchar(120) NOT NULL,
+    entity_id uuid NOT NULL, entity_class_id varchar(80) NOT NULL DEFAULT 'device',
+    source_instance_id uuid NOT NULL DEFAULT '00000000-0000-4000-8000-000000000010',
+    tenant_id bigint NOT NULL
 );
+-- Production definition (2026-10-18), with the one-open-row index whose
+-- violation stopped every source refresh after 0315.
+CREATE TABLE operations.entity_source_link_history (
+    version integer NOT NULL, id uuid PRIMARY KEY, external_namespace varchar(120) NOT NULL,
+    parent_external_namespace varchar(120) NOT NULL, parent_external_id text NOT NULL,
+    external_id text NOT NULL, match_method varchar(40) NOT NULL,
+    match_confidence numeric NOT NULL, actor_kind varchar(16) NOT NULL,
+    actor_process varchar(160) NOT NULL, reason varchar(120) NOT NULL, evidence jsonb NOT NULL,
+    effective_from timestamptz NOT NULL, effective_to timestamptz NULL, actor_id bigint NULL,
+    entity_id uuid NOT NULL, entity_class_id varchar(80) NOT NULL,
+    last_seen_binding_id uuid NULL, source_instance_id uuid NOT NULL, tenant_id bigint NOT NULL
+);
+CREATE UNIQUE INDEX uq_entity_source_link_history_open ON operations.entity_source_link_history
+    (tenant_id, source_instance_id, external_namespace, parent_external_namespace,
+     parent_external_id, external_id) WHERE effective_to IS NULL;
 CREATE TABLE operations.entity_relationships (
     version integer NOT NULL CHECK (version >= 0), id uuid PRIMARY KEY,
     status varchar(16) NOT NULL, selection_reason varchar(40) NOT NULL,
@@ -62,14 +83,34 @@ def conn():
 
 
 def _link(conn, device):
+    """A link with its open history row, as the link sync writes them."""
     link = uuid.uuid4()
     conn.execute(
         """INSERT INTO operations.entity_source_links
-               SELECT 1, %s, 'ninja', %s, NULL, 'observation', entity_id, 1
+               (version, id, external_namespace, external_id, reason, entity_id, tenant_id)
+               SELECT 1, %s, 'ninja', %s, 'observation', entity_id, 1
                  FROM operations.devices WHERE id = %s""",
         (link, str(link), device),
     )
+    _open_history(conn, link)
     return link
+
+
+def _open_history(conn, link):
+    """The link sync's history insert: one open row for the link's entity."""
+    conn.execute(
+        """INSERT INTO operations.entity_source_link_history
+               SELECT 1, gen_random_uuid(), l.external_namespace, l.parent_external_namespace,
+                      l.parent_external_id, l.external_id, 'compatibility', 1, 'system',
+                      'ingest.entity_link_sync', l.reason, '{}', clock_timestamp(), NULL, NULL,
+                      l.entity_id, l.entity_class_id, NULL, l.source_instance_id, l.tenant_id
+                 FROM operations.entity_source_links l
+                WHERE l.id = %s
+                  AND NOT EXISTS (SELECT 1 FROM operations.entity_source_link_history h
+                                   WHERE h.external_id = l.external_id AND h.effective_to IS NULL
+                                     AND h.entity_id = l.entity_id)""",
+        (link,),
+    )
 
 
 def _edge(conn, os_entity, device):
@@ -160,3 +201,52 @@ def test_merge_and_split_move_links_both_ways(conn):
             WHERE target_entity_id = %s AND status = 'active'""",
         (_entity(conn, survivor),),
     ).fetchone()[0] == 0
+
+
+def test_0317_closes_moved_link_history_so_the_link_sync_can_open_the_new_row(conn):
+    """The 2026-10-17 incident: after a link moved, the sync's insert failed."""
+    survivor, absorbed = _computer(conn, "pc-h1"), _computer(conn, "pc-h1")
+    link = _link(conn, absorbed)
+    with conn.transaction():
+        conn.execute(
+            "SELECT operations.merge_computers(%s::uuid, %s::uuid, 'same serial'::text)",
+            (survivor, absorbed),
+        )
+    # Before 0317 the moved link kept its old open row: the sync insert fails.
+    with pytest.raises(psycopg.errors.UniqueViolation), conn.transaction():
+        _open_history(conn, link)
+
+    fix = importlib.import_module("apps.core.migrations.0317_close_moved_link_history")
+    with conn.transaction():
+        conn.execute("SET LOCAL ROLE operations_migrate")
+        conn.execute(fix.FORWARD_SQL)
+    with conn.transaction():
+        _open_history(conn, link)
+    open_rows = conn.execute(
+        """SELECT entity_id FROM operations.entity_source_link_history
+            WHERE external_id = %s AND effective_to IS NULL""",
+        (str(link),),
+    ).fetchall()
+    assert open_rows == [(_entity(conn, survivor),)]
+
+    # A merge after 0317 closes the history itself; so does the split.
+    a, b = _computer(conn, "pc-h2"), _computer(conn, "pc-h2")
+    link2 = _link(conn, b)
+    with conn.transaction():
+        merge_id = conn.execute(
+            "SELECT operations.merge_computers(%s::uuid, %s::uuid, 'same serial'::text)", (a, b)
+        ).fetchone()[0]
+    with conn.transaction():
+        _open_history(conn, link2)
+    with conn.transaction():
+        conn.execute(
+            "SELECT operations.split_computer_merge(%s, 'two machines', 'operator', 7, 'ui')",
+            (merge_id,),
+        )
+    with conn.transaction():
+        _open_history(conn, link2)
+    assert conn.execute(
+        """SELECT entity_id FROM operations.entity_source_link_history
+            WHERE external_id = %s AND effective_to IS NULL""",
+        (str(link2),),
+    ).fetchall() == [(_entity(conn, b),)]
