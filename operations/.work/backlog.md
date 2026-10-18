@@ -20,13 +20,14 @@
   Options: treat `Unknown` as applicable for agents supported on every OS, or
   raise a separate "OS unknown" finding. Revisit before relying on coverage
   for those Computers.
-- **Workstream 8 of the identity plan: replace `audit_log` writers.** 57 write
-  sites (14 files; `views._audit` alone 28) still write `audit_log`; the
-  History tab shows those rows. Move each to an explicit change action
-  (`operations.begin_change` with reason and evidence), then enable
-  `change_history_registry.enforce_action` per table and make `audit_log`
-  read-only (ADR-0033). Risk: most sites lack tests; do it per module with a
-  request test each.
+- **Enforce explicit change actions per table (ADR-0033).** The `audit_log`
+  cutover is done (`430ead9`, migration 0319: `audit_log` read-only, every
+  former writer records a change action through `operations.label_change`).
+  Remaining: `change_history_registry.enforce_action` is still false on every
+  covered table, so a writer without an action is recorded as `implicit`
+  rather than refused. Enable it table by table once each table's writers
+  open an explicit action; the evaluator's bulk finding writers are the
+  largest group.
 
 ## Current operator-surface task list
 
