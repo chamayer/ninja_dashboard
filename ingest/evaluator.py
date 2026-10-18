@@ -1629,6 +1629,12 @@ def _evaluate_coverage(
 
     missing_ft = _get_finding_type_id(cur, "missing_required_platform")
     stale_ft = _get_finding_type_id(cur, "stale_required_platform")
+    os_unknown_ft = _get_finding_type_id(cur, "os_unknown_coverage")
+    # Every OS group a Computer can be mapped to (data: os_group_mappings).
+    # An agent supported on all of them applies whatever the OS turns out to be.
+    cur.execute("SELECT DISTINCT os_group FROM operations.os_group_mappings")
+    mapped_os_groups = {row[0] for row in cur.fetchall()}
+    os_unknown_subjects: list[uuid.UUID] = []
     if missing_ft is None:
         log.warning("evaluator: finding_type 'missing_required_platform' not found")
         return 0
@@ -1695,6 +1701,7 @@ def _evaluate_coverage(
     count = 0
     for dev_id, dev_client_id, hostname, dev_role, exemptions, os_group, in_universe in devices:
         exemptions = exemptions or {}
+        not_evaluated: list[dict[str, str]] = []
         # BLUEPRINT E.6: coverage evaluates against entity types. A device
         # with zero agent.* observations is not in the coverage universe —
         # it's a hypervisor / NMS tracking record. Skipped here; picked up
@@ -1727,7 +1734,28 @@ def _evaluate_coverage(
             elif agent_id and agent_id in agents_by_id:
                 allowed_groups = set(agents_by_id[agent_id][2])
             if allowed_groups is not None and os_group not in allowed_groups:
-                continue
+                if os_group != "Unknown" or os_unknown_ft is None:
+                    continue
+                # Unknown never silently means "not required". The
+                # requirement applies when earlier presence of the agent or
+                # the Computer's role establishes it; otherwise it is reported
+                # as not evaluated (os_unknown_coverage), never as missing.
+                cur.execute(
+                    """
+                    SELECT 1 FROM operations.device_agent_presence_current apc
+                     WHERE apc.tenant_id = %s AND apc.device_id = %s
+                       AND apc.entity_type = %s AND (%s = 'any' OR apc.platform = %s)
+                     LIMIT 1
+                    """,
+                    (tenant_id, dev_id, entity_type, platform, platform),
+                )
+                established = cur.fetchone() is not None or (
+                    dev_role in ("workstation", "server")
+                    and mapped_os_groups <= allowed_groups
+                )
+                if not established:
+                    not_evaluated.append({"entity_type": entity_type, "platform": platform})
+                    continue
 
             # Per-device presence for this (entity_type, platform), 'any'
             # honored (BLUEPRINT C.6 wildcard).
@@ -1822,6 +1850,34 @@ def _evaluate_coverage(
                 ),
             )
 
+        if not_evaluated and os_unknown_ft is not None:
+            os_unknown_subjects.append(dev_id)
+            count += _upsert_finding(
+                cur,
+                tenant_id,
+                os_unknown_ft,
+                dev_client_id,
+                dev_id,
+                _condition_key(tenant_id, dev_client_id, dev_id, "os_unknown_coverage", ""),
+                "medium",
+                "confirmed",
+                now,
+                {"hostname": hostname, "requirements_not_evaluated": not_evaluated},
+                assessment=(
+                    _device_condition_signals(
+                        tenant_id, dev_id, identity_blocked, offline=False, collection_skipped=False
+                    ),
+                    EvaluationCoverage(True, True, True, True),
+                ),
+            )
+
+    # A complete run (all Computers) clears the condition where the OS became
+    # known, a requirement no longer applies, or the Computer left coverage.
+    if device_id is None and os_unknown_ft is not None:
+        _resolve_findings_absent(
+            cur, tenant_id, os_unknown_ft, os_unknown_subjects, now,
+            assessment_required=True, empty_result_verified=True,
+        )
     return count
 
 

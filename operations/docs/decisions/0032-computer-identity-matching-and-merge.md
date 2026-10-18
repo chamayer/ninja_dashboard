@@ -310,6 +310,14 @@ archived asset beside a current one is replaced documentation, not a
 duplicate; it appears on the timeline, not as a finding (54 Computers measured
 with both, 48 of them with an active agent).
 
+Unknown operating system (2026-10-18): `Unknown` never silently means "no
+requirements apply". An OS-dependent requirement applies to an unknown-OS
+Computer when the agent's earlier presence on it, or its role together with an
+agent supported on every mapped OS group, establishes it; otherwise the
+Computer gets one `os_unknown_coverage` finding listing the requirements that
+could not be evaluated. Missing agents are not assumed, so monitored appliances
+raise no false alarms (migration 0320, `_evaluate_coverage`).
+
 Hudu documentation is a coverage requirement: a Computer without a current
 (not archived) Hudu asset raises `missing_required_platform` for Hudu.
 
