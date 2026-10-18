@@ -928,6 +928,18 @@ def _clear_in_use_confirmation(cur: Any, tenant_id: int, device_id: uuid.UUID) -
     )
 
 
+def _begin_lifecycle_action(cur: Any, tenant_id: int, action: str, reason: str, evidence: dict) -> None:
+    cur.execute(
+        "SELECT operations.begin_change(%s, %s, %s::jsonb, 'process', NULL::bigint, "
+        "'ingest.evaluator', '', %s::bigint, true)",
+        (action, reason, json.dumps(evidence), tenant_id),
+    )
+
+
+def _end_lifecycle_action(cur: Any) -> None:
+    cur.execute("SELECT set_config('operations.change_action_id', '', true)")
+
+
 _RETIRE_REASONS = {
     "retire": "Nothing lists this machine any more (ADR-0032).",
 }
@@ -944,22 +956,20 @@ def _transition_lifecycle(
     now: datetime,
     evaluator_run_id: uuid.UUID,
 ) -> bool:
-    """Apply one lifecycle change with its audit row; retire and restore are explicit actions."""
+    """Apply one lifecycle change as its own explicit change action (ADR-0033)."""
     explicit = "retired" in (previous, target)
-    if explicit:
-        retiring = target == "retired"
-        cur.execute(
-            "SELECT operations.begin_change(%s, %s, %s::jsonb, 'process', NULL::bigint, "
-            "'ingest.evaluator', '', %s::bigint, true)",
-            (
-                "computer.retire.automatic" if retiring else "computer.restore.automatic",
-                "Nothing lists this machine any more."
-                if retiring
-                else "A source reports this machine again.",
-                json.dumps({"state": state, "last_source": item.last_source}),
-                tenant_id,
-            ),
-        )
+    retiring = target == "retired"
+    _begin_lifecycle_action(
+        cur,
+        tenant_id,
+        ("computer.retire.automatic" if retiring else "computer.restore.automatic")
+        if explicit
+        else "lifecycle.transition",
+        ("Nothing lists this machine any more." if retiring else "A source reports this machine again.")
+        if explicit
+        else f"Lifecycle {previous} -> {target}: {state}.",
+        {"state": state, "last_source": item.last_source},
+    )
     try:
         cur.execute(
             """
@@ -1033,9 +1043,8 @@ def _transition_lifecycle(
         )
         return True
     finally:
-        if explicit:
-            # The action covers this Computer only; later evaluator writes are implicit.
-            cur.execute("SELECT set_config('operations.change_action_id', '', true)")
+        # The action covers this Computer only; later evaluator writes are implicit.
+        _end_lifecycle_action(cur)
 
 
 def _sync_lifecycle_status(
@@ -1145,6 +1154,11 @@ def _sync_lifecycle_status(
         previous = device["lifecycle_status"]
         if target == previous:
             continue
+        _begin_lifecycle_action(
+            cur, tenant_id, "lifecycle.transition",
+            f"Lifecycle {previous} -> {target}: contact policy.",
+            {"evidence_kind": evidence["kind"], "evidence_platform": evidence["platform"]},
+        )
         cur.execute(
             """
             UPDATE operations.devices
@@ -1159,6 +1173,7 @@ def _sync_lifecycle_status(
             (target, device_id, tenant_id, previous),
         )
         if cur.fetchone() is None:
+            _end_lifecycle_action(cur)
             continue
         cur.execute(
             """
@@ -1190,6 +1205,7 @@ def _sync_lifecycle_status(
                 now,
             ),
         )
+        _end_lifecycle_action(cur)
         affected += 1
 
     if unknown_type_id is not None:

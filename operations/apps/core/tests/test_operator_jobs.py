@@ -121,7 +121,8 @@ def test_admin_navigation_folds_services_into_jobs():
     assert "SET LOCAL operations.tenant_id = 1" in views
     assert 'finding_type__name="source_failure"' in views
     assert "actor_kind=AuditLog.ActorKind.USER" in views
-    assert "occurrence_count=Count(\"audit_id\")" in views
+    # Recent administrator activity reads operator change actions (0319).
+    assert "WHERE tenant_id = 1 AND actor_kind = 'operator'" in views
     assert 'next_due_at = parse_datetime(next_due_at)' in views
     assert "Next: {{ job.next_due_at" in jobs_template
     assert "Request stop for selected Jobs" in jobs_template

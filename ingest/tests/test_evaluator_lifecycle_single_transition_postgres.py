@@ -65,21 +65,7 @@ def postgres_connection():
                         reason text NOT NULL, set_by varchar(120) NOT NULL,
                         set_at timestamptz NOT NULL, version integer NOT NULL
                     );
-                    CREATE TABLE operations.change_actions (
-                        id uuid PRIMARY KEY DEFAULT gen_random_uuid(), action text NOT NULL
-                    );
-                    CREATE FUNCTION operations.begin_change(
-                        p_action text, p_reason text, p_evidence jsonb, p_actor_kind text,
-                        p_actor_id bigint, p_process text, p_process_version text,
-                        p_tenant_id bigint, p_explicit boolean
-                    ) RETURNS uuid LANGUAGE plpgsql AS $$
-                    DECLARE v uuid;
-                    BEGIN
-                        INSERT INTO operations.change_actions (action) VALUES (p_action)
-                        RETURNING id INTO v;
-                        PERFORM set_config('operations.change_action_id', v::text, true);
-                        RETURN v;
-                    END $$;
+                    -- change_actions and begin_change come from the shared harness.
                     """
                 )
             yield conn
@@ -263,7 +249,7 @@ def test_nothing_listing_a_machine_retires_it_and_reporting_restores_it(
             (archived,),
         )
         assert cur.fetchone() == (True, "Nothing lists this machine any more (ADR-0032).")
-        cur.execute("SELECT action, count(*) FROM operations.change_actions GROUP BY 1 ORDER BY 1")
+        cur.execute("SELECT action, count(*) FROM operations.change_actions WHERE action LIKE 'computer.%' GROUP BY 1 ORDER BY 1")
         assert cur.fetchall() == [
             ("computer.restore.automatic", 1),
             ("computer.retire.automatic", 2),

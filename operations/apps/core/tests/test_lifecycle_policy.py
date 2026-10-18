@@ -51,6 +51,10 @@ class _Cursor:
     def execute(self, *_args: object) -> None:
         return None
 
+    def fetchall(self) -> list:
+        # Change-action transitions (migration 0319); none in this test.
+        return []
+
 
 def test_lifecycle_policy_status_requires_shared_admin_permission():
     request = RequestFactory().get("/admin/lifecycle/")

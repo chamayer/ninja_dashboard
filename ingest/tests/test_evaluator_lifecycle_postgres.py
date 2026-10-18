@@ -134,6 +134,21 @@ def _prepare_track_a_schema(conn) -> None:
                 observed_at timestamptz NOT NULL,
                 canonical_data jsonb NOT NULL DEFAULT '{}'
             );
+            -- Change actions (migration 0306), as far as lifecycle transitions use them.
+            CREATE TABLE operations.change_actions (
+                id uuid PRIMARY KEY DEFAULT gen_random_uuid(), action text NOT NULL
+            );
+            CREATE FUNCTION operations.begin_change(
+                p_action text, p_reason text, p_evidence jsonb, p_actor_kind text,
+                p_actor_id bigint, p_process text, p_process_version text,
+                p_tenant_id bigint, p_explicit boolean
+            ) RETURNS uuid LANGUAGE plpgsql SECURITY DEFINER AS $$
+            DECLARE v uuid;
+            BEGIN
+                INSERT INTO operations.change_actions (action) VALUES (p_action) RETURNING id INTO v;
+                PERFORM set_config('operations.change_action_id', v::text, true);
+                RETURN v;
+            END $$;
             CREATE TABLE operations.sources (
                 id smallint PRIMARY KEY,
                 kind varchar(80) NOT NULL,

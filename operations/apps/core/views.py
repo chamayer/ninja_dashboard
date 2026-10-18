@@ -17521,12 +17521,22 @@ def _admin_health_attention_items(
 def _admin_overview_recent_activity() -> list[dict]:
     """Return recent user-initiated administrator activity, not runtime noise."""
     try:
-        recent_activity = list(
-            AuditLog.objects.filter(tenant_id=1, actor_kind=AuditLog.ActorKind.USER)
-            .values("action")
-            .annotate(occurred_at=Max("occurred_at"), occurrence_count=Count("audit_id"))
-            .order_by("-occurred_at", "action")[:5]
-        )
+        # Operator change actions (ADR-0033); audit_log is read-only since 0319.
+        with connection.cursor() as cur:
+            cur.execute(
+                """
+                SELECT action, max(occurred_at) AS occurred_at, count(*) AS occurrence_count
+                  FROM operations.change_actions
+                 WHERE tenant_id = 1 AND actor_kind = 'operator'
+                 GROUP BY action
+                 ORDER BY 2 DESC, 1
+                 LIMIT 5
+                """
+            )
+            recent_activity = [
+                {"action": a, "occurred_at": at, "occurrence_count": n}
+                for a, at, n in cur.fetchall()
+            ]
     except DatabaseError:
         log.exception("Admin overview recent-activity query failed")
         return []
@@ -18208,11 +18218,29 @@ def lifecycle_policy_status(request: HttpRequest) -> HttpResponse:
                 "name", "is_identity_signal", "lifecycle_evidence_mode", "description"
             )
         )
-        transitions = list(
+        # Since migration 0319 transitions are change actions whose evidence
+        # holds the item; earlier ones remain in the read-only audit_log.
+        with connection.cursor() as cur:
+            cur.execute(
+                """
+                SELECT (item ->> 'entity_id')::uuid, a.occurred_at, item -> 'before', item -> 'after'
+                  FROM operations.change_actions a,
+                       jsonb_array_elements(coalesce(a.evidence -> 'items', '[]'::jsonb)) item
+                 WHERE a.tenant_id = 1 AND item ->> 'action' = 'lifecycle.transition'
+                 ORDER BY a.occurred_at DESC
+                 LIMIT 100
+                """
+            )
+            transitions = [
+                {"entity_id": e, "occurred_at": at, "before_state": b, "after_state": af}
+                for e, at, b, af in cur.fetchall()
+            ]
+        transitions += list(
             AuditLog.objects.filter(tenant_id=1, action="lifecycle.transition")
             .order_by("-occurred_at")
             .values("entity_id", "occurred_at", "before_state", "after_state")[:100]
         )
+        transitions = sorted(transitions, key=lambda t: t["occurred_at"], reverse=True)[:100]
     return render(
         request,
         "lifecycle_policy_status.html",
