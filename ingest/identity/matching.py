@@ -16,6 +16,9 @@ candidate selection:
   the candidate at the same time as the incoming record. For an empty Computer
   its last-known serial counts. A record an operator split off a Computer
   never matches that Computer again.
+* A roaming record (an agent identity moving between clones of one image,
+  ``operations.identity_roaming_records``) proves nothing by serial or VM
+  UUID, as candidate or as incoming record.
 * Several candidates: the most recently active one is chosen (ties: the oldest
   Computer). The evaluator surfaces name-only groups as findings; nothing here
   creates a Computer to avoid a choice.
@@ -139,6 +142,10 @@ def resolve_match(
     """
     record_serial = serial.strip().lower() if is_usable_serial(serial) else None
     record_vm_uuid = (vm_uuid or "").strip().lower() or None
+    if (record_serial or record_vm_uuid) and _is_roaming(cur, tenant_id, source_name, external_id):
+        # The record moves between clones of one image (migration 0317): its
+        # serial and VM UUID prove nothing about this machine.
+        record_serial = record_vm_uuid = None
     for policy in policies:
         if skip_source_identity and policy.matcher == "source_identity":
             continue
@@ -189,6 +196,21 @@ def resolve_match(
     return None
 
 
+def _is_roaming(cur, tenant_id: int, source_name: str, external_id: str) -> bool:
+    cur.execute(
+        """
+        SELECT 1 FROM operations.entity_observation_current eo
+          JOIN operations.identity_roaming_records rr
+            ON rr.tenant_id = eo.tenant_id AND rr.source_instance_id = eo.source_instance_id
+           AND rr.external_id = eo.external_id
+         WHERE eo.tenant_id = %s AND eo.platform = %s AND eo.entity_key = %s
+         LIMIT 1
+        """,
+        (tenant_id, source_name, external_id),
+    )
+    return cur.fetchone() is not None
+
+
 def _compared(matcher: str, serial, vm_uuid, hostname) -> dict:
     if matcher == "serial":
         return {"serial": serial}
@@ -237,6 +259,10 @@ def _candidates(
              WHERE eo.tenant_id = %s AND eo.active
                AND lower(trim(eo.canonical_data ->> 'serial_number')) = %s
                AND NOT (eo.platform = %s AND eo.entity_key = %s)
+               AND NOT EXISTS (SELECT 1 FROM operations.identity_roaming_records rr
+                                WHERE rr.tenant_id = eo.tenant_id
+                                  AND rr.source_instance_id = eo.source_instance_id
+                                  AND rr.external_id = eo.external_id)
                AND d.deleted_at IS NULL
                AND (%s::uuid IS NULL OR d.client_id = %s::uuid)
             """,
@@ -253,6 +279,10 @@ def _candidates(
              WHERE eo.tenant_id = %s AND eo.active
                AND lower(eo.canonical_data ->> 'vm_uuid') = %s
                AND NOT (eo.platform = %s AND eo.entity_key = %s)
+               AND NOT EXISTS (SELECT 1 FROM operations.identity_roaming_records rr
+                                WHERE rr.tenant_id = eo.tenant_id
+                                  AND rr.source_instance_id = eo.source_instance_id
+                                  AND rr.external_id = eo.external_id)
                AND d.deleted_at IS NULL
                AND (%s::uuid IS NULL OR d.client_id = %s::uuid)
             """,
@@ -374,7 +404,11 @@ def _hard_conflict(
                lower(trim(eo.canonical_data ->> 'serial_number')),
                lower(eo.canonical_data ->> 'vm_uuid'),
                (eo.canonical_data ->> 'is_online')::boolean,
-               eo.canonical_data ->> 'parent_ninja_id'
+               eo.canonical_data ->> 'parent_ninja_id',
+               EXISTS (SELECT 1 FROM operations.identity_roaming_records rr
+                        WHERE rr.tenant_id = eo.tenant_id
+                          AND rr.source_instance_id = eo.source_instance_id
+                          AND rr.external_id = eo.external_id) AS roaming
           FROM operations.entity_observation_current eo
          WHERE eo.tenant_id = %s AND eo.device_id = %s
            AND NOT (eo.platform = %s AND eo.entity_key = %s)
@@ -383,8 +417,9 @@ def _hard_conflict(
     )
     rows = cur.fetchall()
     live_rows = [row for row in rows if row[0]]
-    # An empty Computer is judged by what its records last reported.
-    judged = live_rows or rows
+    # An empty Computer is judged by what its records last reported. A roaming
+    # record's serial and VM UUID belong to whichever clone it ran on last.
+    judged = [row for row in (live_rows or rows) if not row[8]]
     if "serial" in blockers and serial:
         known = {row[4] for row in judged if row[4] and is_usable_serial(row[4])}
         if known and serial not in known:
@@ -397,7 +432,7 @@ def _hard_conflict(
         # A record of the same source and type that is online on the
         # candidate at the same time as this one: two live installs, so two
         # machines (or, for VM records, two VM objects on different hosts).
-        for active, platform, other_type, _key, _sn, _vu, online, _parent in live_rows:
+        for active, platform, other_type, _key, _sn, _vu, online, _parent, _roam in live_rows:
             if (
                 active
                 and platform == source_name

@@ -81,7 +81,16 @@ def postgres_schema(postgres_connection):
                 active boolean NOT NULL DEFAULT true,
                 entity_type varchar(64) NOT NULL DEFAULT 'agent.rmm',
                 entity_key text NOT NULL DEFAULT '',
-                canonical_data jsonb NOT NULL DEFAULT '{}'
+                canonical_data jsonb NOT NULL DEFAULT '{}',
+                source_instance_id uuid NOT NULL DEFAULT gen_random_uuid(),
+                external_id text NOT NULL DEFAULT ''
+            );
+            CREATE TABLE operations.identity_roaming_records (
+                tenant_id bigint NOT NULL, source_instance_id uuid NOT NULL,
+                external_id text NOT NULL, platform varchar(80) NOT NULL,
+                serial_count integer NOT NULL, name_count integer NOT NULL,
+                computed_at timestamptz NOT NULL DEFAULT now(),
+                PRIMARY KEY (tenant_id, source_instance_id, external_id)
             );
         """)
     return postgres_connection

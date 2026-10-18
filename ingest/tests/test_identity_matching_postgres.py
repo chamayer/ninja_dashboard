@@ -62,7 +62,16 @@ CREATE TABLE operations.entity_observation_current (
     observation_id uuid PRIMARY KEY, tenant_id bigint NOT NULL, device_id uuid NULL,
     client_id uuid NULL, platform varchar(80) NOT NULL, entity_type varchar(80) NOT NULL,
     entity_key text NOT NULL, active boolean NOT NULL, last_seen_at timestamptz NOT NULL,
-    canonical_data jsonb NOT NULL
+    canonical_data jsonb NOT NULL,
+    source_instance_id uuid NOT NULL DEFAULT '00000000-0000-4000-8000-000000000010',
+    external_id text NULL
+);
+-- Migration 0318 (production definition).
+CREATE TABLE operations.identity_roaming_records (
+    tenant_id bigint NOT NULL, source_instance_id uuid NOT NULL, external_id text NOT NULL,
+    platform varchar(80) NOT NULL, serial_count integer NOT NULL, name_count integer NOT NULL,
+    computed_at timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (tenant_id, source_instance_id, external_id)
 );
 CREATE TABLE operations.device_operator_decisions (
     version integer NOT NULL, id uuid PRIMARY KEY, dimension varchar(80) NOT NULL,
@@ -123,8 +132,12 @@ def record(
     entity_type=None,
     **data,
 ):
+    entity_key = key or str(uuid.uuid4())
     cur.execute(
-        "INSERT INTO operations.entity_observation_current VALUES (%s, 1, %s, %s, %s, %s, %s, %s, %s, %s)",
+        """INSERT INTO operations.entity_observation_current
+               (observation_id, tenant_id, device_id, client_id, platform, entity_type,
+                entity_key, active, last_seen_at, canonical_data, external_id)
+           VALUES (%s, 1, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
         (
             uuid.uuid4(),
             device_id,
@@ -132,12 +145,14 @@ def record(
             platform,
             entity_type
             or ("agent.rmm" if platform == "Ninja" else "agent.remote_access"),
-            key or str(uuid.uuid4()),
+            entity_key,
             active,
             seen,
             json.dumps(data),
+            entity_key,
         ),
     )
+    return entity_key
 
 
 def match(
@@ -249,6 +264,31 @@ def test_a_record_split_off_never_returns_to_that_computer(cur):
     )
     assert match(cur, "pc-split", key="lmi-7") is None
     assert match(cur, "pc-split", key="lmi-8") == pc
+
+
+def _roam(cur, key):
+    cur.execute(
+        """INSERT INTO operations.identity_roaming_records
+               (tenant_id, source_instance_id, external_id, platform, serial_count, name_count)
+           VALUES (1, '00000000-0000-4000-8000-000000000010', %s, 'SentinelOne', 5, 5)""",
+        (key,),
+    )
+
+
+def test_a_roaming_record_proves_nothing_by_serial(cur):
+    """An image agent moving between clones (migration 0318)."""
+    clone = computer(cur, "citrixapp37")
+    image = computer(cur, "citrixappmcs")
+    record(cur, clone, "Ninja", serial_number="VMW-37")
+    roaming = record(cur, image, "SentinelOne", serial_number="VMW-37")
+    _roam(cur, roaming)
+    # As a candidate: its serial does not pull another record to its Computer.
+    assert match(cur, "other-name", platform="ScreenConnect", serial="vmw-37") == clone
+    # As the incoming record: it is placed by name, not by the clone's serial.
+    assert (
+        match(cur, "citrixappmcs", platform="SentinelOne", serial="VMW-37", key=roaming)
+        == image
+    )
 
 
 def test_placeholder_serials_never_match(cur):

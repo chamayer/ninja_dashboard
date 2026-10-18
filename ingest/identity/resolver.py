@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import time
 import uuid
 from datetime import UTC, datetime
 from typing import Any
@@ -69,6 +70,7 @@ def drain_resolution(batch_size: int = 200, *, refresh_current: bool = True) -> 
         cur.execute(f"SET LOCAL operations.tenant_id = {TENANT_ID}")
         load_identity_value_rejections(cur)
         identity_policies = load_identity_match_policies(cur, TENANT_ID)
+        refresh_roaming_records(cur)
 
         cur.execute(
             """
@@ -1181,11 +1183,17 @@ WITH rej AS (
            eo.platform || ':' || eo.entity_type AS stream,
            coalesce((eo.canonical_data ->> 'is_online')::boolean, false) AS online,
            lower(split_part(coalesce(eo.canonical_data ->> 'hostname', ''), '.', 1)) AS host,
-           lower(trim(eo.canonical_data ->> 'serial_number')) AS sn,
-           lower(nullif(trim(eo.canonical_data ->> 'vm_uuid'), '')) AS vu
+           -- A roaming record (migration 0318) proves nothing by serial.
+           CASE WHEN rr.external_id IS NULL
+                THEN lower(trim(eo.canonical_data ->> 'serial_number')) END AS sn,
+           CASE WHEN rr.external_id IS NULL
+                THEN lower(nullif(trim(eo.canonical_data ->> 'vm_uuid'), '')) END AS vu
       FROM operations.devices d
       JOIN operations.entity_observation_current eo
         ON eo.tenant_id = d.tenant_id AND eo.device_id = d.id
+      LEFT JOIN operations.identity_roaming_records rr
+        ON rr.tenant_id = eo.tenant_id AND rr.source_instance_id = eo.source_instance_id
+       AND rr.external_id = eo.external_id
      WHERE d.tenant_id = %s AND d.deleted_at IS NULL
        AND (eo.entity_type LIKE 'agent.%%' OR eo.entity_type LIKE 'vm.%%')
        AND eo.entity_key NOT LIKE 'device-health:%%'
@@ -1293,7 +1301,7 @@ def planned_proven_merges(cur) -> list[tuple]:
 
 
 def _operator_separated_pairs(cur) -> set[tuple]:
-    """Computer pairs an operator kept apart, in both directions."""
+    """Computer pairs an operator kept apart (decisions or a split), both directions."""
     cur.execute(
         """
         SELECT dec.device_id, k.value::uuid
@@ -1309,14 +1317,42 @@ def _operator_separated_pairs(cur) -> set[tuple]:
            AND eo.entity_key = substr(k.value, length(split_part(k.value, '|', 1)) + 2)
          WHERE dec.tenant_id = %s AND dec.dimension = 'identity_excluded_records'
            AND eo.device_id IS NOT NULL
+        UNION
+        -- A merge that was split is an operator decision that they differ.
+        SELECT survivor_id, absorbed_id FROM operations.computer_merges
+         WHERE tenant_id = %s AND split_at IS NOT NULL
         """,
-        (TENANT_ID, TENANT_ID, TENANT_ID),
+        (TENANT_ID, TENANT_ID, TENANT_ID, TENANT_ID),
     )
     pairs: set[tuple] = set()
     for a, b in cur.fetchall():
         pairs.add((a, b))
         pairs.add((b, a))
     return pairs
+
+
+_ROAMING_REFRESH_SECONDS = 3600
+_roaming_refreshed_at: float | None = None
+
+
+def refresh_roaming_records(cur) -> None:
+    """Recompute roaming agent records (migration 0318) at most once an hour.
+
+    Reading the observation history takes seconds, so it is not done on every
+    resolution batch; a new clone's record becomes roaming within the hour.
+    """
+    global _roaming_refreshed_at
+    now = time.monotonic()
+    if _roaming_refreshed_at is not None and now - _roaming_refreshed_at < _ROAMING_REFRESH_SECONDS:
+        return
+    cur.execute(
+        "SELECT to_regprocedure('operations.refresh_identity_roaming_records(bigint)') IS NOT NULL"
+    )
+    if not cur.fetchone()[0]:
+        return
+    cur.execute("SELECT operations.refresh_identity_roaming_records(%s)", (TENANT_ID,))
+    log.info("resolver: %s roaming agent records", cur.fetchone()[0])
+    _roaming_refreshed_at = now
 
 
 def merge_proven_splits(cur) -> int:
@@ -1462,6 +1498,10 @@ def _upsert_shared_serial_findings(cur, finding_type_id: int) -> int:
              WHERE d.tenant_id = %s AND d.deleted_at IS NULL AND eo.active
                AND (eo.entity_type LIKE 'agent.%%' OR eo.entity_type LIKE 'vm.%%')
                AND eo.entity_key NOT LIKE 'device-health:%%'
+               AND NOT EXISTS (SELECT 1 FROM operations.identity_roaming_records rr
+                                WHERE rr.tenant_id = eo.tenant_id
+                                  AND rr.source_instance_id = eo.source_instance_id
+                                  AND rr.external_id = eo.external_id)
                AND LENGTH(BTRIM(eo.canonical_data ->> 'serial_number')) >= 4
                AND LENGTH(REPLACE(
                      LOWER(BTRIM(eo.canonical_data ->> 'serial_number')),

@@ -167,6 +167,19 @@ counts for hard conflicts: of 62 empty Computers sharing a name with a live
 one, 3 have a different last-known serial (a replacement machine reusing the
 name) and stay separate.
 
+### Roaming agent records (added 2026-10-18)
+
+An agent baked into a non-persistent image (Citrix MCS: CitrixAppMCS,
+UTAW-CTX-Golden, CTXMCSGOLD) keeps one agent identity while it runs on clone
+after clone, reporting each clone's name and serial in turn. Such a record
+proves nothing about any machine: a record that has reported three or more
+usable serials under three or more names
+(`operations.identity_roaming_records`, refreshed hourly) is ignored by serial
+and VM UUID matching, the automatic merge, `shared_serial` and the
+two-machines check; it still attaches by name and is shown. A real rename or
+hardware change reports two. A split merge counts as an operator decision
+that the two Computers differ, so it is never merged again automatically.
+
 ### Re-check
 
 When an attached record first reports a serial or VM UUID, or reports a

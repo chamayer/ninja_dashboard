@@ -54,13 +54,18 @@ _RECORDS = """
 SELECT d.id, d.client_id, d.canonical_hostname, d.created_at,
        eo.observation_id, eo.platform, eo.entity_type, eo.entity_key,
        lower(split_part(coalesce(eo.canonical_data ->> 'hostname', ''), '.', 1)),
-       eo.canonical_data ->> 'serial_number',
-       lower(nullif(trim(eo.canonical_data ->> 'vm_uuid'), '')),
+       -- A roaming record (migration 0318) carries no machine's serial.
+       CASE WHEN rr.external_id IS NULL THEN eo.canonical_data ->> 'serial_number' END,
+       CASE WHEN rr.external_id IS NULL
+            THEN lower(nullif(trim(eo.canonical_data ->> 'vm_uuid'), '')) END,
        coalesce((eo.canonical_data ->> 'is_online')::boolean, false),
        eo.last_seen_at
   FROM operations.devices d
   JOIN operations.entity_observation_current eo
     ON eo.tenant_id = d.tenant_id AND eo.device_id = d.id
+  LEFT JOIN operations.identity_roaming_records rr
+    ON rr.tenant_id = eo.tenant_id AND rr.source_instance_id = eo.source_instance_id
+   AND rr.external_id = eo.external_id
  WHERE d.tenant_id = %s AND d.deleted_at IS NULL AND eo.active
    AND eo.entity_key NOT LIKE 'device-health:%%'
 """
