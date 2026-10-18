@@ -2,6 +2,15 @@
 
 ## Computer identity and history follow-ups (2026-10-17)
 
+- **Listing-only Computers (orphan analysis 2026-10-18).** 161 Computers known
+  only from a LogMeIn host entry or an R-U-ON monitor (never an installed
+  agent): 25 match an agent-managed Computer by name (16 same client, 5 by
+  prefix, 4 other client); of the 136 others, 91 are offline LogMeIn entries
+  (54 unchanged for 180+ days), 24 online LogMeIn hosts, 21 online R-U-ON
+  monitors (servers, hypervisor hosts, appliances). Several "unmatched" live
+  ones match an agent record whose Computer kept an old name (the name
+  projection did not run while source refresh was failing). Re-measure after
+  the projection has run; then decide the class (user leans "orphans").
 - **Unknown OS skips every agent requirement** (needs a policy decision).
   `ingest/evaluator.py` `_evaluate_coverage` skips a requirement when the
   Computer's `os_group` is not in the agent's `supported_os_groups`;
