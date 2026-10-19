@@ -26,6 +26,7 @@ from psycopg.types.json import Json
 
 from ingest import db
 from ingest.identity.matching import record_name_short
+from ingest.identity.naming import attachments, name_changed_attachments
 from ingest.identity.fast_path import resolve_device_fast
 from ingest.identity.matching import load_identity_match_policies
 from ingest.ninja_client import NinjaClient
@@ -772,7 +773,13 @@ def _write_ninja_observations(
                     current["snapshot_scope"] = "Ninja"
                     current["last_snapshot_run_id"] = run_id
                     current_rows.append(current)
+                attached_before = attachments(cur, current_rows)
                 written = write_current_rows(cur, current_rows)
+                # A record that joined or left a Computer renames it now,
+                # in this transaction (ADR-0034 section 6).
+                name_changed_attachments(
+                    cur, attached_before, attachments(cur, current_rows)
+                )
             complete_run(
                 cur,
                 run_id,

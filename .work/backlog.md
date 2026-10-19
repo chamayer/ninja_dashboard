@@ -3,6 +3,17 @@
 This is the proposed successor to the root-level open-work portion of
 `TODO.md`. Operations-only items belong in `operations/.work/backlog.md`.
 
+## Release notes: changelog history between 0.127.0 and 0.128.0
+
+Release-documentation debt, not a functional gap (recorded 2026-10-19).
+`CHANGELOG.md` goes from 0.127.0 (2026-10-13) straight to 0.128.0 (ADR-0034,
+2026-10-19). Work shipped in between has no entry: ADR-0032 identity matching,
+merge and split, retirement and evidence; ADR-0033 change history and the
+History page; the Jobs observability, logging, maintenance cadence and
+schedule-retirement fixes. Write the entries from `git log 0.127.0`-era
+commits (`git log --since=2026-10-13`) and the ADRs, under 0.128.0 or as
+back-filled sections; do not bump VERSION for it.
+
 ## EOL/EOS: upstream lifecycle gaps for Adobe and Visual C++
 
 - Reason deferred: Adobe Acrobat/Reader and Microsoft Visual C++

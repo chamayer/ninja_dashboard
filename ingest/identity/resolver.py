@@ -29,6 +29,7 @@ from ingest import db, device_cache_projector
 from ingest.conditions import record_assessment
 from ingest.identity import findings as identity_findings
 from ingest.identity import identity_entity_types
+from ingest.identity.naming import write_computer_names
 from ingest.identity.matching import (
     IdentityMatchPolicy,
     load_identity_match_policies,
@@ -1500,33 +1501,6 @@ def refresh_roaming_records(cur) -> None:
         _complete_maintenance(cur, ROAMING_COMPONENT, seconds)
     _telemetry["roaming"] = {"ran": True, "records": records, "seconds": round(seconds, 1)}
     log.info("resolver: %s roaming agent records in %.1fs", records, seconds)
-
-
-_writer_installed = False
-
-
-def write_computer_names(cur, device_ids) -> int:
-    """Name these Computers now through the one writer (ADR-0034 section 6).
-
-    ``None`` reconciles every Computer of the tenant. Returns the Computers
-    whose name or provenance changed. Before migration 0328 is applied the
-    writer does not exist and nothing is written.
-    """
-    global _writer_installed
-    if not _writer_installed:
-        cur.execute(
-            "SELECT to_regprocedure('operations.write_computer_names(uuid[],bigint)') IS NOT NULL"
-        )
-        _writer_installed = bool(cur.fetchone()[0])
-        if not _writer_installed:
-            return 0
-    ids = None if device_ids is None else sorted({str(d) for d in device_ids if d})
-    if ids == []:
-        return 0
-    cur.execute(
-        "SELECT operations.write_computer_names(%s::uuid[], %s::bigint)", (ids, TENANT_ID)
-    )
-    return cur.fetchone()[0] or 0
 
 
 def reconcile_computer_names() -> None:

@@ -286,6 +286,17 @@ shiya_win_11 / lab220-04, duplicate Hudu asset); merged rows unnamed by
 design; hostname policies 0 enabled. Issues: 8 collision, 123 label drift,
 49 duplicate (was 45; record names), 5 identity conflict.
 
+Closure review (2026-10-19): the ingest fast paths (source observations,
+Ninja device sync) now name every Computer a record joined or left in the
+same transaction (`ingest/identity/naming.py`, shared with the resolver);
+0328 test 8 passed incl. a fast-path attachment. Jobs current state healthy:
+latest platform-evaluate and resolver runs completed; the interrupted
+20:46 platform-evaluate run is history only. Resolver after the matching
+fix: 554 s including the one-time naming of 5,543 Computers and the hourly
+roaming and shadow passes; a routine run is measured after this deploy.
+Changelog debt 0.127.0-0.128.0 is in `.work/backlog.md`. The 8 collisions
+stay for operator review.
+
 ---
 
 # Computer identity and platform change history (2026-10-16)

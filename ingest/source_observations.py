@@ -37,6 +37,7 @@ from psycopg.types.json import Json
 from ingest import db
 from ingest.connectors import hudu, logmein, ruon, screenconnect, sentinelone
 from ingest.identity.matching import record_name_short
+from ingest.identity.naming import attachments, name_changed_attachments
 from ingest.identity import identity_entity_types
 from ingest.identity.fast_path import resolve_device_fast
 from ingest.identity.matching import load_identity_match_policies
@@ -554,7 +555,11 @@ def _write_observations(
                     str(row["raw_data"]).encode("utf-8")
                 ).digest()
                 current_rows.append(current)
+            attached_before = attachments(cur, current_rows)
             written = write_current_rows(cur, current_rows)
+            # A record that joined or left a Computer renames it now, in
+            # this transaction (ADR-0034 section 6).
+            name_changed_attachments(cur, attached_before, attachments(cur, current_rows))
         is_complete_snapshot = not getattr(source, "is_partial_snapshot", False)
         complete_run(
             cur,

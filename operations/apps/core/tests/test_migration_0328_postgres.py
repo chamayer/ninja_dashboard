@@ -138,6 +138,28 @@ def test_the_writer_needs_the_session_tenant(conn):
             conn.execute("SELECT operations.write_computer_names(%s::uuid[], 2)", ([device],))
 
 
+def test_a_fast_path_attachment_renames_in_the_same_transaction(conn):
+    """ADR-0034 section 6: the ingest fast path names a Computer as a record joins it."""
+    from apps.core.tests.test_migration_0322_postgres import SOURCE
+    from ingest.identity.naming import attachments, name_changed_attachments
+
+    with conn.transaction():
+        device = _computer(conn, "lmi-label", CLIENT)
+        _record(conn, device, "LogMeIn", "agent.remote_access", "lmi-label")
+        conn.execute("SELECT operations.write_computer_names(%s::uuid[], 1)", ([device],))
+    assert _stored(conn, device)[:2] == ("lmi-label", "current_label")
+
+    key = "fast-path-ninja"
+    rows = [{"source_instance_id": SOURCE, "external_id": key, "entity_type": "agent.rmm"}]
+    with conn.transaction(), conn.cursor() as cur:
+        before = attachments(cur, rows)
+        observation, _ = _record(
+            conn, device, "Ninja", "agent.rmm", "pc-fastpath", online=True, key=key
+        )
+        assert name_changed_attachments(cur, before, attachments(cur, rows)) == 1
+    assert _stored(conn, device) == ("pc-fastpath", "reporting_os", observation)
+
+
 def test_operator_name_and_reset(conn):
     device, observation = _create(conn, "pc-op", "pc-op")
     with conn.transaction():
