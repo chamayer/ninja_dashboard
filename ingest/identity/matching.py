@@ -9,8 +9,11 @@ candidate selection:
   live Computer matches, so a returning machine keeps its history.
 * Serial and VM UUID are compared with what active records report now, not with
   a Computer's stored value (a stale stored serial caused a wrong merge).
-* Names match exactly, ignoring separators, or as a 15-character cut of a
-  longer name (Ninja reports Windows' 15-character name).
+* Names are the names the client's source records report (ADR-0034
+  section 4), never a Computer's stored name: matched exactly, ignoring
+  separators, or as a 15-character cut of a longer name, in tiers (current
+  records on active Computers, on other non-retired Computers, withdrawn
+  records, record history).
 * Only a hard conflict excludes a candidate: a different usable serial, a
   different VM UUID, or a record of the same source and type that is live on
   the candidate at the same time as the incoming record. For an empty Computer
@@ -134,12 +137,15 @@ def resolve_match(
     policies: tuple[IdentityMatchPolicy, ...],
     is_online: bool | None = None,
     skip_source_identity: bool = False,
+    identity_types: list[str] | None = None,
 ) -> MatchResult | None:
     """Select a Computer for one source record, or None when nothing matches.
 
     ``skip_source_identity`` is the re-check: an attached record whose serial
     or VM UUID arrived or changed is matched again without its current link.
     """
+    if identity_types is None:
+        identity_types = _identity_types(cur)
     record_serial = serial.strip().lower() if is_usable_serial(serial) else None
     record_vm_uuid = (vm_uuid or "").strip().lower() or None
     if (record_serial or record_vm_uuid) and _is_roaming(cur, tenant_id, source_name, external_id):
@@ -163,6 +169,7 @@ def resolve_match(
             macs=macs or [],
             client_id=client_id if policy.requires_client_scope else None,
             matcher=policy.matcher,
+            identity_types=identity_types,
         )
         if not candidates:
             continue
@@ -194,6 +201,12 @@ def resolve_match(
             candidates=tuple(usable),
         )
     return None
+
+
+def _identity_types(cur) -> list[str]:
+    from ingest.identity import identity_entity_types
+
+    return sorted(identity_entity_types(cur))
 
 
 def _is_roaming(cur, tenant_id: int, source_name: str, external_id: str) -> bool:
@@ -234,6 +247,7 @@ def _candidates(
     macs: list[str],
     client_id: uuid.UUID | None,
     matcher: str,
+    identity_types: list[str],
 ) -> list[uuid.UUID]:
     if matcher == "source_identity":
         cur.execute(
@@ -300,8 +314,74 @@ def _candidates(
             macs=macs if matcher == "hostname_mac" else None,
             source_name=source_name,
             external_id=external_id,
+            identity_types=identity_types,
         )
     return []
+
+
+_NAME_CANDIDATES = """
+WITH inc AS (
+    SELECT %(name)s::text AS short,
+           regexp_replace(%(name)s::text, '[^a-z0-9]', '', 'g') AS key
+), recs AS (
+    -- Every named identity record of the client's Computers, normalized by the
+    -- one SQL function (ADR-0034 section 1). Roaming records carry no name.
+    SELECT eo.device_id, d.lifecycle_status, f.name_short, f.name_key,
+           eo.active AND coalesce(lc.record_lifecycle, '') <> 'archived' AS is_current
+      FROM operations.entity_observation_current eo
+      JOIN operations.devices d
+        ON d.tenant_id = eo.tenant_id AND d.id = eo.device_id AND d.deleted_at IS NULL
+      LEFT JOIN operations.v_device_source_record_lifecycle_current lc
+        ON lc.observation_id = eo.observation_id
+     CROSS JOIN LATERAL operations.record_name_forms(
+          eo.platform, eo.entity_type,
+          coalesce(nullif(eo.canonical_data ->> 'hostname', ''), eo.canonical_data ->> 'guest_name'),
+          eo.canonical_data ->> 'domain') f
+     WHERE eo.tenant_id = %(tenant)s
+       AND (%(client)s::uuid IS NULL OR d.client_id = %(client)s::uuid)
+       AND eo.entity_type = ANY(%(types)s::text[])
+       AND eo.entity_key NOT LIKE 'device-health:%%'
+       AND NOT (eo.platform = %(source)s AND eo.entity_key = %(key)s)
+       AND f.name_short IS NOT NULL
+       AND NOT EXISTS (SELECT 1 FROM operations.identity_roaming_records rr
+                        WHERE rr.tenant_id = eo.tenant_id
+                          AND rr.source_instance_id = eo.source_instance_id
+                          AND rr.external_id = eo.external_id)
+), hist AS (
+    -- Names the client's records reported earlier (tier 4).
+    SELECT DISTINCT eo.device_id, f.name_short, f.name_key
+      FROM operations.entity_observation_current eo
+      JOIN operations.devices d
+        ON d.tenant_id = eo.tenant_id AND d.id = eo.device_id AND d.deleted_at IS NULL
+      JOIN operations.entity_observation_history h
+        ON h.tenant_id = eo.tenant_id AND h.source_instance_id = eo.source_instance_id
+       AND h.external_id = eo.external_id AND h.entity_type = eo.entity_type
+     CROSS JOIN LATERAL operations.record_name_forms(
+          h.platform, h.entity_type,
+          coalesce(nullif(h.material_data ->> 'hostname', ''), h.material_data ->> 'guest_name'),
+          h.material_data ->> 'domain') f
+     WHERE eo.tenant_id = %(tenant)s
+       AND (%(client)s::uuid IS NULL OR d.client_id = %(client)s::uuid)
+       AND eo.entity_type = ANY(%(types)s::text[])
+       AND NOT (eo.platform = %(source)s AND eo.entity_key = %(key)s)
+       AND f.name_key = (SELECT key FROM inc)
+       AND NOT EXISTS (SELECT 1 FROM operations.identity_roaming_records rr
+                        WHERE rr.tenant_id = eo.tenant_id
+                          AND rr.source_instance_id = eo.source_instance_id
+                          AND rr.external_id = eo.external_id)
+)
+SELECT r.device_id,
+       CASE WHEN r.is_current AND r.lifecycle_status = 'active' THEN 1
+            WHEN r.is_current AND r.lifecycle_status <> 'retired' THEN 2
+            ELSE 3 END AS tier,
+       r.name_short, r.name_key
+  FROM recs r, inc
+ WHERE r.name_key = inc.key
+    OR (length(inc.short) = 15 AND length(r.name_short) > 15 AND left(r.name_short, 15) = inc.short)
+    OR (length(r.name_short) = 15 AND length(inc.short) > 15 AND left(inc.short, 15) = r.name_short)
+UNION ALL
+SELECT h.device_id, 4, h.name_short, h.name_key FROM hist h
+"""
 
 
 def _name_candidates(
@@ -313,64 +393,76 @@ def _name_candidates(
     macs: list[str] | None,
     source_name: str,
     external_id: str,
+    identity_types: list[str],
 ) -> list[uuid.UUID]:
-    """Live Computers whose name matches; empty ones only when no live one does."""
-    loose = loose_name(hostname)
-    cut = hostname if len(hostname) == _NETBIOS_LENGTH else None
+    """Computers whose records report the name (ADR-0034 section 4).
+
+    ``hostname`` is the incoming record's strict name form from
+    ``operations.record_name_forms``. Tiers, the first with a candidate
+    deciding: current records on active Computers, on other non-retired
+    Computers, withdrawn records, record history. Within the tier a strict
+    match may name several Computers (the most recently active is chosen and
+    the duplicate is reported); a loose match decides only when it identifies
+    exactly one Computer; a 15-character match only when exactly one distinct
+    longer name starts with it.
+    """
     cur.execute(
-        """
-        WITH named AS (
-            SELECT d.id, d.canonical_hostname
-              FROM operations.devices d
-             WHERE d.tenant_id = %(tenant)s AND d.deleted_at IS NULL
-               -- Retired Computers stay candidates (as empty ones): a machine
-               -- that reappears returns to its Computer and history.
-               AND (%(client)s::uuid IS NULL OR d.client_id = %(client)s::uuid)
-               AND (d.canonical_hostname = %(name)s
-                    OR regexp_replace(lower(d.canonical_hostname), '[^a-z0-9]', '', 'g') = %(loose)s
-                    OR (%(cut)s::text IS NOT NULL
-                        AND length(d.canonical_hostname) > 15
-                        AND left(d.canonical_hostname, 15) = %(cut)s)
-                    OR (length(d.canonical_hostname) = 15
-                        AND length(%(name)s) > 15
-                        AND left(%(name)s, 15) = d.canonical_hostname))
-        ), classified AS (
-            SELECT n.id, n.canonical_hostname,
-                   EXISTS (SELECT 1 FROM operations.entity_observation_current eo
-                            WHERE eo.tenant_id = %(tenant)s AND eo.device_id = n.id AND eo.active
-                              AND NOT (eo.platform = %(source)s AND eo.entity_key = %(key)s)) AS live,
-                   (%(macs)s::text[] IS NULL OR EXISTS (
-                        SELECT 1 FROM operations.entity_observation_current eo
-                         WHERE eo.tenant_id = %(tenant)s AND eo.device_id = n.id AND eo.active
-                           AND EXISTS (SELECT 1
-                                         FROM jsonb_array_elements_text(
-                                              COALESCE(eo.canonical_data -> 'macs', '[]'::jsonb)) m(mac)
-                                        WHERE m.mac = ANY(%(macs)s::text[])
-                                          AND m.mac NOT LIKE '00:15:5d:%%'))) AS mac_ok
-              FROM named n
-        )
-        SELECT id, canonical_hostname, live FROM classified WHERE mac_ok
-        """,
+        _NAME_CANDIDATES,
         {
             "tenant": tenant_id,
             "client": client_id,
             "name": hostname,
-            "loose": loose,
-            "cut": cut,
-            "macs": macs,
             "source": source_name,
             "key": external_id,
+            "types": identity_types,
         },
     )
     rows = cur.fetchall()
-    # A 15-character cut matches a longer name only when exactly one such name
-    # exists; two longer names behind one cut are ambiguous, not a match.
-    if cut:
-        longer = {name for _id, name, _live in rows if len(name) > _NETBIOS_LENGTH}
-        if len(longer) > 1:
-            rows = [row for row in rows if len(row[1]) <= _NETBIOS_LENGTH]
-    live = [row[0] for row in rows if row[2]]
-    return live or [row[0] for row in rows]
+    key = _LOOSE_RE.sub("", hostname)
+    chosen: list[uuid.UUID] = []
+    for tier in (1, 2, 3, 4):
+        in_tier = [row for row in rows if row[1] == tier]
+        if not in_tier:
+            continue
+        strict = sorted({row[0] for row in in_tier if row[2] == hostname}, key=str)
+        loose = sorted({row[0] for row in in_tier if row[3] == key}, key=str)
+        cut_names = {row[2] for row in in_tier if row[3] != key}
+        if strict:
+            chosen = strict
+        elif loose:
+            chosen = loose if len(loose) == 1 else []
+        elif len(cut_names) == 1:
+            chosen = sorted({row[0] for row in in_tier if row[2] in cut_names}, key=str)
+        # The highest tier holding the name decides, even when it is ambiguous.
+        break
+    if chosen and macs is not None:
+        cur.execute(
+            """
+            SELECT DISTINCT eo.device_id
+              FROM operations.entity_observation_current eo
+             WHERE eo.tenant_id = %s AND eo.device_id = ANY(%s::uuid[]) AND eo.active
+               AND EXISTS (SELECT 1
+                             FROM jsonb_array_elements_text(
+                                  COALESCE(eo.canonical_data -> 'macs', '[]'::jsonb)) m(mac)
+                            WHERE m.mac = ANY(%s::text[]) AND m.mac NOT LIKE '00:15:5d:%%')
+            """,
+            (tenant_id, chosen, macs),
+        )
+        with_mac = {row[0] for row in cur.fetchall()}
+        chosen = [device_id for device_id in chosen if device_id in with_mac]
+    return chosen
+
+
+def record_name_short(cur, platform: str, entity_type: str, name: str | None, domain=None) -> str:
+    """The strict name form of one reported name (``operations.record_name_forms``)."""
+    if not name:
+        return ""
+    cur.execute(
+        "SELECT name_short FROM operations.record_name_forms(%s, %s, %s, %s)",
+        (platform, entity_type, name, domain),
+    )
+    row = cur.fetchone()
+    return (row[0] or "") if row else ""
 
 
 def _hard_conflict(

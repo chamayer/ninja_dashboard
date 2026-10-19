@@ -8,9 +8,11 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import uuid
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
+from pathlib import Path
 
 import psycopg
 import pytest
@@ -79,7 +81,42 @@ CREATE TABLE operations.device_operator_decisions (
     set_at timestamptz NOT NULL, tenant_id bigint NOT NULL, device_id uuid NOT NULL,
     UNIQUE (tenant_id, device_id, dimension)
 );
+CREATE TABLE operations.entity_types (
+    name varchar(80) PRIMARY KEY, is_identity_signal boolean NOT NULL
+);
+INSERT INTO operations.entity_types VALUES
+    ('agent.rmm', true), ('agent.remote_access', true), ('agent.edr', true),
+    ('vm.guest', true), ('vm.host', true), ('cmdb.asset', false);
+CREATE TABLE operations.entity_observation_history (
+    tenant_id bigint NOT NULL, source_instance_id uuid NOT NULL, external_id text NULL,
+    platform varchar(80) NOT NULL, entity_type varchar(80) NOT NULL,
+    material_data jsonb NOT NULL, observed_at timestamptz NOT NULL
+);
+-- Stand-in for the lifecycle view: no record is archived here.
+CREATE TABLE operations.v_device_source_record_lifecycle_current (
+    observation_id uuid PRIMARY KEY, record_lifecycle text NOT NULL
+);
+CREATE TABLE operations.source_name_kinds (
+    platform varchar(80) NOT NULL, record_type varchar(80) NOT NULL,
+    kind varchar(8) NOT NULL, rank smallint NOT NULL,
+    strip_pattern text NOT NULL DEFAULT '', reason text NOT NULL DEFAULT '',
+    PRIMARY KEY (platform, record_type)
+);
 """
+
+
+def _production_record_name_forms() -> str:
+    """The function exactly as migration 0322 creates it."""
+    path = (
+        Path(__file__).resolve().parents[2]
+        / "operations/apps/core/migrations/0322_record_names_and_shadow_naming.py"
+    )
+    text = path.read_text(encoding="utf-8")
+    found = re.search(
+        r"CREATE FUNCTION operations\.record_name_forms\(.*?\$fn\$;", text, re.S
+    )
+    assert found, "record_name_forms not found in migration 0322"
+    return found.group(0)
 
 
 @pytest.fixture(scope="module")
@@ -94,6 +131,7 @@ def conn():
         )
         with psycopg.connect(dsn, autocommit=True) as connection:
             connection.execute(SCHEMA)
+            connection.execute(_production_record_name_forms())
             yield connection
 
 
@@ -133,6 +171,14 @@ def record(
     **data,
 ):
     entity_key = key or str(uuid.uuid4())
+    if "hostname" not in data and device_id is not None:
+        # Matching reads names from records (ADR-0034); a record reports its
+        # Computer's name unless the test says otherwise.
+        cur.execute(
+            "SELECT canonical_hostname FROM operations.devices WHERE id = %s",
+            (device_id,),
+        )
+        data["hostname"] = cur.fetchone()[0]
     cur.execute(
         """INSERT INTO operations.entity_observation_current
                (observation_id, tenant_id, device_id, client_id, platform, entity_type,

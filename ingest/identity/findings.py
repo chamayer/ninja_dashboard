@@ -54,7 +54,9 @@ _RECENT = timedelta(days=30)
 _RECORDS = """
 SELECT d.id, d.client_id, d.canonical_hostname, d.created_at,
        eo.observation_id, eo.platform, eo.entity_type, eo.entity_key,
-       lower(split_part(coalesce(eo.canonical_data ->> 'hostname', ''), '.', 1)),
+       -- The one SQL name normalization (ADR-0034 section 1); roaming records
+       -- carry no name.
+       CASE WHEN rr.external_id IS NULL THEN coalesce(f.name_short, '') ELSE '' END,
        -- A roaming record (migration 0318) carries no machine's serial.
        CASE WHEN rr.external_id IS NULL THEN eo.canonical_data ->> 'serial_number' END,
        CASE WHEN rr.external_id IS NULL
@@ -67,6 +69,10 @@ SELECT d.id, d.client_id, d.canonical_hostname, d.created_at,
   LEFT JOIN operations.identity_roaming_records rr
     ON rr.tenant_id = eo.tenant_id AND rr.source_instance_id = eo.source_instance_id
    AND rr.external_id = eo.external_id
+ CROSS JOIN LATERAL operations.record_name_forms(
+      eo.platform, eo.entity_type,
+      coalesce(nullif(eo.canonical_data ->> 'hostname', ''), eo.canonical_data ->> 'guest_name'),
+      eo.canonical_data ->> 'domain') f
  WHERE d.tenant_id = %s AND d.deleted_at IS NULL AND eo.active
    AND eo.entity_key NOT LIKE 'device-health:%%'
 """
@@ -113,8 +119,15 @@ class _Computer:
         return max((r["last_seen_at"] for r in self.records if r["last_seen_at"]), default=None)
 
 
+_IDENTITY_RECORD_TYPES_CACHE: frozenset[str] = frozenset()
+
+
 def evaluate(cur: Any, tenant_id: int, now: datetime) -> int:
     """Raise and clear both identity conditions; return findings written."""
+    global _IDENTITY_RECORD_TYPES_CACHE
+    from ingest.identity import identity_entity_types
+
+    _IDENTITY_RECORD_TYPES_CACHE = identity_entity_types(cur)
     # Without the serial rejection list no serial is usable, which would read
     # as "no two machines anywhere" and clear every finding: skip instead.
     normalize.load_identity_value_rejections(cur)
@@ -140,9 +153,10 @@ def evaluate(cur: Any, tenant_id: int, now: datetime) -> int:
     if ft_dup is not None:
         keys = []
         for subject, details in duplicate_groups(computers, _separated(cur, tenant_id)):
+            # Keyed by the Computers, never by a name (ADR-0034 section 8).
             key = _key(
-                tenant_id, DUPLICATE_COMPUTERS, subject.client_id, loose_name(subject.name),
-                min(str(m["device_id"]) for m in details["computers"]),
+                tenant_id, DUPLICATE_COMPUTERS, subject.client_id,
+                *sorted(str(m["device_id"]) for m in details["computers"]),
             )
             keys.append(key)
             written += _upsert(
@@ -359,11 +373,19 @@ def _two_names_in_one_source(records: list[dict[str, Any]], now: datetime) -> bo
 def duplicate_groups(
     computers: dict[uuid.UUID, _Computer], separated: set[tuple[str, str]]
 ) -> list[tuple[_Computer, dict[str, Any]]]:
-    """Same-name live Computers that nothing links or separates."""
+    """Live Computers whose records report one name, with nothing linking or separating them.
+
+    The names are what the Computers' current identity records report
+    (ADR-0034 section 4), never their stored names.
+    """
     by_name: dict[tuple, list[_Computer]] = {}
     for computer in computers.values():
-        name = loose_name(computer.name)
-        if name:
+        names = {
+            r["hostname"]
+            for r in computer.records
+            if r["hostname"] and r["entity_type"] in _IDENTITY_RECORD_TYPES_CACHE
+        }
+        for name in names:
             by_name.setdefault((computer.client_id, name), []).append(computer)
     found = []
     for members in by_name.values():

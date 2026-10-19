@@ -258,6 +258,15 @@ measurements, activation review, the history index as a separate reviewed
 `CREATE INDEX CONCURRENTLY` migration, finding re-key and record-name
 matching, verify matching, then the naming writer; label drift last.
 
+Guard deployed (`c183fe8`, 0325). Stage 2, ADR step 3 (end-to-end
+authorization, 2026-10-19, light testing): matching, promotion and duplicate
+detection read record names through `record_name_forms` (four tiers, strict /
+loose / 15-character with ambiguity stop, roaming records nameless);
+`identity_conflict` and `duplicate_device_records` keyed by sorted Computer
+IDs; 0326 rekeys open findings in place (skips a key another open finding
+holds); 0327 builds `idx_obs_hist_record_identity` concurrently. Matching
+test 12 passed. Next: push, check, then stage 3 (the writer).
+
 ---
 
 # Computer identity and platform change history (2026-10-16)
