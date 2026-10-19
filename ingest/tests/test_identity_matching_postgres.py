@@ -18,6 +18,7 @@ import psycopg
 import pytest
 
 from ingest import normalize
+from ingest.identity import matching
 from ingest.identity.matching import IdentityMatchPolicy, resolve_match
 
 NOW = datetime(2026, 10, 16, 12, 0, tzinfo=UTC)
@@ -133,6 +134,11 @@ def conn():
             connection.execute(SCHEMA)
             connection.execute(_production_record_name_forms())
             yield connection
+
+
+@pytest.fixture(autouse=True)
+def _fresh_history_cache():
+    matching._history_cache.clear()
 
 
 @pytest.fixture(autouse=True)

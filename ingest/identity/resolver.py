@@ -329,18 +329,38 @@ def _maybe_create_candidate(
     observation happens to be pending, and this function only runs for
     unresolved ones.
     """
+    # Scoped to the client's records: this runs once per unresolved record, so
+    # the fleet-wide device_names set would be recomputed hundreds of times.
     cur.execute(
-        "WITH "
-        + _DEVICE_NAMES
-        + """
+        """
         SELECT DISTINCT d.id FROM operations.devices d
-          JOIN device_names dn ON dn.device_id = d.id AND dn.name = %s
+          JOIN operations.entity_observation_current eo
+            ON eo.tenant_id = d.tenant_id AND eo.device_id = d.id AND eo.active
+         CROSS JOIN LATERAL operations.record_name_forms(
+              eo.platform, eo.entity_type,
+              coalesce(nullif(eo.canonical_data ->> 'hostname', ''), eo.canonical_data ->> 'guest_name'),
+              eo.canonical_data ->> 'domain') f
          WHERE d.tenant_id = %s AND d.deleted_at IS NULL
-           AND (%s::uuid IS NULL OR d.client_id = %s)
+           AND (%s::uuid IS NULL OR (d.client_id = %s AND eo.client_id = %s))
+           -- Cheap necessary condition before the normalization: the short
+           -- name is the lower-cased start of the raw name.
+           AND lower(ltrim(coalesce(nullif(eo.canonical_data ->> 'hostname', ''),
+                                    eo.canonical_data ->> 'guest_name', ''))) LIKE %s
+           AND eo.entity_key NOT LIKE 'device-health:%%'
+           AND eo.entity_type IN (SELECT name FROM operations.entity_types WHERE is_identity_signal)
+           AND f.name_short = %s
+           AND NOT EXISTS (SELECT 1 FROM operations.identity_roaming_records rr
+                            WHERE rr.tenant_id = eo.tenant_id
+                              AND rr.source_instance_id = eo.source_instance_id
+                              AND rr.external_id = eo.external_id)
          ORDER BY d.id
          LIMIT 5
         """,
-        (norm, TENANT_ID, client_id, client_id),
+        (
+            TENANT_ID, client_id, client_id, client_id,
+            norm.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%",
+            norm,
+        ),
     )
     rows = cur.fetchall()
     if len(rows) < _MIN_IDENTITY_CANDIDATES:

@@ -30,6 +30,7 @@ candidate selection:
 from __future__ import annotations
 
 import re
+import time
 import uuid
 from dataclasses import dataclass, field
 from decimal import Decimal
@@ -322,7 +323,11 @@ def _candidates(
 _NAME_CANDIDATES = """
 WITH inc AS (
     SELECT %(name)s::text AS short,
-           regexp_replace(%(name)s::text, '[^a-z0-9]', '', 'g') AS key
+           regexp_replace(%(name)s::text, '[^a-z0-9]', '', 'g') AS key,
+           -- Every match (same key, or either 15-character cut) has a raw name
+           -- whose letters and digits start with these: a cheap necessary
+           -- condition checked before the normalization function.
+           regexp_replace(left(%(name)s::text, 15), '[^a-z0-9]', '', 'g') AS pre
 ), recs AS (
     -- Every named identity record of the client's Computers, normalized by the
     -- one SQL function (ADR-0034 section 1). Roaming records carry no name.
@@ -342,29 +347,11 @@ WITH inc AS (
        AND eo.entity_type = ANY(%(types)s::text[])
        AND eo.entity_key NOT LIKE 'device-health:%%'
        AND NOT (eo.platform = %(source)s AND eo.entity_key = %(key)s)
+       AND left(regexp_replace(lower(coalesce(nullif(eo.canonical_data ->> 'hostname', ''),
+                                                 eo.canonical_data ->> 'guest_name', '')),
+                               '[^a-z0-9]', '', 'g'), length((SELECT pre FROM inc)))
+           = (SELECT pre FROM inc)
        AND f.name_short IS NOT NULL
-       AND NOT EXISTS (SELECT 1 FROM operations.identity_roaming_records rr
-                        WHERE rr.tenant_id = eo.tenant_id
-                          AND rr.source_instance_id = eo.source_instance_id
-                          AND rr.external_id = eo.external_id)
-), hist AS (
-    -- Names the client's records reported earlier (tier 4).
-    SELECT DISTINCT eo.device_id, f.name_short, f.name_key
-      FROM operations.entity_observation_current eo
-      JOIN operations.devices d
-        ON d.tenant_id = eo.tenant_id AND d.id = eo.device_id AND d.deleted_at IS NULL
-      JOIN operations.entity_observation_history h
-        ON h.tenant_id = eo.tenant_id AND h.source_instance_id = eo.source_instance_id
-       AND h.external_id = eo.external_id AND h.entity_type = eo.entity_type
-     CROSS JOIN LATERAL operations.record_name_forms(
-          h.platform, h.entity_type,
-          coalesce(nullif(h.material_data ->> 'hostname', ''), h.material_data ->> 'guest_name'),
-          h.material_data ->> 'domain') f
-     WHERE eo.tenant_id = %(tenant)s
-       AND (%(client)s::uuid IS NULL OR d.client_id = %(client)s::uuid)
-       AND eo.entity_type = ANY(%(types)s::text[])
-       AND NOT (eo.platform = %(source)s AND eo.entity_key = %(key)s)
-       AND f.name_key = (SELECT key FROM inc)
        AND NOT EXISTS (SELECT 1 FROM operations.identity_roaming_records rr
                         WHERE rr.tenant_id = eo.tenant_id
                           AND rr.source_instance_id = eo.source_instance_id
@@ -379,9 +366,51 @@ SELECT r.device_id,
  WHERE r.name_key = inc.key
     OR (length(inc.short) = 15 AND length(r.name_short) > 15 AND left(r.name_short, 15) = inc.short)
     OR (length(r.name_short) = 15 AND length(inc.short) > 15 AND left(inc.short, 15) = r.name_short)
-UNION ALL
-SELECT h.device_id, 4, h.name_short, h.name_key FROM hist h
 """
+
+# Names the client's records reported earlier (tier 4), distinct per record.
+# Reading the history of every record of a large client takes seconds, so it
+# is computed once per client and kept briefly (_HISTORY_TTL).
+_HISTORY_NAMES = """
+SELECT DISTINCT eo.device_id, eo.platform, eo.entity_key, f.name_short, f.name_key
+  FROM (
+    SELECT DISTINCT eo.device_id, eo.platform, eo.entity_key, h.platform AS h_platform,
+           h.entity_type AS h_type,
+           coalesce(nullif(h.material_data ->> 'hostname', ''), h.material_data ->> 'guest_name') AS raw,
+           h.material_data ->> 'domain' AS domain
+      FROM operations.entity_observation_current eo
+      JOIN operations.devices d
+        ON d.tenant_id = eo.tenant_id AND d.id = eo.device_id AND d.deleted_at IS NULL
+      JOIN operations.entity_observation_history h
+        ON h.tenant_id = eo.tenant_id AND h.source_instance_id = eo.source_instance_id
+       AND h.external_id = eo.external_id AND h.entity_type = eo.entity_type
+     WHERE eo.tenant_id = %(tenant)s
+       AND (%(client)s::uuid IS NULL OR d.client_id = %(client)s::uuid)
+       AND eo.entity_type = ANY(%(types)s::text[])
+       AND NOT EXISTS (SELECT 1 FROM operations.identity_roaming_records rr
+                        WHERE rr.tenant_id = eo.tenant_id
+                          AND rr.source_instance_id = eo.source_instance_id
+                          AND rr.external_id = eo.external_id)
+  ) eo
+ CROSS JOIN LATERAL operations.record_name_forms(eo.h_platform, eo.h_type, eo.raw, eo.domain) f
+ WHERE f.name_key IS NOT NULL
+"""
+_HISTORY_TTL = 600.0
+_history_cache: dict[tuple, tuple[float, list[tuple]]] = {}
+
+
+def _history_names(cur, tenant_id: int, client_id, identity_types: list[str]) -> list[tuple]:
+    cache_key = (tenant_id, client_id, tuple(sorted(identity_types)))
+    cached = _history_cache.get(cache_key)
+    now = time.monotonic()
+    if cached and now - cached[0] < _HISTORY_TTL:
+        return cached[1]
+    cur.execute(
+        _HISTORY_NAMES, {"tenant": tenant_id, "client": client_id, "types": identity_types}
+    )
+    rows = cur.fetchall()
+    _history_cache[cache_key] = (now, rows)
+    return rows
 
 
 def _name_candidates(
@@ -419,6 +448,15 @@ def _name_candidates(
     )
     rows = cur.fetchall()
     key = _LOOSE_RE.sub("", hostname)
+    if not rows:
+        # Tier 4 only decides when no current or withdrawn record holds the name.
+        rows = [
+            (device_id, 4, short, name_key)
+            for device_id, platform, entity_key, short, name_key in _history_names(
+                cur, tenant_id, client_id, identity_types
+            )
+            if name_key == key and not (platform == source_name and entity_key == external_id)
+        ]
     chosen: list[uuid.UUID] = []
     for tier in (1, 2, 3, 4):
         in_tier = [row for row in rows if row[1] == tier]
