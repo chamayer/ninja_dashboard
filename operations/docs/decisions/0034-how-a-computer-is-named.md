@@ -63,7 +63,9 @@ conflict and ambiguity safeguards.
 ### 1. One normalization function, applied on demand
 
 `operations.record_name_forms(platform, record_type, name, domain)` is the
-only normalization of record names. It returns:
+only normalization of record names (the target: until step 3 of the activation order, matching
+still normalizes in Python, and this function serves the shadow naming and
+roaming detection). It returns:
 
 - `name_short`: the name before the first dot, lower case, trimmed (the strict
   form);
@@ -112,7 +114,11 @@ history registry and `change_history_unclassified`.
 A record is roaming when it is in `identity_roaming_records` under the 0318
 rule (three or more usable serials and three or more names), or when it is an
 agent record that, within 90 days, reported five or more distinct `name_key`
-values with no usable serial and no VM UUID. Formatting and domain changes do
+values with no usable serial and no VM UUID. A usable serial is decided as
+identity matching decides it (`ingest/normalize.py` `is_usable_serial`,
+including `identity_value_rejections`); `operations.usable_serial` is its SQL
+parity implementation, pinned by tests. A history interval counts when it
+overlaps the 90 days, not only when it began inside them. Formatting and domain changes do
 not count as names. A roaming record's name is not evidence for matching or
 naming; the record still attaches by its stable source link and is shown.
 Because the new condition requires no serial and no VM UUID, adding such
@@ -172,7 +178,7 @@ record behind it. The first rule with an answer wins:
 | Rule (`name_rule`) | Source of the name | Order within the rule |
 |---|---|---|
 | `operator` | the operator's name | — |
-| `reporting_os` | an OS name from a recently reporting record (online, a powered-on VM, or contact within 30 days — the lifecycle definition in `ingest/computer_listing.py`) | rank |
+| `reporting_os` | an OS name from a recently reporting record: the record itself is online, a powered-on VM, or reports contact within 30 days (the lifecycle duration of `ingest/computer_listing.py`, evaluated per record, not per source) | rank |
 | `silent_os` | an OS name from a current but silent record | rank |
 | `stable_os` | with no current OS record, the current name, when any of the Computer's OS records ever reported it (record history) | — |
 | `withdrawn_os` | an OS name from a withdrawn record | most recently seen, then rank |
