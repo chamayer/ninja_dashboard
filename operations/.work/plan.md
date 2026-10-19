@@ -1,13 +1,84 @@
+# How a Computer is named — ADR-0034 proposal (2026-10-19)
+
+## Status
+
+Active — ADR-0034 accepted 2026-10-19 (user). Step 1 of its activation order
+in progress; steps 2–6 not started.
+
+## Goal
+
+Identity owns Computer naming: one on-demand normalization function, record
+names as identity evidence, name kinds as data, one explainable naming
+function with provenance and a database-enforced single writer, audited
+operator rename, identity findings keyed by Computers, and label drift
+surfaced. Hostname leaves the generic attribute engine (ADR-0010).
+
+## Fixed decisions (user, 2026-10-19)
+
+- LogMeIn names are editable labels; ScreenConnect reports the real hostname.
+- Rethinking ADR-0010/0012 is allowed; the generic engine need not own names.
+- Earlier reviews: rank-stale disagreement shown (History, not an issue);
+  exact historical-name match precedence with the loose and 15-character
+  uniqueness guards; labels may match by name (recorded, reversible); no
+  universal "(…)" stripping; explicit storage contract; activation order
+  matching before naming; roaming by names needs 5+ names (3 would catch 24
+  real renames).
+- Re-review (A–F plus refinements): prefer the longer OS name over its
+  15-character cut; order `silent_os` before `stable_os`; identity findings
+  keyed by Computer IDs with an in-place rekey; normalization on demand (no
+  columns, trigger or backfill on `entity_observation_current`); immediate
+  scoped recomputation plus a full set-based reconciliation each resolver
+  cycle (no queue); guard trigger tied to a dedicated no-login writer role
+  (not a session setting); label drift last and optional; query-plan check for
+  the historical-name tier; time the complete shadow reconciliation; show the
+  10 retired Hudu-driven renames at activation review.
+
+## Affected files
+
+- `operations/docs/decisions/0034-how-a-computer-is-named.md` (accepted).
+- Step 1: `operations/apps/core/migrations/0322_*`, its migration test,
+  `ingest/evaluator.py` (unclassified producer) and its test.
+
+## Step 1 (in progress)
+
+Scope: `record_name_forms()` (SQL, on demand); `source_name_kinds` (global,
+covered by change history, seeded per ADR section 2); roaming `basis`
+('serials' / 'names', name condition limited to agent records with no usable
+serial and no VM UUID in 90 days — neutral for current matching); shadow
+`computer_names(uuid[])` with every rule of section 5 including the
+15-character preference; a shadow full-fleet reconciliation that compares and
+writes nothing; `source_name_kind_unclassified()` with its admin finding type
+(policy `conditions-registry-7`) and evaluator producer. No change to
+matching, to Computer names or to `entity_observation_current`.
+
+Validation: migration test on production column types running every
+operation (forms parity cases, kinds, roaming including the 3-name rename and
+VM UUID guards, every naming rule, unclassified function); evaluator producer
+test; full suites; then, before activation, the production timing of the
+shadow reconciliation and the historical-name query plan. Commit locally;
+no push without the separate locking/backfill review.
+
+## Checkpoint and next action
+
+2026-10-19: ADR-0034 accepted; proposal commit amended. Step 1 build started.
+Before step 2, report to the user: shadow-pass runtime and query plan, the
+historical-name lookup plan, shadow counts (incl. the 19 expanded names and
+the 10 retired Hudu-driven renames), unclassified finding creation and
+resolution, and test results with pre-existing failures.
+
+---
+
 # Computer identity and platform change history (2026-10-16)
 
 ## Status
 
-Active — the only active Operations plan. Durable rules:
+Complete (2026-10-19): workstreams 1–9 shipped through migration 0321
+(`6a098bc`) and verified in production; per-table `enforce_action` is in the
+backlog. Durable rules:
 `docs/decisions/0032-computer-identity-matching-and-merge.md` and
 `docs/decisions/0033-every-platform-change-is-recorded.md` (both Accepted
-2026-10-16). The identity and history framework is not built. The lifecycle
-prerequisite (workstream 6) is shipped in `725f8ae` with migration 0305,
-deployed and verified 2026-10-16. New migrations start at 0306.
+2026-10-16). The sections below record the plan as it was executed, starting
+from the lifecycle prerequisite (workstream 6, `725f8ae`, migration 0305).
 Replaces the 2026-10-15 version of this plan, whose review-only name matching
 was withdrawn after measurement. Absorbs central-work-queue W6 and the
 duplicate-record part of W9 (root plan). Figures are read-only production
@@ -274,6 +345,17 @@ coverage → 9 History page. Each step is its own commit; migrations reviewed
 before each push.
 
 ## Checkpoint and next action
+
+2026-10-18: workstreams shipped through 0320. 0317 (`74dda37`) fixed the
+44-hour source-refresh outage caused by 0315 leaving moved links' history open;
+0318 (`b255b6d`) ignores roaming image agents and split the Citrix merge;
+0319 (`430ead9`) moved writes from audit_log into the change history.
+Follow-up review direction: no new class for listing-only Computers and no
+broader automatic merge rule. Unknown OS now raises one `os_unknown_coverage`
+finding instead of skipping requirements (0320, `b87c9d9`). Name-only
+duplicate groups stay manual (operator). Pre-existing test failures remain the
+same (11 ingest, 4 Operations); `human_labels.py` had ruff-format drift
+before this work. Next: verify the 0320 deploy and the finding count.
 
 2026-10-16 19:20 UTC: shipped `c4ed359`, `e29ed42`, `0b7af48`, `a44a834`
 (0306–0308 applied). Waiting for the first resolver run after 0308 to verify
