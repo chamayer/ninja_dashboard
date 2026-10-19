@@ -23,13 +23,13 @@ Django-based Operations application.
 - Treat a push as a production-affecting action. `origin`
   (`chamayer/ninja_dashboard`) is the deployment authority watched by
   Portainer; `a-m-rose/ninja_dashboard` is the required secondary mirror.
-  After an approved `origin` push, immediately trigger the Portainer redeploy
-  through the configured private mechanism; do not wait for repository polling.
-  The push approval includes that immediate redeploy and service startup applies
-  pending ingest and Django migrations, so the approval must explicitly include
-  the reviewed pending migrations. A standalone redeploy not coupled to an
-  approved push, manual migration, data rebuild, rollback, and other production
-  changes still require their own explicit authorization.
+  An approved `origin` push automatically triggers the Portainer deployment;
+  do not trigger a separate redeploy. The push approval includes that automatic
+  deployment, and service startup applies pending ingest and Django migrations,
+  so the approval must explicitly include the reviewed pending migrations. A
+  standalone redeploy not coupled to an approved push, manual migration, data
+  rebuild, rollback, and other production changes still require their own
+  explicit authorization.
 - Obtain separate approval for commit and push, keep commits to one logical
   change, push an approved deployment commit to `origin` before the secondary
   mirror, and report the short commit hash after both pushes.
