@@ -274,7 +274,17 @@ Stage 3, ADR step 4: 0328 adds `name_rule` / `name_observation_id` /
 promotion and merge and reconciles every run; the projector no longer writes
 the name; Rename / Use automatic name on the Computer page; merge and split
 actions rename at once. 0328 test 7 passed; static writer test added.
-Next: verify 33/2/7 renames in production, then stages 4-6.
+Pushed `fd71df1`.
+
+Complete 2026-10-19. Stages 4-6 `296af84`, `27d7164`, `e014d71`; fixes
+`629b10a` (matching 24 s per record on the largest client: prefilter, cached
+history tier, scoped conflict check) and `dc56492` (0331, naming role EXECUTE
+grant; first pass failed on current_tenant_id). Production: 0322-0331 applied;
+first reconciliation 21:19 UTC changed 5,543 Computers in 22.6 s: 33 live and
+2 retired renames, 105 same-key form changes, 8 kept collisions (new:
+shiya_win_11 / lab220-04, duplicate Hudu asset); merged rows unnamed by
+design; hostname policies 0 enabled. Issues: 8 collision, 123 label drift,
+49 duplicate (was 45; record names), 5 identity conflict.
 
 ---
 
