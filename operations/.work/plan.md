@@ -60,11 +60,27 @@ no push without the separate locking/backfill review.
 
 ## Checkpoint and next action
 
-2026-10-19: ADR-0034 accepted; proposal commit amended. Step 1 build started.
-Before step 2, report to the user: shadow-pass runtime and query plan, the
-historical-name lookup plan, shadow counts (incl. the 19 expanded names and
-the 10 retired Hudu-driven renames), unclassified finding creation and
-resolution, and test results with pre-existing failures.
+2026-10-19: step 1 built and committed locally (not pushed): migration 0322
+(`source_name_kinds` seeded and covered by change history,
+`record_name_forms`, `usable_serial`, roaming `basis`, `computer_names`,
+`computer_name_shadow`, `source_name_kind_unclassified`, finding type and
+policy `conditions-registry-7`), evaluator producer, resolver hourly
+read-only shadow log. Review corrections applied before any push: reporting
+uses each record's own online, power and `last_seen_at` evidence (the
+per-source aggregate made stale duplicates look live: `cp-re01 →
+donnarullo`); a usable serial is decided by `usable_serial`, the same rule as
+identity matching including `identity_value_rejections`; the 90-day window
+takes every interval that overlaps it; serials and names are reduced to
+distinct values before the per-value checks. Validation: 0322 + 0318
+migration tests 19 passed (placeholder serial, window boundary, stale
+duplicate cases added), producer and identity tests 16 passed,
+`git diff --check` clean; complete suites ran before the corrections (11
+ingest and 4 Operations failures, the same without this change). Production
+(read-only, bodies inlined, kinds seed substituted): roaming refresh 5.5 s
+serials + 6.3 s names (5 + 2 records); shadow pass 11.3 s; history lookup as a
+set 0.8 s (no index on source_instance_id + external_id: needed before step
+3's per-record history tier). Next: separate push approval with the migration
+locking review.
 
 ---
 

@@ -114,6 +114,7 @@ def evaluate(tenant_id: int, device_id: uuid.UUID | None = None) -> int:
                     )
                     affected += _evaluate_unknown_entities(cur, tenant_id, now)
                     affected += _evaluate_change_history_registry(cur, tenant_id, now)
+                    affected += _evaluate_source_name_kinds(cur, tenant_id, now)
                     affected += _evaluate_duplicate_records(cur, tenant_id, now)
                     affected += identity_findings.evaluate(cur, tenant_id, now)
                 corroborated = _load_corroborated_devices(cur, tenant_id)
@@ -1332,6 +1333,55 @@ def _evaluate_change_history_registry(cur: Any, tenant_id: int, now: datetime) -
         (now, tenant_id, ft_id, present_keys),
     )
     return len(tables)
+
+
+def _evaluate_source_name_kinds(cur: Any, tenant_id: int, now: datetime) -> int:
+    """Admin finding per source and record type whose names have no name kind (ADR-0034)."""
+    ft_id = _get_finding_type_id(cur, "source_name_kind_unclassified")
+    if ft_id is None:
+        return 0
+    cur.execute(
+        "SELECT to_regprocedure('operations.source_name_kind_unclassified(bigint)') IS NOT NULL"
+    )
+    if not cur.fetchone()[0]:
+        return 0
+    cur.execute("SELECT * FROM operations.source_name_kind_unclassified(%s)", (tenant_id,))
+    rows = cur.fetchall()
+    present_keys = []
+    for platform, record_type, records in rows:
+        ckey = f"source_name_kind_unclassified:{platform}:{record_type}"
+        present_keys.append(ckey)
+        _upsert_admin_finding(
+            cur,
+            tenant_id,
+            ft_id,
+            ckey,
+            "medium",
+            now,
+            {"platform": platform, "record_type": record_type},
+            {"platform": platform, "record_type": record_type, "records": records},
+            measured=True,
+        )
+    cur.execute(
+        """
+        UPDATE operations.admin_findings
+        SET status = 'resolved', resolved_at = %s
+        WHERE tenant_id = %s AND finding_type_id = %s
+          AND status IN ('open', 'acknowledged')
+          AND NOT (condition_key = ANY(%s))
+          AND EXISTS (
+              SELECT 1 FROM operations.condition_assessments a
+               WHERE a.tenant_id = operations.admin_findings.tenant_id
+                 AND a.row_kind = 'admin'
+                 AND a.finding_id = operations.admin_findings.id
+                 AND (a.response->>'may_clear')::boolean IS TRUE
+                 AND a.policy_version = (SELECT version FROM operations.condition_policy_versions WHERE active ORDER BY version DESC LIMIT 1)
+                 AND a.assessed_at >= now() - (SELECT (policy->>'freshness_hours')::integer * interval '1 hour' FROM operations.condition_policy_versions WHERE active ORDER BY version DESC LIMIT 1)
+          )
+        """,
+        (now, tenant_id, ft_id, present_keys),
+    )
+    return len(rows)
 
 
 # --------------------------------------------------------------------------

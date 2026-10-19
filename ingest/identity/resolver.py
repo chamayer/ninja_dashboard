@@ -179,6 +179,8 @@ def drain_resolution(batch_size: int = 200, *, refresh_current: bool = True) -> 
     except Exception:
         log.exception("resolver: layer propagation failed — continuing")
 
+    run_shadow_naming()
+
     # After promotion and projection have settled the device rows this reads.
     try:
         with db.transaction() as cur:
@@ -1353,6 +1355,54 @@ def refresh_roaming_records(cur) -> None:
     cur.execute("SELECT operations.refresh_identity_roaming_records(%s)", (TENANT_ID,))
     log.info("resolver: %s roaming agent records", cur.fetchone()[0])
     _roaming_refreshed_at = now
+
+
+_SHADOW_NAMING_SECONDS = 3600
+_shadow_naming_at: float | None = None
+
+
+def run_shadow_naming() -> None:
+    """Compute every Computer's name under ADR-0034 and log what would change.
+
+    Step 1 of the ADR's activation order: read only, at most once an hour, in
+    its own read-only transaction, so it never affects resolution. The counts
+    and the runtime feed the activation review.
+    """
+    global _shadow_naming_at
+    now = time.monotonic()
+    if _shadow_naming_at is not None and now - _shadow_naming_at < _SHADOW_NAMING_SECONDS:
+        return
+    _shadow_naming_at = now
+    try:
+        with db.transaction() as cur:
+            cur.execute("SET TRANSACTION READ ONLY")
+            cur.execute(f"SET LOCAL operations.tenant_id = {TENANT_ID}")
+            cur.execute("SET LOCAL statement_timeout = '300s'")
+            cur.execute(
+                "SELECT to_regprocedure('operations.computer_name_shadow(bigint)') IS NOT NULL"
+            )
+            if not cur.fetchone()[0]:
+                return
+            started = time.monotonic()
+            cur.execute(
+                """
+                SELECT lifecycle_status = 'retired', outcome, name_rule, count(*)
+                  FROM operations.computer_name_shadow(%s)
+                 GROUP BY 1, 2, 3 ORDER BY 1, 2, 3
+                """,
+                (TENANT_ID,),
+            )
+            counts = cur.fetchall()
+            log.info(
+                "resolver: shadow naming in %.1fs: %s",
+                time.monotonic() - started,
+                "; ".join(
+                    f"{'retired' if retired else 'live'} {outcome} {rule}={n}"
+                    for retired, outcome, rule, n in counts
+                ),
+            )
+    except Exception:
+        log.exception("resolver: shadow naming failed — continuing")
 
 
 def merge_proven_splits(cur) -> int:
