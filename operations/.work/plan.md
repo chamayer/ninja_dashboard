@@ -297,6 +297,16 @@ roaming and shadow passes; a routine run is measured after this deploy.
 Changelog debt 0.127.0-0.128.0 is in `.work/backlog.md`. The 8 collisions
 stay for operator review.
 
+Final (2026-10-19 23:00 UTC): `b9b3623` (fast-path naming) and `7082cbb`
+(per-client name cache; a routine resolver had taken 510 s) deployed. Routine
+resolver 247 s incl. the hourly roaming pass (62 s) and naming 17 s
+(changed 1); without hourly passes about 140 s, in the pre-ADR range.
+Fast-path source runs completed (source-refresh 369 s; agent-observations
+1,567 s, all sources, last run 2026-10-08). All live Computers named.
+Deploy-interrupted runs (platform-evaluate 20:46, agent-observations and
+patch-classify 21:47) are history; each job's latest run is current.
+ADR-0034 complete.
+
 ---
 
 # Computer identity and platform change history (2026-10-16)
