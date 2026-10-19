@@ -1,6 +1,8 @@
 # 0034 — How a Computer is named
 
-Status: Accepted 2026-10-19; not yet implemented (see `operations/.work/plan.md`)
+Status: Accepted 2026-10-19; implemented 2026-10-19 (migrations 0322-0330).
+The device cache projector's name write was removed in step 4, with the
+writer, because the guard refuses it; label drift excludes retired Computers.
 Date: 2026-10-19
 
 ## Context

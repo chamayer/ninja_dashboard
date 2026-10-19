@@ -2,6 +2,36 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.128.0] — 2026-10-19 — How a Computer is named (ADR-0034)
+
+### Added
+
+- Every Computer name is explained: the Computer page shows the rule that
+  decided it (reported by the machine, a source label, set by an operator,
+  kept because another Computer has it) and the record behind it.
+- Rename and "Use automatic name" on the Computer page, with a reason; a name
+  another Computer of the client already has needs an explicit confirmation.
+- "Name already used by another Computer" review issues when a source would
+  give a Computer another live Computer's name; the name is kept meanwhile.
+- "Source label differs from the Computer name" issues (not alerting) for
+  LogMeIn, Hudu, R-U-ON and VM labels that differ from the machine's own name.
+- Search finds a Computer by a former name and by the name of a Computer
+  merged into it; VM names are searched too.
+
+### Changed
+
+- Computer names have one writer, enforced in the database
+  (`operations.write_computer_names`); renames are recorded in History. Names
+  follow the records each resolver run and at once on create, attach, merge,
+  split and operator rename.
+- Identity matching, promotion and duplicate detection use the names records
+  report, normalized once in SQL, never the stored Computer name.
+- Duplicate and identity-conflict issues are keyed by the Computers involved,
+  so a rename no longer closes and reopens them (open issues were rekeyed in
+  place).
+- Hostname is no longer chosen by the generic attribute authority; hostname
+  claims remain visible evidence.
+
 ## [0.127.0] — 2026-10-13 — Software inventory and findings rebuild
 
 ### Added

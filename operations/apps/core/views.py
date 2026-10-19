@@ -3967,8 +3967,26 @@ SEARCH_IDENTITY_SQL = """
                    WHERE d.tenant_id = 1 AND d.deleted_at IS NULL
                      AND d.canonical_serial ILIKE %(p)s
                   UNION ALL
+                  -- A name the Computer had before a rename (ADR-0034).
+                  SELECT d.id, 2, 'former name'
+                    FROM operations.change_actions ca
+                    JOIN operations.devices d
+                      ON d.tenant_id = 1 AND d.deleted_at IS NULL
+                     AND d.id::text = ca.evidence ->> 'device_id'
+                   WHERE ca.tenant_id = 1 AND ca.action = 'computer.rename'
+                     AND ca.evidence ->> 'from' ILIKE %(p)s
+                  UNION ALL
+                  -- The name of a Computer merged into this one.
+                  SELECT m.survivor_id, 2, 'name of a merged Computer'
+                    FROM operations.computer_merges m
+                    JOIN operations.devices absorbed ON absorbed.id = m.absorbed_id
+                    JOIN operations.devices d
+                      ON d.id = m.survivor_id AND d.deleted_at IS NULL
+                   WHERE m.tenant_id = 1 AND absorbed.canonical_hostname ILIKE %(p)s
+                  UNION ALL
                   SELECT eo.device_id, 3,
-                         CASE WHEN eo.canonical_data ->> 'hostname' ILIKE %(p)s
+                         CASE WHEN coalesce(nullif(eo.canonical_data ->> 'hostname', ''),
+                                            eo.canonical_data ->> 'guest_name') ILIKE %(p)s
                                    THEN 'name in ' || eo.platform
                               WHEN eo.canonical_data ->> 'serial_number' ILIKE %(p)s
                                    THEN 'serial number in ' || eo.platform
@@ -3980,6 +3998,7 @@ SEARCH_IDENTITY_SQL = """
                      AND d.deleted_at IS NULL
                    WHERE eo.tenant_id = 1 AND eo.entity_key NOT LIKE 'device-health:%%'
                      AND (eo.canonical_data ->> 'hostname' ILIKE %(p)s
+                          OR eo.canonical_data ->> 'guest_name' ILIKE %(p)s
                           OR eo.canonical_data ->> 'serial_number' ILIKE %(p)s
                           OR eo.canonical_data ->> 'vm_uuid' ILIKE %(p)s)
               ) hits
