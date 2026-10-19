@@ -2,24 +2,16 @@
 
 ## Computer identity and history follow-ups (2026-10-17)
 
-- **Listing-only Computers (orphan analysis 2026-10-18).** 161 Computers known
-  only from a LogMeIn host entry or an R-U-ON monitor (never an installed
-  agent): 25 match an agent-managed Computer by name (16 same client, 5 by
-  prefix, 4 other client); of the 136 others, 91 are offline LogMeIn entries
-  (54 unchanged for 180+ days), 24 online LogMeIn hosts, 21 online R-U-ON
-  monitors (servers, hypervisor hosts, appliances). Several "unmatched" live
-  ones match an agent record whose Computer kept an old name (the name
-  projection did not run while source refresh was failing). Re-measure after
-  the projection has run; then decide the class (user leans "orphans").
-- **Unknown OS skips every agent requirement** (needs a policy decision).
-  `ingest/evaluator.py` `_evaluate_coverage` skips a requirement when the
-  Computer's `os_group` is not in the agent's `supported_os_groups`;
-  `Unknown` is in none. Measured 2026-10-17: 161 Computers in the coverage
-  check have `os_group = 'Unknown'` (61 active, 15 offline, 85 review), e.g.
-  cc-01 lost Ninja on 2026-08-30 and nothing reports the missing agent.
-  Options: treat `Unknown` as applicable for agents supported on every OS, or
-  raise a separate "OS unknown" finding. Revisit before relying on coverage
-  for those Computers.
+- **Should pending cleanup cover coverage findings?** (user deferred
+  2026-10-19.) Measured 2026-10-19: the 70 stale LogMeIn-only Computers are
+  all `pending_cleanup` and each still carries 4–6 open findings (missing
+  Hudu 70, missing Ninja and SentinelOne 58 each, stale LogMeIn, offline,
+  OS unknown), about 330 in all. Cover is finding-to-finding
+  (`finding_types.covered_by`, read live by `compute_finding_state`), and
+  `pending_cleanup` is a lifecycle state with no finding type to cover from;
+  `device_missing_from_source` never fires while LogMeIn still lists them.
+  Decide whether a cleanup state covers coverage findings and what carries
+  it.
 - **Enforce explicit change actions per table (ADR-0033).** The `audit_log`
   cutover is done (`430ead9`, migration 0319: `audit_log` read-only, every
   former writer records a change action through `operations.label_change`).
