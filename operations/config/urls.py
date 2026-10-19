@@ -10,6 +10,7 @@ from drf_spectacular.views import (
     SpectacularSwaggerView,
 )
 
+from apps.core import computer_naming
 from apps.core.finding_state_checks import finding_state_checks
 from apps.core.finding_types_admin import finding_types_config
 from apps.core.generic_admin import (
@@ -147,6 +148,16 @@ urlpatterns = [
         "orgs/<slug:org_slug>/devices/<uuid:device_id>/patch-scope/clear/",
         device_patch_scope_clear,
         name="device_patch_scope_clear",
+    ),
+    path(
+        "orgs/<slug:org_slug>/devices/<uuid:device_id>/name/set/",
+        computer_naming.device_rename,
+        name="device_rename",
+    ),
+    path(
+        "orgs/<slug:org_slug>/devices/<uuid:device_id>/name/automatic/",
+        computer_naming.device_name_automatic,
+        name="device_name_automatic",
     ),
     path(
         "orgs/<slug:org_slug>/devices/<uuid:device_id>/exemption/add/",

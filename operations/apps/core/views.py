@@ -106,6 +106,7 @@ from .finding_actions import (
 )
 from .forms import ClientPolicyForm
 from .identity_actions import run_identity_action
+from . import computer_naming
 from .models import (
     AdminFinding,
     Agent,
@@ -3656,6 +3657,7 @@ def device_detail(request: HttpRequest, org_slug: str, device_id: str) -> HttpRe
         "device_detail.html",
         {
             "device": device,
+            "name_provenance": computer_naming.name_provenance(device.id),
             "condition_policy_available": condition_policy_available,
             "same_name_devices": same_name_devices,
             "same_name_device_count": same_name_device_count,
@@ -17107,6 +17109,8 @@ def _merge_devices(cur, survivor_id, loser_id, reason: str, *, actor_id: int | N
         (survivor_id, loser_id, reason, actor_id),
     )
     merge_id = cur.fetchone()[0]
+    # The survivor's name follows its records at once (ADR-0034 section 6).
+    computer_naming.name_now(cur, [survivor_id, loser_id])
     cur.execute(
         """
         SELECT cardinality(moved_observation_ids), cardinality(moved_finding_ids)

@@ -166,6 +166,25 @@
         <span class="muted" style="font-size:0.85rem;">{{ device.device_role|humanize_label|default:"Computer" }}{% if device.os_name %} · {{ device.os_name }}{% endif %}</span>
     </div>
     <div class="dd-meta">
+        {% if name_provenance %}<span title="{% if name_provenance.decided_at %}Decided {{ name_provenance.decided_at|date:'Y-m-d H:i' }}{% endif %}">Name: {{ name_provenance.label }}{% if name_provenance.platform %} · {{ name_provenance.platform }} {{ name_provenance.record_type|humanize_label }}{% if name_provenance.record_name %} “{{ name_provenance.record_name }}”{% endif %}{% endif %}{% if name_provenance.operator_name %} · by {{ name_provenance.operator_set_by }}: {{ name_provenance.operator_reason }}{% endif %}</span>
+        <details style="display:inline-block; margin-left:0.6rem;">
+            <summary style="cursor:pointer;">Rename</summary>
+            <form method="post" action="{% url 'device_rename' org_slug=device.client.slug device_id=device.id %}" style="margin-top:0.4rem; display:flex; gap:0.4rem; flex-wrap:wrap; align-items:center;">
+                {% csrf_token %}
+                <input type="text" name="name" value="{{ device.canonical_hostname }}" maxlength="255" required aria-label="New name">
+                <input type="text" name="reason" placeholder="Reason" maxlength="500" required aria-label="Reason">
+                <label style="font-size:0.78rem;"><input type="checkbox" name="confirm_collision" value="1"> Another Computer may have this name</label>
+                <button type="submit" class="btn">Rename</button>
+            </form>
+            {% if name_provenance.operator_name %}
+            <form method="post" action="{% url 'device_name_automatic' org_slug=device.client.slug device_id=device.id %}" style="margin-top:0.4rem; display:flex; gap:0.4rem; align-items:center;">
+                {% csrf_token %}
+                <input type="text" name="reason" placeholder="Reason" maxlength="500" required aria-label="Reason">
+                <button type="submit" class="btn">Use automatic name</button>
+            </form>
+            {% endif %}
+        </details>
+        {% endif %}
         {% if device.lifecycle_status == 'pending_cleanup' %}<strong style="color:#b45309;">Needs review</strong>{% elif device.lifecycle_status == 'retired' %}<strong class="muted">Retired</strong>{% endif %}
     </div>
 </div>

@@ -32,6 +32,7 @@ from django.http import HttpRequest, HttpResponse
 from django.shortcuts import redirect
 from django.utils import timezone
 
+from .computer_naming import name_now
 from .finding_actions import (
     CONFIRM_COMPUTERS_IN_USE,
     CONFIRM_COMPUTERS_SEPARATE,
@@ -103,6 +104,7 @@ def _apply(cur, finding: Finding, action: FindingAction, reason: str, actor) -> 
                        'operator', %s::bigint, 'operations.ui')""",
                 (survivor, other, reason, json.dumps({"finding_id": str(finding.id)}), actor),
             )
+        name_now(cur, [survivor, *others])
         return f"Merged {len(others)} Computer{'s' if len(others) != 1 else ''}."
     if action.key == CONFIRM_COMPUTERS_SEPARATE.key:
         cur.execute(
@@ -118,6 +120,7 @@ def _apply(cur, finding: Finding, action: FindingAction, reason: str, actor) -> 
             "SELECT operations.split_computer_records(%s::uuid, %s::uuid[], %s::text, %s::bigint)",
             (finding.subject_id, proposed, reason, actor),
         )
+        name_now(cur, [finding.subject_id])
         return "Proposed records split off; they are matched again."
     if action.key == CONFIRM_COMPUTERS_IN_USE.key:
         cur.execute(

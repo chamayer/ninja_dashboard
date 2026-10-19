@@ -70,6 +70,7 @@ def drain_resolution(batch_size: int = 200, *, refresh_current: bool = True) -> 
     unless the caller will immediately run the full derived-state coordinator.
     """
     resolved_count = 0
+    touched: set = set()
     with db.transaction() as cur:
         cur.execute(f"SET LOCAL operations.tenant_id = {TENANT_ID}")
         load_identity_value_rejections(cur)
@@ -129,6 +130,7 @@ def drain_resolution(batch_size: int = 200, *, refresh_current: bool = True) -> 
             )
             if device_id is not None:
                 _attach_observation(cur, obs_id, device_id)
+                touched.add(device_id)
                 resolved_count += 1
                 log.debug(
                     "resolver: policy match %s → device %s", entity_key, device_id
@@ -143,6 +145,7 @@ def drain_resolution(batch_size: int = 200, *, refresh_current: bool = True) -> 
                     client_id,
                     identity_conflict_ft_id=identity_conflict_ft_id,
                 )
+        write_computer_names(cur, touched)
 
     log.info(
         "resolver: resolved %d / %d observations",
@@ -188,6 +191,7 @@ def drain_resolution(batch_size: int = 200, *, refresh_current: bool = True) -> 
     except Exception:
         log.exception("resolver: layer propagation failed — continuing")
 
+    reconcile_computer_names()
     run_shadow_naming()
 
     # After promotion and projection have settled the device rows this reads.
@@ -807,19 +811,29 @@ WITH policy AS (
            d.device_role,
            d.os_name,
            ARRAY_REMOVE(ARRAY_AGG(DISTINCT mac.value), NULL) AS macs,
+           -- The names the records report, never the stored name (ADR-0034
+           -- section 4); roaming records carry no name.
+           ARRAY_REMOVE(ARRAY_AGG(DISTINCT CASE WHEN rr.external_id IS NULL THEN f.name_short END),
+                        NULL) AS names,
            ARRAY_AGG(DISTINCT o.observation_id::text) AS observation_ids
       FROM operations.devices d
       JOIN operations.entity_observation_current o
         ON o.tenant_id = d.tenant_id
        AND o.device_id = d.id
        AND o.active
+      LEFT JOIN operations.identity_roaming_records rr
+        ON rr.tenant_id = o.tenant_id AND rr.source_instance_id = o.source_instance_id
+       AND rr.external_id = o.external_id
+     CROSS JOIN LATERAL operations.record_name_forms(
+          o.platform, o.entity_type,
+          coalesce(nullif(o.canonical_data ->> 'hostname', ''), o.canonical_data ->> 'guest_name'),
+          o.canonical_data ->> 'domain') f
       LEFT JOIN LATERAL jsonb_array_elements_text(
           COALESCE(o.canonical_data -> 'macs', '[]'::jsonb)
       ) AS mac(value) ON TRUE
      WHERE d.tenant_id = %s
        AND d.deleted_at IS NULL
        AND d.client_id IS NOT NULL
-       AND d.canonical_hostname <> ''
        AND o.entity_type = ANY(%s)
      GROUP BY d.id, d.client_id, d.canonical_hostname, d.canonical_serial,
               d.canonical_vm_uuid, d.device_type, d.device_role, d.os_name
@@ -846,7 +860,7 @@ WITH policy AS (
       FROM device_evidence a
       JOIN device_evidence b
         ON b.client_id = a.client_id
-       AND b.canonical_hostname = a.canonical_hostname
+       AND a.names && b.names
        AND a.device_id::text < b.device_id::text
        AND cardinality(a.macs) > 0
        AND cardinality(b.macs) > 0
@@ -1109,6 +1123,7 @@ def _promote_unmatched_clusters(
     unresolved = cur.fetchall()
     if not unresolved:
         return 0
+    touched: set = set()
 
     # (client_id, norm) → list of (platform, entity_type, entity_key, first, last, cd)
     clusters: dict[tuple, list[tuple]] = {}
@@ -1165,6 +1180,7 @@ def _promote_unmatched_clusters(
                 """,
                 (linked[0], TENANT_ID, platform, entity_key),
             )
+            touched.add(linked[0])
             continue
         clusters.setdefault((client_id, norm), []).append(
             (platform, entity_type, entity_key, first_seen, last_seen, cd)
@@ -1210,9 +1226,13 @@ def _promote_unmatched_clusters(
                         """,
                         (match.device_id, TENANT_ID, entry[0], entry[2]),
                     )
+                touched.add(match.device_id)
                 continue
-            _create_device_for_group(cur, agent_ids, client_id, norm, group)
+            touched.add(_create_device_for_group(cur, agent_ids, client_id, norm, group))
             promoted += 1
+
+    # A new Computer is inserted pending and must be named before commit.
+    write_computer_names(cur, touched)
 
     if promoted:
         log.info("resolver: promoted %d new devices", promoted)
@@ -1462,6 +1482,53 @@ def refresh_roaming_records(cur) -> None:
     log.info("resolver: %s roaming agent records in %.1fs", records, seconds)
 
 
+_writer_installed = False
+
+
+def write_computer_names(cur, device_ids) -> int:
+    """Name these Computers now through the one writer (ADR-0034 section 6).
+
+    ``None`` reconciles every Computer of the tenant. Returns the Computers
+    whose name or provenance changed. Before migration 0328 is applied the
+    writer does not exist and nothing is written.
+    """
+    global _writer_installed
+    if not _writer_installed:
+        cur.execute(
+            "SELECT to_regprocedure('operations.write_computer_names(uuid[],bigint)') IS NOT NULL"
+        )
+        _writer_installed = bool(cur.fetchone()[0])
+        if not _writer_installed:
+            return 0
+    ids = None if device_ids is None else sorted({str(d) for d in device_ids if d})
+    if ids == []:
+        return 0
+    cur.execute(
+        "SELECT operations.write_computer_names(%s::uuid[], %s::bigint)", (ids, TENANT_ID)
+    )
+    return cur.fetchone()[0] or 0
+
+
+def reconcile_computer_names() -> None:
+    """Full set-based naming reconciliation, each resolver run (ADR-0034 section 6).
+
+    Catches source updates, name-kind changes, missed signals and the 30-day
+    reporting boundary; writes only changed decisions.
+    """
+    try:
+        started = time.monotonic()
+        with db.transaction() as cur:
+            cur.execute(f"SET LOCAL operations.tenant_id = {TENANT_ID}")
+            cur.execute("SET LOCAL statement_timeout = '300s'")
+            changed = write_computer_names(cur, None)
+        seconds = time.monotonic() - started
+        _telemetry["naming"] = {"changed": changed, "seconds": round(seconds, 1)}
+        log.info("resolver: naming reconciliation changed %d Computers in %.1fs", changed, seconds)
+    except Exception:
+        _telemetry["naming"] = {"failed": True}
+        log.exception("resolver: naming reconciliation failed — continuing")
+
+
 def run_shadow_naming() -> None:
     """Compute every Computer's name under ADR-0034 and record what would change.
 
@@ -1551,6 +1618,7 @@ def merge_proven_splits(cur) -> int:
                 Json({kind: value}),
             ),
         )
+    write_computer_names(cur, [c for row in planned for c in row[:2]])
     if planned:
         log.info("resolver: merged %d Computers proven to be one machine", len(planned))
     return len(planned)

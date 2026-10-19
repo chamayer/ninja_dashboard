@@ -148,15 +148,50 @@ def test_only_projector_writes_device_cache_columns() -> None:
     )
 
 
-def test_projector_keeps_the_stored_name_following_the_records() -> None:
-    """ADR-0032: the stored name is projected from the effective hostname.
+NAME_COLUMNS = ("canonical_hostname", "name_rule", "name_observation_id", "name_decided_at")
 
-    Promotion still names a new Computer from its first record (matching needs
-    a name at once); afterwards only the projector changes it.
+
+def test_only_the_naming_writer_writes_computer_names() -> None:
+    """ADR-0034 section 6: operations.write_computer_names is the one writer.
+
+    The database refuses any other writer (guard trigger, migration 0328);
+    this keeps code from trying. A new Computer's INSERT may carry a
+    placeholder name (it starts ``pending`` and is named before commit).
     """
-    text = (_REPO_ROOT / _PROJECTOR).read_text(encoding="utf-8")
-    update_block = text[text.find("UPDATE operations.devices") :]
-    assert re.search(r"\bcanonical_hostname\s*=\s*t\.canonical_hostname", update_block)
+    violations: list[str] = []
+    for path in _python_files():
+        rel = path.relative_to(_REPO_ROOT).as_posix()
+        if "/migrations/" in rel:
+            continue
+        text = path.read_text(encoding="utf-8")
+        for match in re.finditer(r"UPDATE\s+operations\.devices\b", text, re.IGNORECASE):
+            window = text[match.start() : match.start() + 1200].split(";", 1)[0]
+            window = window.split('"""', 1)[0]
+            cols = [c for c in NAME_COLUMNS if re.search(rf"\b{c}\s*=", window)]
+            if cols:
+                line = text[: match.start()].count("\n") + 1
+                violations.append(f"{rel}:{line} writes {', '.join(cols)}")
+        for match in _ORM_WRITE_RE.finditer(text):
+            window = text[match.start() : match.start() + 600]
+            cols = [c for c in NAME_COLUMNS if re.search(rf"[\"']{c}[\"']|\b{c}=", window)]
+            if cols:
+                line = text[: match.start()].count("\n") + 1
+                violations.append(f"{rel}:{line} ORM-writes {', '.join(cols)}")
+    assert not violations, (
+        "ADR-0034: only operations.write_computer_names writes Computer names. Found:\n  "
+        + "\n  ".join(violations)
+    )
+
+
+def test_identity_reads_record_names_not_the_stored_name() -> None:
+    """ADR-0034 section 4: matching never reads the Computer name, and the one
+    normalization is SQL (record_name_forms), not Python."""
+    matching = (_REPO_ROOT / "ingest/identity/matching.py").read_text(encoding="utf-8")
+    assert "canonical_hostname" not in matching
+    for rel in ("ingest/identity/matching.py", "ingest/identity/resolver.py",
+                "ingest/identity/findings.py"):
+        text = (_REPO_ROOT / rel).read_text(encoding="utf-8")
+        assert not re.search(r"\bnormalize_(loose_)?hostname\b", text), rel
 
 
 @pytest.mark.parametrize("column", CACHE_COLUMNS)

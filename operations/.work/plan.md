@@ -265,7 +265,16 @@ loose / 15-character with ambiguity stop, roaming records nameless);
 `identity_conflict` and `duplicate_device_records` keyed by sorted Computer
 IDs; 0326 rekeys open findings in place (skips a key another open finding
 holds); 0327 builds `idx_obs_hist_record_identity` concurrently. Matching
-test 12 passed. Next: push, check, then stage 3 (the writer).
+test 12 passed. Pushed `9e244dd`.
+
+Stage 3, ADR step 4: 0328 adds `name_rule` / `name_observation_id` /
+`name_decided_at` (existing rows NULL until the first reconciliation; new rows
+`pending`, refused at commit), the `operations_naming` role owning
+`write_computer_names`, and the guard trigger. Resolver names on attach,
+promotion and merge and reconciles every run; the projector no longer writes
+the name; Rename / Use automatic name on the Computer page; merge and split
+actions rename at once. 0328 test 7 passed; static writer test added.
+Next: verify 33/2/7 renames in production, then stages 4-6.
 
 ---
 
