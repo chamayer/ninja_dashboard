@@ -144,6 +144,8 @@ def drain_resolution(batch_size: int = 200, *, refresh_current: bool = True) -> 
         resolved_count,
         len(rows) if rows else 0,
     )
+    _add_count("observations_resolved", resolved_count)
+    _add_count("observations_examined", len(rows) if rows else 0)
 
     promoted_count = 0
     try:
@@ -160,6 +162,8 @@ def drain_resolution(batch_size: int = 200, *, refresh_current: bool = True) -> 
             merged_count = merge_proven_splits(cur)
     except Exception:
         log.exception("resolver: automatic merge of proven splits failed — continuing")
+    _add_count("computers_promoted", promoted_count)
+    _add_count("computers_merged", merged_count)
     promoted_count += merged_count
 
     # ADR-0012: the projector is the sole writer of the five device cache
@@ -1333,57 +1337,107 @@ def _operator_separated_pairs(cur) -> set[tuple]:
     return pairs
 
 
-_ROAMING_REFRESH_SECONDS = 3600
-_roaming_refreshed_at: float | None = None
+# Hourly maintenance inside the resolver. The cadence lives in the database
+# (migration 0323): every Jobs run is a new process, so a timestamp held in
+# memory would let the work run on every resolver run.
+_MAINTENANCE_INTERVAL = "1 hour"
+ROAMING_COMPONENT = "identity.roaming_records"
+SHADOW_NAMING_COMPONENT = "identity.shadow_naming"
+
+# Aggregate telemetry of the current resolver run, returned in the Job result
+# (counts, durations, whether each maintenance component ran). Never names or
+# record evidence.
+_telemetry: dict[str, object] = {}
+
+
+def reset_telemetry() -> None:
+    _telemetry.clear()
+
+
+def take_telemetry() -> dict[str, object]:
+    """The telemetry gathered since the last reset, then reset."""
+    snapshot = dict(_telemetry)
+    _telemetry.clear()
+    return snapshot
+
+
+def _add_count(key: str, value: int) -> None:
+    _telemetry[key] = int(_telemetry.get(key, 0)) + int(value)
+
+
+def _claim_maintenance(cur, component: str) -> bool | None:
+    """True when this run takes the component's hourly slot; None before 0323."""
+    cur.execute(
+        "SELECT to_regprocedure('operations.claim_maintenance(bigint, text, interval)') IS NOT NULL"
+    )
+    if not cur.fetchone()[0]:
+        return None
+    cur.execute(
+        "SELECT operations.claim_maintenance(%s, %s, %s::interval)",
+        (TENANT_ID, component, _MAINTENANCE_INTERVAL),
+    )
+    return bool(cur.fetchone()[0])
+
+
+def _complete_maintenance(cur, component: str, seconds: float) -> None:
+    cur.execute(
+        "SELECT operations.complete_maintenance(%s, %s, %s)",
+        (TENANT_ID, component, round(seconds, 3)),
+    )
 
 
 def refresh_roaming_records(cur) -> None:
-    """Recompute roaming agent records (migration 0318) at most once an hour.
+    """Recompute roaming agent records (migrations 0318, 0322) at most once an hour.
 
     Reading the observation history takes seconds, so it is not done on every
     resolution batch; a new clone's record becomes roaming within the hour.
+    The claim is part of the resolution transaction: if that rolls back, the
+    slot is free again.
     """
-    global _roaming_refreshed_at
-    now = time.monotonic()
-    if _roaming_refreshed_at is not None and now - _roaming_refreshed_at < _ROAMING_REFRESH_SECONDS:
-        return
     cur.execute(
         "SELECT to_regprocedure('operations.refresh_identity_roaming_records(bigint)') IS NOT NULL"
     )
     if not cur.fetchone()[0]:
         return
+    claimed = _claim_maintenance(cur, ROAMING_COMPONENT)
+    if claimed is False:
+        _telemetry["roaming"] = {"ran": False}
+        return
+    started = time.monotonic()
     cur.execute("SELECT operations.refresh_identity_roaming_records(%s)", (TENANT_ID,))
-    log.info("resolver: %s roaming agent records", cur.fetchone()[0])
-    _roaming_refreshed_at = now
-
-
-_SHADOW_NAMING_SECONDS = 3600
-_shadow_naming_at: float | None = None
+    records = cur.fetchone()[0]
+    seconds = time.monotonic() - started
+    if claimed:
+        _complete_maintenance(cur, ROAMING_COMPONENT, seconds)
+    _telemetry["roaming"] = {"ran": True, "records": records, "seconds": round(seconds, 1)}
+    log.info("resolver: %s roaming agent records in %.1fs", records, seconds)
 
 
 def run_shadow_naming() -> None:
-    """Compute every Computer's name under ADR-0034 and log what would change.
+    """Compute every Computer's name under ADR-0034 and record what would change.
 
-    Step 1 of the ADR's activation order: read only, at most once an hour, in
-    its own read-only transaction, so it never affects resolution. The counts
-    and the runtime feed the activation review.
+    Step 1 of the ADR's activation order: read only, at most once an hour, so
+    it never affects resolution. The claim is committed on its own; the pass
+    runs in a read-only transaction; the counts and runtime go to the log and
+    the Job result for the activation review.
     """
-    global _shadow_naming_at
-    now = time.monotonic()
-    if _shadow_naming_at is not None and now - _shadow_naming_at < _SHADOW_NAMING_SECONDS:
-        return
-    _shadow_naming_at = now
     try:
         with db.transaction() as cur:
-            cur.execute("SET TRANSACTION READ ONLY")
             cur.execute(f"SET LOCAL operations.tenant_id = {TENANT_ID}")
-            cur.execute("SET LOCAL statement_timeout = '300s'")
             cur.execute(
                 "SELECT to_regprocedure('operations.computer_name_shadow(bigint)') IS NOT NULL"
             )
             if not cur.fetchone()[0]:
                 return
-            started = time.monotonic()
+            claimed = _claim_maintenance(cur, SHADOW_NAMING_COMPONENT)
+        if claimed is False:
+            _telemetry["shadow_naming"] = {"ran": False}
+            return
+        started = time.monotonic()
+        with db.transaction() as cur:
+            cur.execute("SET TRANSACTION READ ONLY")
+            cur.execute(f"SET LOCAL operations.tenant_id = {TENANT_ID}")
+            cur.execute("SET LOCAL statement_timeout = '300s'")
             cur.execute(
                 """
                 SELECT lifecycle_status = 'retired', outcome, name_rule, count(*)
@@ -1393,15 +1447,23 @@ def run_shadow_naming() -> None:
                 (TENANT_ID,),
             )
             counts = cur.fetchall()
-            log.info(
-                "resolver: shadow naming in %.1fs: %s",
-                time.monotonic() - started,
-                "; ".join(
-                    f"{'retired' if retired else 'live'} {outcome} {rule}={n}"
-                    for retired, outcome, rule, n in counts
-                ),
-            )
+        seconds = time.monotonic() - started
+        if claimed:
+            with db.transaction() as cur:
+                cur.execute(f"SET LOCAL operations.tenant_id = {TENANT_ID}")
+                _complete_maintenance(cur, SHADOW_NAMING_COMPONENT, seconds)
+        summary = {
+            f"{'retired' if retired else 'live'}:{outcome}:{rule}": n
+            for retired, outcome, rule, n in counts
+        }
+        _telemetry["shadow_naming"] = {"ran": True, "seconds": round(seconds, 1), "counts": summary}
+        log.info(
+            "resolver: shadow naming in %.1fs: %s",
+            seconds,
+            "; ".join(f"{key}={n}" for key, n in summary.items()),
+        )
     except Exception:
+        _telemetry["shadow_naming"] = {"ran": False, "failed": True}
         log.exception("resolver: shadow naming failed — continuing")
 
 

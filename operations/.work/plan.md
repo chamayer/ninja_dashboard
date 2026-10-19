@@ -1,9 +1,83 @@
+# Jobs observability and maintenance cadence (2026-10-19)
+
+## Status
+
+Active (user, 2026-10-19: fix Jobs before ADR-0034 naming activation).
+
+## Goal
+
+Job logs are visible and redacted, a failing job leaves no raw traceback,
+the resolver reports what its maintenance work did, the hourly maintenance
+inside the resolver really runs at most hourly, and disabled schedules stop
+reporting as failures.
+
+## Confirmed causes
+
+- `ingest/jobs_child.py` never configures logging (since `e0bc520`,
+  2026-09-29): INFO from every job is discarded; it re-raises, so a raw
+  traceback reaches inherited stderr.
+- `ingest/logging_utils.py` adds redaction to the root logger; Python does not
+  run ancestor logger filters for records from child loggers, so module
+  logger output is not redacted in main, worker or child.
+- Roaming refresh and shadow naming are throttled in process memory; each
+  job is a new process, so both run on every resolver run (~30/day).
+- 0244 (`5ae4890`) retired the resolver and four other schedules; the
+  terminal-outcome trigger (0227) later overwrote their outcome
+  (`stalled`, `cancelled`, `completed`), and `schedule_failure` health
+  (0259) reports disabled schedules.
+
+## Scope and decisions
+
+- Redaction on handlers: a formatter that redacts the whole formatted output,
+  exception text included, installed on every root handler.
+- `jobs_child`: logging to stderr (stdout stays the JSON result protocol);
+  failure logs a sanitized exception, prints the redacted error JSON and
+  exits nonzero without re-raising.
+- Resolver telemetry in the Job result: counts, durations and whether each
+  maintenance component ran; no names or raw evidence.
+- Migration 0323: tenant-scoped `maintenance_cadence` with atomic
+  `claim_maintenance` / `complete_maintenance`; terminal outcomes no longer
+  written to disabled schedules; the four 0244-managed schedules repaired to
+  `retired`; `schedule_failure` health only for enabled schedules.
+- The resolver stays source-triggered; no independent schedule is restored.
+
+## Validation
+
+Logging tests (module-logger redaction, exception text, child failure
+protocol), migration 0323 test on production column types (claim atomicity
+and interval, trigger on enabled vs disabled, repair, health), resolver
+telemetry and cadence tests, focused suites, `git diff --check`. Local commit;
+push needs separate approval.
+
+## Checkpoint and next action
+
+2026-10-19: built and committed locally (not pushed). `logging_utils`
+redacts the whole formatted output on every root handler; `jobs_child` logs
+to stderr (force), reports a redacted error and exits 1 without re-raising,
+and `db.init` failures now also produce a result line; the resolver Job
+returns aggregate telemetry (observations, promotions, merges, roaming and
+shadow naming: ran, seconds, counts; total seconds); migration 0323 adds
+`maintenance_cadence` with `claim_maintenance` / `complete_maintenance`,
+writes terminal outcomes to enabled schedules only, repairs the four
+0244-managed schedules to `retired` (no change history: `last_outcome` is
+not a recorded column), and measures `schedule_failure` for enabled
+schedules only (the production health function matched 0259 before the
+change). Review correction (amended): the cadence functions refuse a missing or mismatched session tenant and component keys over 64 characters; retired schedules are left out of required_disabled while a required schedule switched off is still reported. Validation: new tests 11 ingest + 7 migration 0323 passed; full
+suites ingest 11 and Operations 4 failures, the same baseline; Django check
+and `makemigrations --check` clean; lint clean; `git diff --check` clean.
+Next: push approval; after deploy, verify 0323, the four schedules, health,
+a resolver run's result telemetry and visible job logs; then collect paced
+shadow measurements for the ADR-0034 activation review.
+
+---
+
 # How a Computer is named — ADR-0034 proposal (2026-10-19)
 
 ## Status
 
-Active — ADR-0034 accepted 2026-10-19 (user). Step 1 of its activation order
-in progress; steps 2–6 not started.
+ADR-0034 accepted 2026-10-19 (user). Step 1 deployed (`afc9cbe`, migration
+0322, verified 2026-10-19). Paused until the Jobs fix above lands; then
+correctly paced shadow measurements and the activation review (step 2).
 
 ## Goal
 
@@ -39,7 +113,7 @@ surfaced. Hostname leaves the generic attribute engine (ADR-0010).
 - Step 1: `operations/apps/core/migrations/0322_*`, its migration test,
   `ingest/evaluator.py` (unclassified producer) and its test.
 
-## Step 1 (in progress)
+## Step 1 (deployed)
 
 Scope: `record_name_forms()` (SQL, on demand); `source_name_kinds` (global,
 covered by change history, seeded per ADR section 2); roaming `basis`
@@ -60,27 +134,24 @@ no push without the separate locking/backfill review.
 
 ## Checkpoint and next action
 
-2026-10-19: step 1 built and committed locally (not pushed): migration 0322
-(`source_name_kinds` seeded and covered by change history,
-`record_name_forms`, `usable_serial`, roaming `basis`, `computer_names`,
-`computer_name_shadow`, `source_name_kind_unclassified`, finding type and
-policy `conditions-registry-7`), evaluator producer, resolver hourly
-read-only shadow log. Review corrections applied before any push: reporting
-uses each record's own online, power and `last_seen_at` evidence (the
-per-source aggregate made stale duplicates look live: `cp-re01 →
-donnarullo`); a usable serial is decided by `usable_serial`, the same rule as
-identity matching including `identity_value_rejections`; the 90-day window
-takes every interval that overlaps it; serials and names are reduced to
-distinct values before the per-value checks. Validation: 0322 + 0318
-migration tests 19 passed (placeholder serial, window boundary, stale
-duplicate cases added), producer and identity tests 16 passed,
-`git diff --check` clean; complete suites ran before the corrections (11
-ingest and 4 Operations failures, the same without this change). Production
-(read-only, bodies inlined, kinds seed substituted): roaming refresh 5.5 s
-serials + 6.3 s names (5 + 2 records); shadow pass 11.3 s; history lookup as a
-set 0.8 s (no index on source_instance_id + external_id: needed before step
-3's per-record history tier). Next: separate push approval with the migration
-locking review.
+2026-10-19: step 1 pushed (`68172df`, `afc9cbe`) and deployed: 0322 applied,
+services healthy, policy `conditions-registry-7`, roaming 5 serial + 2 name
+records, no unclassified-name finding. Deployed shadow function: 14.9 s, 39
+live renames (17 reporting OS incl. 16 active 15-character expansions and
+`cp-re01 → donnarullo`, 3 silent OS, 12 withdrawn OS, 7 labels) and 2
+retired. The resolver run's own log lines are invisible (Jobs child logging,
+see the Jobs plan above).
+
+Decisions for the activation review (user, 2026-10-19): keep labels as
+reported after conservative normalization (no global stripping of
+"retired", "do not boot" and similar); review the three Citrix/Hudu renames
+individually (repair the association or set an operator name; no
+Citrix-specific rule); keep Ninja `vm.host` and `network.device` as labels;
+keep 30 days, evaluated per record; resolve `gld1` manually before
+record-name matching. Order after the Jobs fix: correctly paced shadow
+measurements, activation review, the history index as a separate reviewed
+`CREATE INDEX CONCURRENTLY` migration, finding re-key and record-name
+matching, verify matching, then the naming writer; label drift last.
 
 ---
 

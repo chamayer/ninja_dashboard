@@ -24,6 +24,7 @@ import http.server
 import logging
 import socketserver
 import threading
+import time
 from datetime import datetime, timedelta, timezone
 from html import escape
 from urllib.parse import parse_qs, quote, urlparse
@@ -62,6 +63,7 @@ from ingest.evaluator import evaluate as platform_evaluate
 from ingest.identity.client_resolver import (
     drain_client_resolution as _drain_client_resolution,
 )
+from ingest.identity import resolver as identity_resolver
 from ingest.identity.resolver import drain_resolution as _drain_resolution
 from ingest.inventory import queue as software_queue
 from ingest.inventory import software as software_ingest
@@ -149,8 +151,14 @@ def run_patching_once() -> bool:
             lock_cur.execute("SELECT pg_advisory_unlock(%s)", (_PATCH_CYCLE_LOCK_ID,))
 
 
-def run_identity_resolver_once(*, refresh_current: bool = True) -> None:
-    """Drain unresolved observations and optionally refresh presence state."""
+def run_identity_resolver_once(*, refresh_current: bool = True):
+    """Drain unresolved observations and optionally refresh presence state.
+
+    Returns the run's aggregate telemetry (counts, durations, which hourly
+    maintenance ran) as the Job result.
+    """
+    identity_resolver.reset_telemetry()
+    started = time.monotonic()
     failures: list[tuple[str, Exception]] = []
     try:
         attached = _drain_client_resolution()
@@ -165,6 +173,9 @@ def run_identity_resolver_once(*, refresh_current: bool = True) -> None:
         log.exception("Identity resolver failed")
         failures.append(("identity resolver", exc))
     _raise_step_failures("Identity resolution", failures)
+    telemetry = identity_resolver.take_telemetry()
+    telemetry["seconds"] = round(time.monotonic() - started, 1)
+    return operator_job_queue.JobExecutionResult(result=telemetry)
 
 
 def run_ninja_observations_once() -> None:
