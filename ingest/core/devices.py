@@ -25,6 +25,7 @@ import psycopg
 from psycopg.types.json import Json
 
 from ingest import db
+from ingest.identity.matching import record_name_short
 from ingest.identity.fast_path import resolve_device_fast
 from ingest.identity.matching import load_identity_match_policies
 from ingest.ninja_client import NinjaClient
@@ -33,7 +34,6 @@ from ingest.normalize import (
     form_factor_for_node_class,
     infer_device_role,
     normalize_mac,
-    normalize_hostname,
     normalize_org_name,
     os_family,
 )
@@ -668,7 +668,11 @@ def _write_ninja_observations(
                         entity_type=entity_type,
                         serial=canonical_data["serial_number"],
                         vm_uuid=canonical_data.get("vm_uuid"),
-                        hostname=normalize_hostname(canonical_data["hostname"]) or None,
+                        # The one SQL normalization (ADR-0034 section 1).
+                        hostname=record_name_short(
+                            cur, "Ninja", entity_type, canonical_data["hostname"],
+                            canonical_data.get("domain"),
+                        ) or None,
                         macs=canonical_data["macs"],
                         client_id=client_id,
                         policies=identity_policies,

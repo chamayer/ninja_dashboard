@@ -189,7 +189,8 @@ def test_identity_reads_record_names_not_the_stored_name() -> None:
     matching = (_REPO_ROOT / "ingest/identity/matching.py").read_text(encoding="utf-8")
     assert "canonical_hostname" not in matching
     for rel in ("ingest/identity/matching.py", "ingest/identity/resolver.py",
-                "ingest/identity/findings.py"):
+                "ingest/identity/findings.py", "ingest/source_observations.py",
+                "ingest/core/devices.py"):
         text = (_REPO_ROOT / rel).read_text(encoding="utf-8")
         assert not re.search(r"\bnormalize_(loose_)?hostname\b", text), rel
 

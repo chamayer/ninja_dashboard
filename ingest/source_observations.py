@@ -36,12 +36,12 @@ from psycopg.types.json import Json
 
 from ingest import db
 from ingest.connectors import hudu, logmein, ruon, screenconnect, sentinelone
+from ingest.identity.matching import record_name_short
 from ingest.identity import identity_entity_types
 from ingest.identity.fast_path import resolve_device_fast
 from ingest.identity.matching import load_identity_match_policies
 from ingest.normalize import (
     extract_macs,
-    normalize_hostname,
     normalize_org_name,
     os_family,
 )
@@ -391,7 +391,11 @@ def _write_observations(
                     entity_type=source.entity_type,
                     serial=serial,
                     vm_uuid=canonical_data.get("vm_uuid"),
-                    hostname=normalize_hostname(hostname) or None,
+                    # The one SQL normalization (ADR-0034 section 1).
+                    hostname=record_name_short(
+                        cur, source.platform, source.entity_type, hostname,
+                        canonical_data.get("domain"),
+                    ) or None,
                     macs=canonical_data["macs"],
                     client_id=client_id,
                     policies=identity_policies,
