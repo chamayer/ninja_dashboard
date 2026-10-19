@@ -320,53 +320,75 @@ def _candidates(
     return []
 
 
-_NAME_CANDIDATES = """
-WITH inc AS (
-    SELECT %(name)s::text AS short,
-           regexp_replace(%(name)s::text, '[^a-z0-9]', '', 'g') AS key,
-           -- Every match (same key, or either 15-character cut) has a raw name
-           -- whose letters and digits start with these: a cheap necessary
-           -- condition checked before the normalization function.
-           regexp_replace(left(%(name)s::text, 15), '[^a-z0-9]', '', 'g') AS pre
-), recs AS (
-    -- Every named identity record of the client's Computers, normalized by the
-    -- one SQL function (ADR-0034 section 1). Roaming records carry no name.
-    SELECT eo.device_id, d.lifecycle_status, f.name_short, f.name_key,
-           eo.active AND coalesce(lc.record_lifecycle, '') <> 'archived' AS is_current
-      FROM operations.entity_observation_current eo
-      JOIN operations.devices d
-        ON d.tenant_id = eo.tenant_id AND d.id = eo.device_id AND d.deleted_at IS NULL
-      LEFT JOIN operations.v_device_source_record_lifecycle_current lc
-        ON lc.observation_id = eo.observation_id
-     CROSS JOIN LATERAL operations.record_name_forms(
-          eo.platform, eo.entity_type,
-          coalesce(nullif(eo.canonical_data ->> 'hostname', ''), eo.canonical_data ->> 'guest_name'),
-          eo.canonical_data ->> 'domain') f
-     WHERE eo.tenant_id = %(tenant)s
-       AND (%(client)s::uuid IS NULL OR d.client_id = %(client)s::uuid)
-       AND eo.entity_type = ANY(%(types)s::text[])
-       AND eo.entity_key NOT LIKE 'device-health:%%'
-       AND NOT (eo.platform = %(source)s AND eo.entity_key = %(key)s)
-       AND left(regexp_replace(lower(coalesce(nullif(eo.canonical_data ->> 'hostname', ''),
-                                                 eo.canonical_data ->> 'guest_name', '')),
-                               '[^a-z0-9]', '', 'g'), length((SELECT pre FROM inc)))
-           = (SELECT pre FROM inc)
-       AND f.name_short IS NOT NULL
-       AND NOT EXISTS (SELECT 1 FROM operations.identity_roaming_records rr
-                        WHERE rr.tenant_id = eo.tenant_id
-                          AND rr.source_instance_id = eo.source_instance_id
-                          AND rr.external_id = eo.external_id)
-)
-SELECT r.device_id,
-       CASE WHEN r.is_current AND r.lifecycle_status = 'active' THEN 1
-            WHEN r.is_current AND r.lifecycle_status <> 'retired' THEN 2
-            ELSE 3 END AS tier,
-       r.name_short, r.name_key
-  FROM recs r, inc
- WHERE r.name_key = inc.key
-    OR (length(inc.short) = 15 AND length(r.name_short) > 15 AND left(r.name_short, 15) = inc.short)
-    OR (length(r.name_short) = 15 AND length(inc.short) > 15 AND left(inc.short, 15) = r.name_short)
+# Every named identity record of the client's Computers, normalized by the one
+# SQL function (ADR-0034 section 1). Roaming records carry no name. Read once
+# per client and matched in Python: one query per record cost about a second
+# on a large client and made the resolver and source runs several times slower.
+_CLIENT_NAMES = """
+SELECT eo.device_id, d.lifecycle_status, f.name_short, f.name_key,
+       eo.active AND coalesce(lc.record_lifecycle, '') <> 'archived' AS is_current,
+       eo.platform, eo.entity_key, eo.entity_type
+  FROM operations.entity_observation_current eo
+  JOIN operations.devices d
+    ON d.tenant_id = eo.tenant_id AND d.id = eo.device_id AND d.deleted_at IS NULL
+  LEFT JOIN operations.v_device_source_record_lifecycle_current lc
+    ON lc.observation_id = eo.observation_id
+ CROSS JOIN LATERAL operations.record_name_forms(
+      eo.platform, eo.entity_type,
+      coalesce(nullif(eo.canonical_data ->> 'hostname', ''), eo.canonical_data ->> 'guest_name'),
+      eo.canonical_data ->> 'domain') f
+ WHERE eo.tenant_id = %(tenant)s
+   AND (%(client)s::uuid IS NULL OR d.client_id = %(client)s::uuid)
+   AND eo.entity_key NOT LIKE 'device-health:%%'
+   AND f.name_short IS NOT NULL
+   AND NOT EXISTS (SELECT 1 FROM operations.identity_roaming_records rr
+                    WHERE rr.tenant_id = eo.tenant_id
+                      AND rr.source_instance_id = eo.source_instance_id
+                      AND rr.external_id = eo.external_id)
 """
+# Kept briefly and dropped for a client as soon as a record attaches to one of
+# its Computers (invalidate_client_names), so a run sees its own attachments.
+_NAMES_TTL = 120.0
+_names_cache: dict[tuple, tuple[float, list[tuple]]] = {}
+
+
+def invalidate_client_names(client_id=None) -> None:
+    """Forget cached record names for a client (all clients when ``None``)."""
+    if client_id is None:
+        _names_cache.clear()
+        return
+    for cache_key in [k for k in _names_cache if k[1] in (client_id, None)]:
+        _names_cache.pop(cache_key, None)
+
+
+def client_record_names(cur, tenant_id: int, client_id) -> list[tuple]:
+    """(device_id, lifecycle, name_short, name_key, is_current, platform, entity_key,
+    entity_type) for every named record of the client's Computers."""
+    cache_key = (tenant_id, client_id)
+    cached = _names_cache.get(cache_key)
+    now = time.monotonic()
+    if cached and now - cached[0] < _NAMES_TTL:
+        return cached[1]
+    cur.execute(_CLIENT_NAMES, {"tenant": tenant_id, "client": client_id})
+    rows = cur.fetchall()
+    _names_cache[cache_key] = (now, rows)
+    return rows
+
+
+def _tier(lifecycle: str, is_current: bool) -> int:
+    if is_current and lifecycle == "active":
+        return 1
+    if is_current and lifecycle != "retired":
+        return 2
+    return 3
+
+
+def _names_match(short: str, key: str, name_short: str, name_key: str) -> bool:
+    return (
+        name_key == key
+        or (len(short) == 15 and len(name_short) > 15 and name_short[:15] == short)
+        or (len(name_short) == 15 and len(short) > 15 and short[:15] == name_short)
+    )
 
 # Names the client's records reported earlier (tier 4), distinct per record.
 # Reading the history of every record of a large client takes seconds, so it
@@ -435,19 +457,16 @@ def _name_candidates(
     exactly one Computer; a 15-character match only when exactly one distinct
     longer name starts with it.
     """
-    cur.execute(
-        _NAME_CANDIDATES,
-        {
-            "tenant": tenant_id,
-            "client": client_id,
-            "name": hostname,
-            "source": source_name,
-            "key": external_id,
-            "types": identity_types,
-        },
-    )
-    rows = cur.fetchall()
     key = _LOOSE_RE.sub("", hostname)
+    types = set(identity_types)
+    rows = [
+        (device_id, _tier(lifecycle, is_current), name_short, name_key)
+        for device_id, lifecycle, name_short, name_key, is_current, platform, entity_key, entity_type
+        in client_record_names(cur, tenant_id, client_id)
+        if entity_type in types
+        and not (platform == source_name and entity_key == external_id)
+        and _names_match(hostname, key, name_short, name_key or "")
+    ]
     if not rows:
         # Tier 4 only decides when no current or withdrawn record holds the name.
         rows = [

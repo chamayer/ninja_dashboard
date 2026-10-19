@@ -139,6 +139,7 @@ def conn():
 @pytest.fixture(autouse=True)
 def _fresh_history_cache():
     matching._history_cache.clear()
+    matching._names_cache.clear()
 
 
 @pytest.fixture(autouse=True)
@@ -217,6 +218,7 @@ def match(
     online=None,
     key="new",
 ):
+    matching.invalidate_client_names()
     result = resolve_match(
         cur,
         tenant_id=1,

@@ -69,4 +69,8 @@ def name_changed_attachments(cur: Any, before: dict, after: dict) -> int:
         old, new = before.get(key), after.get(key)
         if old != new:
             touched.update(d for d in (old, new) if d)
+    if touched:
+        from ingest.identity.matching import invalidate_client_names
+
+        invalidate_client_names()
     return write_computer_names(cur, touched)

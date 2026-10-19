@@ -30,6 +30,7 @@ from ingest.conditions import record_assessment
 from ingest.identity import findings as identity_findings
 from ingest.identity import identity_entity_types
 from ingest.identity.naming import write_computer_names
+from ingest.identity.matching import client_record_names, invalidate_client_names
 from ingest.identity.matching import (
     IdentityMatchPolicy,
     load_identity_match_policies,
@@ -308,9 +309,12 @@ def _attach_observation(cur, obs_id: uuid.UUID | None, device_id: uuid.UUID) -> 
     """
     if obs_id is not None:
         cur.execute(
-            "UPDATE operations.entity_observation_current SET device_id = %s WHERE observation_id = %s",
+            "UPDATE operations.entity_observation_current SET device_id = %s "
+            "WHERE observation_id = %s RETURNING client_id",
             (device_id, obs_id),
         )
+        row = cur.fetchone()
+        invalidate_client_names(row[0] if row else None)
 
 
 def _maybe_create_candidate(
@@ -330,40 +334,21 @@ def _maybe_create_candidate(
     observation happens to be pending, and this function only runs for
     unresolved ones.
     """
-    # Scoped to the client's records: this runs once per unresolved record, so
-    # the fleet-wide device_names set would be recomputed hundreds of times.
-    cur.execute(
-        """
-        SELECT DISTINCT d.id FROM operations.devices d
-          JOIN operations.entity_observation_current eo
-            ON eo.tenant_id = d.tenant_id AND eo.device_id = d.id AND eo.active
-         CROSS JOIN LATERAL operations.record_name_forms(
-              eo.platform, eo.entity_type,
-              coalesce(nullif(eo.canonical_data ->> 'hostname', ''), eo.canonical_data ->> 'guest_name'),
-              eo.canonical_data ->> 'domain') f
-         WHERE d.tenant_id = %s AND d.deleted_at IS NULL
-           AND (%s::uuid IS NULL OR (d.client_id = %s AND eo.client_id = %s))
-           -- Cheap necessary condition before the normalization: the short
-           -- name is the lower-cased start of the raw name.
-           AND lower(ltrim(coalesce(nullif(eo.canonical_data ->> 'hostname', ''),
-                                    eo.canonical_data ->> 'guest_name', ''))) LIKE %s
-           AND eo.entity_key NOT LIKE 'device-health:%%'
-           AND eo.entity_type IN (SELECT name FROM operations.entity_types WHERE is_identity_signal)
-           AND f.name_short = %s
-           AND NOT EXISTS (SELECT 1 FROM operations.identity_roaming_records rr
-                            WHERE rr.tenant_id = eo.tenant_id
-                              AND rr.source_instance_id = eo.source_instance_id
-                              AND rr.external_id = eo.external_id)
-         ORDER BY d.id
-         LIMIT 5
-        """,
-        (
-            TENANT_ID, client_id, client_id, client_id,
-            norm.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%",
-            norm,
-        ),
-    )
-    rows = cur.fetchall()
+    # From the client's cached record names: this runs once per unresolved
+    # record. Current, active identity records only.
+    types = identity_entity_types(cur)
+    rows = [
+        (device_id,)
+        for device_id in sorted(
+            {
+                device_id
+                for device_id, _lifecycle, name_short, _key, is_current, _platform, _entity_key,
+                entity_type in client_record_names(cur, TENANT_ID, client_id)
+                if is_current and entity_type in types and name_short == norm
+            },
+            key=str,
+        )[:5]
+    ]
     if len(rows) < _MIN_IDENTITY_CANDIDATES:
         return
     candidate_ids = [row[0] for row in rows]
@@ -1202,6 +1187,7 @@ def _promote_unmatched_clusters(
                 (linked[0], TENANT_ID, platform, entity_key),
             )
             touched.add(linked[0])
+            invalidate_client_names(client_id)
             continue
         clusters.setdefault((client_id, norm), []).append(
             (platform, entity_type, entity_key, first_seen, last_seen, cd)
@@ -1248,12 +1234,16 @@ def _promote_unmatched_clusters(
                         (match.device_id, TENANT_ID, entry[0], entry[2]),
                     )
                 touched.add(match.device_id)
+                invalidate_client_names(client_id)
                 continue
             touched.add(_create_device_for_group(cur, agent_ids, client_id, norm, group))
+            # The next group of this cluster must see the Computer just created.
+            invalidate_client_names(client_id)
             promoted += 1
 
     # A new Computer is inserted pending and must be named before commit.
     write_computer_names(cur, touched)
+    invalidate_client_names()
 
     if promoted:
         log.info("resolver: promoted %d new devices", promoted)
