@@ -46,6 +46,7 @@ log = logging.getLogger(__name__)
 TWO_MACHINES = "two_machines_on_one_computer"
 DUPLICATE_COMPUTERS = "duplicate_device_records"
 NAME_COLLISION = "computer_name_collision"
+LABEL_DRIFT = "computer_name_differs_in_source"
 _SAME_NAME_WINDOW = timedelta(days=1)
 _RECENT = timedelta(days=30)
 
@@ -178,7 +179,70 @@ def evaluate(cur: Any, tenant_id: int, now: datetime) -> int:
                 cur, tenant_id, ft_collision, client_id, subject_id, key, "medium", now, details
             )
         resolve_absent(cur, tenant_id, ft_collision, keys, now)
+    # Label drift (ADR-0034 section 9): non-alerting, fixed at the source.
+    ft_drift = _finding_type_id(cur, LABEL_DRIFT)
+    if ft_drift is not None:
+        keys = []
+        for (device_id, client_id, platform), details in label_drift(cur, tenant_id).items():
+            key = _key(tenant_id, LABEL_DRIFT, device_id, platform)
+            keys.append(key)
+            written += _upsert(cur, tenant_id, ft_drift, client_id, device_id, key, "low", now, details)
+        resolve_absent(cur, tenant_id, ft_drift, keys, now)
     return written
+
+
+# Current labels whose name key differs from a Computer name an OS rule
+# decided. Names come from the one SQL normalization; roaming records carry
+# no name; archived records are not current.
+_LABEL_DRIFT = """
+SELECT d.id, d.client_id, d.canonical_hostname, d.name_rule, eo.platform, eo.entity_type,
+       eo.observation_id,
+       coalesce(nullif(eo.canonical_data ->> 'hostname', ''), eo.canonical_data ->> 'guest_name'),
+       eo.last_seen_at
+  FROM operations.devices d
+  JOIN operations.entity_observation_current eo
+    ON eo.tenant_id = d.tenant_id AND eo.device_id = d.id AND eo.active
+  JOIN operations.source_name_kinds k
+    ON k.platform = eo.platform AND k.record_type = eo.entity_type AND k.kind = 'label'
+  LEFT JOIN operations.v_device_source_record_lifecycle_current lc
+    ON lc.observation_id = eo.observation_id
+ CROSS JOIN LATERAL operations.record_name_forms(
+      eo.platform, eo.entity_type,
+      coalesce(nullif(eo.canonical_data ->> 'hostname', ''), eo.canonical_data ->> 'guest_name'),
+      eo.canonical_data ->> 'domain') f
+ WHERE d.tenant_id = %s AND d.deleted_at IS NULL AND d.lifecycle_status <> 'retired'
+   AND d.name_rule IN ('reporting_os', 'silent_os', 'stable_os', 'withdrawn_os')
+   AND coalesce(lc.record_lifecycle, '') <> 'archived'
+   AND eo.entity_key NOT LIKE 'device-health:%%'
+   AND f.name_key IS NOT NULL
+   AND f.name_key <> regexp_replace(lower(d.canonical_hostname), '[^a-z0-9]', '', 'g')
+   AND NOT EXISTS (SELECT 1 FROM operations.identity_roaming_records rr
+                    WHERE rr.tenant_id = eo.tenant_id
+                      AND rr.source_instance_id = eo.source_instance_id
+                      AND rr.external_id = eo.external_id)
+ ORDER BY d.id, eo.platform, eo.observation_id
+"""
+
+
+def label_drift(cur: Any, tenant_id: int) -> dict[tuple, dict[str, Any]]:
+    """One entry per Computer and labeling system, with the differing labels as evidence."""
+    cur.execute(_LABEL_DRIFT, (tenant_id,))
+    drift: dict[tuple, dict[str, Any]] = {}
+    for (device_id, client_id, name, rule, platform, record_type, observation_id, label,
+         seen) in cur.fetchall():
+        entry = drift.setdefault(
+            (device_id, client_id, platform),
+            {"computer_name": name, "name_rule": rule, "source": platform, "labels": []},
+        )
+        entry["labels"].append(
+            {
+                "record_type": record_type,
+                "label": label,
+                "observation_id": str(observation_id),
+                "last_seen_at": seen.isoformat() if seen else None,
+            }
+        )
+    return drift
 
 
 _COLLISIONS = """
