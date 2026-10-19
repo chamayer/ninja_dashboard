@@ -9619,6 +9619,8 @@ def admin_jobs(request: HttpRequest) -> HttpResponse:
         in {"1", "true", "yes", "on"},
         "software_queue": os.environ.get("SOFTWARE_QUEUE_ENABLED", "false").strip().lower()
         in {"1", "true", "yes", "on"},
+        # Runs when work is pending; always available to start by hand.
+        "pending_work": True,
     }
 
     latest_by_execution: dict[str, dict] = {}
@@ -10068,6 +10070,7 @@ def admin_job_detail(request: HttpRequest, job_id: str) -> HttpResponse:
             .strip()
             .lower()
             in {"1", "true", "yes", "on"},
+            "pending_work": True,
         },
     )
     schedule_presentation = _job_schedule_presentation(

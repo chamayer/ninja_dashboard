@@ -2,7 +2,7 @@
 
 ## Status
 
-Active (user, 2026-10-19: fix Jobs before ADR-0034 naming activation).
+Deployed and verified 2026-10-19 (`15b6cdb`, hotfix `17f7e13`); two follow-ups open (below).
 
 ## Goal
 
@@ -65,9 +65,72 @@ schedules only (the production health function matched 0259 before the
 change). Review correction (amended): the cadence functions refuse a missing or mismatched session tenant and component keys over 64 characters; retired schedules are left out of required_disabled while a required schedule switched off is still reported. Validation: new tests 11 ingest + 7 migration 0323 passed; full
 suites ingest 11 and Operations 4 failures, the same baseline; Django check
 and `makemigrations --check` clean; lint clean; `git diff --check` clean.
-Next: push approval; after deploy, verify 0323, the four schedules, health,
-a resolver run's result telemetry and visible job logs; then collect paced
+Pushed and deployed (`0bdff25`, `15b6cdb`) at 16:55 UTC. Incident: every
+resolver run failed from 16:55 to 17:12 — psycopg sent the seconds as double
+precision and `complete_maintenance(bigint, text, numeric)` was not found;
+the resolution transaction rolled back. Only one run fell in the window (a
+manual trigger). Fixed in `17f7e13` (explicit casts; a PostgreSQL test runs
+the resolver's own calls and fails on the old code), pushed with the user's
+`60d33cd` and deployed 17:12:40. Verified: 0323 applied, services healthy,
+the four 0244 schedules `retired`, no `schedule_failure`; run 1 completed
+with telemetry (roaming 7 records in 43.3 s, shadow pass 10.5 s, renames
+unchanged), run 2 completed with both components skipped (`ran: false`),
+job logs visible in the worker log. Open: health still reports six older
+replaced schedules as `required_disabled` (agent-observations,
+documentation-observations, patches, source-actions, source-demand,
+source-demand-recovery; pre-existing, not marked retired); container logs
+have no rotation (default json-file). Next: decide those two; collect paced
 shadow measurements for the ADR-0034 activation review.
+
+---
+
+# Schedule retirement authority (2026-10-19)
+
+## Status
+
+Active (user approved, "finish it").
+
+## Scope and decisions
+
+- Migration 0324: `jobs_disable_retired_tenant_schedules_v1` (called on every
+  scheduler poll) retires every tenant schedule the catalog no longer
+  declares: disabled, no next due, `last_outcome = 'retired'`; it changes a
+  row only when that state differs (idempotent every minute); an already
+  retired row keeps its reason, a newly retired one gets "Retired — no
+  longer declared in the Jobs catalog."
+- Explicit repair, tenant 1 and scope `tenant:1`, keeping their replacement
+  reasons: `patches`, `agent-observations`, `documentation-observations`
+  (0263, per-binding source refreshes), `source-demand`,
+  `source-demand-recovery` (0266), and the ten reference-data schedules of
+  0265 (`intel-nvd` … `intel-endoflife`, per-binding source refreshes; all
+  bindings ran in the last 24 h).
+- `source-actions` is not retired: capability `pending_work` (enabled while a
+  source action is pending), so idle is not "required disabled"; Operations
+  capability maps treat it as available for manual runs.
+
+## Validation
+
+Migration 0324 test on production types through the real call
+(idempotent second pass returns 0 and adds no history; reason rules; declared
+schedules untouched; health: retired absent, a declared required schedule
+switched off present, enabled failure present); `_schedule_enabled` and
+registry tests; focused suites; local commit, push on approval.
+
+## Checkpoint and next action
+
+2026-10-19: built and committed locally (not pushed): migration 0324, registry
+capability `pending_work` for `source-actions` with an explicit pending-work
+query map in `operator_job_queue`, Operations capability maps. Production
+check before deploy: the only enabled undeclared schedules are the 16
+per-binding `source-refresh` schedules (scope `source-binding:…`, excluded);
+the undeclared `tenant:1` rows are exactly the 15 repaired plus the 4 already
+retired, so the rule's first poll after deploy changes nothing. Validation:
+0324 test 3 passed (idempotent second and third pass, no added history,
+reason rules, declared and binding schedules untouched, health), pending-work
+tests 4 passed; full suites ingest 11 and Operations 4 failures (baseline);
+Django checks clean; no new lint findings. Next: push approval; after deploy,
+health shows no `required_disabled` for the six, and `source-actions` stays
+declared and idle. Then the ADR-0034 activation review.
 
 ---
 

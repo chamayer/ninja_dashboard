@@ -188,18 +188,26 @@ def _schedule_cadence(schedule: Any) -> dict[str, int | str]:
     raise ValueError(f"Unsupported Jobs cadence unit: {schedule.cadence_unit}")
 
 
+# Jobs with capability "pending_work" and the query that says work is waiting.
+_PENDING_WORK_QUERIES = {
+    "source-actions": (
+        "SELECT EXISTS (SELECT 1 FROM operations.source_action_requests WHERE status = 'pending')"
+    ),
+}
+
+
 def _schedule_enabled(job_key: str) -> tuple[bool, str]:
     """Apply the existing capability gates before automatic admission."""
     job = definition(job_key)
     if job_key in legacy_job_definition_keys():
         return False, "Disabled — retired legacy bridge."
-    if job_key == "source-actions":
-        table = "operations.source_action_requests"
+    if job.capability == "pending_work":
+        # The schedule runs only while the Job has pending work.
         with db.transaction() as cur:
             cur.execute("SET LOCAL operations.tenant_id = 1")
-            cur.execute(f"SELECT EXISTS (SELECT 1 FROM {table} WHERE status = 'pending')")
+            cur.execute(_PENDING_WORK_QUERIES[job_key])
             pending = cur.fetchone()[0]
-        return pending, "Available" if pending else "Waiting for source actions."
+        return pending, "Available" if pending else "Waiting for pending work."
     enabled = {
         "always": True,
         "intel": settings.INTEL_ENABLED,

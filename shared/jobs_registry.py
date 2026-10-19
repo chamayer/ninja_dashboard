@@ -600,6 +600,9 @@ _RAW_DEFINITIONS = (
         "source_action_requests",
         "run_log",
         "ingest.source_actions.process_pending",
+        # Its schedule runs only while a source action is pending; idle is
+        # not disabled (Jobs health counts only "always" as required).
+        capability="pending_work",
         run_all=False,
         schedule_ids=("source_action_requests_cycle",),
     ),
