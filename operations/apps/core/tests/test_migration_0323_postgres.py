@@ -292,3 +292,19 @@ def test_cadence_is_classified_and_tenant_scoped(conn):
             connection.execute("SELECT count(*) FROM operations.maintenance_cadence").fetchone()[0]
             == 0
         )
+
+
+def test_the_resolver_calls_match_the_function_signatures(conn):
+    """psycopg types the parameters (smallint, double precision); the calls must resolve."""
+    from ingest.identity import resolver
+
+    connection, _ids = conn
+    connection.execute("DELETE FROM operations.maintenance_cadence")
+    with connection.transaction(), connection.cursor() as cur:
+        cur.execute("SET LOCAL ROLE ninja_ingest")
+        assert resolver._claim_maintenance(cur, "identity.signature_check") is True
+        resolver._complete_maintenance(cur, "identity.signature_check", 1.23456)
+        assert resolver._claim_maintenance(cur, "identity.signature_check") is False
+    assert connection.execute(
+        "SELECT last_seconds FROM operations.maintenance_cadence WHERE component = 'identity.signature_check'"
+    ).fetchone()[0] == Decimal("1.235")

@@ -1372,8 +1372,11 @@ def _claim_maintenance(cur, component: str) -> bool | None:
     )
     if not cur.fetchone()[0]:
         return None
+    # Explicit casts: psycopg sends small ints as smallint and floats as double
+    # precision, and PostgreSQL has no implicit cast from double precision to
+    # numeric, so an uncast call finds no function.
     cur.execute(
-        "SELECT operations.claim_maintenance(%s, %s, %s::interval)",
+        "SELECT operations.claim_maintenance(%s::bigint, %s::text, %s::interval)",
         (TENANT_ID, component, _MAINTENANCE_INTERVAL),
     )
     return bool(cur.fetchone()[0])
@@ -1381,7 +1384,7 @@ def _claim_maintenance(cur, component: str) -> bool | None:
 
 def _complete_maintenance(cur, component: str, seconds: float) -> None:
     cur.execute(
-        "SELECT operations.complete_maintenance(%s, %s, %s)",
+        "SELECT operations.complete_maintenance(%s::bigint, %s::text, %s::numeric)",
         (TENANT_ID, component, round(seconds, 3)),
     )
 
