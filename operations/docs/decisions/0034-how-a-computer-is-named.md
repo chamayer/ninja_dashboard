@@ -200,6 +200,34 @@ Computers have two recently reporting OS names from different sources (22
 Ninja vs SentinelOne); in none is the lower-ranked one seen more than a day
 later. An issue is added only if persistent disagreement proves actionable.
 
+### 5a. Name-collision guard (amended 2026-10-19, activation review)
+
+A rename never gives a Computer a name key that another live Computer of the
+same client holds. Live means not retired and not merged; pending cleanup
+counts. The proposed `name_key` is compared with every live Computer's
+current key and with every key proposed in the same pass, so the result does
+not depend on the order of the renames. On a collision the Computer keeps its
+current name under `kept_collision`, and the rejected name, rule and record
+and the conflicting Computer IDs are kept as evidence. A collision ends only
+by a source cleanup, a real merge, or an explicit name-collision confirmation:
+`name_collision_confirmed` for the proposed name, or `collision_confirmed` on
+an operator name. "Confirmed separate machines" does not end it: separate
+machines can still be misnamed (a Hudu label on the wrong Computer). There is
+no uniqueness constraint: two Computers may share a name when they are
+separate machines or when identity work is still open.
+
+Each collision is identity work: the hourly shadow pass stores the
+collisions (`operations.computer_name_collisions`), and identity findings
+raise one review-only `computer_name_collision` issue per group of Computers,
+keyed by their IDs, with no Merge or Confirm-separate action (a collision is
+not evidence that the Computers are one machine; the server refuses both
+actions for this type). It resolves when the collision is gone. Measured in the activation review: seven
+collisions (duplicate Hudu assets for lab220-34, -21 and -22; a split R-U-ON
+monitor, utaw-82-mgt03; a split LogMeIn record, cp-re01 / donnarullo; a
+duplicate cluster, 2march2016vm; a clone fragment taking its image's name,
+citrixapp36 / citrixappmcs). Acceptance target for activation: 33 live and 2
+retired renames.
+
 ### 6. One writer, enforced in the database
 
 - `operations.write_computer_names(p_devices uuid[], p_tenant bigint)` compares

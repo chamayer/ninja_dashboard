@@ -205,6 +205,48 @@ live renames (17 reporting OS incl. 16 active 15-character expansions and
 retired. The resolver run's own log lines are invisible (Jobs child logging,
 see the Jobs plan above).
 
+Activation review (read-only, 2026-10-19 18:42 UTC; production shadow): 40
+live renames and 2 retired. Seven renames would give a Computer a name another
+live Computer in the client already holds (lab220-34/21/22 from duplicate
+Hudu assets on ctxdesktop065/068 and citrixapp45; utaw-82-mgt03 → utaw-82-mgt;
+cp-re01 → donnarullo, a split LogMeIn record; 2march2016vm_retired;
+citrixapp36 → citrixappmcs, a clone fragment kept active by a roaming
+record). Proposed before activation: a name-collision guard (keep the name,
+raise identity review) as an ADR-0034 amendment. gld1: a powered-off VM and
+an archived Hudu asset both marked retired (#65189); no record reports
+"gld1". Shadow passes 17:13 and 18:20 matched except citrixapp36 (12 → 13
+withdrawn-OS renames); a third pass is being captured.
+
+Name-collision guard (user approved 2026-10-19, building): automatic naming
+never gives a Computer a name key another live Computer in the client holds
+(live = not retired, not merged, pending cleanup included); compared
+set-wise against current names and every name proposed in the same pass;
+a collision ends only by source cleanup, a real merge or an explicit
+name-collision confirmation (not by "confirmed separate"); `kept_collision` keeps the rejected
+name, rule, record and conflicting Computer IDs; the hourly shadow pass
+stores collisions in `computer_name_collisions` and identity findings raise a
+review-only `computer_name_collision` issue per group keyed by sorted
+Computer IDs (no Merge or Confirm-separate; the server refuses both),
+resolving when the collision is gone. No uniqueness constraint. Acceptance:
+exactly 33 live and 2 retired renames; seven collisions kept and visible.
+Built and committed locally (not pushed): migration 0325 (guard in
+`computer_names`, extended evidence columns, `computer_name_shadow` outcome
+`collision`, `computer_name_collisions` + `refresh_computer_name_collisions`),
+resolver shadow pass refreshes collisions, identity findings raise one
+review-only issue per collision group keyed by sorted Computer IDs, ADR-0034
+section 5a. Review correction (amended): own finding type
+`computer_name_collision` (policy `conditions-registry-8`) without actions;
+`identity_separate` no longer bypasses the guard; explicit
+`name_collision_confirmed`. Validation: 0325 test 9 passed (key comparison,
+pending cleanup live, retired and other client not, set-wise two-way, scoped
+call equals the pass, confirmed separate does not permit, only an explicit
+confirmation for that name does, a real merge ends it, operator confirmation,
+type and policy registration, tenant-scoped refresh), action tests 3 passed,
+ingest collision and maintenance tests 8 passed; full suites at baseline (11
+ingest, 4 Operations); Django checks and lint clean. Production read-only
+acceptance with the new body: 33 live and 2 retired renames, exactly the 7
+expected collisions, 15.3 s.
+
 Decisions for the activation review (user, 2026-10-19): keep labels as
 reported after conservative normalization (no global stripping of
 "retired", "do not boot" and similar); review the three Citrix/Hudu renames

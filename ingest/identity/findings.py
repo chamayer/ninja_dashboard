@@ -45,6 +45,7 @@ log = logging.getLogger(__name__)
 
 TWO_MACHINES = "two_machines_on_one_computer"
 DUPLICATE_COMPUTERS = "duplicate_device_records"
+NAME_COLLISION = "computer_name_collision"
 _SAME_NAME_WINDOW = timedelta(days=1)
 _RECENT = timedelta(days=30)
 
@@ -148,7 +149,102 @@ def evaluate(cur: Any, tenant_id: int, now: datetime) -> int:
                 cur, tenant_id, ft_dup, subject.client_id, subject.id, key, "medium", now, details
             )
         resolve_absent(cur, tenant_id, ft_dup, keys, now)
+    # Review only: a name collision is not evidence that the Computers are one
+    # machine, so it has its own type without Merge or Confirm-separate.
+    ft_collision = _finding_type_id(cur, NAME_COLLISION)
+    if ft_collision is not None:
+        keys = []
+        for subject_id, client_id, member_ids, details in name_collision_groups(
+            cur, tenant_id, computers
+        ):
+            # Keyed by the Computers, never by a name (ADR-0034 section 8).
+            key = _key(tenant_id, NAME_COLLISION, *member_ids)
+            keys.append(key)
+            written += _upsert(
+                cur, tenant_id, ft_collision, client_id, subject_id, key, "medium", now, details
+            )
+        resolve_absent(cur, tenant_id, ft_collision, keys, now)
     return written
+
+
+_COLLISIONS = """
+SELECT c.device_id, c.client_id, c.proposed_name, c.rejected_rule,
+       c.rejected_observation_id, c.conflicting_device_ids
+  FROM operations.computer_name_collisions c
+ WHERE c.tenant_id = %s
+ ORDER BY c.device_id
+"""
+
+
+def name_collision_groups(
+    cur: Any, tenant_id: int, computers: dict[uuid.UUID, _Computer]
+) -> list[tuple[uuid.UUID, Any, list[str], dict[str, Any]]]:
+    """Groups of Computers a rename would give the same name (ADR-0034 guard).
+
+    The hourly shadow naming pass stores each kept collision; one review-only
+    finding per distinct group of Computers. It clears when the collision is
+    gone: after a source cleanup, a real merge or an explicit name-collision
+    confirmation. "Confirmed separate" does not clear it.
+    """
+    cur.execute("SELECT to_regclass('operations.computer_name_collisions') IS NOT NULL")
+    if not cur.fetchone()[0]:
+        return []
+    cur.execute(_COLLISIONS, (tenant_id,))
+    groups: dict[frozenset[str], dict[str, Any]] = {}
+    for device_id, client_id, proposed, rule, observation_id, conflicting in cur.fetchall():
+        members = frozenset({str(device_id), *(str(c) for c in conflicting)})
+        group = groups.setdefault(
+            members, {"subject": device_id, "client_id": client_id, "renames": []}
+        )
+        group["renames"].append(
+            {
+                "device_id": str(device_id),
+                "proposed_name": proposed,
+                "rule": rule,
+                "rejected_observation_id": str(observation_id) if observation_id else None,
+            }
+        )
+    if not groups:
+        return []
+    ids = sorted({member for members in groups for member in members})
+    cur.execute(
+        "SELECT id::text, canonical_hostname FROM operations.devices WHERE id = ANY(%s::uuid[])",
+        (ids,),
+    )
+    names = dict(cur.fetchall())
+    found = []
+    for members, group in groups.items():
+        member_ids = sorted(members)
+        first = group["renames"][0]
+        found.append(
+            (
+                group["subject"],
+                group["client_id"],
+                member_ids,
+                {
+                    "hostname": first["proposed_name"],
+                    "computer_count": len(member_ids),
+                    "renames": group["renames"],
+                    "computers": [_collision_member(m, names, computers) for m in member_ids],
+                },
+            )
+        )
+    return found
+
+
+def _collision_member(
+    device_id: str, names: dict[str, str], computers: dict[uuid.UUID, _Computer]
+) -> dict[str, Any]:
+    computer = computers.get(uuid.UUID(device_id))
+    return {
+        "device_id": device_id,
+        "hostname": names.get(device_id, ""),
+        "serials": sorted(computer.serials) if computer else [],
+        "platforms": sorted({r["platform"] for r in computer.records}) if computer else [],
+        "last_active_at": computer.last_active.isoformat()
+        if computer and computer.last_active
+        else None,
+    }
 
 
 def _load(cur: Any, tenant_id: int) -> dict[uuid.UUID, _Computer]:

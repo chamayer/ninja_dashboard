@@ -32,6 +32,8 @@ class _Cursor:
             self._row = (self.claimed,)
         elif "refresh_identity_roaming_records(%s)" in sql:
             self._row = (7,)
+        elif "refresh_computer_name_collisions" in sql:
+            self._row = (7,)
         elif "computer_name_shadow" in sql:
             self._rows = [
                 (False, "rename", "current_label", 7),
@@ -106,10 +108,11 @@ def test_shadow_naming_reports_aggregate_counts(monkeypatch):
         "live:rename:current_label": 7,
         "retired:same:withdrawn_os": 48,
     }
-    # Claim, read-only pass, completion: three transactions; the pass is read only.
-    assert len(cursors) == 3
-    assert cursors[1].statements[0] == "SET TRANSACTION READ ONLY"
-    assert cursors[2].ran("complete_maintenance")
+    # Claim, collision refresh, read-only pass, completion; the pass is read only.
+    assert len(cursors) == 4
+    assert cursors[1].ran("refresh_computer_name_collisions(%s::bigint)")
+    assert cursors[2].statements[0] == "SET TRANSACTION READ ONLY"
+    assert cursors[3].ran("complete_maintenance")
 
 
 def test_the_resolver_job_returns_its_telemetry(monkeypatch):

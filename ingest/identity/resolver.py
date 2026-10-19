@@ -1437,6 +1437,18 @@ def run_shadow_naming() -> None:
             _telemetry["shadow_naming"] = {"ran": False}
             return
         started = time.monotonic()
+        collisions = None
+        with db.transaction() as cur:
+            cur.execute(f"SET LOCAL operations.tenant_id = {TENANT_ID}")
+            cur.execute(
+                "SELECT to_regprocedure('operations.refresh_computer_name_collisions(bigint)') IS NOT NULL"
+            )
+            if cur.fetchone()[0]:
+                # Collisions of this pass, for the identity findings (ADR-0034).
+                cur.execute(
+                    "SELECT operations.refresh_computer_name_collisions(%s::bigint)", (TENANT_ID,)
+                )
+                collisions = cur.fetchone()[0]
         with db.transaction() as cur:
             cur.execute("SET TRANSACTION READ ONLY")
             cur.execute(f"SET LOCAL operations.tenant_id = {TENANT_ID}")
@@ -1459,7 +1471,12 @@ def run_shadow_naming() -> None:
             f"{'retired' if retired else 'live'}:{outcome}:{rule}": n
             for retired, outcome, rule, n in counts
         }
-        _telemetry["shadow_naming"] = {"ran": True, "seconds": round(seconds, 1), "counts": summary}
+        _telemetry["shadow_naming"] = {
+            "ran": True,
+            "seconds": round(seconds, 1),
+            "counts": summary,
+            "collisions": collisions,
+        }
         log.info(
             "resolver: shadow naming in %.1fs: %s",
             seconds,
