@@ -24,8 +24,8 @@ do not open competing blueprints for the same work.
 - Blueprint: BLUEPRINT.md
 - Source: docs/archive/workspace-cleanup-2026-10-20/plan.md
 - Section: Active plan — Dashboard navigation performance
-- Resume gate: Release 0.128.4, then repeat authenticated handler and browser/navigation measurements. Do not close until the archived success criteria or measured, explicitly deferred exceptions are recorded.
-- Last checked: 2026-10-20 (releases 0.128.1–0.128.3 are healthy; their current handler evidence and the scoped 0.128.4 follow-up are recorded in `BLUEPRINT.md`).
+- Resume gate: Release 0.128.5, then repeat authenticated handler and browser/navigation measurements. Do not close until the archived success criteria or measured, explicitly deferred exceptions are recorded.
+- Last checked: 2026-10-20 (releases 0.128.1–0.128.4 are healthy; their current handler evidence and the scoped 0.128.5 follow-up are recorded in `BLUEPRINT.md`).
 
 ## PLAN-002 — Source-driven collection and Jobs recovery
 

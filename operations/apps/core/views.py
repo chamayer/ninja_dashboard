@@ -7128,10 +7128,10 @@ def _software_page_data(request: HttpRequest) -> dict:
             (categorized_titles,) = cur.fetchone()
 
             if not is_overview:
-            # Capability breakdown, replacing the software_catalog category
-            # breakdown this used to read. 'av' is the URL-facing alias for
-            # the endpoint_security capability, matching the unauthorized_av
-            # finding type name it already drives.
+                # Capability breakdown, replacing the software_catalog category
+                # breakdown this used to read. 'av' is the URL-facing alias for
+                # the endpoint_security capability, matching the unauthorized_av
+                # finding type name it already drives.
                 cur.execute(
                     """
                     SELECT CASE cap.capability WHEN 'endpoint_security' THEN 'av' ELSE cap.capability END,
@@ -7154,29 +7154,23 @@ def _software_page_data(request: HttpRequest) -> dict:
         if product_category_available and not is_overview:
             cur.execute(
                 """
-                SELECT COUNT(DISTINCT sic.canonical_name)
+                SELECT pce.category,
+                       COUNT(DISTINCT sic.canonical_name),
+                       GROUPING(pce.category) AS is_total
                 FROM operations.software_installations_current sic
                 JOIN catalog.software_versions sv ON sv.id = sic.software_version_id
                 JOIN catalog.products p ON p.id = sv.product_id
                 JOIN catalog.v_product_category_effective pce ON pce.product_uuid = p.product_uuid
                 WHERE sic.tenant_id = 1 AND sic.deleted_at IS NULL AND sic.stale_since IS NULL
+                GROUP BY GROUPING SETS ((pce.category), ())
                 """
             )
-            (descriptive_categorized_titles,) = cur.fetchone()
-
-            cur.execute(
-                """
-                SELECT pce.category, COUNT(DISTINCT sic.canonical_name)
-                FROM operations.software_installations_current sic
-                JOIN catalog.software_versions sv ON sv.id = sic.software_version_id
-                JOIN catalog.products p ON p.id = sv.product_id
-                JOIN catalog.v_product_category_effective pce ON pce.product_uuid = p.product_uuid
-                WHERE sic.tenant_id = 1 AND sic.deleted_at IS NULL AND sic.stale_since IS NULL
-                GROUP BY pce.category
-                ORDER BY 2 DESC
-                """
-            )
-            descriptive_category_rows = cur.fetchall()
+            for category, count, is_total in cur.fetchall():
+                if is_total:
+                    descriptive_categorized_titles = count
+                else:
+                    descriptive_category_rows.append((category, count))
+            descriptive_category_rows.sort(key=lambda row: row[1], reverse=True)
 
         # Decisions rollup
         cur.execute(

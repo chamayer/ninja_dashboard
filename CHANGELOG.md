@@ -2,6 +2,13 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.128.5] — 2026-10-20 — Software Products category aggregation
+
+### Changed
+
+- Software Products derives descriptive category totals and breakdowns from
+  one current read instead of two full-fleet aggregates.
+
 ## [0.128.4] — 2026-10-20 — Software Overview first-view boundary
 
 ### Changed

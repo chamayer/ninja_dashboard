@@ -14,12 +14,12 @@ Active. Before release, fresh authenticated tenant-1 handler timings found Dashb
 
 ## Change and measurement plan
 
-Release 0.128.4 makes the Overview match its rendered scope: it retains its displayed aggregate but omits the Products rows and category breakdowns that only the Products template renders. CSV and Products retain their existing result shapes. After the automatic `origin` rollout, confirm the image contains the change, run repeated authenticated handler timings, then run the documented authenticated browser/navigation measurement. Trace only routes still outside the archive criteria before selecting another change.
+Release 0.128.4 made the Overview meet the warm target at 1.042–1.068 s (first request 12.284 s). Products remains 2.853–2.976 s warm. Its trace attributes 1.295 s to a descriptive category total followed by a second 92 ms breakdown scan; release 0.128.5 combines those exact aggregates with grouping sets. After the automatic rollout, remeasure Products, then trace only routes still outside the archive criteria before selecting another change.
 
 ## Validation
 
-Focused pytest: 31 passed. `manage.py check`, `compileall`, registry validation, and diff whitespace checks passed for 0.128.1; the focused suite, checks, and compilation also pass for 0.128.2–0.128.4. Python 3.14 reports existing Django deprecation warnings; file-wide Ruff has existing unrelated legacy findings. No schema or data changes are included.
+Focused pytest: 31 passed. `manage.py check`, `compileall`, registry validation, and diff whitespace checks passed for 0.128.1; the focused suite and checks also pass for 0.128.2–0.128.5. Python 3.14 reports existing Django deprecation warnings; file-wide Ruff has existing unrelated legacy findings. No schema or data changes are included.
 
 ## Checkpoint and next action
 
-User approved the commit and pushes needed to complete the goal; `origin` automatically deploys, with no separate redeploy. Commit this scoped 0.128.4 change, push `origin` then `a-m-rose`, and perform read-only rollout and performance validation. PLAN-001 stays active until those measurements meet the archived success criteria or documented measured exceptions receive a follow-up decision.
+User approved the commit and pushes needed to complete the goal; `origin` automatically deploys, with no separate redeploy. Commit this scoped 0.128.5 change, push `origin` then `a-m-rose`, and perform read-only rollout and performance validation. PLAN-001 stays active until those measurements meet the archived success criteria or documented measured exceptions receive a follow-up decision.
