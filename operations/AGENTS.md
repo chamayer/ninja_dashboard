@@ -71,26 +71,8 @@ Ninja Dashboard stack.
   superuser owner — migration 0122 found one handing the application write
   access to two tables that had been explicitly denied to it.
 
-## Planning and continuity
+## Versioning
 
-- For nontrivial Operations work, use `operations/.work/plan.md` as the single
-  active implementation plan and continuity record.
-- Create or update it before implementation with status, goal, scope, affected
-  files, steps, decisions, validation plan, checkpoint, and next action.
-- Keep it current during implementation and verify it against Git status,
-  diffs, migrations, and current files when resuming.
-- At completion, record actual validation and applicable commit hashes, promote
-  durable reasoning to `operations/docs/decisions/`, and mark the plan
-  complete.
-- Keep the Operations plan tracked for cross-agent continuity and update it
-  alongside related code. Do not push a plan-only change merely to trigger a
-  production redeploy.
-- Do not create an extra commit solely to place that commit's own hash in the
-  plan. Record hashes already known and report the pushed hash in the response.
-- A completed Operations plan remains until the next nontrivial Operations task
-  replaces it.
-- Put deferred Operations work in `operations/.work/backlog.md` with sufficient
-  paths, constraints, risk, and revisit criteria.
 - Stack releases still use the root `VERSION` and `CHANGELOG.md`; do not create
   an independent module version unless explicitly approved.
 
@@ -117,7 +99,7 @@ validation when the required services or dependencies are unavailable.
 - The implementation follows the current architecture authorities.
 - Relevant checks pass or limitations are documented.
 - Migrations and deployment packaging are complete when applicable.
-- The active plan records current work and reasoning, not a session transcript.
+- The active blueprint records current work and reasoning, not a session transcript.
 
 ## Documentation routing
 
@@ -132,8 +114,4 @@ validation when the required services or dependencies are unavailable.
 - Read `docs/operations.md` for deployment, RLS verification, recovery, or
   maintenance.
 - Read `docs/runbooks/<topic>.md` only for the matching operational condition.
-- Read `.work/plan.md` when planning, implementing, or resuming the active
-  Operations task.
-- Read `.work/backlog.md` only when selecting or reviewing deferred Operations
-  work.
 - Read decision records when changing a previously settled architectural rule.

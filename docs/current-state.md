@@ -1,5 +1,9 @@
 # Ninja Dashboard current state
 
+> Historical snapshot: this document is dated 2026-07-16 and must be
+> reconciled with code, `VERSION`, `CHANGELOG.md`, and the active blueprint
+> before it is used as current authority.
+
 Status date: 2026-07-16
 Repository version observed: 0.50.5
 
@@ -84,7 +88,7 @@ The current CHANGELOG identifies the next design direction as:
 - Data-backed trends, contract/QBR context, assignments, and service metrics
 
 This direction is not represented in the existing root BLUEPRINT or
-Operations BUILD_BLUEPRINT; both describe older completed work.
+Operations BLUEPRINT; both describe older completed work.
 
 ## Current local state
 
@@ -114,4 +118,4 @@ Operations BUILD_BLUEPRINT; both describe older completed work.
 - Root architecture: `docs/architecture.md`.
 - Operations concise architecture guide: `operations/docs/architecture.md`.
 - Operations detailed architecture during transition: `operations/DESIGN.md`.
-- Active work: the applicable `.work/plan.md`.
+- Active work: the applicable `BLUEPRINT.md`, reconciled with the worktree.

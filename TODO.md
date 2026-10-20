@@ -8,11 +8,11 @@ Read Inbox at the start of every session.
 ## Inbox
 
 - [ ] Operations M0 build is now tracked in module docs:
-      `operations/BUILD_BLUEPRINT.md`, `operations/SESSIONS.md`, and
+      `operations/BLUEPRINT.md`, `operations/SESSIONS.md`, and
       `operations/TODO.md`. Review current M0.3-M0.10 WIP before commit;
       approve M0.11 before more schema work.
 - [ ] After v0.32.0 redeploys, run `/run/agent-compliance` and
-      execute the new validation queries (HANDY_COMMANDS.md
+      execute the new validation queries (docs/operations.md
       "id-link sanity") to confirm no
       `(platform, platform_group_id)` maps to multiple client_ids.
 - [ ] SC session `YLSedison` (UTA, session id
@@ -304,7 +304,7 @@ Read Inbox at the start of every session.
       `/devices-detailed`, not yet surfaced. Asset/warranty domain
       candidate.
 
-### Open questions to resolve (from `REQUIREMENTS.md` §8)
+### Open questions to resolve (from `docs/requirements.md`)
 
 - [ ] Snapshot cadence — confirm hourly or shift to 15 min.
 - [ ] Snapshot retention window — 90 days then downsample? operator
@@ -385,11 +385,11 @@ Read Inbox at the start of every session.
 
 ### v0.1.0 — 2026-06-02
 
-- [x] Project design & decisions captured in `REQUIREMENTS.md`.
-- [x] Repo scaffold: `CONTEXT.md`, `CHANGELOG.md`, `VERSION`,
+- [x] Project design & decisions captured in `docs/requirements.md`.
+- [x] Repo scaffold: architecture/context documentation, `CHANGELOG.md`, `VERSION`,
       `SESSIONS.md`, `TODO.md`, `.gitignore`, `.dockerignore`.
 - [x] `docker-compose.yml` (postgres + metabase + ingest), `Dockerfile`,
-      `requirements.txt`, `.env.example`.
+      `ingest/requirements.txt`, `.env.example`.
 - [x] `ingest/` Python package skeleton.
 - [x] `sql/init/00_create_databases.sh` — Postgres bootstrap.
 - [x] `sql/migrations/001_init_core.sql` — `ninja_core` schema.
@@ -405,7 +405,8 @@ Read Inbox at the start of every session.
       SYSTEM_REBOOTED.
 - [x] Tightened published-port surface: only Metabase on LAN;
       ingest on loopback; Postgres internal-only.
-- [x] `PORTS.md` documents host port map + what this stack publishes.
+- [x] Historical port map preserved under `docs/archive/`; current deployment
+      guidance lives in `docs/operations.md`.
 - [x] `ingest/ninja_client.py` — full implementation: OAuth2 token
       lifecycle, retry/backoff on 5xx/429, refresh-and-retry on 401,
       `paginate_after` + `paginate_cursor`, sync `httpx.Client`.
@@ -417,7 +418,7 @@ Read Inbox at the start of every session.
 - [x] `ingest/smoke.py` — `python -m ingest.smoke` verifies env,
       Postgres connectivity, applies pending migrations, Ninja auth,
       and one `/organizations` call. Non-zero exit on any failure.
-- [x] Added `psycopg-pool==3.2.3` to `requirements.txt`.
+- [x] Added `psycopg-pool==3.2.3` to `ingest/requirements.txt`.
 - [x] Env handling settled on bind-mount + read-at-start (dmarc
       pattern). ingest uses python-dotenv on `/app/.env`; postgres
       and metabase wrap their entrypoints to `source /etc/secrets.env`

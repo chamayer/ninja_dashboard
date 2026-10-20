@@ -75,7 +75,7 @@ SELECT
     -- Warning rollup (NEW). MESSAGE codes from both prefixes carry
     -- operationally critical signals ("outstanding approved patches",
     -- "post reboot scan required", "download error", "scheduled update
-    -- skipped", etc.). See CONTEXT.md and ninja_dashboard memory for
+    -- skipped", etc.). See docs/architecture.md and project memory for
     -- the prefix-doesn't-match-scope quirk.
     MAX(activity_time) FILTER (
         WHERE activity_type IN (

@@ -69,7 +69,7 @@ This sequence is planning material, not yet an approved active task.
 
 ## Stale state documents
 
-- BUILD_BLUEPRINT describes an older fleet-overview slice already committed.
+- BLUEPRINT describes an older fleet-overview slice already committed.
 - Root BLUEPRINT describes M0 work completed many releases ago.
 - Operations TODO still presents completed Track O and Track C work as open.
 - Operations SESSIONS contains valuable reasoning but is too large and
@@ -95,5 +95,5 @@ This sequence is planning material, not yet an approved active task.
 - Concise architecture guide: `operations/docs/architecture.md`.
 - Detailed architecture during transition: `DESIGN.md`.
 - Stack release: root VERSION and CHANGELOG.
-- Active work: `operations/.work/plan.md`.
+- Active work: `operations/BLUEPRINT.md`, reconciled with the worktree.
 - Durable decisions: `operations/docs/decisions/`.

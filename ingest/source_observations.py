@@ -85,7 +85,7 @@ def is_identity_source(source: SourceConfig) -> bool:
 
     Callers use this to partition collection cadence: identity sources are
     live agent telemetry and want a short cycle, documentation sources change
-    slowly. See `.work/backlog.md` — honouring `source_bindings.schedule` is
+    slowly. Honouring `source_bindings.schedule` is
     the durable replacement for cadence-by-capability.
 
     Opens its own connection because callers partition a source list outside

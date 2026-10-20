@@ -11,7 +11,7 @@ RUN groupadd -r ninja && useradd -r -g ninja -d /app ninja
 WORKDIR /app
 
 # Python deps first (layer caching — rarely changes)
-COPY requirements.txt .
+COPY ingest/requirements.txt ./requirements.txt
 RUN --mount=type=secret,id=workstation_ca \
     set -eu; \
     local_ca=/usr/local/share/ca-certificates/workstation-build-ca.crt; \

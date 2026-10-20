@@ -27,12 +27,12 @@ version: "3.8"
 services:
   # ───────────────────────────────────────────────────────────────────
   # postgres — main Operations data store
-  # Built from postgres.Dockerfile so the init script is in the image.
+  # Built from docker/postgres.Dockerfile so the init script is in the image.
   # ───────────────────────────────────────────────────────────────────
   postgres:
     build:
       context: .
-      dockerfile: postgres.Dockerfile
+      dockerfile: docker/postgres.Dockerfile
     container_name: ninja-postgres
     restart: unless-stopped
     shm_size: "1gb"
@@ -68,12 +68,12 @@ services:
 
   # ───────────────────────────────────────────────────────────────────
   # ingest — Python service, pulls Ninja API on schedule into Postgres
-  # Built from ingest.Dockerfile by Portainer on every git push.
+  # Built from ingest/Dockerfile by Portainer on every git push.
   # ───────────────────────────────────────────────────────────────────
   ingest:
     build:
       context: .
-      dockerfile: ingest.Dockerfile
+      dockerfile: ingest/Dockerfile
     container_name: operations-ingest
     restart: unless-stopped
     environment:
@@ -97,7 +97,7 @@ services:
   jobs-worker:
     build:
       context: .
-      dockerfile: ingest.Dockerfile
+      dockerfile: ingest/Dockerfile
     container_name: ninja-jobs-worker
     restart: unless-stopped
     command: ["python", "-m", "ingest.jobs_worker"]
@@ -121,13 +121,13 @@ services:
 
   # ───────────────────────────────────────────────────────────────────
   # operations — Django + DRF service, write-side operator console.
-  # Built from operations.Dockerfile.
+  # Built from operations/Dockerfile.
   # See operations/BLUEPRINT.md.
   # ───────────────────────────────────────────────────────────────────
   operations:
     build:
       context: .
-      dockerfile: operations.Dockerfile
+      dockerfile: operations/Dockerfile
     container_name: ninja-operations
     restart: unless-stopped
     environment:

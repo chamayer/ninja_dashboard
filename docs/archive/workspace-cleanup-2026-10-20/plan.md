@@ -830,6 +830,28 @@ single rebuildable inventory-list projection owned by existing source,
 identity, coverage, and Hudu read models—not another request-query or a
 cache. Define its refresh boundary and lifecycle before implementation.
 
+**Handoff (2026-10-20):** This performance goal remains active and is not
+complete. Do not infer completion from the ADR-0034 naming releases: they are
+separate work. Before resuming, verify this plan against the current branch,
+deployed revision, and fresh authenticated measurements; earlier timing and
+commit references are historical evidence, not current production truth.
+
+The next agent must measure the Dashboard and every route reachable from its
+cards, primary navigation, and contextual sub-navigation, then update the
+route inventory with before/after evidence. Continue only from a measured
+query or rendering cause, preserve tenant/RLS and the existing data
+authorities, and prefer bounded first views or an existing owned read model to
+page caches, duplicate projections, or speculative indexes. The immediate
+unresolved targets are the Dashboard (including source-status meaning),
+Computers inventory, Issues, Software user exposure/cleanup, Sources, Clients,
+and client overview. Reassess each rather than assuming its previous ranking.
+
+Completion requires fresh route-by-route measurements, focused regression
+checks, and live validation showing the Dashboard under 1.5 seconds warm and
+ordinary landing pages under 2 seconds server-side, or an explicit measured
+exception with a deferred decision. Record the final deployed revision,
+evidence, and any remaining exception here before marking this goal complete.
+
 ---
 
 ## Completed plan — Metabase retirement

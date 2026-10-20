@@ -217,7 +217,7 @@ def run_ninja_observations_once() -> None:
 def run_agent_observations_once() -> None:
     """Fetch S1/SC/LMI and write to entity_observations, then resolve device IDs.
 
-    INTERIM (see `.work/backlog.md` "Honour source_bindings.schedule"): the
+    INTERIM (legacy evidence is archived under docs/archive): the
     source list is filtered to identity-signal sources so slow documentation
     collectors do not delay live agent telemetry on this cycle. Reverting to
     a single unified cycle means dropping this filter and the companion

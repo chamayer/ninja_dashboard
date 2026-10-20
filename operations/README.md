@@ -2,10 +2,10 @@
 
 Write-side companion to Metabase in the ninja-dashboard stack.
 
-Read `AGENTS.md` before making changes. Use `docs/architecture.md` as the
-concise guide and `DESIGN.md` as the detailed architecture authority during
-the documentation transition. `BLUEPRINT.md` contains mixed implemented and
-pending planning material; active work belongs in `.work/plan.md`.
+Read `AGENTS.md` before making changes. Use `docs/README.md` for documentation
+routing, `docs/architecture.md` as the concise architecture guide, and
+`DESIGN.md` only when detailed transitional rules are needed. `BLUEPRINT.md`
+is the concise active handoff.
 
 ## Development
 
@@ -31,10 +31,9 @@ Settings modules:
 ```
 operations/
 ├── AGENTS.md             standing development instructions
-├── DESIGN.md             detailed architecture authority during transition
-├── docs/                 concise references, decisions, and runbooks
-├── .work/plan.md         active implementation checkpoint
-├── BLUEPRINT.md          mixed historical and pending planning source
+├── DESIGN.md             detailed transitional architecture reference
+├── docs/                 architecture, decisions, runbooks, and archive
+├── BLUEPRINT.md          active implementation checkpoint
 ├── pyproject.toml        deps + tool config
 ├── manage.py             Django entry point
 ├── config/               Django project package

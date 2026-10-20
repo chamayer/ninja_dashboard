@@ -10,13 +10,15 @@ project index. Module-level work may keep detailed state inside the module.
 For Operations work:
 
 - Root `BLUEPRINT.md` is a checkpoint/router only.
-- Detailed active plan lives at `operations/BUILD_BLUEPRINT.md`.
+- Detailed active handoff lives at `operations/BLUEPRINT.md`.
 - Detailed session log lives at `operations/SESSIONS.md`.
 - Detailed backlog lives at `operations/TODO.md`.
 - Root `SESSIONS.md` and `TODO.md` get short pointer entries only when
   Operations work affects repo-level status.
-- `operations/BLUEPRINT.md` is the product architecture/specification
-  document, not the per-session scratchpad.
+- `operations/BLUEPRINT.md` is the concise active handoff, not the product
+  architecture or a session transcript. Architecture belongs in
+  `operations/docs/architecture.md` and durable decisions in
+  `operations/docs/decisions/`.
 
-Before editing Operations code, report the active doc paths and wait for
-approval for the specific M0 slice being changed.
+Before editing Operations code, follow `operations/AGENTS.md` and consult the
+applicable architecture authority only when the task crosses its boundaries.

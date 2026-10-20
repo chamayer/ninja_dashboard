@@ -10,7 +10,7 @@ Migration 0130 left it on `device` and its docstring recorded the reason as
 "ADR-0015 keeps the first two on device explicitly". That is correct for
 `rare_recent` -- recency genuinely is a per-device fact -- but wrong for
 `install_path_suspicious`, which the ADR places on the relationship in the
-sentence quoted above. `.work/plan.md` carried the same mistaken reading, so
+sentence quoted above. Historical planning carried the same mistaken reading, so
 step 3 moved eight types and left this one behind with nothing recording that
 an Accepted ADR had been overruled.
 

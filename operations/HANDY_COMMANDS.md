@@ -1,7 +1,7 @@
 # Operations — Handy Commands
 
 Operator-facing commands for the Operations service. Run from the am-ch-01
-host shell unless otherwise noted. See root `ninja-dashboard/HANDY_COMMANDS.md`
+host shell unless otherwise noted. See root `ninja-dashboard/docs/operations.md`
 for stack-wide commands (postgres, metabase, ingest).
 
 ---

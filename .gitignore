@@ -32,9 +32,9 @@ test-data/
 !/archive/metabase/RESTORE.md
 
 # ── Reference data (not code) ────────────────────────────────────────
-# NinjaRMM OpenAPI spec — large reference file used to design the
-# schema. Re-download from Ninja docs if needed for future domains.
-NinjaRMM-API-v2*.json
+# NinjaRMM OpenAPI specifications — local development reference used to design
+# source connectors and schemas. Re-download from Ninja docs when needed.
+docs/reference/ninja-api/NinjaRMM-API-v2*.json
 
 # ── Editor / OS ──────────────────────────────────────────────────────
 .vscode/

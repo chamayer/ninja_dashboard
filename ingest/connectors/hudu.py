@@ -5,7 +5,7 @@ other vendors' records verbatim (Ninja, Auvik). Ninja is already an
 aggregator in the same sense (`ingest/core/devices.py`) — Hudu's only extra
 axis is that the originating vendor differs from the collecting one.
 
-Consequences, all measured (see `.work/plan.md`):
+Consequences, all measured in the preserved historical analysis:
 
 * Hudu contributes no independent identity evidence. A card is a *pointer*
   ("I am Ninja device 296"), so device attachment is a direct lookup and this

@@ -49,7 +49,7 @@ tables must keep ``arwd`` for the application to function. The rule is
 therefore stated in ``operations/AGENTS.md``: a migration creating a read model
 must revoke the DML it inherits. This migration's assertion catches the current
 population only; anything created after it is on the next author. A continuous
-check is recorded in ``.work/backlog.md``.
+check remains a future hardening concern.
 """
 
 from typing import ClassVar

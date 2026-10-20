@@ -1,0 +1,22 @@
+name: Governance
+
+on:
+  pull_request:
+  push:
+
+jobs:
+  governance:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate handoff and release metadata
+        shell: bash
+        run: |
+          test -f BLUEPRINT.md
+          test "$(wc -c < BLUEPRINT.md)" -le 4000
+          grep -Eiq '^#{1,2}[[:space:]].*goal' BLUEPRINT.md
+          grep -Eiq '^#{1,2}[[:space:]].*scope' BLUEPRINT.md
+          grep -Eiq '^#{1,2}[[:space:]].*status' BLUEPRINT.md
+          version="$(tr -d '\r\n' < VERSION)"
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]
+          grep -Eq "^## \[$version\]( |$)" CHANGELOG.md

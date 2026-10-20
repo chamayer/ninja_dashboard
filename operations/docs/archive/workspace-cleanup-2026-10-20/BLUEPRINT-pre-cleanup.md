@@ -34,7 +34,7 @@ Out:
   all-clients branch of `org_index`.
 - `operations/templates/org_index.html` — replace the Fleet card with
   summary tiles + improved client table.
-- `operations/BUILD_BLUEPRINT.md` — this checkpoint.
+- `operations/BLUEPRINT.md` — this checkpoint.
 - `operations/SESSIONS.md` — implementation record.
 - `operations/TODO.md` — completion state.
 

@@ -45,31 +45,6 @@ Django-based Operations application.
 - Do not infer production state from local files; verify externally only when
   authorized.
 
-## Planning and continuity
-
-- For nontrivial root-level work, use `.work/plan.md` as the single active plan
-  and continuity record.
-- Create or update it before implementation with status, goal, scope, affected
-  files, steps, decisions, validation plan, checkpoint, and next action.
-- Operations-only work uses `operations/.work/plan.md`; the root plan should
-  contain only a short pointer when repository-wide coordination is needed.
-- Keep plans current while working. A new agent must compare the applicable
-  plan with Git status, diffs, and current files before continuing.
-- At completion, record actual validation and applicable commit hashes, promote
-  durable decisions to `docs/decisions/` or
-  `operations/docs/decisions/`, and mark the plan complete.
-- Keep active plans tracked for cross-agent continuity. Update them alongside
-  related work; do not push a plan-only change merely to trigger a production
-  redeploy.
-- Do not create an extra commit solely to write that commit's own hash into a
-  plan. Record hashes already known and report the pushed hash in the response.
-- A completed plan remains until the next nontrivial task in that scope
-  replaces it. Git history preserves prior plans.
-- Do not use plans as transcripts, chronological histories, or general
-  backlogs.
-- Put deferred root/cross-service work in `.work/backlog.md`; Operations-only
-  deferred work belongs in `operations/.work/backlog.md`.
-
 ## Versioning
 
 - The stack uses Semantic Versioning. Root `VERSION` and `CHANGELOG.md` are the
@@ -106,14 +81,26 @@ Report any check that cannot run locally.
 ## Documentation routing
 
 - Read `README.md` for project setup and primary commands.
+- Read `docs/README.md` when locating the correct documentation authority.
+- Use `docs/reference/` for durable external or vendor development reference
+  material; it is neither runtime input nor archival history.
+- Use `docs/records/` for retained maintenance records and audit summaries.
 - Read `docs/requirements.md` for platform scope and acceptance criteria.
 - Read `docs/architecture.md` for ingest, database, or service design.
 - Read `docs/current-state.md` for the currently supported domains and known
-  incomplete areas.
+  incomplete areas only after checking its status date.
 - Read `docs/operations.md` only for deployment, recovery, host, or maintenance
   work.
 - Read `operations/AGENTS.md` before changing the Operations module.
-- Read `.work/plan.md` when planning, implementing, or resuming active
-  root-level work.
-- Read `.work/backlog.md` only when selecting or reviewing deferred root work.
 - Read `CHANGELOG.md` only when release history is relevant.
+
+## Module work-state routing
+
+For Operations work, root `BLUEPRINT.md` is the cross-service checkpoint and
+router. The detailed active handoff, session history, and deferred backlog are
+respectively `operations/BLUEPRINT.md`, `operations/SESSIONS.md`, and
+`operations/TODO.md`. Root `SESSIONS.md` and `TODO.md` receive only concise
+cross-project pointers when Operations work affects repository-level status.
+
+Machine-specific command permissions belong in untracked local tool settings,
+not repository instructions.

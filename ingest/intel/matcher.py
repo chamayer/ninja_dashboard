@@ -47,7 +47,7 @@ moved the unit of work from ~21k titles to ~40k product+versions, and the
 2026-08-06) to 1,799,966 (measured 2026-08-12) -- a 10.9x increase. Migration
 090 adds ``intel_ingest_status.last_duration_seconds`` so this run's cost is
 observable instead of inferred. Whether the full rebuild should become
-incremental is a separate, measured decision -- see ``.work/backlog.md``; do
+incremental is a separate, measured decision; do
 not make the matcher incremental on the strength of this note alone, because a
 full rebuild is what currently guarantees no stale match survives a CVE
 withdrawal.

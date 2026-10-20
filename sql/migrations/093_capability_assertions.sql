@@ -30,7 +30,7 @@
 -- The second direction is held by code review and tests, not by the database.
 -- The grants are written as though ingest were `ninja_ingest` so they begin
 -- enforcing the moment that changes; running ingest as a non-superuser role is
--- recorded in .work/backlog.md and is worth doing well beyond this feature.
+-- retained as a future security-hardening concern beyond this feature.
 -- Claiming a structural boundary that does not exist would be worse than the
 -- asymmetry itself.
 -- ---------------------------------------------------------------------------

@@ -18,10 +18,11 @@ through the Django Operations application.
 ingest/                    Python ingest engine and connectors
 sql/                       Postgres initialization and ingest migrations
 operations/                Django/DRF/HTMX Operations application
+docker/                    Shared infrastructure image definitions
 docker-compose.yml         Stack definition
-*.Dockerfile               Custom service images
+*/Dockerfile               Service image definitions
 docs/                      Root requirements, architecture, state, operations
-.work/plan.md              Current root or cross-service work
+BLUEPRINT.md                Current root or cross-service work
 VERSION                    Stack version
 CHANGELOG.md               Release-visible history
 ```
@@ -61,7 +62,7 @@ Read:
 - `AGENTS.md` before changing the repository.
 - `docs/architecture.md` for cross-service or storage changes.
 - `operations/AGENTS.md` before changing Operations.
-- The applicable `.work/plan.md` for active nontrivial work.
+- The applicable `BLUEPRINT.md` for active nontrivial work.
 
 ## Validation
 

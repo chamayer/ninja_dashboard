@@ -1,5 +1,9 @@
 # Ninja Dashboard architecture
 
+> This is the root cross-module architecture authority. It describes stable
+> boundaries and dependency directions, not task history. Consult it before a
+> change crosses ingest, SQL, Operations, shared code, or deployment packaging.
+
 ## System overview
 
 ```text
@@ -28,6 +32,36 @@ The repository builds custom Postgres, ingest, and Operations images.
 | `sql/migrations/` | Ingest-managed SQL schema evolution |
 | `operations/` | Django/DRF/HTMX operator control plane |
 | `docker-compose.yml` and `*.Dockerfile` | Runtime packaging and orchestration |
+
+## Ownership and dependency rules
+
+- Source connectors and ingest code own acquisition, source fidelity, and
+  ingest-managed schema evolution. They do not make tenant-facing operator
+  decisions.
+- The `operations` schema and Django application own source-agnostic canonical
+  entities, tenant-safe read models, operator decisions, findings, and
+  workflows.
+- `shared/` may contain contracts consumed by both applications, but must not
+  become a hidden third business domain.
+- `sql/` contains root-level initialization and ingest migrations; Operations
+  Django migrations remain under `operations/apps/*/migrations/`.
+- Dependency direction is connectors/source schemas -> ingest processing ->
+  persisted observations and derived state -> Operations read models and UI.
+  UI actions must not write back into an external source platform.
+- A cross-boundary change must name its data owner, migration owner, read/write
+  contract, tenant/RLS effect, validation path, and any required ADR.
+
+## Documentation authority
+
+| Question | Authority |
+|---|---|
+| Cross-service boundaries, ownership, and deployment shape | This document |
+| Root scope and acceptance criteria | `docs/requirements.md` |
+| Current verified state | `docs/current-state.md` (only when its date is current) |
+| Deployment/recovery procedure | `docs/operations.md` |
+| Operations internals | `operations/docs/architecture.md`, then `operations/DESIGN.md` when needed |
+| Settled decisions | Root or Operations `docs/decisions/` |
+| Active task | Applicable `BLUEPRINT.md` |
 
 ## Source and domain schemas
 

@@ -1,6 +1,6 @@
 # 0032 — Computer identity: matching, merge over split, and re-check
 
-Status: Accepted 2026-10-16; not yet implemented (see `operations/.work/plan.md`)
+Status: Accepted 2026-10-16; not yet implemented (see the archived legacy Operations plan)
 Date: 2026-10-16
 
 ## Context
