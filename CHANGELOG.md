@@ -2,6 +2,13 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.128.4] — 2026-10-20 — Software Overview first-view boundary
+
+### Changed
+
+- Software Overview no longer reads the Products table or category breakdowns
+  that it does not render; CSV and Products retain their existing results.
+
 ## [0.128.3] — 2026-10-20 — Software first-view publisher authority
 
 ### Changed

@@ -7127,30 +7127,31 @@ def _software_page_data(request: HttpRequest) -> dict:
             )
             (categorized_titles,) = cur.fetchone()
 
+            if not is_overview:
             # Capability breakdown, replacing the software_catalog category
             # breakdown this used to read. 'av' is the URL-facing alias for
             # the endpoint_security capability, matching the unauthorized_av
             # finding type name it already drives.
-            cur.execute(
-                """
-                SELECT CASE cap.capability WHEN 'endpoint_security' THEN 'av' ELSE cap.capability END,
-                       COUNT(DISTINCT sic.canonical_name)
-                FROM operations.software_installations_current sic
-                JOIN catalog.software_versions sv ON sv.id = sic.software_version_id
-                JOIN catalog.products p ON p.id = sv.product_id
-                JOIN catalog.v_product_capability_effective cap ON cap.product_uuid = p.product_uuid
-                WHERE sic.tenant_id = 1 AND sic.deleted_at IS NULL AND sic.stale_since IS NULL
-                GROUP BY cap.capability
-                ORDER BY 2 DESC
-                """
-            )
-            category_rows = cur.fetchall()
+                cur.execute(
+                    """
+                    SELECT CASE cap.capability WHEN 'endpoint_security' THEN 'av' ELSE cap.capability END,
+                           COUNT(DISTINCT sic.canonical_name)
+                    FROM operations.software_installations_current sic
+                    JOIN catalog.software_versions sv ON sv.id = sic.software_version_id
+                    JOIN catalog.products p ON p.id = sv.product_id
+                    JOIN catalog.v_product_capability_effective cap ON cap.product_uuid = p.product_uuid
+                    WHERE sic.tenant_id = 1 AND sic.deleted_at IS NULL AND sic.stale_since IS NULL
+                    GROUP BY cap.capability
+                    ORDER BY 2 DESC
+                    """
+                )
+                category_rows = cur.fetchall()
 
         # Descriptive category (migration 104) -- same join shape as the
         # capability block above, distinct table, never merged with it.
         descriptive_categorized_titles = 0
         descriptive_category_rows: list = []
-        if product_category_available:
+        if product_category_available and not is_overview:
             cur.execute(
                 """
                 SELECT COUNT(DISTINCT sic.canonical_name)
@@ -7283,6 +7284,7 @@ def _software_page_data(request: HttpRequest) -> dict:
         # result. An ordinary first view has no category predicate, so defer
         # its category enrichment until after the bounded title page below.
         needs_full_category_snapshot = bool(category_filter or product_category_filter or is_csv)
+        title_page_size = 0 if is_overview and not is_csv else page_size
         category_cte_sql = (
             """SELECT sic2.canonical_name,
                       array_agg(DISTINCT
@@ -7339,7 +7341,7 @@ def _software_page_data(request: HttpRequest) -> dict:
                 WHERE {where_sql}
                   AND sic.device_count >= {min_devices_int}
                 ORDER BY {sort_sql}
-                LIMIT {page_size} OFFSET {page_offset}
+                LIMIT {title_page_size} OFFSET {page_offset}
             )
             SELECT filtered.canonical_name,
                    filtered.publisher,
