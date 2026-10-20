@@ -92,7 +92,8 @@ def test_every_page_that_records_a_decision_collects_the_comment():
 def test_products_list_matches_decisions_ignoring_case_and_shows_the_main_publisher():
     assert "sd.canonical_name = sic.canonical_name" not in _VIEWS
     assert _VIEWS.count("LOWER(sd.canonical_name) = LOWER(sic.canonical_name)") == 4
-    assert "ORDER BY COUNT(*) DESC, installed.publisher" in _VIEWS
+    assert "main_publisher" not in _VIEWS
+    assert "filtered.publisher," in _VIEWS
 
 
 def test_unfiltered_software_first_view_defers_category_enrichment_to_displayed_titles():

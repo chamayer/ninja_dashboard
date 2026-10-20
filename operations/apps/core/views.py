@@ -7342,7 +7342,7 @@ def _software_page_data(request: HttpRequest) -> dict:
                 LIMIT {page_size} OFFSET {page_offset}
             )
             SELECT filtered.canonical_name,
-                   COALESCE(main_publisher.publisher, filtered.publisher),
+                   filtered.publisher,
                    filtered.device_count,
                    filtered.client_count,
                    filtered.last_install,
@@ -7354,17 +7354,6 @@ def _software_page_data(request: HttpRequest) -> dict:
                    filtered.total_filtered
             FROM totals
             LEFT JOIN filtered ON TRUE
-            LEFT JOIN LATERAL (
-                SELECT installed.publisher
-                FROM operations.software_installations_current installed
-                WHERE installed.tenant_id = 1
-                  AND installed.deleted_at IS NULL AND installed.stale_since IS NULL
-                  AND LOWER(installed.canonical_name) = LOWER(filtered.canonical_name)
-                  AND COALESCE(installed.publisher, '') <> ''
-                GROUP BY installed.publisher
-                ORDER BY COUNT(*) DESC, installed.publisher
-                LIMIT 1
-            ) main_publisher ON filtered.canonical_name IS NOT NULL
             """,
             params,
         )

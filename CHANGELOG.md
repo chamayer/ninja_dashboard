@@ -2,6 +2,13 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.128.3] — 2026-10-20 — Software first-view publisher authority
+
+### Changed
+
+- Software first views use the established title read model's most-common
+  publisher rather than recomputing that value once per displayed title.
+
 ## [0.128.2] — 2026-10-20 — Software first-view category boundary
 
 ### Changed
