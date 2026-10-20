@@ -2,6 +2,13 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.128.6] — 2026-10-20 — Software Products first-view boundary
+
+### Changed
+
+- Software Products now paginates ordinary HTML first views at 100 titles and
+  obtains title decisions from one case-insensitive rollup; CSV retains 500 rows.
+
 ## [0.128.5] — 2026-10-20 — Software Products category aggregation
 
 ### Changed

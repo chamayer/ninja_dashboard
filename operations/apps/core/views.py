@@ -7278,7 +7278,7 @@ def _software_page_data(request: HttpRequest) -> dict:
         # result. An ordinary first view has no category predicate, so defer
         # its category enrichment until after the bounded title page below.
         needs_full_category_snapshot = bool(category_filter or product_category_filter or is_csv)
-        title_page_size = 0 if is_overview and not is_csv else page_size
+        title_page_size = 0 if is_overview and not is_csv else (page_size if is_csv else 100)
         category_cte_sql = (
             """SELECT sic2.canonical_name,
                       array_agg(DISTINCT
@@ -7315,6 +7315,13 @@ def _software_page_data(request: HttpRequest) -> dict:
             ),
             category_by_title AS ({category_cte_sql}),
             product_category_by_title AS ({product_category_cte_sql}),
+            decision_by_title AS (
+                SELECT tenant_id, LOWER(canonical_name) AS canonical_name,
+                       MIN(decision) AS decision
+                FROM operations.software_decisions
+                WHERE tenant_id = 1 AND canonical_name <> ''
+                GROUP BY tenant_id, LOWER(canonical_name)
+            ),
             filtered AS (
                 SELECT sic.canonical_name,
                        sic.publisher,
@@ -7323,15 +7330,14 @@ def _software_page_data(request: HttpRequest) -> dict:
                        sic.latest_install AS last_install,
                        cbt.categories,
                        pcbt.product_categories,
-                       (SELECT MIN(sd.decision)
-                        FROM operations.software_decisions sd
-                        WHERE sd.tenant_id = sic.tenant_id
-                          AND LOWER(sd.canonical_name) = LOWER(sic.canonical_name)
-                       ) AS decision,
+                       decision_by_title.decision,
                        COUNT(*) OVER ()::bigint AS total_filtered
                 FROM operations.software_title_current sic
                 LEFT JOIN category_by_title cbt ON cbt.canonical_name = sic.canonical_name
                 LEFT JOIN product_category_by_title pcbt ON pcbt.canonical_name = sic.canonical_name
+                LEFT JOIN decision_by_title
+                  ON decision_by_title.tenant_id = sic.tenant_id
+                 AND decision_by_title.canonical_name = LOWER(sic.canonical_name)
                 WHERE {where_sql}
                   AND sic.device_count >= {min_devices_int}
                 ORDER BY {sort_sql}

@@ -91,7 +91,8 @@ def test_every_page_that_records_a_decision_collects_the_comment():
 
 def test_products_list_matches_decisions_ignoring_case_and_shows_the_main_publisher():
     assert "sd.canonical_name = sic.canonical_name" not in _VIEWS
-    assert _VIEWS.count("LOWER(sd.canonical_name) = LOWER(sic.canonical_name)") == 4
+    assert _VIEWS.count("LOWER(sd.canonical_name) = LOWER(sic.canonical_name)") == 3
+    assert "LOWER(canonical_name) AS canonical_name" in _VIEWS
     assert "main_publisher" not in _VIEWS
     assert "filtered.publisher," in _VIEWS
 
@@ -99,3 +100,8 @@ def test_products_list_matches_decisions_ignoring_case_and_shows_the_main_publis
 def test_unfiltered_software_first_view_defers_category_enrichment_to_displayed_titles():
     assert "needs_full_category_snapshot = bool(category_filter or product_category_filter or is_csv)" in _VIEWS
     assert "sic.canonical_name = ANY(%s::text[])" in _VIEWS
+
+
+def test_products_first_view_uses_a_bounded_page_and_one_decision_rollup():
+    assert "else (page_size if is_csv else 100)" in _VIEWS
+    assert "decision_by_title AS" in _VIEWS
