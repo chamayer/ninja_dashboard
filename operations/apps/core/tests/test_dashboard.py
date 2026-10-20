@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pytest
 from django.template.loader import get_template
 
@@ -7,6 +9,9 @@ from apps.core.views import (
     _dashboard_priority,
     _raw_json_object,
 )
+
+
+_VIEWS = Path(__file__).parents[1].joinpath("views.py").read_text(encoding="utf-8")
 
 
 @pytest.mark.parametrize(
@@ -84,3 +89,9 @@ def test_dashboard_is_an_operator_briefing_with_issue_drill_throughs():
     assert "What changed in the last 24 hours" in template
     assert 'aria-label="Data and processing status"' in template
     assert "data_status_summaries" not in template
+
+
+def test_dashboard_finding_rollups_share_one_current_read():
+    assert "GROUP BY GROUPING SETS" in _VIEWS
+    assert "attention_group_rows" in _VIEWS
+    assert "for row in attention_group_rows:" in _VIEWS

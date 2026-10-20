@@ -972,28 +972,88 @@ def home(request: HttpRequest) -> HttpResponse:  # noqa: PLR0912, PLR0915
         )
         active_devices = cur.fetchone()[0]
 
-    # Aggregate active, unsnoozed issues by client/domain/type/severity. This
-    # replaces filtered joins repeated for every dashboard metric and keeps the
-    # query count independent of the number of clients.
-    issue_rows = (
-        Finding.objects.filter(
-            tenant_id=1,
-            status__in=_FINDING_ACTIVE_STATUSES,
-            finding_type__issue_category__in=_DASHBOARD_DOMAIN_CATEGORIES,
+    # One grouping-set scan supplies both the per-client/domain rollup and
+    # the fleet-wide attention list. Keeping the two aggregate levels in one
+    # current-read query avoids scanning active findings twice while retaining
+    # exact distinct-subject/client counts at each level.
+    with transaction.atomic(), connection.cursor() as cur:
+        cur.execute("SET LOCAL operations.tenant_id = 1")
+        cur.execute(
+            """
+            WITH active AS MATERIALIZED (
+                SELECT finding.client_id, finding_type.issue_category,
+                       finding_type.name AS type_name, finding.severity,
+                       finding.subject_id, finding.first_seen_at,
+                       COALESCE(finding.last_detected_at, finding.last_seen_at) AS updated_at
+                FROM operations.findings finding
+                JOIN operations.finding_types finding_type
+                  ON finding_type.id = finding.finding_type_id
+                WHERE finding.tenant_id = 1
+                  AND finding.status IN ('open', 'acknowledged', 'investigating')
+                  AND (finding.snoozed_until IS NULL OR finding.snoozed_until < %s)
+            )
+            SELECT client_id, issue_category, type_name, severity,
+                   COUNT(*)::int AS finding_count,
+                   COUNT(DISTINCT subject_id)::int AS subject_count,
+                   COUNT(*) FILTER (WHERE first_seen_at >= %s)::int AS new_count,
+                   GROUPING(client_id) AS is_fleet_rollup,
+                   COUNT(DISTINCT client_id)::int AS client_count,
+                   MAX(updated_at) AS updated_at,
+                   MAX(CASE severity
+                       WHEN 'critical' THEN 5 WHEN 'high' THEN 4
+                       WHEN 'medium' THEN 3 WHEN 'low' THEN 2 ELSE 1 END)::int
+                       AS severity_level
+            FROM active
+            GROUP BY GROUPING SETS (
+                (client_id, issue_category, type_name, severity),
+                (issue_category, type_name)
+            )
+            """,
+            [now, yesterday],
         )
-        .filter(Q(snoozed_until__isnull=True) | Q(snoozed_until__lt=now))
-        .values(
-            "client_id",
-            "finding_type__issue_category",
-            "finding_type__name",
-            "severity",
-        )
-        .annotate(
-            n=Count("id"),
-            subjects=Count("subject_id", distinct=True),
-            new=Count("id", filter=Q(first_seen_at__gte=yesterday)),
-        )
-    )
+        grouped_issue_rows = cur.fetchall()
+
+    issue_rows = []
+    attention_group_rows = []
+    for row in grouped_issue_rows:
+        (
+            client_id,
+            issue_category,
+            type_name,
+            severity,
+            finding_count,
+            subject_count,
+            new_count,
+            is_fleet_rollup,
+            client_count,
+            updated_at,
+            severity_level,
+        ) = row
+        if is_fleet_rollup:
+            attention_group_rows.append(
+                {
+                    "finding_type__name": type_name,
+                    "finding_type__issue_category": issue_category or "",
+                    "count": finding_count,
+                    "clients": client_count,
+                    "subjects": subject_count,
+                    "new": new_count,
+                    "updated_at": updated_at,
+                    "severity_level": severity_level,
+                }
+            )
+        elif issue_category in _DASHBOARD_DOMAIN_CATEGORIES:
+            issue_rows.append(
+                {
+                    "client_id": client_id,
+                    "finding_type__issue_category": issue_category,
+                    "finding_type__name": type_name,
+                    "severity": severity,
+                    "n": finding_count,
+                    "subjects": subject_count,
+                    "new": new_count,
+                }
+            )
     client_domain_stats: dict = {}
     global_domain_stats = {
         name: {"severities": {}, "types": {}, "subjects": {}, "total": 0, "new_total": 0}
@@ -1486,27 +1546,7 @@ def home(request: HttpRequest) -> HttpResponse:  # noqa: PLR0912, PLR0915
     severity_rank = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
     severity_from_level = {5: "critical", 4: "high", 3: "medium", 2: "low", 1: "info"}
     attention_by_type: dict[str, dict] = {}
-    grouped_findings = (
-        Finding.objects.filter(active_issue_filter, tenant_id=1)
-        .values("finding_type__name", "finding_type__issue_category")
-        .annotate(
-            count=Count("id"),
-            clients=Count("client_id", distinct=True),
-            subjects=Count("subject_id", distinct=True),
-            new=Count("id", filter=Q(first_seen_at__gte=yesterday)),
-            updated_at=Max(Coalesce("last_detected_at", "last_seen_at")),
-            severity_level=Max(
-                Case(
-                    When(severity="critical", then=Value(5)),
-                    When(severity="high", then=Value(4)),
-                    When(severity="medium", then=Value(3)),
-                    When(severity="low", then=Value(2)),
-                    default=Value(1),
-                )
-            ),
-        )
-    )
-    for row in grouped_findings:
+    for row in attention_group_rows:
         type_name = row["finding_type__name"]
         row_severity = severity_from_level.get(row["severity_level"], "info")
         item = attention_by_type.setdefault(
@@ -6919,6 +6959,8 @@ def _software_page_data(request: HttpRequest) -> dict:
     Both views render different templates from the same data.
     """
     q_filter = (request.GET.get("q") or "").strip()
+    is_overview = getattr(getattr(request, "resolver_match", None), "url_name", "") == "software_page"
+    is_csv = wants_csv(request)
     decision_filter = request.GET.get("decision", "")  # approved|rejected|pending|any
     category_filter = request.GET.get("category", "")  # av|rmm|remote_access|...|uncategorized
     # Separate axis from `category` above: that one is the security-relevant
@@ -7003,19 +7045,13 @@ def _software_page_data(request: HttpRequest) -> dict:
     if not product_category_available and product_category_filter:
         product_category_filter = ""
 
-    # Fetch v_software_safety ONCE up front. Everything downstream —
-    # per-title risk map, high-risk count, distribution, this-week
-    # highlights, AND the ?safety=<band> filter — is derived from this
-    # single snapshot.
-    #
-    # The comment here used to justify this by "the view is a multi-CTE join
-    # that costs ~700-900 ms per evaluation". That is no longer true: it has
-    # since been materialized, and the full unbounded fetch measures 19 ms
-    # against production. Fetching once is still right — one round trip beats
-    # six — but it is not the page's cost center, and chasing it would have
-    # been wasted effort.
+    # A safety filter or CSV needs the complete matching/exportable set. The
+    # ordinary HTML views need safety only for their bounded title page; the
+    # Overview's fleet summary is an aggregate read below, not an estate-wide
+    # row transfer.
     all_safety_rows: list[tuple] = []
-    if intel_available:
+    needs_full_safety_snapshot = bool(safety_filter) or is_csv
+    if intel_available and needs_full_safety_snapshot:
         try:
             with transaction.atomic(), connection.cursor() as sc:
                 sc.execute("SET LOCAL operations.tenant_id = 1")
@@ -7042,6 +7078,23 @@ def _software_page_data(request: HttpRequest) -> dict:
             # No products in that band. Force the main query to return
             # zero title rows without scanning the whole fleet.
             safety_filter_names = ["\x00__no_match__\x00"]
+
+    risk_distribution = {"high": 0, "medium": 0, "low": 0, "clean": 0, "unknown": 0}
+    if intel_available and is_overview:
+        with transaction.atomic(), connection.cursor() as sc:
+            sc.execute("SET LOCAL operations.tenant_id = 1")
+            sc.execute(
+                """
+                SELECT safety_band, COUNT(*)::int
+                FROM operations.v_software_safety
+                WHERE tenant_id = 1
+                GROUP BY safety_band
+                """
+            )
+            for band, count in sc.fetchall():
+                if band in risk_distribution:
+                    risk_distribution[band] = count
+    high_risk_titles = risk_distribution["high"]
 
     with transaction.atomic(), connection.cursor() as cur:
         cur.execute("SET LOCAL operations.tenant_id = 1")
@@ -7319,6 +7372,18 @@ def _software_page_data(request: HttpRequest) -> dict:
 
         canonical_names = [row[0] for row in title_rows]
 
+        if intel_available and not needs_full_safety_snapshot and canonical_names:
+            cur.execute(
+                """
+                SELECT canonical_name, safety_score, safety_band,
+                       cve_count, kev_count, osint_hits
+                FROM operations.v_software_safety
+                WHERE tenant_id = 1 AND canonical_name = ANY(%s::text[])
+                """,
+                [canonical_names],
+            )
+            all_safety_rows = list(cur.fetchall())
+
         # Recent installations — last 24h, first-seen
         cur.execute(
             """
@@ -7334,16 +7399,14 @@ def _software_page_data(request: HttpRequest) -> dict:
         )
         recent_installs = cur.fetchall()
 
-    # v_software_safety was already fetched once at the top of the
-    # request. Reuse ``all_safety_rows`` for all downstream aggregates.
+    # The complete safety snapshot is used only for filtering/export. Both
+    # ordinary HTML surfaces now enrich their bounded title page instead.
     safety_by_title: dict[str, dict] = {}
-    shown_set = {c for c in canonical_names}
-    high_risk_titles = 0
-    risk_distribution = {"high": 0, "medium": 0, "low": 0, "clean": 0, "unknown": 0}
+    shown_set = set(canonical_names)
     for cn, score, band, cve_count, kev_count, osint_hits in all_safety_rows:
-        if band in risk_distribution:
+        if not is_overview and band in risk_distribution:
             risk_distribution[band] += 1
-        if band == "high":
+        if not is_overview and band == "high":
             high_risk_titles += 1
         if cn in shown_set:
             safety_by_title[cn] = {
@@ -7366,14 +7429,13 @@ def _software_page_data(request: HttpRequest) -> dict:
             sc.execute("SET LOCAL operations.tenant_id = 1")
             sc.execute(
                 """
-                SELECT canonical_name
+                SELECT COUNT(*)::int
                 FROM operations.software_title_current
                 WHERE tenant_id = 1
                   AND latest_install >= NOW() - INTERVAL '7 days'
                 """
             )
-            new_products_set = {row[0] for row in sc.fetchall()}
-            this_week["new_products"] = len(new_products_set)
+            (this_week["new_products"],) = sc.fetchone()
             sc.execute(
                 """
                 SELECT canonical_name, device_count AS devices
@@ -7386,11 +7448,22 @@ def _software_page_data(request: HttpRequest) -> dict:
             row = sc.fetchone()
             if row:
                 this_week["top_new_product"] = {"name": row[0], "devices": row[1]}
-        # Derive new-high-risk from the safety snapshot rather than a
-        # separate view scan.
-        this_week["new_high_risk"] = sum(
-            1 for r in all_safety_rows if r[2] == "high" and r[0] in new_products_set
-        )
+        if is_overview and intel_available:
+            with transaction.atomic(), connection.cursor() as sc:
+                sc.execute("SET LOCAL operations.tenant_id = 1")
+                sc.execute(
+                    """
+                    SELECT COUNT(*)::int
+                    FROM operations.v_software_safety safety
+                    JOIN operations.software_title_current title
+                      ON title.tenant_id = safety.tenant_id
+                     AND title.canonical_name = safety.canonical_name
+                    WHERE safety.tenant_id = 1
+                      AND safety.safety_band = 'high'
+                      AND title.latest_install >= NOW() - INTERVAL '7 days'
+                    """
+                )
+                (this_week["new_high_risk"],) = sc.fetchone()
     except Exception:
         pass
 

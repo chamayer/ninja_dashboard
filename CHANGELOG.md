@@ -2,6 +2,16 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.128.1] — 2026-10-20 — Dashboard navigation performance
+
+### Changed
+
+- The Dashboard derives its client and fleet finding rollups from one
+  tenant-scoped current-read query, avoiding a second scan of active findings.
+- Ordinary Software Overview and Products first views fetch safety detail only
+  for displayed titles; overview counts remain aggregate reads. Filtered and
+  CSV views retain their complete-result behavior.
+
 ## [0.128.0] — 2026-10-19 — How a Computer is named (ADR-0034)
 
 ### Added
