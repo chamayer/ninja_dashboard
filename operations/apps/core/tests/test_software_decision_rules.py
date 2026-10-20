@@ -93,3 +93,8 @@ def test_products_list_matches_decisions_ignoring_case_and_shows_the_main_publis
     assert "sd.canonical_name = sic.canonical_name" not in _VIEWS
     assert _VIEWS.count("LOWER(sd.canonical_name) = LOWER(sic.canonical_name)") == 4
     assert "ORDER BY COUNT(*) DESC, installed.publisher" in _VIEWS
+
+
+def test_unfiltered_software_first_view_defers_category_enrichment_to_displayed_titles():
+    assert "needs_full_category_snapshot = bool(category_filter or product_category_filter or is_csv)" in _VIEWS
+    assert "sic.canonical_name = ANY(%s::text[])" in _VIEWS

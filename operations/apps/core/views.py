@@ -7279,6 +7279,10 @@ def _software_page_data(request: HttpRequest) -> dict:
         # an index lookup -- 500 rows of that is minutes, which is what
         # produced the Gunicorn worker timeout. A single GROUP BY pass here
         # costs about what the category-breakdown queries above already cost.
+        # Category filters and CSV need an estate-wide matching/exportable
+        # result. An ordinary first view has no category predicate, so defer
+        # its category enrichment until after the bounded title page below.
+        needs_full_category_snapshot = bool(category_filter or product_category_filter or is_csv)
         category_cte_sql = (
             """SELECT sic2.canonical_name,
                       array_agg(DISTINCT
@@ -7290,7 +7294,7 @@ def _software_page_data(request: HttpRequest) -> dict:
                  JOIN catalog.v_product_capability_effective cap ON cap.product_uuid = p.product_uuid
                 WHERE sic2.tenant_id = 1 AND sic2.deleted_at IS NULL AND sic2.stale_since IS NULL
                 GROUP BY sic2.canonical_name"""
-            if capability_available
+            if capability_available and needs_full_category_snapshot
             else "SELECT NULL::text AS canonical_name, NULL::text[] AS categories WHERE FALSE"
         )
         product_category_cte_sql = (
@@ -7302,7 +7306,7 @@ def _software_page_data(request: HttpRequest) -> dict:
                  JOIN catalog.v_product_category_effective pce ON pce.product_uuid = p.product_uuid
                 WHERE sic2.tenant_id = 1 AND sic2.deleted_at IS NULL AND sic2.stale_since IS NULL
                 GROUP BY sic2.canonical_name"""
-            if product_category_available
+            if product_category_available and needs_full_category_snapshot
             else "SELECT NULL::text AS canonical_name, NULL::text[] AS product_categories WHERE FALSE"
         )
         cur.execute(
@@ -7371,6 +7375,43 @@ def _software_page_data(request: HttpRequest) -> dict:
         title_rows = [row[:8] for row in software_rows if row[0] is not None]
 
         canonical_names = [row[0] for row in title_rows]
+
+        categories_by_title: dict[str, list[str]] = {}
+        product_categories_by_title: dict[str, list[str]] = {}
+        if canonical_names and capability_available:
+            cur.execute(
+                """
+                SELECT sic.canonical_name,
+                       array_agg(DISTINCT CASE cap.capability
+                           WHEN 'endpoint_security' THEN 'av' ELSE cap.capability END)
+                FROM operations.software_installations_current sic
+                JOIN catalog.software_versions sv ON sv.id = sic.software_version_id
+                JOIN catalog.products p ON p.id = sv.product_id
+                JOIN catalog.v_product_capability_effective cap ON cap.product_uuid = p.product_uuid
+                WHERE sic.tenant_id = 1 AND sic.deleted_at IS NULL AND sic.stale_since IS NULL
+                  AND sic.canonical_name = ANY(%s::text[])
+                GROUP BY sic.canonical_name
+                """,
+                [canonical_names],
+            )
+            categories_by_title = {name: categories for name, categories in cur.fetchall()}
+        if canonical_names and product_category_available:
+            cur.execute(
+                """
+                SELECT sic.canonical_name, array_agg(DISTINCT pce.category)
+                FROM operations.software_installations_current sic
+                JOIN catalog.software_versions sv ON sv.id = sic.software_version_id
+                JOIN catalog.products p ON p.id = sv.product_id
+                JOIN catalog.v_product_category_effective pce ON pce.product_uuid = p.product_uuid
+                WHERE sic.tenant_id = 1 AND sic.deleted_at IS NULL AND sic.stale_since IS NULL
+                  AND sic.canonical_name = ANY(%s::text[])
+                GROUP BY sic.canonical_name
+                """,
+                [canonical_names],
+            )
+            product_categories_by_title = {
+                name: categories for name, categories in cur.fetchall()
+            }
 
         if intel_available and not needs_full_safety_snapshot and canonical_names:
             cur.execute(
@@ -7614,8 +7655,8 @@ def _software_page_data(request: HttpRequest) -> dict:
                 "device_count": row[2],
                 "client_count": row[3],
                 "last_install": row[4],
-                "categories": row[5] or [],
-                "product_categories": row[6] or [],
+                "categories": categories_by_title.get(canonical, row[5] or []),
+                "product_categories": product_categories_by_title.get(canonical, row[6] or []),
                 "decision": row[7],
                 "safety_score": safety.get("score"),
                 "safety_band": safety.get("band", ""),

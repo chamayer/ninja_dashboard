@@ -2,6 +2,14 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.128.2] — 2026-10-20 — Software first-view category boundary
+
+### Changed
+
+- Unfiltered Software Overview and Products now add category labels only for
+  displayed titles. Category-filtered and CSV responses retain their complete
+  matching/exportable results.
+
 ## [0.128.1] — 2026-10-20 — Dashboard navigation performance
 
 ### Changed
