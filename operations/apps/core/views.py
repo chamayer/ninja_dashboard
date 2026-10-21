@@ -14933,8 +14933,10 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
             params.append(("agent_requirement_0", requirement))
         return "?" + urlencode(params)
 
-    def inventory_platform_cell(row: dict, platform: str) -> dict:
-        """Return the one product-cell model used by UI, filters, cards, and CSV."""
+    def inventory_platform_cell(
+        row: dict, platform: str, *, presentation: bool = False
+    ) -> dict:
+        """Return status facts, adding URLs and tooltips only for rendered rows."""
         possible_match = row["possible_match"] if platform == "Ninja" else None
         coverage = row["platform_states"].get(platform)
         source_status = row["source_states"].get(platform)
@@ -14993,12 +14995,14 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
             "platform": platform,
             "record_status": record_status,
             "record_age": record_age,
-            "record_url": agent_filter_url(platform, state=record_status),
-            "record_tooltip": record_tooltip,
+            "record_url": agent_filter_url(platform, state=record_status) if presentation else "",
+            "record_tooltip": record_tooltip if presentation else "",
             "rule_status": rule_status,
             "rule_label": rule_label,
-            "rule_url": agent_filter_url(platform, requirement=rule_status),
-            "rule_tooltip": rule_tooltip,
+            "rule_url": agent_filter_url(platform, requirement=rule_status)
+            if presentation
+            else "",
+            "rule_tooltip": rule_tooltip if presentation else "",
             "possible_match": possible_match,
             "attention": rule_status in {"Missing", "Stale"},
         }
@@ -15447,6 +15451,11 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
             row["hudu_links"] = links
 
     if wants_csv(request):
+        for row in device_rows:
+            row["platform_cells_by_name"] = {
+                platform: inventory_platform_cell(row, platform, presentation=True)
+                for platform in platforms
+            }
         populate_hudu_presentation(device_rows)
 
         def inventory_agent_value(row: dict, platform: str) -> str:
@@ -15544,7 +15553,8 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
     for row in device_rows:
         row["source_observations"] = source_observations_by_device.get(row["device_id"], {})
         row["platform_cells_by_name"] = {
-            platform: inventory_platform_cell(row, platform) for platform in platforms
+            platform: inventory_platform_cell(row, platform, presentation=True)
+            for platform in platforms
         }
         row["agent_cells"] = [row["platform_cells_by_name"][platform] for platform in platforms]
 

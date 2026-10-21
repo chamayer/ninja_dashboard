@@ -2,6 +2,14 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.128.15] — 2026-10-21 — Computers page-cell boundary
+
+### Changed
+
+- Computers now creates drill-through URLs and display tooltips only for the
+  rendered HTML page; fleet filters and summary cards retain status facts, and
+  CSV retains complete presentation data.
+
 ## [0.128.14] — 2026-10-21 — Computers Hudu presentation boundary
 
 ### Changed
