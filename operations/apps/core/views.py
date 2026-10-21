@@ -14100,6 +14100,7 @@ def _coverage_filter_url(**filters: str) -> str:
 @login_required
 def fleet_coverage(request: HttpRequest) -> HttpResponse:
     """Show every known Computer with its product records and required state."""
+    compact_source_observations = not wants_csv(request)
     client_filters = list(dict.fromkeys(value for value in request.GET.getlist("client") if value))
     device_query = (request.GET.get("device") or "").strip().lower()
     agents_query = (request.GET.get("agents") or "").strip().lower()
@@ -14435,29 +14436,44 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
             # state tells the inventory reader whether a record is current or
             # withdrawn.  The source-link timestamp is the actual withdrawal
             # time rather than the older last-seen timestamp.
-            cur.execute(
-                """
-                SELECT evidence.device_id, evidence.source_name,
-                       BOOL_OR(evidence.observation_active) AS has_current_record,
-                       MAX(evidence.observation_last_seen_at)
-                           FILTER (WHERE evidence.observation_active) AS current_seen_at,
-                       MAX(COALESCE(link.missing_since, evidence.observation_last_seen_at))
-                           FILTER (WHERE NOT evidence.observation_active) AS withdrawn_at
-                  FROM operations.v_device_observation_current evidence
-                  JOIN operations.source_instances source_instance
-                    ON source_instance.tenant_id = evidence.tenant_id
-                   AND source_instance.id = evidence.source_instance_id
-                  LEFT JOIN operations.v_device_source_link link
-                    ON link.tenant_id = evidence.tenant_id
-                   AND link.device_id = evidence.device_id
-                   AND link.source_id = source_instance.source_id
-                   AND link.external_id = evidence.external_id
-                 WHERE evidence.tenant_id = 1
-                   AND (evidence.entity_type LIKE 'agent.%%'
-                        OR evidence.entity_type = 'vm.guest')
-                 GROUP BY evidence.device_id, evidence.source_name
-                """,
-            )
+            if compact_source_observations:
+                cur.execute(
+                    """
+                    SELECT evidence.device_id, evidence.source_name,
+                           BOOL_OR(evidence.observation_active) AS has_current_record,
+                           NULL::timestamptz AS current_seen_at,
+                           NULL::timestamptz AS withdrawn_at
+                      FROM operations.v_device_observation_current evidence
+                     WHERE evidence.tenant_id = 1
+                       AND (evidence.entity_type LIKE 'agent.%%'
+                            OR evidence.entity_type = 'vm.guest')
+                     GROUP BY evidence.device_id, evidence.source_name
+                    """
+                )
+            else:
+                cur.execute(
+                    """
+                    SELECT evidence.device_id, evidence.source_name,
+                           BOOL_OR(evidence.observation_active) AS has_current_record,
+                           MAX(evidence.observation_last_seen_at)
+                               FILTER (WHERE evidence.observation_active) AS current_seen_at,
+                           MAX(COALESCE(link.missing_since, evidence.observation_last_seen_at))
+                               FILTER (WHERE NOT evidence.observation_active) AS withdrawn_at
+                      FROM operations.v_device_observation_current evidence
+                      JOIN operations.source_instances source_instance
+                        ON source_instance.tenant_id = evidence.tenant_id
+                       AND source_instance.id = evidence.source_instance_id
+                      LEFT JOIN operations.v_device_source_link link
+                        ON link.tenant_id = evidence.tenant_id
+                       AND link.device_id = evidence.device_id
+                       AND link.source_id = source_instance.source_id
+                       AND link.external_id = evidence.external_id
+                     WHERE evidence.tenant_id = 1
+                       AND (evidence.entity_type LIKE 'agent.%%'
+                            OR evidence.entity_type = 'vm.guest')
+                     GROUP BY evidence.device_id, evidence.source_name
+                    """
+                )
             source_observation_rows = cur.fetchall()
             # Do not hide a current agent/VM record merely because it has not
             # resolved to a live Computer.  Hudu has its dedicated inventory
@@ -15458,7 +15474,50 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
     page_query = page_query.urlencode()
     device_rows = list(page_obj.object_list)
 
+    # The first view already has complete current/withdrawn state for every
+    # Computer. Load the withdrawal timestamps only for rows being rendered;
+    # CSV retains the complete-detail query above.
+    page_device_ids = [row["device_id"] for row in device_rows if row["device_id"]]
+    if compact_source_observations and page_device_ids:
+        with transaction.atomic(), connection.cursor() as cur:
+            cur.execute("SET LOCAL operations.tenant_id = 1")
+            cur.execute(
+                """
+                SELECT evidence.device_id, evidence.source_name,
+                       BOOL_OR(evidence.observation_active) AS has_current_record,
+                       MAX(evidence.observation_last_seen_at)
+                           FILTER (WHERE evidence.observation_active) AS current_seen_at,
+                       MAX(COALESCE(link.missing_since, evidence.observation_last_seen_at))
+                           FILTER (WHERE NOT evidence.observation_active) AS withdrawn_at
+                  FROM operations.v_device_observation_current evidence
+                  JOIN operations.source_instances source_instance
+                    ON source_instance.tenant_id = evidence.tenant_id
+                   AND source_instance.id = evidence.source_instance_id
+                  LEFT JOIN operations.v_device_source_link link
+                    ON link.tenant_id = evidence.tenant_id
+                   AND link.device_id = evidence.device_id
+                   AND link.source_id = source_instance.source_id
+                   AND link.external_id = evidence.external_id
+                 WHERE evidence.tenant_id = 1
+                   AND evidence.device_id = ANY(%s::uuid[])
+                   AND (evidence.entity_type LIKE 'agent.%%'
+                        OR evidence.entity_type = 'vm.guest')
+                 GROUP BY evidence.device_id, evidence.source_name
+                """,
+                [page_device_ids],
+            )
+            for device_id, platform, has_current, current_seen_at, withdrawn_at in cur.fetchall():
+                source_observations_by_device.setdefault(device_id, {})[platform] = {
+                    "state": "Current" if has_current else "Withdrawn",
+                    "current_seen_at": current_seen_at,
+                    "withdrawn_at": withdrawn_at,
+                }
+
     for row in device_rows:
+        row["source_observations"] = source_observations_by_device.get(row["device_id"], {})
+        row["platform_cells_by_name"] = {
+            platform: inventory_platform_cell(row, platform) for platform in platforms
+        }
         row["agent_cells"] = [row["platform_cells_by_name"][platform] for platform in platforms]
 
     return render(

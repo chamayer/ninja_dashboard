@@ -154,6 +154,7 @@ class _Cursor:
                     True,
                 ),
             ],
+            [],  # Bounded HTML-page source-observation timestamp detail.
         ]
 
     def __enter__(self):

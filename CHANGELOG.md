@@ -2,6 +2,13 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.128.7] — 2026-10-21 — Computers source-evidence first view
+
+### Changed
+
+- Computers first views read fleet source-record state once and retrieve
+  timestamp detail only for rendered rows; CSV retains complete detail.
+
 ## [0.128.6] — 2026-10-20 — Software Products first-view boundary
 
 ### Changed
