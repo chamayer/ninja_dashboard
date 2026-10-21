@@ -21,46 +21,54 @@ operator can act on.
 4. One finding per unknown-OS Computer that is not `pending_cleanup`:
    "Operating system unknown: agent requirements not applied". This
    replaces the meaning of `os_unknown_coverage`.
+5. Existing findings that stop applying are covered, not closed (ADR-0031
+   cover): add `device_offline` to `missing_required_platform.covered_by`
+   (stale already has it), and add `os_unknown_coverage` to both types'
+   `covered_by`, through an audited migration. Cover uncovers live when the
+   Computer returns or its OS becomes known. No new policy version and no
+   bypass of the clearing check.
+6. Computers page labels: "N/A — OS unknown" (OS unknown), "N/A — Offline"
+   (`pending_cleanup`), and "No agents" (no agent records). The page does not
+   mirror cover. In the 7-30 day window it keeps showing Missing/Stale next
+   to the agent's Offline record status (146 Computers, about 130 findings
+   on 2026-10-21).
 
 ## Scope
 
-- `ingest/evaluator.py` coverage pass: apply decisions 1, 2, and 4, and
-  record a verdict for each excluded requirement so nothing disappears
-  silently. The verdict name is to be settled; it must stay distinct from
-  outside coverage.
-- Make the resolve step (`_auto_resolve`) agree with the coverage pass, so the
-  drift table stops reporting findings without verdicts. It currently uses a
-  separate requirement copy and a fixed 7-day offline window.
-- Migration: reword the `os_unknown_coverage` finding type. Extend the
-  `device_requirement_state` verdict check if a new verdict is added.
-- Computers page: show the new verdicts plainly, with no "Not evaluated" for
-  OS, and label no-agent Computers "No agents".
-- A decision record superseding 0320's behavior and updating ADR-0035, plus
-  tests.
+Evaluator coverage pass and resolve step, migration 0333 (verdicts, cover
+rules, finding wording, drift check), Computers page labels, ADR-0036, and
+tests.
+
+Rationale and the clearing constraint are in ADR-0036.
 
 ## Measured impact (production, read-only, 2026-10-21)
 
-- 3,106 open missing/stale findings. About 1,968 close under both rules
-  (1,897 from the `pending_cleanup` gate, including 498 critical Ninja and
-  SentinelOne missing findings kept critical from before the Computers went
-  offline). About 37 more close from the OS rule on Computers that are not
-  offline. About 1,140 actionable findings remain on live Computers.
+- 3,106 open missing/stale findings. About 1,968 stop applying (1,897 from
+  the `pending_cleanup` gate, including 498 critical missing findings blocked
+  today, plus about 37 from the OS rule). These become covered. About 1,140
+  remain on live Computers.
 - 148 open `os_unknown_coverage` findings become about 91 to 183 reworded
   findings (91 unknown-OS Computers with agents are online).
 - 616 Computers are waiting in `pending_cleanup` on the Devices list.
 
 ## Status
 
-Ready. Recorded 2026-10-21, not started.
+Active. Implemented and validated locally on 2026-10-21, committed with
+ADR-0036 and migration 0333. Deployment and the post-deploy check are pending.
 
-## Validation (planned)
+## Validation
 
-Postgres evaluator tests for each rule and for resolve-step agreement, a
-migration test with production role attributes, Computers page tests, and a
-read-only production impact check before and after deployment.
+- Migration 0333 on PostgreSQL with production role attributes: 3 passed. This
+  caught a constraint-order bug before deployment.
+- Evaluator Postgres tests: 34 passed (unknown OS applies nothing and raises
+  one finding, a seen agent does not apply, `pending_cleanup` records only).
+- Computers page tests: 20 passed. Full suites: Operations 445 passed,
+  ingest 481 passed, with the same 8 failures as clean HEAD.
+- `manage.py check` and `makemigrations --check` clean; no new lint findings.
 
 ## Next action
 
-Settle the excluded-verdict name. Then implement the evaluator and resolve
-step, the migration, the page, and the decision record, with tests. Nothing is
-committed without approval.
+User review, then separately approved commit and push. The push applies 0333
+and refreshes about 3,100 finding states. After deployment, trigger
+`platform-evaluate` and compare covered counts and drift with the measured
+impact.

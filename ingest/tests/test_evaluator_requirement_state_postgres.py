@@ -66,7 +66,7 @@ def captured(monkeypatch):
         conf,
         now,
         details,
-        assessment=None: (findings.append((ft, device, details["platform"], key)) or 1),
+        assessment=None: (findings.append((ft, device, details.get("platform", ""), key)) or 1),
     )
     monkeypatch.setattr(evaluator, "_resolve_findings_absent", lambda *a, **kw: None)
     monkeypatch.setattr(
@@ -77,12 +77,14 @@ def captured(monkeypatch):
     return findings, writes
 
 
-def _computer(conn, *, presence=(), hudu=None, exemptions=None):
+def _computer(
+    conn, *, presence=(), hudu=None, exemptions=None, os_group="Windows", lifecycle="active"
+):
     device = uuid.uuid4()
     conn.execute(
         """INSERT INTO operations.devices (id, tenant_id, client_id, lifecycle_status, os_group, device_role)
-           VALUES (%s, 1, %s, 'active', 'Windows', 'workstation')""",
-        (device, CLIENT),
+           VALUES (%s, 1, %s, %s, %s, 'workstation')""",
+        (device, CLIENT, lifecycle, os_group),
     )
     for entity_type, platform, age in presence:
         conn.execute(
@@ -206,4 +208,37 @@ def test_single_computer_pass_writes_only_that_computer(conn, captured):
         "Ninja": "satisfied",
         "LogMeIn": "missing",
         "Hudu": "satisfied",
+    }
+
+
+def test_unknown_os_and_pending_cleanup_are_recorded_not_raised(conn, captured):
+    findings, writes = captured
+    recent = timedelta(hours=1)
+    unknown = _computer(
+        conn, os_group="Unknown", presence=[("agent.rmm", "Ninja", timedelta(days=40))],
+        hudu="active",
+    )
+    cleanup = _computer(
+        conn, lifecycle="pending_cleanup", presence=[("agent.rmm", "Ninja", timedelta(days=45))],
+        hudu="archived",
+    )
+    live = _computer(conn, presence=[("agent.rmm", "Ninja", recent)], hudu="active")
+
+    with conn.cursor() as cur:
+        evaluator._evaluate_coverage(cur, 1, None, NOW, [], set())
+
+    ((_device_arg, verdicts),) = writes
+    by_device = _by_device(verdicts)
+    # Hudu supports "Unknown", so it still applies; the agents do not.
+    assert by_device[str(unknown)] == {
+        "Ninja": "os_unknown", "LogMeIn": "os_unknown", "Hudu": "satisfied",
+    }
+    # Lifecycle decides a Computer awaiting cleanup: nothing is checked.
+    assert by_device[str(cleanup)] == {
+        "Ninja": "pending_cleanup", "LogMeIn": "pending_cleanup", "Hudu": "pending_cleanup",
+    }
+    assert by_device[str(live)]["LogMeIn"] == "missing"
+    raised = {(device, platform) for _ft, device, platform, _key in findings}
+    assert not {item for item in raised if item[0] in {unknown, cleanup}} - {
+        (unknown, "")  # the os_unknown_coverage finding carries no platform
     }

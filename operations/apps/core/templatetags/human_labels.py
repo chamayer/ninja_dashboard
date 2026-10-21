@@ -265,9 +265,10 @@ def finding_detail_text(finding):
     if name == "device_missing_from_source" and d.get("reason") in _MISSING_REASONS:
         return _MISSING_REASONS[d["reason"]]
     if name == "os_unknown_coverage":
-        items = d.get("requirements_not_evaluated") or []
+        # Findings opened before ADR-0036 keep their original details key.
+        items = d.get("requirements_not_applied") or d.get("requirements_not_evaluated") or []
         names = ", ".join(sorted({i.get("platform", "?") for i in items}))
-        return f"OS unknown; not checked: {names}" if names else "OS unknown"
+        return f"OS unknown; not applied: {names}" if names else "OS unknown"
     if name == "archived_but_reporting":
         last_source = d.get("last_source")
         return f"archived in Hudu, still reporting{f' in {last_source}' if last_source else ''}"

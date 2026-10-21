@@ -60,7 +60,6 @@ from shared.conditions.contracts import (
 log = logging.getLogger(__name__)
 
 _CORROBORATION_WINDOW_HOURS = 48
-_LONG_OFFLINE_DAYS = 7
 _STALE_DATA_DAYS = 7
 
 
@@ -1681,10 +1680,6 @@ def _evaluate_coverage(
     missing_ft = _get_finding_type_id(cur, "missing_required_platform")
     stale_ft = _get_finding_type_id(cur, "stale_required_platform")
     os_unknown_ft = _get_finding_type_id(cur, "os_unknown_coverage")
-    # Every OS group a Computer can be mapped to (data: os_group_mappings).
-    # An agent supported on all of them applies whatever the OS turns out to be.
-    cur.execute("SELECT DISTINCT os_group FROM operations.os_group_mappings")
-    mapped_os_groups = {row[0] for row in cur.fetchall()}
     os_unknown_subjects: list[uuid.UUID] = []
     if missing_ft is None:
         log.warning("evaluator: finding_type 'missing_required_platform' not found")
@@ -1734,7 +1729,8 @@ def _evaluate_coverage(
                 OR EXISTS(SELECT 1 FROM operations.device_operator_decisions dec
                           WHERE dec.tenant_id = d.tenant_id AND dec.device_id = d.id
                             AND dec.dimension = 'in_use_confirmed'
-                            AND dec.value = 'true'::jsonb)) AS in_agent_universe
+                            AND dec.value = 'true'::jsonb)) AS in_agent_universe,
+               d.lifecycle_status
         FROM operations.devices d
         LEFT JOIN operations.device_operator_decisions op
           ON op.tenant_id = d.tenant_id
@@ -1766,10 +1762,39 @@ def _evaluate_coverage(
             }
         )
 
+    def allowed_os_groups(agent_id, aog) -> set[str] | None:
+        # applicable_os_groups on the item narrows the agent's supported set;
+        # None means the requirement is not limited by operating system.
+        if aog:
+            return set(aog)
+        if agent_id and agent_id in agents_by_id:
+            return set(agents_by_id[agent_id][2])
+        return None
+
+    def record_all(dev_id, tier_rows, exemptions, os_group, verdict) -> None:
+        """Record every requirement of a Computer the pass does not check."""
+        for _rid, _rclient, agent_id, entity_type, platform, _rscope, aog, *_rest in tier_rows:
+            if entity_type in exemptions:
+                record(dev_id, agent_id, entity_type, platform, "exempt")
+                continue
+            allowed_groups = allowed_os_groups(agent_id, aog)
+            if allowed_groups is not None and os_group not in allowed_groups and os_group != "Unknown":
+                continue
+            record(dev_id, agent_id, entity_type, platform, verdict)
+
     count = 0
-    for dev_id, dev_client_id, hostname, dev_role, exemptions, os_group, in_universe in devices:
+    for (
+        dev_id,
+        dev_client_id,
+        hostname,
+        dev_role,
+        exemptions,
+        os_group,
+        in_universe,
+        lifecycle_status,
+    ) in devices:
         exemptions = exemptions or {}
-        not_evaluated: list[dict[str, str]] = []
+        not_applied: list[dict[str, str]] = []
         tier_rows = resolve_tier(dev_client_id, dev_role or "all")
         # BLUEPRINT E.6: coverage evaluates against entity types. A device
         # with zero agent.* observations is not in the coverage universe —
@@ -1777,16 +1802,13 @@ def _evaluate_coverage(
         # by _evaluate_unenrolled instead. Its requirements are recorded as
         # outside coverage, never as missing.
         if not in_universe:
-            for _rid, _rclient, agent_id, entity_type, platform, _rscope, aog, *_rest in tier_rows:
-                if entity_type in exemptions:
-                    record(dev_id, agent_id, entity_type, platform, "exempt")
-                    continue
-                allowed_groups = set(aog) if aog else (
-                    set(agents_by_id[agent_id][2]) if agent_id in agents_by_id else None
-                )
-                if allowed_groups is not None and os_group not in allowed_groups and os_group != "Unknown":
-                    continue
-                record(dev_id, agent_id, entity_type, platform, "outside_coverage")
+            record_all(dev_id, tier_rows, exemptions, os_group, "outside_coverage")
+            continue
+        # ADR-0036: a Computer offline past the retire-review threshold is
+        # decided by lifecycle, not by agent findings. Its earlier findings
+        # stay open and are covered by device_offline.
+        if lifecycle_status == "pending_cleanup":
+            record_all(dev_id, tier_rows, exemptions, os_group, "pending_cleanup")
             continue
         for (
             _rid,
@@ -1804,39 +1826,17 @@ def _evaluate_coverage(
             if entity_type in exemptions:
                 record(dev_id, agent_id, entity_type, platform, "exempt")
                 continue
-            # Agent physics: skip if device's os_group isn't in the
-            # supported set (LMI on Linux etc). applicable_os_groups on
-            # the item narrows further if set; else falls to the Agent's
-            # supported_os_groups.
-            allowed_groups = None
-            if aog:
-                allowed_groups = set(aog)
-            elif agent_id and agent_id in agents_by_id:
-                allowed_groups = set(agents_by_id[agent_id][2])
+            # ADR-0036: positive on the operating system. An OS-limited
+            # requirement applies only when the Computer's OS group is known
+            # and supported (LogMeIn is not expected on Linux). An unknown OS
+            # applies none of them, even where the agent has been seen; the
+            # Computer gets one os_unknown_coverage finding instead.
+            allowed_groups = allowed_os_groups(agent_id, aog)
             if allowed_groups is not None and os_group not in allowed_groups:
-                if os_group != "Unknown" or os_unknown_ft is None:
-                    continue
-                # Unknown never silently means "not required". The
-                # requirement applies when earlier presence of the agent or
-                # the Computer's role establishes it; otherwise it is reported
-                # as not evaluated (os_unknown_coverage), never as missing.
-                cur.execute(
-                    """
-                    SELECT 1 FROM operations.device_agent_presence_current apc
-                     WHERE apc.tenant_id = %s AND apc.device_id = %s
-                       AND apc.entity_type = %s AND (%s = 'any' OR apc.platform = %s)
-                     LIMIT 1
-                    """,
-                    (tenant_id, dev_id, entity_type, platform, platform),
-                )
-                established = cur.fetchone() is not None or (
-                    dev_role in ("workstation", "server")
-                    and mapped_os_groups <= allowed_groups
-                )
-                if not established:
-                    not_evaluated.append({"entity_type": entity_type, "platform": platform})
-                    record(dev_id, agent_id, entity_type, platform, "not_evaluated")
-                    continue
+                if os_group == "Unknown":
+                    not_applied.append({"entity_type": entity_type, "platform": platform})
+                    record(dev_id, agent_id, entity_type, platform, "os_unknown")
+                continue
 
             # Per-device presence for this (entity_type, platform), 'any'
             # honored (BLUEPRINT C.6 wildcard).
@@ -1942,7 +1942,7 @@ def _evaluate_coverage(
                 ),
             )
 
-        if not_evaluated and os_unknown_ft is not None:
+        if os_group == "Unknown" and os_unknown_ft is not None:
             os_unknown_subjects.append(dev_id)
             count += _upsert_finding(
                 cur,
@@ -1954,7 +1954,7 @@ def _evaluate_coverage(
                 "medium",
                 "confirmed",
                 now,
-                {"hostname": hostname, "requirements_not_evaluated": not_evaluated},
+                {"hostname": hostname, "requirements_not_applied": not_applied},
                 assessment=(
                     _device_condition_signals(
                         tenant_id, dev_id, identity_blocked, offline=False, collection_skipped=False
@@ -1964,7 +1964,7 @@ def _evaluate_coverage(
             )
 
     # A complete run (all Computers) clears the condition where the OS became
-    # known, a requirement no longer applies, or the Computer left coverage.
+    # known, the Computer reached pending_cleanup, or it left coverage.
     if device_id is None and os_unknown_ft is not None:
         _resolve_findings_absent(
             cur, tenant_id, os_unknown_ft, os_unknown_subjects, now,
@@ -2569,37 +2569,10 @@ def _auto_resolve(
         )
         count += cur.rowcount or 0
 
-    # Resolve stale_required_platform on devices that are now fully
-    # offline (BLUEPRINT §1.8): device_offline covers the whole
-    # device, per-agent stale becomes noise. Reciprocal of the
-    # suppression in _evaluate_coverage — closes legacy rows so they
-    # don't linger after the emission gate kicks in.
-    stale_ft_id = _get_finding_type_id(cur, "stale_required_platform")
-    if stale_ft_id:
-        # Non-correlated subquery — Postgres computes the
-        # offline-device set once. Tenant is always the same for
-        # the outer scope so it's safe to bind directly.
-        cur.execute(
-            f"""
-            UPDATE operations.findings f
-            SET status = 'resolved', last_seen_at = %s
-            WHERE f.tenant_id = %s AND f.finding_type_id = %s
-              AND f.status IN ('open', 'acknowledged')
-              AND (%s::uuid IS NULL OR f.subject_id = %s)
-              AND f.subject_id IN (
-                  SELECT apc.device_id
-                  FROM operations.device_agent_presence_current apc
-                  WHERE apc.tenant_id = %s
-                    AND apc.entity_type LIKE 'agent.%%'
-                  GROUP BY apc.device_id
-                  HAVING MAX(COALESCE(apc.last_contact_at, apc.last_observed_at))
-                       < NOW() - INTERVAL '{_LONG_OFFLINE_DAYS} days'
-              )
-              {clear_assessment}
-            """,
-            (now, tenant_id, stale_ft_id, device_id, device_id, tenant_id),
-        )
-        count += cur.rowcount or 0
+    # Stale and missing findings on an offline Computer are covered by
+    # device_offline (finding_types.covered_by, migration 0333), not resolved:
+    # the offline signal blocks may_clear, so a resolve rule here could never
+    # pass its own clearing check (ADR-0036).
 
     # Close any missing/stale_required_platform finding whose device left
     # the agent universe (no agent.* observation exists anymore). New

@@ -90,5 +90,7 @@ changes between runs, is not stored.
 
 ## Supersedes or superseded by
 
+Amended by ADR-0036 (2026-10-21): `not_evaluated` is replaced by `os_unknown`
+and `pending_cleanup`, and outside-coverage Computers show "No agents".
 Follows the stored-state pattern of ADR-0031. Requirement policy is described
 in `docs/architecture.md` (requirement profiles and client overrides).

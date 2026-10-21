@@ -168,12 +168,12 @@ do not open competing blueprints for the same work.
 ## PLAN-014 — Requirement applicability
 
 - Scope: Evaluator coverage rules and Computers requirement display
-- Status: ready
+- Status: active
 - Defined: 2026-10-21
-- Started: —
+- Started: 2026-10-21
 - Completed: —
 - Blueprint: ingest/BLUEPRINT.md
 - Source: ingest/BLUEPRINT.md
 - Section: PLAN-014 — Requirement applicability
-- Resume gate: Settle the excluded-verdict name, then implement the positive-OS rule, the pending_cleanup gate, the reworded unknown-OS finding, and resolve-step agreement with tests and a decision record. Independent of PLAN-012's read model.
-- Last checked: 2026-10-21 (user decisions recorded; read-only impact measured: about 1,968 of 3,106 open missing/stale findings close).
+- Resume gate: After deployment, run platform-evaluate and compare covered counts and requirement-state drift with the measured impact; then mark complete.
+- Last checked: 2026-10-21 (implemented with migration 0333 and ADR-0036; local validation passed; deployment pending).

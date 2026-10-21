@@ -1,4 +1,4 @@
-"""Unknown OS never silently means "no requirements" (migration 0320).
+"""Unknown OS applies no OS-limited requirement and raises one finding (ADR-0036).
 
 Opt-in PostgreSQL coverage of ``_evaluate_coverage``: the queries run against
 the shared lifecycle harness plus the requirement tables (production column
@@ -124,9 +124,10 @@ def _computer(conn, *, os_group="Unknown", role="unknown", presence=()):
     return device
 
 
-def test_unknown_os_reports_unevaluated_requirements_instead_of_skipping(conn, captured):
+def test_unknown_os_applies_no_os_limited_requirement_and_raises_one_finding(conn, captured):
     writes, resolved = captured
-    # A LogMeIn-only entry: LogMeIn applies (it is present), Ninja cannot be evaluated.
+    # ADR-0036: positive on the OS. LogMeIn is present, but with the OS unknown
+    # neither Ninja nor LogMeIn applies; one os_unknown_coverage finding lists both.
     listing = _computer(conn, presence=[("agent.remote_access", "LogMeIn")])
     # A Windows machine without Ninja: reported missing as before.
     windows = _computer(conn, os_group="Windows", presence=[("agent.remote_access", "LogMeIn")])
@@ -136,19 +137,21 @@ def test_unknown_os_reports_unevaluated_requirements_instead_of_skipping(conn, c
     for ft, device, details in writes:
         by_device.setdefault(device, []).append((ft, details))
     assert by_device[listing] == [
-        (92, {"hostname": "", "requirements_not_evaluated": [
-            {"entity_type": "agent.rmm", "platform": "Ninja"}]}),
+        (92, {"hostname": "", "requirements_not_applied": [
+            {"entity_type": "agent.rmm", "platform": "Ninja"},
+            {"entity_type": "agent.remote_access", "platform": "LogMeIn"},
+        ]}),
     ]
     assert [ft for ft, _d in by_device[windows]] == [90]
     assert resolved == [(92, [listing])]
 
 
-def test_earlier_presence_establishes_the_requirement(conn, captured):
+def test_a_seen_agent_does_not_make_an_unknown_os_requirement_apply(conn, captured):
     writes, _resolved = captured
-    # The OS name is unmapped but Ninja has been on it: Ninja is evaluated
-    # (current here, so nothing is raised) and nothing is reported unevaluated.
+    # Ninja and LogMeIn have been on it, but the OS is unknown: nothing is
+    # required, so nothing is missing or stale; the OS finding is raised.
     device = _computer(conn, role="workstation", presence=[("agent.rmm", "Ninja"),
                                                           ("agent.remote_access", "LogMeIn")])
     with conn.cursor() as cur:
         evaluator._evaluate_coverage(cur, 1, device, NOW, [], set())
-    assert [w for w in writes if w[1] == device] == []
+    assert [ft for ft, d, _details in writes if d == device] == [92]
