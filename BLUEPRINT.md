@@ -14,7 +14,7 @@ Active. The fresh authenticated tenant-1 handler baseline was Dashboard 3.154 s,
 
 ## Change and measurement plan
 
-Release 0.128.10 narrows User exposure's HTML page from 100 to 25 ranked users after the deployed authenticated first page transferred 927 KB and reached first response at 4.302 s. It preserves exact ranked totals, all filters, pagination, and CSV export; the full-estate SQL remains the next cause to revisit only if the smaller rendered boundary does not meet the criterion. Computers also remains outside the criterion: current subquery timing points to full-inventory Python assembly after bounded source evidence, with Hudu lifecycle detail the largest known SQL component (about 1.35 s). Retain the browser pass as the final acceptance check.
+Release 0.128.10 is deployed and healthy. It narrows User exposure's HTML page from 100 to 25 ranked users and improved the authenticated browser first response from 4.302 s to 2.961 s, with transfer from 927 KB to 563 KB. Read-only application-role tracing then isolated its single materialized SQL statement as the remaining boundary. Release 0.128.11 keeps the same key-level deduplication, ranking, totals, filters, pagination, and CSV export but joins hostname/client labels only after the selected page is known. Computers is still 6.351 s browser first response: current subquery timing points to full-inventory Python assembly after bounded source evidence, with Hudu lifecycle detail the largest known SQL component (about 1.35 s). Retain the browser pass as the final acceptance check.
 
 ## Validation
 
@@ -22,4 +22,4 @@ The 0.128.10 focused User exposure boundary test passes, as do `manage.py check`
 
 ## Checkpoint and next action
 
-User approved commits and pushes needed to complete the goal; `origin` automatically deploys, with no separate redeploy. Preserve all unrelated working-tree changes and `.work` probes. Next, commit and push the scoped 0.128.10 rendered-first-view correction to `origin` then `a-m-rose`; after GitOps rollout, repeat authenticated handler and browser measurements for User exposure, Computers, Products, and Dashboard. PLAN-001 stays active until the archived success criteria are verified.
+User approved commits and pushes needed to complete the goal; `origin` automatically deploys, with no separate redeploy. Release `fa0500c` is pushed to `origin` and `a-m-rose`; preserve all unrelated working-tree changes and `.work` probes. Next, release the scoped 0.128.11 SQL-width correction, then repeat authenticated browser timing for User exposure before selecting any Computer change. PLAN-001 stays active until the archived success criteria are verified.

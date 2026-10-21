@@ -2,6 +2,14 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.128.11] — 2026-10-21 — User exposure ranking boundary
+
+### Changed
+
+- User exposure ranks lightweight item keys before joining presentation labels,
+  avoiding full-estate hostname and client-text materialization for a bounded
+  HTML page while preserving its ranking, totals, filters, and CSV export.
+
 ## [0.128.10] — 2026-10-21 — User exposure rendered first view
 
 ### Changed
