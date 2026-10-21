@@ -54,16 +54,22 @@
 .coverage-hudu-details summary { cursor:pointer; color:var(--link, #0b69a3); }
 .coverage-hudu-details[open] summary { margin-bottom:0.45rem; }
 .coverage-hudu-links a + a::before { content:" · "; color:var(--muted); }
-.coverage-filter { position:relative; min-width:10rem; }
+.coverage-filter { position:relative; flex:1 1 0; min-width:0; }
 .coverage-filter summary { cursor:pointer; list-style:none; border:1px solid var(--border); border-radius:4px; background:var(--surface); padding:0.45rem 0.65rem; font-size:0.85rem; }
 .coverage-filter summary::-webkit-details-marker { display:none; }
 .coverage-filter summary::after { content:"▾"; float:right; margin-left:1rem; color:var(--muted); }
 .coverage-filter-options { position:absolute; z-index:20; top:calc(100% + 0.2rem); left:0; min-width:14rem; max-height:18rem; overflow:auto; border:1px solid var(--border); border-radius:4px; background:var(--surface); box-shadow:0 3px 10px rgba(0,0,0,.14); padding:0.45rem; }
 .coverage-filter-search { box-sizing:border-box; width:100%; margin-bottom:0.35rem; padding:0.35rem 0.45rem; }
 .coverage-filter-options label { display:flex; align-items:center; gap:0.4rem; padding:0.25rem; font-size:0.84rem; white-space:normal; }
-.coverage-filter-row { display:flex; flex-wrap:wrap; align-items:end; gap:0.5rem; }
+.coverage-filter-row { display:flex; flex-wrap:nowrap; align-items:stretch; gap:0.5rem; }
 .coverage-filterbar > .coverage-filter-row { flex-direction:row; }
-.coverage-filter-row + .coverage-filter-row { margin-top:0.5rem; }
+.coverage-filter summary { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.coverage-filter:nth-last-of-type(-n+2) .coverage-filter-options { left:auto; right:0; }
+.coverage-filter-actions { display:flex; flex:none; gap:0.5rem; margin-left:auto; }
+.coverage-filterbar .coverage-filter-action { box-sizing:border-box; display:inline-flex; align-items:center; justify-content:center; min-width:5rem; padding:0.45rem 0.9rem; border:1px solid var(--accent); border-radius:4px; background:var(--accent); color:#fff; font:inherit; font-size:0.85rem; line-height:1.2; text-decoration:none; cursor:pointer; }
+.coverage-filterbar .coverage-filter-action:hover { filter:brightness(0.92); }
+.coverage-filterbar .coverage-filter-action.is-disabled { opacity:0.5; pointer-events:none; }
+@media (max-width:900px) { .coverage-filter-row { flex-wrap:wrap; } .coverage-filter { flex:1 1 9rem; } .coverage-filter-actions { margin-left:0; } }
 .coverage-filterbar { display:block; }
 .coverage-column-filter { position:relative; min-width:0; }
 .coverage-column-filter summary { cursor:pointer; list-style:none; white-space:nowrap; }
@@ -127,10 +133,6 @@
     {% empty %}
     <section class="coverage-card"><p class="muted" style="margin:0;">No Computer records are available.</p></section>
     {% endfor %}
-    <section class="coverage-card">
-        <h2>Hudu</h2>
-        <div class="coverage-counts">{% for count in hudu_card.counts %}<a class="coverage-count coverage-{{ count.name|slugify }}" href="{{ count.url }}"><span>{{ count.name }}</span><strong>{{ count.count }}</strong></a>{% endfor %}</div>
-    </section>
 </div>
 
 <div class="coverage-result-heading">
@@ -150,13 +152,12 @@
             <div class="coverage-filter-row">
                 <details class="coverage-filter"><summary>Client</summary><div class="coverage-filter-options"><input class="coverage-filter-search" type="search" placeholder="Search clients" aria-label="Search clients">{% for client in filter_clients %}<label><input type="checkbox" name="client" value="{{ client.slug }}"{% if client.slug in client_filters %} checked{% endif %}>{{ client.name }}</label>{% endfor %}</div></details>
                 <details class="coverage-filter"><summary>Agents</summary><div class="coverage-filter-options agent-builder"><strong>Show Computers where every condition below is true.</strong><div id="agent-conditions">{% for condition in agent_filter_forms %}<div class="agent-condition" data-agent-condition><label>Agent<select name="agent_{{ condition.index }}"><option value="">Choose</option>{% for agent in agent_filter_agents %}<option value="{{ agent }}"{% if agent == condition.agent %} selected{% endif %}>{{ agent }}</option>{% endfor %}</select></label><label>State<details class="agent-choice"><summary>Any</summary><div class="agent-choice-options">{% for state in agent_filter_states %}<label><input type="checkbox" name="agent_state_{{ condition.index }}" value="{{ state }}"{% if state in condition.states %} checked{% endif %}>{{ state }}</label>{% endfor %}</div></details></label><label>Required?<details class="agent-choice"><summary>Any</summary><div class="agent-choice-options">{% for requirement in agent_filter_requirements %}<label><input type="checkbox" name="agent_requirement_{{ condition.index }}" value="{{ requirement }}"{% if requirement in condition.requirements %} checked{% endif %}>{{ requirement }}</label>{% endfor %}</div></details></label><button class="agent-condition-remove" type="button">Remove</button></div>{% endfor %}</div><button id="add-agent-condition" type="button">Add condition</button></div></details>
-                <div><button type="submit">Filter</button><a class="clear{% if not filters_active %} muted{% endif %}" data-clear-filters href="{% url 'inventory_computers' %}"{% if not filters_active %} aria-disabled="true"{% endif %}>Clear</a></div>
-            </div>
-            <div class="coverage-filter-row">
+                <details class="coverage-filter"><summary>Status</summary><div class="coverage-filter-options"><strong>Show Computers matching any checked status.</strong>{% for value, label in computer_scope_labels.items %}<label><input type="checkbox" name="computer_scope" value="{{ value }}"{% if value in computer_scope_filters %} checked{% endif %}>{{ label }}</label>{% endfor %}</div></details>
                 <details class="coverage-filter"><summary>Hudu</summary><div class="coverage-filter-options"><strong>Hudu record</strong><label><input type="checkbox" name="hudu" value="in_hudu"{% if "in_hudu" in hudu_filters %} checked{% endif %}>In Hudu</label><label><input type="checkbox" name="hudu" value="not_in_hudu"{% if "not_in_hudu" in hudu_filters %} checked{% endif %}>Not in Hudu</label><hr><strong>Links</strong><label><input type="checkbox" name="hudu_links" value="has_links"{% if "has_links" in hudu_link_filters %} checked{% endif %}>Has links</label><label><input type="checkbox" name="hudu_links" value="no_links"{% if "no_links" in hudu_link_filters %} checked{% endif %}>No links</label><div class="coverage-hudu-record-filter"{% if not hudu_record_filter_active %} hidden{% endif %}><hr><label>Which records? <select name="hudu_record_filter"{% if not hudu_record_filter_active %} disabled{% endif %}><option value="any"{% if hudu_record_filter == "any" %} selected{% endif %}>Any Hudu record</option><option value="has_current"{% if hudu_record_filter == "has_current" %} selected{% endif %}>Has current record</option><option value="has_archived"{% if hudu_record_filter == "has_archived" %} selected{% endif %}>Has archived record</option><option value="current_only"{% if hudu_record_filter == "current_only" %} selected{% endif %}>Current records only</option><option value="archived_only"{% if hudu_record_filter == "archived_only" %} selected{% endif %}>Archived records only</option><option value="both"{% if hudu_record_filter == "both" %} selected{% endif %}>Current and archived</option></select></label></div></div></details>
                 <details class="coverage-filter"><summary>OS family</summary><div class="coverage-filter-options"><input class="coverage-filter-search" type="search" placeholder="Search OS families" aria-label="Search OS families">{% for family in os_families %}<label><input type="checkbox" name="os_family" value="{{ family }}"{% if family in os_family_filters %} checked{% endif %}>{{ family }}</label>{% endfor %}</div></details>
                 <details class="coverage-filter"><summary>Device type</summary><div class="coverage-filter-options"><input class="coverage-filter-search" type="search" placeholder="Search device types" aria-label="Search device types">{% for device_type in device_types %}<label><input type="checkbox" name="device_type" value="{{ device_type }}"{% if device_type in device_type_filters %} checked{% endif %}>{{ device_type }}</label>{% endfor %}</div></details>
                 <details class="coverage-filter"><summary>Role</summary><div class="coverage-filter-options"><input class="coverage-filter-search" type="search" placeholder="Search roles" aria-label="Search roles">{% for role in device_roles %}<label><input type="checkbox" name="device_role" value="{{ role }}"{% if role in device_role_filters %} checked{% endif %}>{{ role }}</label>{% endfor %}</div></details>
+                <div class="coverage-filter-actions"><button class="coverage-filter-action" type="submit">Filter</button><a class="coverage-filter-action{% if not filters_active %} is-disabled{% endif %}" data-clear-filters href="{% url 'inventory_computers' %}"{% if not filters_active %} aria-disabled="true"{% endif %}>Clear</a></div>
             </div>
         <p class="muted" style="margin:0.75rem 0 0; font-size:0.82rem;">Agents lists each product on its own line: current state, then whether it is required.</p>
     </div>

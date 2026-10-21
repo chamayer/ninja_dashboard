@@ -14094,6 +14094,46 @@ _SEV_RANK = (
     "CASE severity WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END"
 )
 _COVERAGE_STATES = ("Online", "Offline", "Stale", "Missing", "Not evaluated")
+# Computers summary-card order; any other platform follows alphabetically.
+_COMPUTER_CARD_ORDER = ("Ninja", "SentinelOne", "LogMeIn", "R-U-ON", "ScreenConnect", "Hudu")
+# Computers Status filter, in display order. "Agent" means every catalogued
+# agent (operations.agents with an agent.* entity type), never a fixed list.
+_COMPUTER_SCOPE_LABELS = {
+    "any_online": "Online in any agent",
+    "any_offline": "Offline in any agent",
+    "missing_required": "Missing a requirement",
+    "stale_required": "A requirement is stale",
+    "has_product_record": "Current record in any agent",
+    "no_product_records": "No current agent record",
+    "no_current_records": "No current record anywhere (agents or Hudu)",
+}
+
+
+def _inventory_record_status(
+    platform: str, row: dict, source_status: str | None, observation: dict | None
+) -> str:
+    """Record fact for one platform on one Computers inventory row."""
+    if platform == "Hudu":
+        # Hudu assets are cmdb records, read by the dedicated Hudu reader.
+        if row.get("hudu_current_count"):
+            return "No status reported"
+        return "Withdrawn" if row.get("hudu_archived_count") else "No record"
+    if source_status == "Current" or (
+        not source_status and observation and observation["state"] == "Current"
+    ):
+        return "No status reported"
+    if source_status in {"Online", "Offline"}:
+        return source_status
+    if observation and observation["state"] == "Withdrawn":
+        return "Withdrawn"
+    return "No record"
+
+
+def _computer_card_order(card: dict) -> tuple[int, str]:
+    platform = card["platform"]
+    if platform in _COMPUTER_CARD_ORDER:
+        return _COMPUTER_CARD_ORDER.index(platform), ""
+    return len(_COMPUTER_CARD_ORDER), platform.casefold()
 
 
 def _safe_external_http_url(value: str | None) -> str:
@@ -14384,6 +14424,10 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
                 """,
             )
             source_only_rows = cur.fetchall()
+            cur.execute(
+                "SELECT name FROM operations.agents WHERE entity_type LIKE 'agent.%%'"
+            )
+            agent_platforms = {row[0] for row in cur.fetchall()}
 
     devices_by_id = {
         row[0]: {
@@ -14827,16 +14871,7 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
         source_status = row["source_states"].get(platform)
         observation = row["source_observations"].get(platform)
 
-        if source_status == "Current" or (
-            not source_status and observation and observation["state"] == "Current"
-        ):
-            record_status = "No status reported"
-        elif source_status in {"Online", "Offline"}:
-            record_status = source_status
-        elif observation and observation["state"] == "Withdrawn":
-            record_status = "Withdrawn"
-        else:
-            record_status = "No record"
+        record_status = _inventory_record_status(platform, row, source_status, observation)
 
         record_age = ""
         if record_status == "Withdrawn" and observation:
@@ -14939,11 +14974,9 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
             return False
         if computer_scope_filters:
             named_products = {
-                name: row["platform_cells_by_name"].get(name)
-                for name in ("Ninja", "SentinelOne", "ScreenConnect", "LogMeIn")
-            }
-            named_products = {
-                name: cell for name, cell in named_products.items() if cell is not None
+                name: cell
+                for name, cell in row["platform_cells_by_name"].items()
+                if name in agent_platforms
             }
             has_named_record = any(
                 cell["record_status"] in {"Online", "Offline", "No status reported"}
@@ -15112,6 +15145,33 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
         "Total": _coverage_filter_url(hudu="in_hudu"),
     }
 
+    # One Hudu card: record counts from the Hudu evidence reader plus the
+    # requirement counts from the stored verdicts (ADR-0035).
+    hudu_card = {
+        "platform": "Hudu",
+        "counts": [
+            {"name": name, "count": count, "url": hudu_urls[name]}
+            for name, count in hudu_counts.items()
+        ]
+        + [
+            {
+                "name": "Total",
+                "count": sum(row["hudu_present"] for row in inventory_rows),
+                "url": hudu_urls["Total"],
+            }
+        ],
+        "requirement_total": 0,
+        "requirement_total_url": "",
+        "requirement_exceptions": [],
+    }
+    for card in platform_cards:
+        if card["platform"] == "Hudu":
+            for key in ("requirement_total", "requirement_total_url", "requirement_exceptions"):
+                hudu_card[key] = card[key]
+    platform_cards = [card for card in platform_cards if card["platform"] != "Hudu"]
+    platform_cards.append(hudu_card)
+    platform_cards.sort(key=_computer_card_order)
+
     filtered_summary = {
         "clients": len({row["client_slug"] for row in device_rows}),
         "devices": len(device_rows),
@@ -15135,15 +15195,7 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
     if agents_query:
         filter_logic_parts.append(f"(Agents contains “{agents_query}”)")
         filter_summary_parts.append(f"Agents contains “{agents_query}”")
-    scope_labels = {
-        "has_product_record": "Found now in Ninja, SentinelOne, ScreenConnect, or LogMeIn",
-        "any_online": "Online in at least one of those four",
-        "any_offline": "Offline in at least one of those four",
-        "no_product_records": "No current record in Ninja, SentinelOne, ScreenConnect, or LogMeIn",
-        "no_current_records": "No current record anywhere",
-        "missing_required": "Missing something required",
-        "stale_required": "Something required is stale",
-    }
+    scope_labels = _COMPUTER_SCOPE_LABELS
     if computer_scope_filters:
         filter_logic_parts.append(
             "(" + " OR ".join(scope_labels[value] for value in computer_scope_filters) + ")"
@@ -15457,19 +15509,8 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
             "paginator": paginator,
             "page_query": page_query,
             "platform_cards": platform_cards,
-            "hudu_card": {
-                "counts": [
-                    {"name": name, "count": count, "url": hudu_urls[name]}
-                    for name, count in hudu_counts.items()
-                ]
-                + [
-                    {
-                        "name": "Total",
-                        "count": sum(row["hudu_present"] for row in inventory_rows),
-                        "url": hudu_urls["Total"],
-                    }
-                ],
-            },
+            "hudu_card": hudu_card,
+            "computer_scope_labels": _COMPUTER_SCOPE_LABELS,
             "filtered_summary": filtered_summary,
             "filter_logic": filter_logic,
             "filter_summary": filter_summary,

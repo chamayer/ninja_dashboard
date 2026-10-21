@@ -145,6 +145,8 @@ class _Cursor:
                     True,
                 ),
             ],
+            # operations.agents with an agent.* entity type.
+            [("Ninja",), ("SentinelOne",), ("R-U-ON",)],
         ]
 
     def __enter__(self):
@@ -495,7 +497,14 @@ def test_coverage_template_has_clear_statuses_hudu_and_multiselect_filters():
     assert "Required platform" not in template
     assert "Hudu" in template
     assert template.count('type="checkbox"') >= 12
-    assert template.count('<details class="coverage-filter">') == 6
+    assert template.count('<details class="coverage-filter">') == 7
+    # One filter row; Filter and Clear share one style at the far right.
+    assert template.count('<div class="coverage-filter-row">') == 1
+    assert '<summary>Status</summary>' in template
+    assert template.count('class="coverage-filter-action"') == 1
+    assert 'class="coverage-filter-action{% if not filters_active %} is-disabled' in template
+    assert template.index("<summary>Role</summary>") < template.index("coverage-filter-actions\">")
+    assert "hudu_card.counts" not in template
     assert template.count('class="coverage-filter-search"') >= 7
     assert "coverage-filterbar" in template
     assert "const filterMenus" in template
@@ -604,3 +613,83 @@ def test_cmdb_inventory_archive_state_is_read_only():
     assert "OWNER TO operations_view_owner" in migration
     assert "REVOKE INSERT, UPDATE, DELETE, TRUNCATE" in migration
 
+
+def test_cards_follow_the_agreed_order_with_one_hudu_card(monkeypatch):
+    context = _render_coverage_context(monkeypatch, "")
+    order = [card["platform"] for card in context["platform_cards"]]
+    assert order == ["Ninja", "SentinelOne", "Hudu"]
+    assert order.count("Hudu") == 1
+    assert context["platform_cards"][-1] is context["hudu_card"]
+    assert views._computer_card_order({"platform": "Auvik"}) > views._computer_card_order(
+        {"platform": "Hudu"}
+    )
+    assert sorted(
+        [{"platform": name} for name in ("Hudu", "R-U-ON", "ScreenConnect", "Zeta", "LogMeIn", "Auvik")],
+        key=views._computer_card_order,
+    ) == [
+        {"platform": name}
+        for name in ("LogMeIn", "R-U-ON", "ScreenConnect", "Hudu", "Auvik", "Zeta")
+    ]
+
+
+def test_hudu_card_carries_requirement_counts_from_stored_verdicts(monkeypatch):
+    cursor = _Cursor()
+    first = cursor._results[0][0]
+    cursor._results[0].append((*first[:6], "Hudu", False, "Missing", False, EVALUATED_AT))
+    captured = {}
+    monkeypatch.setattr(views, "connection", _Connection(cursor))
+    monkeypatch.setattr(views.transaction, "atomic", nullcontext)
+    monkeypatch.setattr(
+        views,
+        "render",
+        lambda _request, _template, context: captured.setdefault("context", context)
+        or HttpResponse(),
+    )
+    request = RequestFactory().get("/inventory/computers/")
+    request.user = SimpleNamespace(is_authenticated=True)
+    views.fleet_coverage(request)
+    context = captured["context"]
+
+    hudu_cards = [card for card in context["platform_cards"] if card["platform"] == "Hudu"]
+    assert len(hudu_cards) == 1
+    hudu = hudu_cards[0]
+    assert [item["name"] for item in hudu["counts"]] == [
+        "Current only", "Current + archived", "Archived only", "No record", "Total",
+    ]
+    assert hudu["requirement_total"] == 1
+    assert {item["name"]: item["count"] for item in hudu["requirement_exceptions"]} == {
+        "Missing": 1,
+    }
+    # The Hudu line in the Agents column comes from the Hudu reader, not agent records.
+    row = next(row for row in context["device_rows"] if row["device_id"] == "device-1")
+    cell = next(cell for cell in row["agent_cells"] if cell["platform"] == "Hudu")
+    assert cell["record_status"] == "No status reported"
+    assert cell["rule_label"] == "Required · Missing"
+
+
+def test_status_filter_counts_every_catalogued_agent(monkeypatch):
+    cursor = _Cursor()
+    # device-2 is online only in R-U-ON, which the old fixed list of four ignored.
+    cursor._results[4] = [("device-1", "Ninja", True), ("device-2", "R-U-ON", True)]
+    cursor._results[5] = [("device-1", "Ninja", True, None, None), ("device-2", "R-U-ON", True, None, None)]
+    captured = {}
+    monkeypatch.setattr(views, "connection", _Connection(cursor))
+    monkeypatch.setattr(views.transaction, "atomic", nullcontext)
+    monkeypatch.setattr(
+        views,
+        "render",
+        lambda _request, _template, context: captured.setdefault("context", context)
+        or HttpResponse(),
+    )
+    request = RequestFactory().get("/inventory/computers/?computer_scope=any_online")
+    request.user = SimpleNamespace(is_authenticated=True)
+    views.fleet_coverage(request)
+    context = captured["context"]
+
+    # The source-only Ninja record is online too, so it matches as well.
+    assert {row["device_id"] for row in context["device_rows"]} == {"device-1", "device-2", None}
+    assert context["computer_scope_filters"] == ["any_online"]
+    assert list(context["computer_scope_labels"]) == [
+        "any_online", "any_offline", "missing_required", "stale_required",
+        "has_product_record", "no_product_records", "no_current_records",
+    ]

@@ -163,4 +163,4 @@ do not open competing blueprints for the same work.
 - Source: BLUEPRINT.md
 - Section: Computers full-fleet inventory contract
 - Resume gate: Design and measure a rebuildable, existing-authority-owned inventory read model; preserve tenant/RLS, filters, cards, CSV, and source/coverage/Hudu semantics.
-- Last checked: 2026-10-21 (step 1, stored requirement verdicts per ADR-0035 and migration 0332, implemented and validated locally; uncommitted. Baseline: page showed 3,946 Hudu requirements missing with no evaluator finding).
+- Last checked: 2026-10-21 (step 1, stored requirement verdicts per ADR-0035 and migration 0332, committed `cc5d936`; step 2, Computers cards, Status filter, and one-line filter bar, committed next. Not deployed. Baseline: page showed 3,946 Hudu requirements missing with no evaluator finding).

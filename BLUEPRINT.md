@@ -12,15 +12,13 @@ One rebuildable effective read model owned by existing source, identity,
 coverage, and Hudu authorities. Preserve tenant/RLS, URLs, cards, filters, CSV,
 and source-only rows. No cache or duplicate authority.
 
-User-confirmed order (2026-10-21): (1) stored requirement verdicts; (2) Status
-filter including Missing over every agent (not four hard-coded names), one
-Hudu card (requirement counts now allowed), card order Ninja, SentinelOne,
-LogMeIn, R-U-ON, ScreenConnect, Hudu, then others, and a one-line filter bar
-with matching Filter/Clear at the far right.
+User-confirmed order (2026-10-21): (1) stored requirement verdicts; (2) the
+Computers cards, Status filter, and filter bar described under Step 2.
 
 ## Status
 
-Active. Step 1 implemented and validated locally; uncommitted, not deployed.
+Active. Step 1 committed as `cc5d936`. Step 2 is implemented and validated
+locally and committed after it. Neither is pushed or deployed.
 
 ## Decisions
 
@@ -54,6 +52,22 @@ against finding-backed page rows: Ninja 344/245, SentinelOne 515/420, LogMeIn
 - Ruff is clean on changed files. `views.py` has the same findings as HEAD.
 - Not validated: the deployed stack. The page shows no verdicts until the
   first evaluator run after deploy.
+
+## Step 2 (local)
+
+- One Hudu card shows Hudu record counts and requirement counts from the
+  stored verdicts. The Hudu line in the Agents column now comes from the Hudu
+  reader (current, archived-only, none) instead of agent records.
+- Cards follow `_COMPUTER_CARD_ORDER`, with any other platform alphabetical.
+- New Status filter (`computer_scope`). "Any agent" means every
+  `operations.agents` entry with an `agent.*` entity type (production: Ninja,
+  SentinelOne, LogMeIn, ScreenConnect, R-U-ON).
+- The filter bar is one row: Client, Agents, Status, Hudu, OS family, Device
+  type, Role, then matching Filter/Clear at the far right. It wraps below
+  900 px.
+- Validation: Computers page tests 19 passed. An Edge render at 1440 and
+  1280 px showed one row and identical Filter/Clear styles ending at the row
+  edge. `views.py` lint findings are the same set as HEAD.
 
 ## Checkpoint
 
