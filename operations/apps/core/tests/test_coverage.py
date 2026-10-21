@@ -246,6 +246,8 @@ def test_coverage_uses_effective_requirements_and_source_specific_filters(monkey
     ] == [
         ("Ninja", "Online", "Required · Missing"),
         ("SentinelOne", "Online", "Required"),
+        # Hudu's line comes from the Hudu reader: a current asset, not required here.
+        ("Hudu", "No status reported", "N/A"),
     ]
     assert row["agent_cells"][0]["record_url"] == (
         "?agent_0=Ninja&agent_state_0=Online"
@@ -467,18 +469,20 @@ def test_computers_csv_has_the_current_table_platform_columns(monkeypatch):
         "active",
         "In Hudu",
         "Ninja — host-1, Auvik #42",
-        "Ninja: Online; Required · Missing | SentinelOne: Online; Required",
+        "Ninja: Online; Required · Missing | SentinelOne: Online; Required"
+        " | Hudu: No status reported; N/A",
     ] in rows
     assert [
         "Beta",
         "host-2",
-        "",
+        "Unknown",
         "",
         "",
         "",
         "In Hudu",
         "",
-        "Ninja: No record; possible match: host-2; N/A | SentinelOne: No record; N/A",
+        "Ninja: No record; possible match: host-2; N/A | SentinelOne: No record; N/A"
+        " | Hudu: No status reported; N/A",
     ] in rows
 
 
@@ -486,7 +490,7 @@ def test_coverage_template_has_clear_statuses_hudu_and_multiselect_filters():
     template = (Path(__file__).parents[3] / "templates/coverage.html").read_text(encoding="utf-8")
 
     for label in (
-        "Links",
+        "Integration links in Hudu",
         "Agents",
         "OS family",
         "Device type",
@@ -693,3 +697,31 @@ def test_status_filter_counts_every_catalogued_agent(monkeypatch):
         "any_online", "any_offline", "missing_required", "stale_required",
         "has_product_record", "no_product_records", "no_current_records",
     ]
+
+
+def test_hudu_cell_says_which_link_goes_where_and_hudu_is_always_listed(monkeypatch):
+    template = Path(views.__file__).parents[2].joinpath("templates", "coverage.html")
+    source = template.read_text(encoding="utf-8")
+    assert source.count("Open in Hudu ↗") == 2
+    assert source.count(">Linked Computer</a>") == 2
+    assert "Not linked to a Computer" in source
+    assert "integration link{{ record.links|length|pluralize }} in Hudu" in source
+    assert ">Hudu</a>" not in source
+    assert ">Operations device</a>" not in source
+
+    # Hudu stays in the Agents column even before any verdict names it.
+    cursor = _Cursor()
+    cursor._results[0] = []
+    captured = {}
+    monkeypatch.setattr(views, "connection", _Connection(cursor))
+    monkeypatch.setattr(views.transaction, "atomic", nullcontext)
+    monkeypatch.setattr(
+        views,
+        "render",
+        lambda _request, _template, context: captured.setdefault("context", context)
+        or HttpResponse(),
+    )
+    request = RequestFactory().get("/inventory/computers/")
+    request.user = SimpleNamespace(is_authenticated=True)
+    views.fleet_coverage(request)
+    assert "Hudu" in captured["context"]["platforms"]

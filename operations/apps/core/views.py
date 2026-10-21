@@ -14549,6 +14549,7 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
             platform_states[row["platform"]] = row
 
     coverage_platforms = sorted({row["platform"] for row in coverage_rows})
+    # Same order as the summary cards: the agreed products, then the rest.
     platforms = sorted(
         set(coverage_platforms)
         | {platform for states in source_states_by_device.values() for platform in states}
@@ -14557,6 +14558,10 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
             for observations in source_observations_by_device.values()
             for platform in observations
         }
+        # Hudu's line comes from its own evidence reader, so it is listed
+        # whenever Hudu records exist, not only when a verdict mentions it.
+        | ({"Hudu"} if hudu_rows else set()),
+        key=lambda platform: _computer_card_order({"platform": platform}),
     )
     record_status_filters: dict[str, list[str]] = {}
     rule_status_filters: dict[str, list[str]] = {}
@@ -15413,7 +15418,7 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
                 {
                     "client_name": row["client_name"],
                     "hostname": row["hostname"],
-                    "os_family": row["os_family"],
+                    "os_family": row["os_family"] or "Unknown",
                     "device_type": row["device_type"],
                     "device_role": row["device_role"],
                     "lifecycle_status": row["lifecycle_status"],
