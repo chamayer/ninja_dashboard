@@ -399,6 +399,8 @@ def test_device_source_records_are_unique_and_review_copy_is_truthful():
     assert "FROM operations.v_device_observation_current evidence" in source
     assert "LEFT JOIN LATERAL (\n                  SELECT presence.reported_online" in source
     assert "LIMIT 1\n              ) presence ON TRUE" in source
+    assert "[1, str(device.id)]," in source
+    assert "[str(device.id), 1, str(device.id)]," not in source
     assert "this Computer is outside normal inventory" in template
     assert "no current source record reports this Computer" not in template
     assert "no source currently reports this Computer" not in template

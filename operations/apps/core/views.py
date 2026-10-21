@@ -2937,7 +2937,7 @@ def device_detail(request: HttpRequest, org_slug: str, device_id: str) -> HttpRe
              ORDER BY evidence.source_name, evidence.entity_type,
                       evidence.observation_last_seen_at DESC
                 """,
-                [str(device.id), 1, str(device.id)],
+                [1, str(device.id)],
             )
             observations = cur.fetchall()
 
