@@ -15692,30 +15692,50 @@ def sources_status(request: HttpRequest) -> HttpResponse:
             # not a second live lifecycle.
             cur.execute(
                 """
-                SELECT binding.id, run.status, run.completed_at, run.started_at,
-                       run.requested_at, run.rows_touched, run.error
+                SELECT binding.id,
+                       latest.status, latest.completed_at, latest.started_at,
+                       latest.requested_at, latest.rows_touched, latest.error,
+                       success.status, success.completed_at, success.started_at,
+                       success.requested_at, success.rows_touched, success.error
                   FROM operations.source_bindings binding
                   JOIN operations.source_instances instance
                     ON instance.id = binding.source_instance_id
-                  JOIN operations.operator_job_runs run
-                    ON run.tenant_id = binding.tenant_id
-                   AND run.job_key = instance.config->>'legacy_job_key'
+                  LEFT JOIN LATERAL (
+                    SELECT run.status, run.completed_at, run.started_at,
+                           run.requested_at, run.rows_touched, run.error
+                      FROM operations.operator_job_runs run
+                     WHERE run.tenant_id = binding.tenant_id
+                       AND run.job_key = instance.config->>'legacy_job_key'
+                       AND run.status IN ('completed', 'failed', 'stalled', 'cancelled')
+                     ORDER BY COALESCE(run.completed_at, run.started_at, run.requested_at) DESC,
+                              run.id DESC
+                     LIMIT 1
+                  ) latest ON TRUE
+                  LEFT JOIN LATERAL (
+                    SELECT run.status, run.completed_at, run.started_at,
+                           run.requested_at, run.rows_touched, run.error
+                      FROM operations.operator_job_runs run
+                     WHERE run.tenant_id = binding.tenant_id
+                       AND run.job_key = instance.config->>'legacy_job_key'
+                       AND run.status = 'completed'
+                     ORDER BY COALESCE(run.completed_at, run.started_at, run.requested_at) DESC,
+                              run.id DESC
+                     LIMIT 1
+                  ) success ON TRUE
                  WHERE binding.tenant_id = %s
                    AND COALESCE(instance.config->>'legacy_job_key', '') <> ''
-                   AND run.status IN ('completed', 'failed', 'stalled', 'cancelled')
-                 ORDER BY binding.id,
-                          COALESCE(run.completed_at, run.started_at, run.requested_at) DESC,
-                          run.id DESC
                 """,
                 (tenant_id,),
             )
             legacy_refresh: dict = {}
             legacy_success: dict = {}
             for row in cur.fetchall():
-                binding_id, status, completed_at, started_at, requested_at, rows_touched, error = row
-                legacy_refresh.setdefault(binding_id, row[1:])
-                if status == "completed":
-                    legacy_success.setdefault(binding_id, row[1:])
+                binding_id, *values = row
+                latest, success = values[:6], values[6:]
+                if latest[0] is not None:
+                    legacy_refresh[binding_id] = tuple(latest)
+                if success[0] is not None:
+                    legacy_success[binding_id] = tuple(success)
 
             # Source-refresh runs are the authoritative operational history.
             # The former reference-feed runs remain visible only while a

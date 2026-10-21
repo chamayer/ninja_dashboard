@@ -14,7 +14,7 @@ Active. Before release, fresh authenticated tenant-1 handler timings found Dashb
 
 ## Change and measurement plan
 
-Release 0.128.7 improved Computers to 6.132–6.309 s warm. Fresh routes: Sources 2.599 s, Issues 1.716 s, and User exposure 5.260 s, whose main query is 2.561 s. Release 0.128.8 paginates the existing SQL-ranked User exposure result at 100 users; all users remain reachable and CSV remains complete. After rollout, remeasure User exposure, Computers, and Products, then trace only routes still outside the archive criteria.
+Release 0.128.8 improved User exposure to 2.917–2.933 s warm. Sources trace attributes 1.114 s to a legacy-history transfer; a per-binding latest-terminal/latest-success query takes 82 ms with identical fallback inputs. Release 0.128.9 applies that bounded read. After rollout, remeasure Sources, User exposure, Computers, and Products, then trace only routes still outside the archive criteria.
 
 ## Validation
 
@@ -22,4 +22,4 @@ Focused pytest: 32 software tests, 14 coverage tests, and two User exposure test
 
 ## Checkpoint and next action
 
-User approved the commit and pushes needed to complete the goal; `origin` automatically deploys, with no separate redeploy. Commit this scoped 0.128.8 change, push `origin` then `a-m-rose`, and perform read-only rollout and performance validation. PLAN-001 stays active until the archived success criteria are verified.
+User approved the commit and pushes needed to complete the goal; `origin` automatically deploys, with no separate redeploy. Commit this scoped 0.128.9 change, push `origin` then `a-m-rose`, and perform read-only rollout and performance validation. PLAN-001 stays active until the archived success criteria are verified.

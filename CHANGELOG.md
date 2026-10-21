@@ -2,6 +2,13 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.128.9] — 2026-10-21 — Sources legacy-history boundary
+
+### Changed
+
+- Sources retrieves only each binding's latest terminal and latest successful
+  legacy result instead of transferring complete legacy job history.
+
 ## [0.128.8] — 2026-10-21 — User exposure pagination
 
 ### Changed
