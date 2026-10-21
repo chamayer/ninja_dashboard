@@ -162,5 +162,18 @@ do not open competing blueprints for the same work.
 - Blueprint: BLUEPRINT.md
 - Source: BLUEPRINT.md
 - Section: Computers full-fleet inventory contract
-- Resume gate: Design and measure a rebuildable, existing-authority-owned inventory read model; preserve tenant/RLS, filters, cards, CSV, and source/coverage/Hudu semantics.
-- Last checked: 2026-10-21 (step 1, stored requirement verdicts per ADR-0035 and migration 0332, committed `cc5d936`; step 2, Computers cards, Status filter, and one-line filter bar, committed next. Not deployed. Baseline: page showed 3,946 Hudu requirements missing with no evaluator finding).
+- Resume gate: Re-measure the deployed Computers page, then design the rebuildable, existing-authority-owned inventory read model and its refresh_derived() hook; preserve tenant/RLS, filters, cards, CSV, and source/coverage/Hudu semantics. Requirement-rule changes belong to PLAN-014.
+- Last checked: 2026-10-21 (prerequisite cc5d936 and page fixes 453c41c and ccae6da deployed; the read model, refresh function, re-measurement, and parity validation are not started).
+
+## PLAN-014 — Requirement applicability
+
+- Scope: Evaluator coverage rules and Computers requirement display
+- Status: ready
+- Defined: 2026-10-21
+- Started: —
+- Completed: —
+- Blueprint: ingest/BLUEPRINT.md
+- Source: ingest/BLUEPRINT.md
+- Section: PLAN-014 — Requirement applicability
+- Resume gate: Settle the excluded-verdict name, then implement the positive-OS rule, the pending_cleanup gate, the reworded unknown-OS finding, and resolve-step agreement with tests and a decision record. Independent of PLAN-012's read model.
+- Last checked: 2026-10-21 (user decisions recorded; read-only impact measured: about 1,968 of 3,106 open missing/stale findings close).

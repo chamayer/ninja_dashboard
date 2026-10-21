@@ -2,83 +2,65 @@
 
 ## Goal
 
-Make the Computers inventory correct and responsive while preserving its
-filter, card, and CSV contract. Requirement state has one authority that pages
-read instead of re-deriving.
+Make the Computers inventory page fast without weakening its full-fleet
+contract. Preserve canonical computer data, tenant isolation, coverage
+verdicts, source and Hudu state, filters, summary cards, CSV, and
+current-versus-withdrawn semantics. Reusable fleet facts move into an owned,
+rebuildable read model refreshed after ingest.
 
 ## Scope
 
-One rebuildable effective read model owned by existing source, identity,
-coverage, and Hudu authorities. Preserve tenant/RLS, URLs, cards, filters, CSV,
-and source-only rows. No cache or duplicate authority.
-
-User-confirmed order (2026-10-21): (1) stored requirement verdicts; (2) the
-Computers cards, Status filter, and filter bar described under Step 2.
+One rebuildable effective read model owned by the existing source, identity,
+coverage, and Hudu authorities, with a refresh function integrated into
+`refresh_derived()`. No cache or duplicate authority. Requirement-rule
+changes are out of scope; they belong to PLAN-014 (`ingest/BLUEPRINT.md`).
 
 ## Status
 
-Active. Step 1 committed as `cc5d936`. Step 2 is implemented and validated
-locally and committed after it. Neither is pushed or deployed.
+Active. The read model itself has not started.
 
-## Decisions
+Done under this plan (pushed to both remotes):
+- `cc5d936`: the evaluator stores requirement verdicts (ADR-0035, migration
+  0332). This prerequisite gives the read model one requirement authority.
+- `453c41c` and `ccae6da`: Computers page fixes the user requested (card
+  order, one Hudu card, Status filter over every catalogued agent, one-line
+  filter bar, compact cards, clearer Hudu column, OS "Unknown"). These are
+  page fixes, not read-model progress.
 
-- ADR-0035 (`operations/docs/decisions/0035-...`): the evaluator's coverage
-  pass stores a verdict per Computer and requirement in
-  `operations.device_requirement_state` (migration 0332) in the transaction
-  that writes its findings. Its only writer is
-  `write_device_requirement_state`. Runtime roles get SELECT only.
-- Online/Offline stays a live read from `device_agent_presence_current`.
-- `check_device_requirement_state` runs after each platform evaluation and
-  keeps disagreements in `device_requirement_state_drift`. It does not repair.
+Not done:
+- no inventory read model or materialized view;
+- no refresh function and no `refresh_derived()` integration;
+- the route still assembles fleet state from several runtime queries;
+- no performance re-measurement, parity validation, release documentation,
+  or plan completion.
 
-## Baseline (production, read-only, 2026-10-21 ~17:00 UTC)
+## Evidence
 
-5,420 Computers; 4,853 have a current Hudu asset. The page showed 4,208 Hudu
-requirements, all Missing, and 3,946 had no finding. Page-only Missing:
-Ninja 57, SentinelOne 51, LogMeIn 42, ScreenConnect 4. Open Missing findings
-against finding-backed page rows: Ninja 344/245, SentinelOne 515/420, LogMeIn
-162/131. The evaluator runs every ~41 min (248 s).
+Deployed 0.128.15 measured Computers at 4.740 s browser first response: 3.154 s
+of database wait across 15 fleet reads, plus 1.209 s of template rendering.
+That was before `cc5d936`, which replaced the page's requirement derivation
+with one indexed read. Re-measure before designing.
 
-## Validation (step 1, local)
+Production after the first verdict pass (2026-10-21 17:48 UTC): 19,012
+verdicts. Hudu Missing went from 4,208 on the page to 260. The drift check
+shows 582 open findings with no matching verdict, which the resolve step's
+separate rule copy explains (PLAN-014).
 
-- Migration 0332 on PostgreSQL 16 with production role attributes: 8 passed.
-- Evaluator verdicts on PostgreSQL (Hudu current/archived, stale, outside
-  coverage, exempt, single Computer): ingest evaluator and requirement-state
-  tests, 33 passed.
-- Computers page tests: 16 passed. `manage.py check` and
-  `makemigrations --check` are clean.
-- Full suites: Operations 441 passed/4 failed; ingest 481 passed/4 failed.
-  The same 8 fail on clean HEAD 3091a47.
-- Ruff is clean on changed files. `views.py` has the same findings as HEAD.
-- Not validated: the deployed stack. The page shows no verdicts until the
-  first evaluator run after deploy.
+## Validation
 
-## Step 2 (local)
-
-- One Hudu card shows Hudu record counts and requirement counts from the
-  stored verdicts. The Hudu line in the Agents column now comes from the Hudu
-  reader (current, archived-only, none) instead of agent records.
-- Cards follow `_COMPUTER_CARD_ORDER`, with any other platform alphabetical.
-- New Status filter (`computer_scope`). "Any agent" means every
-  `operations.agents` entry with an `agent.*` entity type (production: Ninja,
-  SentinelOne, LogMeIn, ScreenConnect, R-U-ON).
-- The filter bar is one row: Client, Agents, Status, Hudu, OS family, Device
-  type, Role, then matching Filter/Clear at the far right. It wraps below
-  900 px.
-- Validation: Computers page tests 19 passed. An Edge render at 1440 and
-  1280 px showed one row and identical Filter/Clear styles ending at the row
-  edge. `views.py` lint findings are the same set as HEAD.
+Recorded with each commit: migration 0332 and evaluator Postgres tests,
+Computers page tests (20), Edge screenshots, and the full suites. Each run
+had only the 8 failures that also fail on HEAD 3091a47.
 
 ## Checkpoint
 
-Step 1 code: migration 0332, `ingest/evaluator.py` (`_write_requirement_state`),
-`ingest/requirement_state.py` with `operator_job_queue` wiring, the Computers
-page read in `views.py` and `coverage.html`, tests, ADR-0035, and an
-architecture note.
+Prerequisites and page fixes are deployed. The read-model design has not
+started.
 
 ## Next action
 
-User review, then a separately approved commit and push (the push deploys and
-applies 0332). After deploy, compare the page with the baseline and read the
-drift table. Then step 2. After that, move the Dashboard, software-capability,
-and `_auto_resolve` copies to the stored verdicts.
+Re-measure the deployed Computers page. Trace each remaining runtime query
+to its authority. Define the read model, its refresh owner and
+`refresh_derived()` hook, its tenant boundary, staleness behavior, and
+parity checks before implementation. Then move the Dashboard and
+software-capability requirement copies to the stored verdicts.
