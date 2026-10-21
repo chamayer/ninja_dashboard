@@ -5,6 +5,25 @@ only project-level pointers.
 
 ---
 
+## 2026-10-21 — Clarify Computer overview and inventory destinations
+
+**Why:** Operators could not tell that the dashboard's Devices destination and
+Inventory's Computers destination serve different purposes.
+
+**Change:** Renamed the fleet status page to **Computer overview** and the
+inventory page to **Computer inventory**. The dashboard KPI now says
+**Computer overview**, the Inventory navigation link says **Computer
+inventory**, and the overview heading links directly to inventory. Existing
+routes, inventory filters, and page behavior are unchanged.
+
+**Files:** `apps/core/views.py`, `templates/base.html`,
+`templates/devices_page.html`, `templates/coverage.html`.
+
+**Validation:** `git diff --check` passed. Tests were not run. No release or
+deployment was prepared.
+
+---
+
 ## 2026-07-15 (latest) — Track O foundation: standing storage separation principle
 
 **Why:** patching_scope design work exposed a systemic issue on

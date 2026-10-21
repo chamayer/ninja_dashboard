@@ -1504,7 +1504,7 @@ def home(request: HttpRequest) -> HttpResponse:  # noqa: PLR0912, PLR0915
             "href": reverse("org_index", kwargs={"org_slug": "all"}),
         },
         {
-            "name": "Computers",
+            "name": "Computer overview",
             "value": f"{total_devices:,}",
             "detail": f"{active_devices:,} active · {retired_devices:,} retired",
             "href": reverse("devices_page"),

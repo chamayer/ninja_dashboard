@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% load human_labels %}
 
-{% block title %}Devices{% endblock %}
+{% block title %}Computer overview{% endblock %}
 
 {% block content %}
 <style>
@@ -27,18 +27,21 @@
 
 <div class="card">
     <div style="display:flex; align-items:center; justify-content:space-between; gap:1rem;">
-        <h1 style="margin:0;">Devices
+        <h1 style="margin:0;">Computer overview
           <span class="muted" style="font-weight:400; font-size:0.9rem;">
             {{ overview.total }} across all clients
           </span>
         </h1>
-        {% include "_csv_download.html" %}
+        <div style="display:flex; align-items:center; gap:0.75rem;">
+            <a href="{% url 'inventory_computers' %}" style="font-weight:600; white-space:nowrap;">Computer inventory →</a>
+            {% include "_csv_download.html" %}
+        </div>
     </div>
-    <p class="muted" style="margin-top:0.5rem;">A current view of devices across all clients — explore, filter, and drill in.</p>
+    <p class="muted" style="margin-top:0.5rem;">A current view of computers across all clients — explore, filter, and drill in.</p>
     {% if coverage_issues or identity_issues or delayed_sources %}
     <div class="dv-chips" style="margin-top:0.6rem;">
-        {% if coverage_issues %}<a class="dv-chip" href="{% url 'findings_queue' %}?category=agents_reporting">{{ coverage_issues }} device{{ coverage_issues|pluralize }} with a coverage gap</a>{% endif %}
-        {% if identity_issues %}<a class="dv-chip" href="{% url 'findings_queue' %}?category=inventory">{{ identity_issues }} device{{ identity_issues|pluralize }} with an identity conflict</a>{% endif %}
+        {% if coverage_issues %}<a class="dv-chip" href="{% url 'findings_queue' %}?category=agents_reporting">{{ coverage_issues }} computer{{ coverage_issues|pluralize }} with a coverage gap</a>{% endif %}
+        {% if identity_issues %}<a class="dv-chip" href="{% url 'findings_queue' %}?category=inventory">{{ identity_issues }} computer{{ identity_issues|pluralize }} with an identity conflict</a>{% endif %}
         {% if delayed_sources %}<a class="dv-chip" href="{% url 'sources_status' %}">{{ delayed_sources }} source{{ delayed_sources|pluralize }} delayed</a>{% endif %}
     </div>
     {% endif %}
@@ -48,7 +51,7 @@
     <a class="tile" href="{% url 'devices_page' %}">
         <div class="tile-label">Total</div>
         <div class="tile-value">{{ overview.total }}</div>
-        <div class="tile-note">managed devices</div>
+        <div class="tile-note">managed computers</div>
     </a>
     <a class="tile" href="?state=active">
         <div class="tile-label">Active</div>
@@ -158,7 +161,7 @@
 </div>
 
 <div class="card">
-    <h2 class="section-label">Devices
+    <h2 class="section-label">Computers
       <span style="font-weight:400;">({{ devices|length }}{% if devices|length == 500 %}+{% endif %})</span>
     </h2>
     {% if devices %}
@@ -209,7 +212,7 @@
         </tbody>
     </table>
     {% else %}
-    <p class="muted">No devices match the current filter.</p>
+    <p class="muted">No computers match the current filter.</p>
     {% endif %}
 </div>
 {% endblock %}
