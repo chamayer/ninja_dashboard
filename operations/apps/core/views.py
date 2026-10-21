@@ -8853,18 +8853,22 @@ def software_user_risk(request: HttpRequest) -> HttpResponse:
             ORDER BY du.last_user, d.canonical_hostname, ai.kind, ai.canonical_name
         """
     else:
-        # Rank the whole filtered set from just the deduplication key, then
-        # attach presentation labels only for the selected page. The previous
-        # materialization carried hostname and client text for every matching
-        # item even though an ordinary response renders one page.
+        # The operator page renders one bounded page of highest-impact users.
+        # Materialising the joined items keeps the existing meaning and totals
+        # while selecting the bounded first view before rows cross the
+        # application boundary.
         result_sql = f"""
-            , joined_item_keys AS MATERIALIZED (
+            , joined_items AS MATERIALIZED (
                 SELECT du.last_user,
                        d.id AS device_id,
+                       d.canonical_hostname,
+                       c.slug AS client_slug,
+                       c.display_name AS client_name,
                        ai.canonical_name,
                        ai.kind
                 FROM device_user du
                 JOIN operations.devices d ON d.id = du.ops_device_id AND d.deleted_at IS NULL
+                JOIN operations.clients c ON c.id = d.client_id AND c.deleted_at IS NULL
                 JOIN all_items ai ON ai.device_id = d.id
                 WHERE d.tenant_id = 1
                   {client_where}
@@ -8873,8 +8877,9 @@ def software_user_risk(request: HttpRequest) -> HttpResponse:
             ),
             deduplicated_items AS MATERIALIZED (
                 SELECT DISTINCT ON (last_user, device_id, canonical_name, kind)
-                       last_user, device_id, canonical_name, kind
-                FROM joined_item_keys
+                       last_user, device_id, canonical_hostname, client_slug,
+                       client_name, canonical_name, kind
+                FROM joined_items
                 ORDER BY last_user, device_id, canonical_name, kind
             ),
             ranked_users AS MATERIALIZED (
@@ -8890,9 +8895,9 @@ def software_user_risk(request: HttpRequest) -> HttpResponse:
             )
             SELECT item.last_user,
                    item.device_id,
-                   device.canonical_hostname,
-                   client.slug AS client_slug,
-                   client.display_name AS client_name,
+                   item.canonical_hostname,
+                   item.client_slug,
+                   item.client_name,
                    item.canonical_name,
                    item.kind,
                    ranked.item_count,
@@ -8900,15 +8905,11 @@ def software_user_risk(request: HttpRequest) -> HttpResponse:
                    ranked.total_items
             FROM deduplicated_items item
             JOIN ranked_users ranked ON ranked.last_user = item.last_user
-            JOIN operations.devices device
-              ON device.id = item.device_id AND device.deleted_at IS NULL
-            JOIN operations.clients client
-              ON client.id = device.client_id AND client.deleted_at IS NULL
             WHERE ranked.user_rank > {page_rank_start}
               AND ranked.user_rank <= {page_rank_start + page_size}
             ORDER BY ranked.item_count DESC,
                      item.last_user,
-                     device.canonical_hostname,
+                     item.canonical_hostname,
                      item.kind,
                      item.canonical_name
         """

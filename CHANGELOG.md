@@ -2,6 +2,13 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.128.13] — 2026-10-21 — User exposure ranking rollback
+
+### Fixed
+
+- Restored the proven User exposure materialization after its lightweight-key
+  experiment regressed authenticated first response from 2.961 s to 4.637 s.
+
 ## [0.128.12] — 2026-10-21 — User exposure ranking repair
 
 ### Fixed

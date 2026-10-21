@@ -15,7 +15,6 @@ def test_user_exposure_bounds_html_rows_but_retains_complete_csv_export():
     assert "ranked.user_rank >" in view
     assert "ROW_NUMBER() OVER" in view
     assert "AND ranked.user_rank <= {page_rank_start + page_size}" in view
-    assert "device.canonical_hostname" in view
-    assert "item.canonical_hostname" not in view
+    assert "item.canonical_hostname" in view
     assert '"users": users,' in view
     assert '"users": users[:500]' not in view
