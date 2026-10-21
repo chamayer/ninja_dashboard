@@ -17,15 +17,15 @@ do not open competing blueprints for the same work.
 ## PLAN-001 — Dashboard navigation performance
 
 - Scope: Root and Operations performance
-- Status: active
+- Status: completed
 - Defined: 2026-10-13
 - Started: 2026-10-13
-- Completed: —
+- Completed: 2026-10-21
 - Blueprint: BLUEPRINT.md
 - Source: docs/archive/workspace-cleanup-2026-10-20/plan.md
 - Section: Active plan — Dashboard navigation performance
-- Resume gate: Release 0.128.9, then repeat authenticated handler and browser/navigation measurements. Do not close until the archived success criteria or measured, explicitly deferred exceptions are recorded.
-- Last checked: 2026-10-21 (release 0.128.13 is deployed; a fresh read-only Computers handler trace measured 7.525 s before template rendering, with Hudu evidence and full-fleet Python assembly as the next scoped boundary in `BLUEPRINT.md`).
+- Resume gate: No action. A new approved plan is required for a shared inventory read model or any change to the full-fleet filter/card contract.
+- Last checked: 2026-10-21 (releases 0.128.14 and 0.128.15 reduced Computers browser first response from 6.351 s to 4.740 s. The remaining below-target result is a measured, explicitly deferred architecture exception in `BLUEPRINT.md`).
 
 ## PLAN-002 — Source-driven collection and Jobs recovery
 

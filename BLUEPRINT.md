@@ -2,26 +2,48 @@
 
 ## Goal
 
-Make ordinary Dashboard navigation responsive from measured causes, and close PLAN-001 only with current deployed evidence.
+Make ordinary Dashboard navigation responsive from measured causes, with current
+deployed evidence or an explicit measured exception.
 
 ## Scope
 
-Measured server/rendering causes on Dashboard navigation and its landing pages. Preserve tenant/RLS, card meanings, URLs, and established data authorities. No cache, duplicate projection, speculative index, migration, or production-data action.
+Dashboard and landing-page server/rendering performance. Preserve tenant/RLS,
+URLs, card meanings, and existing data authorities. No cache, duplicate
+projection, speculative index, migration, or production-data action.
 
-## Status and evidence
+## Status
 
-Active. The fresh authenticated tenant-1 handler baseline was Dashboard 3.154 s, Computers 12.871 s, Sources 4.474 s, Cleanup 5.368 s, User exposure 5.877 s, and Software Overview/Products over the 20 s request limit. Releases through 0.128.9 are deployed and healthy: Dashboard warmed to 1.308–1.568 s, Sources to 0.935–0.988 s, Software Overview to 1.042–1.068 s, and Products to 2.037–2.082 s. Authenticated headless-browser navigation on the deployed stack independently measured response/duration: Dashboard 1.995/2.399 s, Findings 1.887/2.503 s, Software Overview 2.013/2.477 s, Products 2.588/3.314 s, User exposure 4.302/4.989 s, Computers 6.471/7.108 s, and Sources 1.232/1.638 s. The browser method is documented in `docs/reference/authenticated-browser-measurement.md`; credentials were process-only and no production action occurred.
+Completed with a measured exception. Releases 0.128.1–0.128.15 are deployed;
+the latest performance releases are mirrored by commits `e671685` and
+`6ec8b35`.
 
-## Change and measurement plan
+## Evidence and decision
 
-Release 0.128.10 is deployed and healthy. It narrows User exposure's HTML page from 100 to 25 ranked users and improved authenticated browser first response from 4.302 s to 2.961 s, with transfer from 927 KB to 563 KB. The 0.128.11 lightweight-key materialization experiment regressed that same route to 4.637 s/5.188 s response/duration; releases 0.128.12 and 0.128.13 repaired and then restored the proven 0.128.10 query shape. Computers remains 6.351 s browser first response: pagination already bounds rendered source timestamp detail, but full-inventory Python assembly and Hudu lifecycle evidence (about 1.35 s SQL) still occur before pagination. Retain the browser pass as the final acceptance check.
+Dashboard warm handler timing is 1.308–1.568 s; Sources is 0.935–0.988 s;
+Software Overview is 1.042–1.068 s; Products is 2.037–2.082 s. User exposure
+browser first response improved from 4.302 s to 2.961 s after its bounded view.
 
-On 2026-10-21, a fresh read-only deployed handler trace (template rendering excluded) measured 7.525 s of Computers assembly: Hudu evidence 2.054 s, coverage requirements 0.990 s, page-only source timestamps 0.475 s, compact source-observation state 0.463 s, and about 3.3 s of Python full-fleet assembly. The measured correction is to retain Hudu presence/lifecycle/link-filter facts for the fleet summaries and filters, but fetch Hudu links and record presentation only for the selected HTML page. CSV deliberately retains complete detail. This keeps `v_hudu_computer_inventory_evidence_current` as the evidence authority and does not add storage, a cache, a projection, or a schema change.
+Computers first response improved from 6.351 s to 4.740 s (4.942 s duration,
+375 KB transfer). Its handler assembly fell from 7.525 s to 4.610 s. Hudu
+fleet facts fell from 2.054 s to 0.989 s; page-only Hudu presentation is
+0.071 s. The next release removed 80,164 full-fleet URL encodes, which a
+full-render profile had measured at 4.634 s.
+
+The remaining full-render profile measures 3.154 s database wait across the
+15 fleet reads and 1.209 s template rendering; full-fleet status-cell work is
+only 0.579 s. Reaching the two-second target would require an approved shared
+inventory read model or a changed full-fleet filter/card contract. That work
+is deferred rather than introducing an unapproved projection or weakening the
+operator contract.
 
 ## Validation
 
-The 0.128.13 rollback focused User exposure test, `manage.py check`, diff whitespace, and release governance validation pass. The scoped Computers change passes `pytest apps/core/tests/test_coverage.py -q` (14 passed), `manage.py check`, `compileall`, plan-registry validation, and diff whitespace. Deployed 0.128.14 handler assembly is 5.546 s (from 7.525 s); its compact Hudu fleet read is 0.989 s (from 2.054 s) and page-only Hudu detail is 0.071 s. Authenticated browser navigation is 6.030 s first response, 6.212 s duration, and 375 KB transfer, so Computers remains an explicit unmet exception. File-wide Ruff continues to report pre-existing legacy findings; no schema or data changes are included.
+`pytest apps/core/tests/test_coverage.py -q` passed (14 tests), as did
+`manage.py check`, `compileall`, plan-registry validation, diff whitespace,
+and governance validation. Governance retains the known stale
+`docs/current-state.md` status-date warning. No schema or data changes.
 
-## Checkpoint and next action
+## Follow-up
 
-User approved commits and pushes needed to complete the goal; `origin` automatically deploys, with no separate redeploy. Release `520a967` is deployed and mirrored to `a-m-rose`; preserve all unrelated working-tree changes and `.work` probes. Release 0.128.14 is healthy and reduces Computers handler assembly, but Computers is still 6.030 s browser first response. Release 0.128.15 bounds page-cell URL and tooltip construction to the rendered page after the full-render trace measured 5.849 s in 40,056 cell builds and 4.634 s in URL encoding. After its approved release, repeat handler and authenticated-browser timing for Computers. PLAN-001 stays active until the archived success criteria are verified.
+Open a new approved plan before designing an inventory read model or changing
+the full-fleet filter/card contract.
