@@ -8908,7 +8908,7 @@ def software_user_risk(request: HttpRequest) -> HttpResponse:
               AND ranked.user_rank <= {page_rank_start + page_size}
             ORDER BY ranked.item_count DESC,
                      item.last_user,
-                     item.canonical_hostname,
+                     device.canonical_hostname,
                      item.kind,
                      item.canonical_name
         """

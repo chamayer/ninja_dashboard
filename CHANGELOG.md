@@ -2,6 +2,13 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.128.12] — 2026-10-21 — User exposure ranking repair
+
+### Fixed
+
+- Restored the User exposure HTML sort to use the device field after the
+  bounded ranking query moved presentation labels out of its item CTE.
+
 ## [0.128.11] — 2026-10-21 — User exposure ranking boundary
 
 ### Changed
