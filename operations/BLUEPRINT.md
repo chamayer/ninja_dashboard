@@ -1,3 +1,38 @@
+# PLAN-004 corrective repair — restricted observation reads
+
+## Goal and scope
+
+Restore the affected Computer UI paths without restoring the Operations
+application's direct access to restricted observation payloads. Production
+tracebacks on 2026-10-21 confirm that global search and Computer detail read
+`entity_observation_current` directly after migration 0117 revoked that
+access. The History tab and Hudu-archive finding action contain the same
+unsafe read pattern.
+
+Extend the existing reviewed, tenant-filtered, security-barrier metadata
+projection with only the scalar identifiers required by those callers. Move
+the four user-facing reads to it and add focused regression coverage. Do not
+grant the application role the raw table or payload JSON. This repair is
+independent of PLAN-012's population design and must preserve PLAN-013's
+authentication work.
+
+## Status, validation, and checkpoint
+
+Implementation authorized 2026-10-21. Migration 0334 extends
+`v_entity_observation_admin_metadata`; Computer name provenance, global
+search, History, and Hudu-archive eligibility now use it. The raw table
+remains denied to runtime readers; the two remaining references in `views.py`
+are intentional guarded updates.
+
+`ruff check` passed for the migration and focused tests; Python compilation,
+registry validation, and `git diff --check` passed. Django/pytest are absent
+from the workstation interpreter. Docker Compose could not run the focused
+tests because its Operations container requires the unavailable local database
+password; it created an empty local Compose network and volume only. No
+production schema or application state has changed. Commit and deployment
+push were approved on 2026-10-21. Next action: commit this repair, push it,
+then verify the deployed endpoints and migration under the runtime role.
+
 # PLAN-013 — Operations sign-in page
 
 ## Goal

@@ -103,6 +103,31 @@ def test_observation_metadata_view_excludes_payload_columns() -> None:
     assert "raw_data" not in view_sql
     assert "canonical_data->>'hostname'" in view_sql
     assert "canonical_data->>'platform_group_id'" in view_sql
+
+
+def test_observation_identity_metadata_is_limited_to_the_ui_scalars() -> None:
+    migration = importlib.import_module(
+        "apps.core.migrations.0334_safe_observation_identity_metadata"
+    )
+    sql = migration.FORWARD_SQL
+
+    assert "WITH (security_barrier = true)" in sql
+    assert "operations.current_tenant_id()" in sql
+    for column in (
+        "reported_name",
+        "canonical_serial",
+        "vm_uuid",
+        "link_verdict",
+        "archived",
+        "hudu_company_id",
+    ):
+        assert column in sql
+    assert sql.count("raw_data") == 1
+    assert "REVOKE ALL ON operations.v_entity_observation_admin_metadata" in sql
+    assert "GRANT SELECT ON operations.v_entity_observation_admin_metadata" in sql
+    assert "REVOKE INSERT, UPDATE, DELETE, TRUNCATE" in sql
+
+
 def test_condition_policy_action_form_preserves_django_action_fields():
     from apps.core.admin import ConditionPolicyActivationForm
 

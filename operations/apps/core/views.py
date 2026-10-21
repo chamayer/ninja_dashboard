@@ -3577,7 +3577,7 @@ def device_detail(request: HttpRequest, org_slug: str, device_id: str) -> HttpRe
             activity.extend(_record_history_events(cur, history_ids, history_before))
             activity.extend(_audit_history_events(cur, history_ids, history_before, users))
             cur.execute(
-                """SELECT DISTINCT eo.external_id FROM operations.entity_observation_current eo
+                """SELECT DISTINCT eo.external_id FROM operations.v_entity_observation_admin_metadata eo
                     WHERE eo.tenant_id = 1 AND eo.device_id = ANY(%s::uuid[])
                       AND eo.platform = 'Ninja' AND eo.external_id ~ '^[0-9]+$'""",
                 (history_ids,),
@@ -4025,22 +4025,20 @@ SEARCH_IDENTITY_SQL = """
                    WHERE m.tenant_id = 1 AND absorbed.canonical_hostname ILIKE %(p)s
                   UNION ALL
                   SELECT eo.device_id, 3,
-                         CASE WHEN coalesce(nullif(eo.canonical_data ->> 'hostname', ''),
-                                            eo.canonical_data ->> 'guest_name') ILIKE %(p)s
+                         CASE WHEN eo.reported_name ILIKE %(p)s
                                    THEN 'name in ' || eo.platform
-                              WHEN eo.canonical_data ->> 'serial_number' ILIKE %(p)s
+                              WHEN eo.canonical_serial ILIKE %(p)s
                                    THEN 'serial number in ' || eo.platform
                               ELSE 'VM UUID in ' || eo.platform END
                          || CASE WHEN eo.active THEN '' ELSE ' (earlier record)' END
-                    FROM operations.entity_observation_current eo
+                    FROM operations.v_entity_observation_admin_metadata eo
                     JOIN operations.devices d
                       ON d.tenant_id = eo.tenant_id AND d.id = eo.device_id
                      AND d.deleted_at IS NULL
                    WHERE eo.tenant_id = 1 AND eo.entity_key NOT LIKE 'device-health:%%'
-                     AND (eo.canonical_data ->> 'hostname' ILIKE %(p)s
-                          OR eo.canonical_data ->> 'guest_name' ILIKE %(p)s
-                          OR eo.canonical_data ->> 'serial_number' ILIKE %(p)s
-                          OR eo.canonical_data ->> 'vm_uuid' ILIKE %(p)s)
+                     AND (eo.reported_name ILIKE %(p)s
+                          OR eo.canonical_serial ILIKE %(p)s
+                          OR eo.vm_uuid ILIKE %(p)s)
               ) hits
              ORDER BY device_id, rank
              LIMIT %(limit)s
@@ -6884,18 +6882,18 @@ def _queue_selected_hudu_archives(request: HttpRequest, ids: list[str], action) 
             cur.execute(
                 """
                 SELECT eo.source_instance_id, eo.parent_external_id, eo.external_id
-                  FROM operations.entity_observation_current eo
+                  FROM operations.v_entity_observation_admin_metadata eo
                   JOIN operations.source_instances si ON si.id = eo.source_instance_id
                   JOIN operations.sources s ON s.id = si.source_id
                  WHERE eo.tenant_id = 1
                    AND eo.source_instance_id = %s::uuid
-                   AND COALESCE(eo.raw_data->>'company_id', '') = %s
+                   AND COALESCE(eo.hudu_company_id, '') = %s
                    AND eo.external_id = %s
                    AND eo.active
                    AND s.name = 'Hudu'
                    AND eo.entity_type = 'cmdb.asset'
-                   AND eo.canonical_data->>'link_verdict' = 'stale'
-                   AND COALESCE((eo.canonical_data->>'archived')::boolean, FALSE) IS FALSE
+                   AND eo.link_verdict = 'stale'
+                   AND eo.archived IS FALSE
                 """,
                 (source_instance_id, str(company_id), str(asset_id)),
             )
@@ -17264,8 +17262,8 @@ def _record_history_events(cur, computer_ids, before) -> list[dict]:
     cur.execute(
         """
         SELECT eo.withdrawn_at, eo.platform, eo.entity_type,
-               coalesce(eo.canonical_data ->> 'hostname', eo.external_id)
-          FROM operations.entity_observation_current eo
+               coalesce(eo.reported_name, eo.external_id)
+          FROM operations.v_entity_observation_admin_metadata eo
          WHERE eo.tenant_id = 1 AND eo.device_id = ANY(%s::uuid[])
            AND eo.withdrawn_at IS NOT NULL
            AND eo.entity_key NOT LIKE 'device-health:%%'

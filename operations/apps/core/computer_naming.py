@@ -174,10 +174,10 @@ def name_provenance(device_id) -> dict:
         cur.execute(
             """
             SELECT d.name_rule, d.name_decided_at, o.platform, o.entity_type,
-                   coalesce(nullif(o.canonical_data ->> 'hostname', ''), o.canonical_data ->> 'guest_name'),
+                   o.reported_name,
                    x.value ->> 'name', x.reason, x.set_by
               FROM operations.devices d
-              LEFT JOIN operations.entity_observation_current o
+              LEFT JOIN operations.v_entity_observation_admin_metadata o
                 ON o.tenant_id = d.tenant_id AND o.observation_id = d.name_observation_id
               LEFT JOIN operations.device_operator_decisions x
                 ON x.tenant_id = d.tenant_id AND x.device_id = d.id AND x.dimension = 'name'

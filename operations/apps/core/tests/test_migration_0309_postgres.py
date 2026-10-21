@@ -285,6 +285,17 @@ def test_search_finds_a_computer_by_what_any_of_its_records_reported(conn):
 
     device = _computer(conn, "pc-now")
     conn.execute(
+        """
+        CREATE VIEW operations.v_entity_observation_admin_metadata AS
+        SELECT observation_id, tenant_id, device_id, platform, entity_key, active,
+               coalesce(nullif(canonical_data->>'hostname', ''),
+                        canonical_data->>'guest_name') AS reported_name,
+               canonical_data->>'serial_number' AS canonical_serial,
+               canonical_data->>'vm_uuid' AS vm_uuid
+          FROM operations.entity_observation_current
+        """
+    )
+    conn.execute(
         """INSERT INTO operations.entity_observation_current VALUES
                (%s, 1, %s, 'LogMeIn', 'lmi-old', false, '{"hostname": "OLD-NAME-77"}'),
                (%s, 1, %s, 'Ninja', 'device-health:1', true, '{"hostname": "health-only-77"}')""",
