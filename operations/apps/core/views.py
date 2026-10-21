@@ -8727,6 +8727,12 @@ def software_user_risk(request: HttpRequest) -> HttpResponse:
     q_filter = (request.GET.get("q") or "").strip().lower()
     kind_filter = (request.GET.get("kind") or "").strip().lower()
     is_csv = wants_csv(request)
+    try:
+        page_number = max(1, int(request.GET.get("page", "1")))
+    except ValueError:
+        page_number = 1
+    page_size = 100
+    page_rank_start = (page_number - 1) * page_size
     q_pattern = q_filter.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
     kind_pattern = (
         kind_filter.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
@@ -8895,7 +8901,8 @@ def software_user_risk(request: HttpRequest) -> HttpResponse:
                    ranked.total_items
             FROM deduplicated_items item
             JOIN ranked_users ranked ON ranked.last_user = item.last_user
-            WHERE ranked.user_rank <= 500
+            WHERE ranked.user_rank > {page_rank_start}
+              AND ranked.user_rank <= {page_rank_start + page_size}
             ORDER BY ranked.item_count DESC,
                      item.last_user,
                      item.canonical_hostname,
@@ -9037,6 +9044,9 @@ def software_user_risk(request: HttpRequest) -> HttpResponse:
             "active_clients": client_slugs,
             "active_q": q_filter,
             "active_kind": kind_filter,
+            "page_number": page_number,
+            "page_size": page_size,
+            "page_count": max(1, -(-user_count // page_size)),
             "software_tab": "user-risk",
         },
     )

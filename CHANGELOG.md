@@ -2,6 +2,13 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.128.8] — 2026-10-21 — User exposure pagination
+
+### Changed
+
+- User exposure renders 100 ranked users per page while retaining the full
+  ranked set through pagination and complete CSV export.
+
 ## [0.128.7] — 2026-10-21 — Computers source-evidence first view
 
 ### Changed

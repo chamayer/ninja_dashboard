@@ -90,8 +90,12 @@
     {% endfor %}
 </div>
 {% endfor %}
-{% if user_count > 500 %}
-<p class="muted">Showing top 500 users (of {{ user_count }}). Filter by client to narrow.</p>
+{% if page_count > 1 %}
+<p class="muted">Showing users {{ page_number }} of {{ page_count }} ({{ user_count }} total).</p>
+<p class="muted">
+    {% if page_number > 1 %}<a href="?q={{ active_q|urlencode }}&kind={{ active_kind|urlencode }}&page={{ page_number|add:'-1' }}{% for slug in active_clients %}&client={{ slug|urlencode }}{% endfor %}">Previous</a>{% endif %}
+    {% if page_number < page_count %}{% if page_number > 1 %} · {% endif %}<a href="?q={{ active_q|urlencode }}&kind={{ active_kind|urlencode }}&page={{ page_number|add:'1' }}{% for slug in active_clients %}&client={{ slug|urlencode }}{% endfor %}">Next</a>{% endif %}
+</p>
 {% endif %}
 {% else %}
 <p class="muted">Nothing on the user-risk queue for the current filter.</p>

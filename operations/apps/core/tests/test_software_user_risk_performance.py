@@ -10,7 +10,9 @@ def test_user_exposure_bounds_html_rows_but_retains_complete_csv_export():
     assert "is_csv = wants_csv(request)" in view
     assert "if is_csv:" in view
     assert "ranked_users AS MATERIALIZED" in view
+    assert "page_rank_start" in view
+    assert "ranked.user_rank >" in view
     assert "ROW_NUMBER() OVER" in view
-    assert "WHERE ranked.user_rank <= 500" in view
+    assert "AND ranked.user_rank <= {page_rank_start + page_size}" in view
     assert '"users": users,' in view
     assert '"users": users[:500]' not in view
