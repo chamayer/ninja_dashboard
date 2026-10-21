@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from django.contrib import admin
+from django.contrib.auth import views as auth_views
 from django.urls import path
 from drf_spectacular.views import (
     SpectacularAPIView,
@@ -387,6 +388,22 @@ urlpatterns = [
         name="client_requirements_config",
     ),
     path("switch/", client_switch, name="client_switch"),
+    path(
+        "login/",
+        auth_views.LoginView.as_view(redirect_authenticated_user=True),
+        name="login",
+    ),
+    path("logout/", auth_views.LogoutView.as_view(), name="logout"),
+    path(
+        "account/password/",
+        auth_views.PasswordChangeView.as_view(),
+        name="password_change",
+    ),
+    path(
+        "account/password/done/",
+        auth_views.PasswordChangeDoneView.as_view(),
+        name="password_change_done",
+    ),
     path("admin/", admin.site.urls),
     path("api/schema/", SpectacularAPIView.as_view(), name="schema"),
     path("api/docs/", SpectacularSwaggerView.as_view(url_name="schema"), name="swagger-ui"),

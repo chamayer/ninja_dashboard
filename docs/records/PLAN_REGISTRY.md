@@ -165,6 +165,19 @@ do not open competing blueprints for the same work.
 - Resume gate: Re-measure the deployed Computers page, then design the rebuildable, existing-authority-owned inventory read model and its refresh_derived() hook; preserve tenant/RLS, filters, cards, CSV, and source/coverage/Hudu semantics. Requirement-rule changes belong to PLAN-014.
 - Last checked: 2026-10-21 (prerequisite cc5d936 and page fixes 453c41c and ccae6da deployed; the read model, refresh function, re-measurement, and parity validation are not started).
 
+## PLAN-013 — Operations sign-in page
+
+- Scope: Operations authentication pages
+- Status: active
+- Defined: 2026-10-21
+- Started: 2026-10-21
+- Completed: —
+- Blueprint: operations/BLUEPRINT.md
+- Source: operations/BLUEPRINT.md
+- Section: PLAN-013 — Operations sign-in page
+- Resume gate: Independent of PLAN-012 (no shared files). Verify the blueprint checkpoint against the working tree before continuing.
+- Last checked: 2026-10-21 (committed and pushed; deployed sign-in not yet verified).
+
 ## PLAN-014 — Requirement applicability
 
 - Scope: Evaluator coverage rules and Computers requirement display

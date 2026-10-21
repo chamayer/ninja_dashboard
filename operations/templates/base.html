@@ -51,6 +51,9 @@
         }
         .user-info { font-size: 0.85rem; color: #b3b6c1; }
         .user-info a { text-decoration: underline; }
+        .logout-form { display: inline; margin: 0; }
+        .logout-form button { padding: 0; border: 0; background: none; color: inherit;
+            font: inherit; text-decoration: underline; cursor: pointer; }
         main {
             padding: 2rem 1.5rem;
             max-width: 1200px;
@@ -289,10 +292,13 @@
         </form>
         <div class="user-info">
             {{ user.username }} ·
-            <a href="{% url 'admin:logout' %}">logout</a>
+            <a href="{% url 'password_change' %}">change password</a> ·
+            <form action="{% url 'logout' %}" method="post" class="logout-form">
+                {% csrf_token %}<button type="submit">sign out</button>
+            </form>
         </div>
         {% else %}
-        <div class="user-info"><a href="{% url 'admin:login' %}">log in</a></div>
+        <div class="user-info"><a href="{% url 'login' %}">sign in</a></div>
         {% endif %}
     </header>
 

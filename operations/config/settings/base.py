@@ -117,10 +117,11 @@ DATABASES = {
 # ---------------------------------------------------------------------------
 AUTH_USER_MODEL = "operations.User"
 
-# login_required redirects here. Admin login gets us into the app until
-# we ship dedicated login views.
-LOGIN_URL = "/admin/login/"
+# login_required redirects here. The Operations sign-in page accepts any
+# active user; /admin/login/ still requires staff status.
+LOGIN_URL = "/login/"
 LOGIN_REDIRECT_URL = "/"
+LOGOUT_REDIRECT_URL = "/login/"
 
 AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},

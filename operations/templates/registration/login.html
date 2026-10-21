@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+
+{% block title %}Sign in{% endblock %}
+
+{% block content %}
+<style>
+  .auth-card { max-width: 24rem; margin: 2rem auto; }
+  .auth-card h1 { margin: 0 0 .35rem; font-size: 1.35rem; }
+  .auth-card form { display: grid; gap: .75rem; margin-top: 1rem; }
+  .auth-card label { display: grid; gap: .25rem; font-size: .85rem; color: var(--muted); }
+  .auth-card input { padding: .5rem .6rem; border: 1px solid var(--border); border-radius: 4px; font: inherit; }
+  .auth-card button { justify-self: start; padding: .45rem 1rem; }
+  .auth-error { margin: 0; padding: .5rem .65rem; border: 1px solid #f1b5b5; border-radius: 4px; background: #fdf0f0; color: #8a1f1f; font-size: .85rem; }
+</style>
+
+<div class="card auth-card">
+  <h1>Sign in</h1>
+  <p class="muted" style="margin:0;">Use your Operations username and password.</p>
+
+  <form method="post" action="{% url 'login' %}">
+    {% csrf_token %}
+    {% if form.non_field_errors %}
+      {% for error in form.non_field_errors %}<p class="auth-error" role="alert">{{ error }}</p>{% endfor %}
+    {% endif %}
+    <label for="{{ form.username.id_for_label }}">Username
+      <input type="text" name="{{ form.username.html_name }}" id="{{ form.username.id_for_label }}"
+             value="{{ form.username.value|default:'' }}" autocomplete="username" autocapitalize="none" autofocus required>
+    </label>
+    <label for="{{ form.password.id_for_label }}">Password
+      <input type="password" name="{{ form.password.html_name }}" id="{{ form.password.id_for_label }}"
+             autocomplete="current-password" required>
+    </label>
+    <input type="hidden" name="next" value="{{ next }}">
+    <button type="submit">Sign in</button>
+  </form>
+  <p class="muted" style="margin:1rem 0 0;">Forgot your password? Ask an Operations administrator to reset it.</p>
+</div>
+{% endblock %}

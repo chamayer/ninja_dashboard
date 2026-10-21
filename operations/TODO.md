@@ -7,6 +7,16 @@ module-specific; root `../TODO.md` keeps cross-repo items and pointers.
 
 ## Inbox
 
+- [ ] **Sign-in follow-ups (after PLAN-013):** (1) replace the `is_staff`
+      edit checks in `finding_types_admin.py`, `software_policy.py`, the
+      client-mappings view, `home.html`, and `sources.html` with group
+      permissions so non-staff `admin` users can edit; (2) decide on single
+      sign-on (Entra ID/OIDC needs a new dependency, HTTPS, and an ADR);
+      (3) optional Operations Users page backed by `manage_users`.
+- [ ] **Pre-existing test failures (seen 2026-10-21 on HEAD 3091a47):**
+      `test_conditions.py` (2), `test_conditions_command.py` (1), and
+      `test_e5_generic_admin.py` (1) — the conditions profile now has 61
+      definitions against the expected 54.
 - [ ] **Computers Sources column: link each line to its source record** (user
       deferred 2026-10-21). Only Hudu stores a record URL (`hudu_url`); the
       agent sources store `external_id` only. Plan: Hudu line linked from the
