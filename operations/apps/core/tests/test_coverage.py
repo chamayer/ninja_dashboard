@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import csv as csv_module
 from contextlib import nullcontext
+from datetime import UTC, datetime
 from io import StringIO
 from pathlib import Path
 from types import SimpleNamespace
@@ -13,6 +14,7 @@ from django.test import RequestFactory
 
 from apps.core import views
 
+EVALUATED_AT = datetime(2026, 10, 21, 16, 55, tzinfo=UTC)
 
 class _Cursor:
     def __init__(self):
@@ -45,6 +47,7 @@ class _Cursor:
                     False,
                     "Missing",
                     False,
+                    EVALUATED_AT,
                 ),
                 (
                     "acme",
@@ -57,6 +60,7 @@ class _Cursor:
                     False,
                     "Online",
                     False,
+                    EVALUATED_AT,
                 ),
                 (
                     "beta",
@@ -69,6 +73,7 @@ class _Cursor:
                     True,
                     "Online",
                     False,
+                    EVALUATED_AT,
                 ),
             ],
             [
@@ -191,11 +196,13 @@ def test_coverage_uses_effective_requirements_and_source_specific_filters(monkey
     views.fleet_coverage(request)
 
     statement, params = cursor.queries[1]
-    assert "requirement_profile_items" in statement
-    assert "coverage_requirements" in statement
+    # ADR-0035: the page reads stored verdicts and never re-derives the rule.
+    assert "operations.device_requirement_state" in statement
+    assert "requirement_profile_items" not in statement
+    assert "coverage_requirements" not in statement
+    assert "findings" not in statement
     assert "device_operator_decisions" in statement
-    assert "missing_required_platform" in statement
-    assert "stale_required_platform" in statement
+    assert "device_agent_presence_current" in statement
     assert params is None
     hudu_statement, hudu_params = cursor.queries[2]
     assert "v_hudu_computer_inventory_evidence_current" in hudu_statement
@@ -221,6 +228,7 @@ def test_coverage_uses_effective_requirements_and_source_specific_filters(monkey
     assert context["device_role_filters"] == ["workstation"]
     assert len(context["device_rows"]) == 1
     assert context["paginator"].count == 1
+    assert context["requirements_evaluated_at"] == EVALUATED_AT
     assert context["filtered_summary"] == {
         "clients": 1,
         "devices": 1,
@@ -281,6 +289,60 @@ def _render_coverage_context(monkeypatch, query: str) -> dict:
     request.user = SimpleNamespace(is_authenticated=True)
     views.fleet_coverage(request)
     return captured["context"]
+
+
+def test_requirement_the_evaluator_did_not_assess_is_shown_as_not_evaluated(monkeypatch):
+    cursor = _Cursor()
+    first = cursor._results[0][0]
+    cursor._results[0][0] = (*first[:8], "Not evaluated", *first[9:])
+    captured = {}
+    monkeypatch.setattr(views, "connection", _Connection(cursor))
+    monkeypatch.setattr(views.transaction, "atomic", nullcontext)
+    monkeypatch.setattr(
+        views,
+        "render",
+        lambda _request, _template, context: captured.setdefault("context", context)
+        or HttpResponse(),
+    )
+    request = RequestFactory().get(
+        "/inventory/computers/?agent_0=Ninja&agent_requirement_0=Not+evaluated"
+    )
+    request.user = SimpleNamespace(is_authenticated=True)
+    views.fleet_coverage(request)
+    context = captured["context"]
+
+    assert context["paginator"].count == 1
+    row = context["device_rows"][0]
+    assert row["device_id"] == "device-1"
+    assert row["agent_cells"][0]["rule_label"] == "Required · Not evaluated"
+    cards = {card["platform"]: card for card in context["platform_cards"]}
+    assert {item["name"]: item["count"] for item in cards["Ninja"]["requirement_exceptions"]} == {
+        "Not evaluated": 1,
+    }
+    assert "Not evaluated" in context["agent_filter_requirements"]
+
+
+def test_page_says_when_requirements_have_not_been_evaluated(monkeypatch):
+    cursor = _Cursor()
+    cursor._results[0] = []
+    captured = {}
+    monkeypatch.setattr(views, "connection", _Connection(cursor))
+    monkeypatch.setattr(views.transaction, "atomic", nullcontext)
+    monkeypatch.setattr(
+        views,
+        "render",
+        lambda _request, _template, context: captured.setdefault("context", context)
+        or HttpResponse(),
+    )
+    request = RequestFactory().get("/inventory/computers/")
+    request.user = SimpleNamespace(is_authenticated=True)
+    views.fleet_coverage(request)
+
+    assert captured["context"]["requirements_evaluated_at"] is None
+    template = Path(views.__file__).parents[2].joinpath("templates", "coverage.html")
+    source = template.read_text(encoding="utf-8")
+    assert "Requirements were last evaluated" in source
+    assert "they appear after the next evaluator run" in source
 
 
 def test_computer_shortcuts_distinguish_other_records_from_hudu(monkeypatch):
@@ -541,3 +603,4 @@ def test_cmdb_inventory_archive_state_is_read_only():
     assert "END AS is_archived" in migration
     assert "OWNER TO operations_view_owner" in migration
     assert "REVOKE INSERT, UPDATE, DELETE, TRUNCATE" in migration
+

@@ -151,3 +151,16 @@ do not open competing blueprints for the same work.
 - Source: docs/archive/workspace-cleanup-2026-10-20/plan.md
 - Section: Active plan — Software inventory ingest rebuild; Active plan — Software findings rebuild (implementation)
 - Resume gate: No action; open a new plan only for a verified follow-up not covered by the 0.127.0 release.
+
+## PLAN-012 — Computers inventory read model
+
+- Scope: Operations Computers inventory performance
+- Status: active
+- Defined: 2026-10-21
+- Started: 2026-10-21
+- Completed: —
+- Blueprint: BLUEPRINT.md
+- Source: BLUEPRINT.md
+- Section: Computers full-fleet inventory contract
+- Resume gate: Design and measure a rebuildable, existing-authority-owned inventory read model; preserve tenant/RLS, filters, cards, CSV, and source/coverage/Hudu semantics.
+- Last checked: 2026-10-21 (step 1, stored requirement verdicts per ADR-0035 and migration 0332, implemented and validated locally; uncommitted. Baseline: page showed 3,946 Hudu requirements missing with no evaluator finding).

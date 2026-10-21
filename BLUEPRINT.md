@@ -1,49 +1,70 @@
-# PLAN-001 — Dashboard navigation performance
+# PLAN-012 — Computers inventory read model
 
 ## Goal
 
-Make ordinary Dashboard navigation responsive from measured causes, with current
-deployed evidence or an explicit measured exception.
+Make the Computers inventory correct and responsive while preserving its
+filter, card, and CSV contract. Requirement state has one authority that pages
+read instead of re-deriving.
 
 ## Scope
 
-Dashboard and landing-page server/rendering performance. Preserve tenant/RLS,
-URLs, card meanings, and existing data authorities. No cache, duplicate
-projection, speculative index, migration, or production-data action.
+One rebuildable effective read model owned by existing source, identity,
+coverage, and Hudu authorities. Preserve tenant/RLS, URLs, cards, filters, CSV,
+and source-only rows. No cache or duplicate authority.
+
+User-confirmed order (2026-10-21): (1) stored requirement verdicts; (2) Status
+filter including Missing over every agent (not four hard-coded names), one
+Hudu card (requirement counts now allowed), card order Ninja, SentinelOne,
+LogMeIn, R-U-ON, ScreenConnect, Hudu, then others, and a one-line filter bar
+with matching Filter/Clear at the far right.
 
 ## Status
 
-Completed with a measured exception. Releases 0.128.1–0.128.15 are deployed;
-the latest performance releases are mirrored by commits `e671685` and
-`6ec8b35`.
+Active. Step 1 implemented and validated locally; uncommitted, not deployed.
 
-## Evidence and decision
+## Decisions
 
-Dashboard warm handler timing is 1.308–1.568 s; Sources is 0.935–0.988 s;
-Software Overview is 1.042–1.068 s; Products is 2.037–2.082 s. User exposure
-browser first response improved from 4.302 s to 2.961 s after its bounded view.
+- ADR-0035 (`operations/docs/decisions/0035-...`): the evaluator's coverage
+  pass stores a verdict per Computer and requirement in
+  `operations.device_requirement_state` (migration 0332) in the transaction
+  that writes its findings. Its only writer is
+  `write_device_requirement_state`. Runtime roles get SELECT only.
+- Online/Offline stays a live read from `device_agent_presence_current`.
+- `check_device_requirement_state` runs after each platform evaluation and
+  keeps disagreements in `device_requirement_state_drift`. It does not repair.
 
-Computers first response improved from 6.351 s to 4.740 s (4.942 s duration,
-375 KB transfer). Its handler assembly fell from 7.525 s to 4.610 s. Hudu
-fleet facts fell from 2.054 s to 0.989 s; page-only Hudu presentation is
-0.071 s. The next release removed 80,164 full-fleet URL encodes, which a
-full-render profile had measured at 4.634 s.
+## Baseline (production, read-only, 2026-10-21 ~17:00 UTC)
 
-The remaining full-render profile measures 3.154 s database wait across the
-15 fleet reads and 1.209 s template rendering; full-fleet status-cell work is
-only 0.579 s. Reaching the two-second target would require an approved shared
-inventory read model or a changed full-fleet filter/card contract. That work
-is deferred rather than introducing an unapproved projection or weakening the
-operator contract.
+5,420 Computers; 4,853 have a current Hudu asset. The page showed 4,208 Hudu
+requirements, all Missing, and 3,946 had no finding. Page-only Missing:
+Ninja 57, SentinelOne 51, LogMeIn 42, ScreenConnect 4. Open Missing findings
+against finding-backed page rows: Ninja 344/245, SentinelOne 515/420, LogMeIn
+162/131. The evaluator runs every ~41 min (248 s).
 
-## Validation
+## Validation (step 1, local)
 
-`pytest apps/core/tests/test_coverage.py -q` passed (14 tests), as did
-`manage.py check`, `compileall`, plan-registry validation, diff whitespace,
-and governance validation. Governance retains the known stale
-`docs/current-state.md` status-date warning. No schema or data changes.
+- Migration 0332 on PostgreSQL 16 with production role attributes: 8 passed.
+- Evaluator verdicts on PostgreSQL (Hudu current/archived, stale, outside
+  coverage, exempt, single Computer): ingest evaluator and requirement-state
+  tests, 33 passed.
+- Computers page tests: 16 passed. `manage.py check` and
+  `makemigrations --check` are clean.
+- Full suites: Operations 441 passed/4 failed; ingest 481 passed/4 failed.
+  The same 8 fail on clean HEAD 3091a47.
+- Ruff is clean on changed files. `views.py` has the same findings as HEAD.
+- Not validated: the deployed stack. The page shows no verdicts until the
+  first evaluator run after deploy.
 
-## Follow-up
+## Checkpoint
 
-Open a new approved plan before designing an inventory read model or changing
-the full-fleet filter/card contract.
+Step 1 code: migration 0332, `ingest/evaluator.py` (`_write_requirement_state`),
+`ingest/requirement_state.py` with `operator_job_queue` wiring, the Computers
+page read in `views.py` and `coverage.html`, tests, ADR-0035, and an
+architecture note.
+
+## Next action
+
+User review, then a separately approved commit and push (the push deploys and
+applies 0332). After deploy, compare the page with the baseline and read the
+drift table. Then step 2. After that, move the Dashboard, software-capability,
+and `_auto_resolve` copies to the stored verdicts.

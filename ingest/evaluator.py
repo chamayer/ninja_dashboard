@@ -1659,6 +1659,7 @@ def _evaluate_coverage(
     client_profile: dict[Any, Any] = {row[0]: row[1] for row in cur.fetchall()}
 
     if not global_rows and not profile_rows and not client_override_rows:
+        _write_requirement_state(cur, tenant_id, device_id, [])
         return 0
 
     def resolve_tier(dev_client_id, dev_role: str) -> list[tuple]:
@@ -1748,17 +1749,45 @@ def _evaluate_coverage(
     )
     devices = cur.fetchall()
 
+    # ADR-0035: every evaluated requirement's verdict, written below in this
+    # transaction, so readers never re-derive the rule.
+    verdicts: list[dict[str, Any]] = []
+
+    def record(dev_id, agent_id, entity_type, platform, verdict, last_observed=None, ckey=None):
+        verdicts.append(
+            {
+                "device_id": str(dev_id),
+                "entity_type": entity_type,
+                "platform": platform,
+                "agent_id": agent_id,
+                "verdict": verdict,
+                "last_observed_at": last_observed.isoformat() if last_observed else None,
+                "condition_key": ckey,
+            }
+        )
+
     count = 0
     for dev_id, dev_client_id, hostname, dev_role, exemptions, os_group, in_universe in devices:
         exemptions = exemptions or {}
         not_evaluated: list[dict[str, str]] = []
+        tier_rows = resolve_tier(dev_client_id, dev_role or "all")
         # BLUEPRINT E.6: coverage evaluates against entity types. A device
         # with zero agent.* observations is not in the coverage universe —
         # it's a hypervisor / NMS tracking record. Skipped here; picked up
-        # by _evaluate_unenrolled instead.
+        # by _evaluate_unenrolled instead. Its requirements are recorded as
+        # outside coverage, never as missing.
         if not in_universe:
+            for _rid, _rclient, agent_id, entity_type, platform, _rscope, aog, *_rest in tier_rows:
+                if entity_type in exemptions:
+                    record(dev_id, agent_id, entity_type, platform, "exempt")
+                    continue
+                allowed_groups = set(aog) if aog else (
+                    set(agents_by_id[agent_id][2]) if agent_id in agents_by_id else None
+                )
+                if allowed_groups is not None and os_group not in allowed_groups and os_group != "Unknown":
+                    continue
+                record(dev_id, agent_id, entity_type, platform, "outside_coverage")
             continue
-        tier_rows = resolve_tier(dev_client_id, dev_role or "all")
         for (
             _rid,
             _rclient,
@@ -1773,6 +1802,7 @@ def _evaluate_coverage(
             conf_hours,
         ) in tier_rows:
             if entity_type in exemptions:
+                record(dev_id, agent_id, entity_type, platform, "exempt")
                 continue
             # Agent physics: skip if device's os_group isn't in the
             # supported set (LMI on Linux etc). applicable_os_groups on
@@ -1805,6 +1835,7 @@ def _evaluate_coverage(
                 )
                 if not established:
                     not_evaluated.append({"entity_type": entity_type, "platform": platform})
+                    record(dev_id, agent_id, entity_type, platform, "not_evaluated")
                     continue
 
             # Per-device presence for this (entity_type, platform), 'any'
@@ -1842,6 +1873,7 @@ def _evaluate_coverage(
                     last_observed = last_observed.replace(tzinfo=timezone.utc)
                 gap_age_hours = (now - last_observed).total_seconds() / 3600
                 if gap_age_hours < gap_hours:
+                    record(dev_id, agent_id, entity_type, platform, "satisfied", last_observed)
                     continue
                 if gap_age_hours >= conf_hours:
                     confidence = "confirmed"
@@ -1852,6 +1884,7 @@ def _evaluate_coverage(
                 if confidence == "confirmed" and dev_id not in corroborated:
                     confidence = "probable"
                 if stale_ft is None:
+                    record(dev_id, agent_id, entity_type, platform, "stale", last_observed)
                     continue
                 ftype, ft_name, sev = stale_ft, "stale_required_platform", "medium"
 
@@ -1871,6 +1904,15 @@ def _evaluate_coverage(
                 details["reason_suppressed"] = "device_offline"
 
             ckey = _condition_key(tenant_id, dev_client_id, dev_id, ft_name, platform)
+            record(
+                dev_id,
+                agent_id,
+                entity_type,
+                platform,
+                "missing" if last_observed is None else "stale",
+                last_observed,
+                ckey,
+            )
             count += _upsert_finding(
                 cur,
                 tenant_id,
@@ -1928,7 +1970,29 @@ def _evaluate_coverage(
             cur, tenant_id, os_unknown_ft, os_unknown_subjects, now,
             assessment_required=True, empty_result_verified=True,
         )
+    _write_requirement_state(cur, tenant_id, device_id, verdicts)
     return count
+
+
+def _write_requirement_state(
+    cur: Any, tenant_id: int, device_id: uuid.UUID | None, verdicts: list[dict[str, Any]]
+) -> None:
+    """Replace the stored requirement verdicts for this pass (ADR-0035, migration 0332).
+
+    A full pass replaces every Computer's verdicts; a single-Computer pass only
+    that Computer's. Runs in the coverage pass's transaction, so the verdicts
+    and the findings they produced commit together.
+    """
+    cur.execute(
+        "SELECT to_regprocedure("
+        "'operations.write_device_requirement_state(bigint, uuid[], jsonb)') IS NOT NULL"
+    )
+    if not cur.fetchone()[0]:
+        return
+    cur.execute(
+        "SELECT operations.write_device_requirement_state(%s, %s::uuid[], %s::jsonb)",
+        (tenant_id, [str(device_id)] if device_id else None, json.dumps(verdicts)),
+    )
 
 
 # --------------------------------------------------------------------------

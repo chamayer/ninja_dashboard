@@ -109,7 +109,7 @@
 
 <div class="coverage-result-heading">
     <h2>All known Computers</h2>
-    <p>These counts are not changed by the filters below.</p>
+    <p>These counts are not changed by the filters below. {% if requirements_evaluated_at %}Requirements were last evaluated {{ requirements_evaluated_at|timesince }} ago ({{ requirements_evaluated_at|date:"M j, H:i" }}).{% else %}Requirement results are not available yet; they appear after the next evaluator run.{% endif %}</p>
 </div>
 <div class="coverage-cards">
     {% for card in platform_cards %}

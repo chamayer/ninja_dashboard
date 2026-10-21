@@ -104,6 +104,11 @@ requirements are sparse overrides: an enabled row explicitly requires a
 service, a disabled row explicitly exempts it, and no row inherits the
 assigned profile (or the tenant-global fallback when no profile is assigned).
 
+The evaluator's coverage pass is the only place that decides whether a
+requirement is met. It stores a verdict per Computer and requirement in
+`operations.device_requirement_state`, in the transaction that writes its
+findings; consumers read verdicts instead of re-deriving the rule (ADR-0035).
+
 ## Queues
 
 Queues use registered contracts for:

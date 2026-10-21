@@ -14093,7 +14093,7 @@ def org_software_decide(request: HttpRequest, org_slug: str) -> HttpResponse:
 _SEV_RANK = (
     "CASE severity WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END"
 )
-_COVERAGE_STATES = ("Online", "Offline", "Stale", "Missing")
+_COVERAGE_STATES = ("Online", "Offline", "Stale", "Missing", "Not evaluated")
 
 
 def _safe_external_http_url(value: str | None) -> str:
@@ -14204,185 +14204,62 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
         with connection.cursor() as cur:
             cur.execute("SET LOCAL operations.tenant_id = 1")
 
-            # This mirrors the evaluator's requirement resolution: profile
-            # (or global) baseline, then client all/role overrides.  The page
-            # reads current state only; it does not infer a requirement from a
-            # historical observation.
+            # ADR-0035: the evaluator's coverage pass stores a verdict for every
+            # requirement; the page reads it and never re-derives the rule.
+            # Online/Offline is source evidence, read live from presence.
+            # Exempt requirements are not shown as requirements (SentinelOne
+            # exemptions are shown through s1_exempt).
             cur.execute(
                 """
-                WITH devices AS MATERIALIZED (
-                    SELECT d.id, d.tenant_id, d.client_id, d.canonical_hostname,
-                           d.device_role, d.os_group, d.os_family, d.device_type,
-                           c.slug, c.display_name,
-                           c.requirement_profile_id,
-                           COALESCE(decision.value, '{}'::jsonb) AS exemptions
-                    FROM operations.devices d
-                    JOIN operations.clients c ON c.id = d.client_id
-                    LEFT JOIN operations.device_operator_decisions decision
-                      ON decision.tenant_id = d.tenant_id
-                     AND decision.device_id = d.id
-                     AND decision.dimension = 'exemptions'
-                    WHERE d.tenant_id = 1
-                      AND d.deleted_at IS NULL
-                      AND d.lifecycle_status <> 'retired'
-                ), baseline AS MATERIALIZED (
-                    SELECT d.*, requirement.agent_id, requirement.entity_type,
-                           requirement.platform, requirement.applicable_os_groups
-                    FROM devices d
-                    JOIN LATERAL (
-                        SELECT profile.agent_id, profile.entity_type, profile.platform,
-                               profile.device_scope, profile.applicable_os_groups
-                        FROM operations.requirement_profile_items profile
-                        WHERE profile.tenant_id = d.tenant_id
-                          AND profile.profile_id = d.requirement_profile_id
-                          AND d.requirement_profile_id IS NOT NULL
-                          AND (
-                              profile.device_scope = d.device_role
-                              OR (
-                                  profile.device_scope = 'all'
-                                  AND NOT EXISTS (
-                                      SELECT 1
-                                      FROM operations.requirement_profile_items role_item
-                                      WHERE role_item.tenant_id = d.tenant_id
-                                        AND role_item.profile_id = d.requirement_profile_id
-                                        AND role_item.device_scope = d.device_role
-                                  )
-                              )
-                          )
-                        UNION ALL
-                        SELECT global.agent_id, global.entity_type, global.platform,
-                               global.device_scope, global.applicable_os_groups
-                        FROM operations.coverage_requirements global
-                        WHERE global.tenant_id = d.tenant_id
-                          AND global.client_id IS NULL
-                          AND global.enabled
-                          AND d.requirement_profile_id IS NULL
-                          AND (
-                              global.device_scope = d.device_role
-                              OR (
-                                  global.device_scope = 'all'
-                                  AND NOT EXISTS (
-                                      SELECT 1
-                                      FROM operations.coverage_requirements role_requirement
-                                      WHERE role_requirement.tenant_id = d.tenant_id
-                                        AND role_requirement.client_id IS NULL
-                                        AND role_requirement.enabled
-                                        AND role_requirement.device_scope = d.device_role
-                                  )
-                              )
-                          )
-                    ) requirement ON TRUE
-                ), overrides AS MATERIALIZED (
-                    SELECT DISTINCT ON (
-                        d.id,
-                        COALESCE(requirement.agent_id::text,
-                                 requirement.entity_type || ':' || requirement.platform)
-                    )
-                           d.id AS device_id, requirement.agent_id,
-                           requirement.entity_type, requirement.platform,
-                           requirement.applicable_os_groups, requirement.enabled
-                    FROM devices d
-                    JOIN operations.coverage_requirements requirement
-                      ON requirement.tenant_id = d.tenant_id
-                     AND requirement.client_id = d.client_id
-                     AND requirement.device_scope IN ('all', d.device_role)
-                    ORDER BY d.id,
-                             COALESCE(requirement.agent_id::text,
-                                      requirement.entity_type || ':' || requirement.platform),
-                             CASE WHEN requirement.device_scope = d.device_role THEN 0 ELSE 1 END
-                ), effective_requirements AS (
-                    SELECT baseline.*
-                    FROM baseline
-                    WHERE NOT EXISTS (
-                        SELECT 1
-                        FROM overrides override
-                        WHERE override.device_id = baseline.id
-                          AND (
-                              (override.agent_id IS NOT NULL
-                               AND override.agent_id = baseline.agent_id)
-                              OR (
-                                  override.agent_id IS NULL
-                                  AND baseline.agent_id IS NULL
-                                  AND override.entity_type = baseline.entity_type
-                                  AND override.platform = baseline.platform
-                              )
-                          )
-                    )
-                    UNION ALL
-                    SELECT d.*, override.agent_id, override.entity_type,
-                           override.platform, override.applicable_os_groups
-                    FROM overrides override
-                    JOIN devices d ON d.id = override.device_id
-                    WHERE override.enabled
-                ), required_agents AS MATERIALIZED (
-                    SELECT requirement.*
-                    FROM effective_requirements requirement
-                    LEFT JOIN operations.agents agent ON agent.id = requirement.agent_id
-                    WHERE NOT (requirement.exemptions ? requirement.entity_type)
-                      AND (
-                          COALESCE(requirement.applicable_os_groups,
-                                   agent.supported_os_groups) IS NULL
-                          OR COALESCE(requirement.applicable_os_groups,
-                                      agent.supported_os_groups) ? requirement.os_group
-                      )
-                ), agent_presence AS MATERIALIZED (
-                    SELECT presence.tenant_id, presence.device_id,
-                           presence.entity_type, presence.platform,
+                WITH presence AS MATERIALIZED (
+                    SELECT presence.device_id, presence.entity_type, presence.platform,
                            BOOL_OR(presence.reported_online) AS online
                     FROM operations.device_agent_presence_current presence
                     WHERE presence.tenant_id = 1
-                      AND presence.entity_type LIKE 'agent.%%'
-                    GROUP BY presence.tenant_id, presence.device_id,
-                             presence.entity_type, presence.platform
+                    GROUP BY presence.device_id, presence.entity_type, presence.platform
                 ), presence_by_requirement AS MATERIALIZED (
-                    SELECT tenant_id, device_id, entity_type, platform, online
-                    FROM agent_presence
+                    SELECT device_id, entity_type, platform, online FROM presence
                     UNION ALL
-                    SELECT tenant_id, device_id, entity_type, 'any' AS platform,
-                           BOOL_OR(online) AS online
-                    FROM agent_presence
-                    GROUP BY tenant_id, device_id, entity_type
-                ), active_gaps AS MATERIALIZED (
-                    SELECT finding.subject_id, finding.finding_details->>'platform' AS platform,
-                           MAX(type.name) AS finding_type
-                    FROM operations.findings finding
-                    JOIN operations.finding_types type ON type.id = finding.finding_type_id
-                    WHERE finding.tenant_id = 1
-                      AND type.name IN ('missing_required_platform', 'stale_required_platform')
-                      AND finding.status IN ('open', 'acknowledged', 'investigating')
-                    GROUP BY finding.subject_id, finding.finding_details->>'platform'
-                ), coverage AS (
-                    SELECT requirement.slug AS client_slug,
-                           requirement.display_name AS client_name,
-                           requirement.id AS device_id,
-                           COALESCE(requirement.canonical_hostname, '') AS hostname,
-                           COALESCE(requirement.os_family, '') AS os_family,
-                           requirement.device_type,
-                           requirement.platform,
-                           requirement.exemptions ? 'agent.edr' AS s1_exempt,
-                           CASE
-                               WHEN gap.finding_type = 'missing_required_platform' THEN 'Missing'
-                               WHEN gap.finding_type = 'stale_required_platform' THEN 'Stale'
-                               WHEN COALESCE(presence.online, FALSE) THEN 'Online'
-                               WHEN presence.device_id IS NOT NULL THEN 'Offline'
-                               ELSE 'Missing'
-                           END AS status,
-                           FALSE AS hudu_present
-                    FROM required_agents requirement
-                    LEFT JOIN presence_by_requirement presence
-                      ON presence.tenant_id = requirement.tenant_id
-                     AND presence.device_id = requirement.id
-                     AND presence.entity_type = requirement.entity_type
-                     AND presence.platform = requirement.platform
-                    LEFT JOIN active_gaps gap
-                      ON gap.subject_id = requirement.id
-                     AND gap.platform = requirement.platform
+                    SELECT device_id, entity_type, 'any' AS platform, BOOL_OR(online)
+                    FROM presence
+                    GROUP BY device_id, entity_type
                 )
-                SELECT
-                    client_slug, client_name, device_id, hostname, os_family, device_type,
-                    platform, s1_exempt, status, hudu_present
-                FROM coverage
-                ORDER BY client_name, hostname, platform
+                SELECT c.slug AS client_slug,
+                       c.display_name AS client_name,
+                       d.id AS device_id,
+                       COALESCE(d.canonical_hostname, '') AS hostname,
+                       COALESCE(d.os_family, '') AS os_family,
+                       d.device_type,
+                       state.platform,
+                       COALESCE(decision.value, '{}'::jsonb) ? 'agent.edr' AS s1_exempt,
+                       CASE state.verdict
+                           WHEN 'missing' THEN 'Missing'
+                           WHEN 'stale' THEN 'Stale'
+                           WHEN 'satisfied' THEN
+                               CASE WHEN COALESCE(presence.online, FALSE) THEN 'Online'
+                                    ELSE 'Offline' END
+                           ELSE 'Not evaluated'
+                       END AS status,
+                       FALSE AS hudu_present,
+                       state.evaluated_at
+                FROM operations.device_requirement_state state
+                JOIN operations.devices d
+                  ON d.tenant_id = state.tenant_id
+                 AND d.id = state.device_id
+                 AND d.deleted_at IS NULL
+                 AND d.lifecycle_status <> 'retired'
+                JOIN operations.clients c ON c.id = d.client_id
+                LEFT JOIN operations.device_operator_decisions decision
+                  ON decision.tenant_id = d.tenant_id
+                 AND decision.device_id = d.id
+                 AND decision.dimension = 'exemptions'
+                LEFT JOIN presence_by_requirement presence
+                  ON presence.device_id = state.device_id
+                 AND presence.entity_type = state.entity_type
+                 AND presence.platform = state.platform
+                WHERE state.tenant_id = 1
+                  AND state.verdict <> 'exempt'
+                ORDER BY c.display_name, hostname, state.platform
             """,
             )
             rows = cur.fetchall()
@@ -14605,10 +14482,18 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
         }
         for row in rows
     ]
+    # Every verdict of a coverage pass carries that pass's time (ADR-0035).
+    requirements_evaluated_at = max((row[10] for row in rows), default=None)
     # A Computer can have more than one requirement within one platform.  The
     # inventory card must still count that Computer once, using the status an
     # operator should address first.
-    coverage_status_rank = {"Missing": 0, "Stale": 1, "Offline": 2, "Online": 3}
+    coverage_status_rank = {
+        "Missing": 0,
+        "Stale": 1,
+        "Not evaluated": 2,
+        "Offline": 3,
+        "Online": 4,
+    }
     coverage_by_device: dict = {}
     for row in coverage_rows:
         platform_states = coverage_by_device.setdefault(row["device_id"], {})
@@ -14639,7 +14524,7 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
         "No status reported",
         "Possible match",
     }
-    allowed_rule_statuses = {"Required", "Missing", "Stale", "N/A", "Exempt"}
+    allowed_rule_statuses = {"Required", "Missing", "Stale", "Not evaluated", "N/A", "Exempt"}
     for value in requested_record_status_filters:
         product, separator, status = value.partition("|")
         if separator and product in platforms and status in allowed_record_statuses:
@@ -14963,16 +14848,12 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
             rule_status = "Exempt"
             rule_label = "Exempt"
         elif coverage:
-            coverage_status = coverage.get("status")
-            if coverage_status == "Missing":
-                rule_status = "Missing"
-                rule_label = "Required · Missing"
-            elif coverage_status == "Stale":
-                rule_status = "Stale"
-                rule_label = "Required · Stale"
-            else:
+            rule_status = coverage.get("status")
+            if rule_status not in {"Missing", "Stale", "Not evaluated"}:
                 rule_status = "Required"
-                rule_label = "Required"
+            rule_label = (
+                rule_status if rule_status == "Required" else f"Required · {rule_status}"
+            )
         else:
             rule_status = "N/A"
             rule_label = "N/A"
@@ -14988,6 +14869,10 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
             "Required": f"{platform} is required for this Computer.",
             "Missing": f"{platform} is required, but no qualifying current record was found.",
             "Stale": f"{platform} is required, but its qualifying record is stale.",
+            "Not evaluated": (
+                f"{platform} is required, but the evaluator did not assess it: the Computer "
+                "has no agent records or its operating system is unknown."
+            ),
             "N/A": f"{platform} is not required for this Computer.",
             "Exempt": "This Computer has a saved SentinelOne exemption.",
         }[rule_status]
@@ -15039,7 +14924,8 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
         if not requirements:
             return True
         return cell["rule_status"] in requirements or (
-            "Required" in requirements and cell["rule_status"] in {"Required", "Missing", "Stale"}
+            "Required" in requirements
+            and cell["rule_status"] in {"Required", "Missing", "Stale", "Not evaluated"}
         )
 
     def matches(row: dict) -> bool:
@@ -15153,11 +15039,13 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
     for platform in platforms:
         record_counts = {status: 0 for status in record_status_order}
         requirement_total = 0
-        requirement_counts = {status: 0 for status in ("Missing", "Stale", "Exempt")}
+        requirement_counts = {
+            status: 0 for status in ("Missing", "Stale", "Not evaluated", "Exempt")
+        }
         for inventory_row in inventory_rows:
             cell = inventory_row["platform_cells_by_name"][platform]
             record_counts[cell["record_status"]] += 1
-            if cell["rule_status"] in {"Required", "Missing", "Stale"}:
+            if cell["rule_status"] in {"Required", "Missing", "Stale", "Not evaluated"}:
                 requirement_total += 1
             if cell["rule_status"] in requirement_counts:
                 requirement_counts[cell["rule_status"]] += 1
@@ -15187,7 +15075,7 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
                         "count": requirement_counts[status],
                         "url": agent_filter_url(platform, requirement=status),
                     }
-                    for status in ("Missing", "Stale", "Exempt")
+                    for status in ("Missing", "Stale", "Not evaluated", "Exempt")
                     if requirement_counts[status]
                 ],
             }
@@ -15288,6 +15176,7 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
             {
                 "Missing": "Required · Missing",
                 "Stale": "Required · Stale",
+                "Not evaluated": "Required · Not evaluated",
             }.get(requirement, requirement)
             for requirement in condition["requirements"]
         )
@@ -15593,9 +15482,11 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
                 "Required",
                 "Missing",
                 "Stale",
+                "Not evaluated",
                 "N/A",
                 "Exempt",
             ),
+            "requirements_evaluated_at": requirements_evaluated_at,
             "coverage_filter_sources": coverage_filter_sources,
             "os_families": os_families,
             "device_types": device_types,

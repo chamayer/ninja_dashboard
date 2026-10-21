@@ -890,12 +890,19 @@ def _request_whole_fleet_findings(source: str) -> None:
 
 
 def _platform_evaluate_and_check():
-    """Platform evaluation, then the stored-attention consistency check (see finding_attention)."""
-    from ingest import db, finding_attention, main
+    """Platform evaluation, then the stored-state consistency checks.
+
+    See finding_attention (finding state) and requirement_state (requirement
+    verdicts, ADR-0035).
+    """
+    from ingest import db, finding_attention, main, requirement_state
 
     affected = main.platform_evaluate(tenant_id=1)
     with db.transaction() as cur:
         finding_attention.check_and_repair_state(cur, 1)
+    with db.transaction() as cur:
+        cur.execute("SET LOCAL operations.tenant_id = 1")
+        requirement_state.check_state(cur, 1)
     return affected
 
 
