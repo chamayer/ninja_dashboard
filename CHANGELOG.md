@@ -2,6 +2,14 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.128.14] — 2026-10-21 — Computers Hudu presentation boundary
+
+### Changed
+
+- Computers now retains compact Hudu facts for fleet filters and summaries, and
+  loads Hudu links and display records only for rendered HTML rows; CSV retains
+  complete detail.
+
 ## [0.128.13] — 2026-10-21 — User exposure ranking rollback
 
 ### Fixed

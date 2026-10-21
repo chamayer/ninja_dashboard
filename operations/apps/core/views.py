@@ -14389,18 +14389,16 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
             cur.execute(
                 """
                 SELECT hudu.observation_id, hudu.device_id, hudu.client_id,
-                       hudu.hostname, hudu.source_layout, hudu.source_url,
-                       hudu.serial_number, hudu.link_verdict,
-                       hudu.card_source, hudu.card_id,
-                       hudu.card_resolved_device_id,
+                       hudu.hostname,
                        lifecycle.record_lifecycle = 'archived' AS is_archived,
-                       alias.canonical
+                       BOOL_OR(hudu.card_source IS NOT NULL AND hudu.card_id IS NOT NULL)
+                           AS has_links
                 FROM operations.v_hudu_computer_inventory_evidence_current hudu
                 LEFT JOIN operations.v_device_source_record_lifecycle_current lifecycle
                   ON lifecycle.tenant_id = hudu.tenant_id
                  AND lifecycle.observation_id = hudu.observation_id
-                LEFT JOIN operations.platform_aliases alias
-                  ON alias.alias = LOWER(hudu.card_source)
+                GROUP BY hudu.observation_id, hudu.device_id, hudu.client_id,
+                         hudu.hostname, lifecycle.record_lifecycle
                 """,
             )
             hudu_rows = cur.fetchall()
@@ -14550,52 +14548,15 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
         }
 
     hudu_by_observation: dict = {}
-    for (
-        observation_id,
-        device_id,
-        client_id,
-        hostname,
-        layout,
-        hudu_url,
-        serial_number,
-        link_verdict,
-        card_source,
-        card_id,
-        resolved_device_id,
-        is_archived,
-        canonical,
-    ) in hudu_rows:
-        is_archived = bool(is_archived)
-        hudu = hudu_by_observation.setdefault(
-            observation_id,
-            {
-                "observation_id": observation_id,
-                "device_id": device_id,
-                "client_id": client_id,
-                "hostname": hostname or "",
-                "layout": layout or "",
-                "serial_number": serial_number or "",
-                "link_verdict": link_verdict or "",
-                "is_archived": is_archived,
-                "hudu_url": None,
-                "hudu_links": [],
-            },
-        )
-        if hudu_url and (hudu["hudu_url"] is None or hudu_url > hudu["hudu_url"]):
-            hudu["hudu_url"] = hudu_url
-        if card_source is None or card_id is None:
-            continue
-        linked_hostname = hostnames_by_device.get(device_id)
-        if (
-            card_source.lower() == "ninja"
-            and resolved_device_id == str(device_id)
-            and linked_hostname
-        ):
-            label = f"Ninja — {linked_hostname}"
-        else:
-            label = f"{canonical or card_source.title()} #{card_id}"
-        if label not in hudu["hudu_links"]:
-            hudu["hudu_links"].append(label)
+    for observation_id, device_id, client_id, hostname, is_archived, has_links in hudu_rows:
+        hudu_by_observation[observation_id] = {
+            "observation_id": observation_id,
+            "device_id": device_id,
+            "client_id": client_id,
+            "hostname": hostname or "",
+            "is_archived": bool(is_archived),
+            "has_links": bool(has_links),
+        }
 
     hudu_by_device: dict = {}
     for hudu in hudu_by_observation.values():
@@ -14819,45 +14780,14 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
             "hudu_present": bool(records),
             "hudu_archived": bool(records) and all(record["is_archived"] for record in records),
             "hudu_has_archived": any(record["is_archived"] for record in records),
-            "hudu_url": None,
+            "hudu_observation_ids": [record["observation_id"] for record in records],
             "hudu_links": [],
             "hudu_records": [],
             "hudu_matches_record_filter": hudu_matches_record_filter,
-            "hudu_matching_links": [],
+            "hudu_matching_links": any(record["has_links"] for record in matching_records),
         }
-        for record in sorted(
-            records,
-            key=lambda record: (
-                record["is_archived"],
-                record["layout"].lower(),
-                str(record["observation_id"]),
-            ),
-        ):
-            hudu_url = record["hudu_url"]
-            if hudu_url and (hudu["hudu_url"] is None or hudu_url > hudu["hudu_url"]):
-                hudu["hudu_url"] = hudu_url
-            for link in record["hudu_links"]:
-                if link not in hudu["hudu_links"]:
-                    hudu["hudu_links"].append(link)
-            linked_device = devices_by_id.get(record["device_id"])
-            hudu["hudu_records"].append(
-                {
-                    "layout": record["layout"] or "Asset",
-                    "is_archived": record["is_archived"],
-                    "url": _safe_external_http_url(record["hudu_url"]),
-                    "links": record["hudu_links"],
-                    "device_id": linked_device["device_id"] if linked_device else None,
-                    "device_client_slug": (linked_device["client_slug"] if linked_device else ""),
-                }
-            )
-        hudu["hudu_url"] = _safe_external_http_url(hudu["hudu_url"])
         hudu["hudu_current_count"] = sum(not record["is_archived"] for record in records)
         hudu["hudu_archived_count"] = sum(record["is_archived"] for record in records)
-        hudu["hudu_card_count"] = len(hudu["hudu_links"])
-        for record in matching_records:
-            for link in record["hudu_links"]:
-                if link not in hudu["hudu_matching_links"]:
-                    hudu["hudu_matching_links"].append(link)
         hudu["hudu_status"] = (
             (
                 "Archived in Hudu"
@@ -15435,7 +15365,89 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
         or device_role_filters
     )
 
+    def populate_hudu_presentation(target_rows: list[dict]) -> None:
+        """Load display-only Hudu detail after the fleet-level filter pass."""
+        observation_ids = [
+            observation_id
+            for row in target_rows
+            for observation_id in row["hudu_observation_ids"]
+        ]
+        if not observation_ids:
+            return
+        with transaction.atomic(), connection.cursor() as cur:
+            cur.execute("SET LOCAL operations.tenant_id = 1")
+            cur.execute(
+                """
+                SELECT hudu.observation_id, hudu.device_id, hudu.source_layout,
+                       hudu.source_url, hudu.card_source, hudu.card_id,
+                       hudu.card_resolved_device_id, alias.canonical
+                FROM operations.v_hudu_computer_inventory_evidence_current hudu
+                LEFT JOIN operations.platform_aliases alias
+                  ON alias.alias = LOWER(hudu.card_source)
+                WHERE hudu.observation_id = ANY(%s::uuid[])
+                """,
+                [observation_ids],
+            )
+            detail_rows = cur.fetchall()
+        details: dict = {}
+        for (
+            observation_id,
+            device_id,
+            layout,
+            hudu_url,
+            card_source,
+            card_id,
+            resolved_device_id,
+            canonical,
+        ) in detail_rows:
+            detail = details.setdefault(
+                observation_id,
+                {
+                    "layout": layout or "Asset",
+                    "url": _safe_external_http_url(hudu_url),
+                    "links": [],
+                    "device_id": device_id if device_id in devices_by_id else None,
+                    "device_client_slug": (
+                        devices_by_id[device_id]["client_slug"]
+                        if device_id in devices_by_id
+                        else ""
+                    ),
+                },
+            )
+            if card_source is None or card_id is None:
+                continue
+            linked_hostname = hostnames_by_device.get(device_id)
+            if (
+                card_source.lower() == "ninja"
+                and resolved_device_id == str(device_id)
+                and linked_hostname
+            ):
+                label = f"Ninja — {linked_hostname}"
+            else:
+                label = f"{canonical or card_source.title()} #{card_id}"
+            if label not in detail["links"]:
+                detail["links"].append(label)
+        for row in target_rows:
+            records = []
+            links = []
+            for observation_id in row["hudu_observation_ids"]:
+                detail = details.get(observation_id)
+                if detail is None:
+                    continue
+                records.append(
+                    {
+                        **detail,
+                        "is_archived": hudu_by_observation[observation_id]["is_archived"],
+                    }
+                )
+                for link in detail["links"]:
+                    if link not in links:
+                        links.append(link)
+            row["hudu_records"] = records
+            row["hudu_links"] = links
+
     if wants_csv(request):
+        populate_hudu_presentation(device_rows)
 
         def inventory_agent_value(row: dict, platform: str) -> str:
             cell = row["platform_cells_by_name"][platform]
@@ -15487,6 +15499,8 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
     page_query.pop("page", None)
     page_query = page_query.urlencode()
     device_rows = list(page_obj.object_list)
+
+    populate_hudu_presentation(device_rows)
 
     # The first view already has complete current/withdrawn state for every
     # Computer. Load the withdrawal timestamps only for rows being rendered;

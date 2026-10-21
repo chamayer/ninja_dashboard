@@ -17,6 +17,21 @@ from apps.core import views
 class _Cursor:
     def __init__(self):
         self.queries: list[tuple[str, dict | None]] = []
+        self._statement = ""
+        self._hudu_detail_rows = [
+            (
+                "hudu-observation-1", "device-1", "Computer Assets",
+                "https://hudu.example/assets/1", "ninja", "296", "device-1", "Ninja",
+            ),
+            (
+                "hudu-observation-1", "device-1", "Computer Assets",
+                "https://hudu.example/assets/1", "auvik", "42", None, "Auvik",
+            ),
+            (
+                "hudu-observation-2", None, "Computer Assets",
+                "https://hudu.example/assets/2", None, None, None, None,
+            ),
+        ]
         self._results = [
             [
                 (
@@ -62,45 +77,16 @@ class _Cursor:
                     "device-1",
                     "client-1",
                     "host-1",
-                    "Computer Assets",
-                    "https://hudu.example/assets/1",
-                    "SERIAL-1",
-                    "linked",
-                    "ninja",
-                    "296",
-                    "device-1",
                     False,
-                    "Ninja",
-                ),
-                (
-                    "hudu-observation-1",
-                    "device-1",
-                    "client-1",
-                    "host-1",
-                    "Computer Assets",
-                    "https://hudu.example/assets/1",
-                    "SERIAL-1",
-                    "linked",
-                    "auvik",
-                    "42",
-                    None,
-                    False,
-                    "Auvik",
+                    True,
                 ),
                 (
                     "hudu-observation-2",
                     None,
                     "client-2",
                     "host-2",
-                    "Computer Assets",
-                    "https://hudu.example/assets/2",
-                    "SERIAL-2",
-                    "unlinked",
-                    None,
-                    None,
                     False,
-                    None,
-                    None,
+                    False,
                 ),
             ],
             [
@@ -154,7 +140,6 @@ class _Cursor:
                     True,
                 ),
             ],
-            [],  # Bounded HTML-page source-observation timestamp detail.
         ]
 
     def __enter__(self):
@@ -165,8 +150,13 @@ class _Cursor:
 
     def execute(self, statement, params=None):
         self.queries.append((statement, params))
+        self._statement = statement
 
     def fetchall(self):
+        if "hudu.observation_id = ANY" in self._statement:
+            return self._hudu_detail_rows
+        if "evidence.device_id = ANY" in self._statement:
+            return []
         return self._results.pop(0)
 
 
@@ -209,8 +199,8 @@ def test_coverage_uses_effective_requirements_and_source_specific_filters(monkey
     assert params is None
     hudu_statement, hudu_params = cursor.queries[2]
     assert "v_hudu_computer_inventory_evidence_current" in hudu_statement
-    assert "platform_aliases" in hudu_statement
-    assert "hudu.source_name = 'Hudu'" not in hudu_statement
+    assert "BOOL_OR" in hudu_statement
+    assert "GROUP BY hudu.observation_id" in hudu_statement
     assert hudu_params is None
     computer_statement, _ = cursor.queries[3]
     assert "device_operator_decisions" in computer_statement
