@@ -2918,11 +2918,17 @@ def device_detail(request: HttpRequest, org_slug: str, device_id: str) -> HttpRe
               LEFT JOIN operations.v_device_source_record_lifecycle_current lifecycle
                 ON lifecycle.tenant_id = evidence.tenant_id
                AND lifecycle.observation_id = evidence.observation_id
-              LEFT JOIN operations.device_agent_presence_current presence
-                ON presence.tenant_id = evidence.tenant_id
-               AND presence.device_id = %s
-               AND presence.platform = evidence.source_name
-               AND presence.entity_type = evidence.entity_type
+              LEFT JOIN LATERAL (
+                  SELECT presence.reported_online, presence.last_contact_at
+                    FROM operations.device_agent_presence_current presence
+                   WHERE presence.tenant_id = evidence.tenant_id
+                     AND presence.device_id = evidence.device_id
+                     AND presence.platform = evidence.source_name
+                     AND presence.entity_type = evidence.entity_type
+                   ORDER BY COALESCE(presence.last_contact_at, presence.last_observed_at)
+                       DESC NULLS LAST
+                   LIMIT 1
+              ) presence ON TRUE
               LEFT JOIN operations.v_cmdb_inventory_evidence_current hudu
                 ON hudu.tenant_id = evidence.tenant_id
                AND hudu.observation_id = evidence.observation_id

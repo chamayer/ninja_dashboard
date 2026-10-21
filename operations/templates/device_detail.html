@@ -209,7 +209,7 @@
     <div class="dd-card {% if device.lifecycle_status == 'pending_cleanup' or not patching.is_online_any %}alert{% endif %}">
         <div class="lbl">Current status</div>
         <div class="val">{% if device.lifecycle_status == 'pending_cleanup' %}Needs review{% elif patching.is_online_any %}Online{% else %}Offline{% endif %}</div>
-        <div class="sub">{% if device.lifecycle_status == 'pending_cleanup' %}no source currently reports this Computer{% elif patching.online_sources %}{{ patching.online_sources|join:", " }}{% else %}no source checked in{% endif %}</div>
+        <div class="sub">{% if device.lifecycle_status == 'pending_cleanup' %}review source records{% elif patching.online_sources %}{{ patching.online_sources|join:", " }}{% else %}no source checked in{% endif %}</div>
     </div>
     <a class="dd-card {% if sev_counts.critical %}alert{% elif sev_counts.high %}warn{% endif %}" href="{% url 'findings_queue' %}?status=all&amp;response=all&amp;subject_id={{ device.id }}">
         <div class="lbl">Open issues</div>
@@ -348,7 +348,7 @@
 
 {% if device.lifecycle_status == 'pending_cleanup' %}
 <div class="dd-lifecycle-banner">
-    <strong>Needs review</strong> — no current source record reports this Computer.
+    <strong>Needs review</strong> — this Computer is outside normal inventory.
     <a href="?tab=details#source-records">Review source records →</a>
 </div>
 {% elif device.lifecycle_status == 'retired' %}
@@ -641,7 +641,7 @@ function swFilter(q) {
     <p class="muted" style="margin-top:-0.4rem;">The source records behind this Computer and the information above.</p>
     {% if device.lifecycle_status == 'pending_cleanup' %}
     <div class="dd-lifecycle-banner">
-        <strong>Needs review</strong> — no current source record reports this Computer. Review the records before removing it from normal inventory.
+        <strong>Needs review</strong> — this Computer is outside normal inventory. Review its current and historical source records before removing it.
         <p style="margin:0.35rem 0;"><a href="{% url 'findings_queue' %}?type=device_missing_from_source&amp;status=all&amp;subject_id={{ device.id }}">Open related finding →</a></p>
     </div>
     {% elif device.lifecycle_status == 'retired' %}

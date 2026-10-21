@@ -392,6 +392,18 @@ def test_manual_retirement_is_visible_without_a_lifecycle_finding_gate():
     assert "Why retire this Computer?" in template
 
 
+def test_device_source_records_are_unique_and_review_copy_is_truthful():
+    source = Path("apps/core/views.py").read_text(encoding="utf-8")
+    template = Path("templates/device_detail.html").read_text(encoding="utf-8")
+
+    assert "FROM operations.v_device_observation_current evidence" in source
+    assert "LEFT JOIN LATERAL (\n                  SELECT presence.reported_online" in source
+    assert "LIMIT 1\n              ) presence ON TRUE" in source
+    assert "this Computer is outside normal inventory" in template
+    assert "no current source record reports this Computer" not in template
+    assert "no source currently reports this Computer" not in template
+
+
 def test_hudu_archive_action_requires_source_management_permission():
     assert _permissioned_actions(
         _FindingActionUser(may_manage_lifecycle=False, may_manage_sources=True)
