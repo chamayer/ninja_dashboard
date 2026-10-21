@@ -8731,7 +8731,12 @@ def software_user_risk(request: HttpRequest) -> HttpResponse:
         page_number = max(1, int(request.GET.get("page", "1")))
     except ValueError:
         page_number = 1
-    page_size = 100
+    # The page presents nested device and item detail for each user.  The
+    # deployed 100-user first view transferred 927 KB and took 4.3 s to first
+    # response in an authenticated browser check.  Keep the existing complete
+    # ranking and totals, but bound that detail more tightly; pagination and
+    # CSV remain the deliberate paths to the full filtered result.
+    page_size = 25
     page_rank_start = (page_number - 1) * page_size
     q_pattern = q_filter.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
     kind_pattern = (
@@ -8848,11 +8853,11 @@ def software_user_risk(request: HttpRequest) -> HttpResponse:
             ORDER BY du.last_user, d.canonical_hostname, ai.kind, ai.canonical_name
         """
     else:
-        # The operator page renders the 500 highest-impact users.  Previously
-        # it fetched and grouped every matching item in Python before slicing
-        # the result.  Materialising the joined items once keeps the existing
-        # meaning and totals, but makes PostgreSQL select the bounded first
-        # view before rows cross the application boundary.
+        # The operator page renders one bounded page of highest-impact users.
+        # Previously it fetched and grouped every matching item in Python
+        # before slicing the result. Materialising the joined items once keeps
+        # the existing meaning and totals, but makes PostgreSQL select the
+        # bounded first view before rows cross the application boundary.
         result_sql = f"""
             , joined_items AS MATERIALIZED (
                 SELECT du.last_user,

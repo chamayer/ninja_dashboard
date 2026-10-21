@@ -8,6 +8,7 @@ def test_user_exposure_bounds_html_rows_but_retains_complete_csv_export():
     view = source[start:end]
 
     assert "is_csv = wants_csv(request)" in view
+    assert "page_size = 25" in view
     assert "if is_csv:" in view
     assert "ranked_users AS MATERIALIZED" in view
     assert "page_rank_start" in view

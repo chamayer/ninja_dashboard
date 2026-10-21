@@ -2,6 +2,14 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.128.10] — 2026-10-21 — User exposure rendered first view
+
+### Changed
+
+- User exposure now renders 25 ranked users per ordinary HTML page, retaining
+  complete totals, filters, pagination, and CSV export while bounding its
+  nested first-view detail.
+
 ## [0.128.9] — 2026-10-21 — Sources legacy-history boundary
 
 ### Changed
