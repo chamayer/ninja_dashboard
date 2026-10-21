@@ -7,6 +7,14 @@ module-specific; root `../TODO.md` keeps cross-repo items and pointers.
 
 ## Inbox
 
+- [ ] **Computers Sources column: link each line to its source record** (user
+      deferred 2026-10-21). Only Hudu stores a record URL (`hudu_url`); the
+      agent sources store `external_id` only. Plan: Hudu line linked from the
+      stored URL; an admin-managed per-source record-link pattern on the
+      Sources page (needs a small migration) with `{id}` substitution; the
+      most recent record when a source has several; the Computer's
+      Observations tab as fallback. Needs a verified deep-link format per
+      source from an administrator.
 - [x] After device-list pagination/search ships, live-check
       `/orgs/uta/devices/` through Operations and compare response size/time
       against the previous large render. 2026-07-07: live response was 47,649

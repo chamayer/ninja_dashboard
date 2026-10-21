@@ -247,7 +247,7 @@ def test_coverage_uses_effective_requirements_and_source_specific_filters(monkey
         ("Ninja", "Online", "Required · Missing"),
         ("SentinelOne", "Online", "Required"),
         # Hudu's line comes from the Hudu reader: a current asset, not required here.
-        ("Hudu", "No status reported", "N/A"),
+        ("Hudu", "No status", "N/A"),
     ]
     assert row["agent_cells"][0]["record_url"] == (
         "?agent_0=Ninja&agent_state_0=Online"
@@ -256,7 +256,6 @@ def test_coverage_uses_effective_requirements_and_source_specific_filters(monkey
     assert {item["name"]: item["count"] for item in cards["Ninja"]["counts"]} == {
         "Online": 3,
         "Offline": 0,
-        "No status reported": 0,
         "Withdrawn": 0,
         "No record": 1,
         "Total": 3,
@@ -295,10 +294,12 @@ def _render_coverage_context(monkeypatch, query: str) -> dict:
     return captured["context"]
 
 
-def test_requirement_the_evaluator_did_not_assess_is_shown_as_not_evaluated(monkeypatch):
+def test_requirements_not_applied_show_n_a_with_the_reason(monkeypatch):
+    # ADR-0036: os_unknown -> "N/A — OS unknown", pending_cleanup -> "N/A — Offline",
+    # outside_coverage -> "No agents"; none of them counts as required.
     cursor = _Cursor()
     first = cursor._results[0][0]
-    cursor._results[0][0] = (*first[:8], "Not evaluated", *first[9:])
+    cursor._results[0][0] = (*first[:8], "N/A — OS unknown", *first[9:])
     captured = {}
     monkeypatch.setattr(views, "connection", _Connection(cursor))
     monkeypatch.setattr(views.transaction, "atomic", nullcontext)
@@ -309,7 +310,7 @@ def test_requirement_the_evaluator_did_not_assess_is_shown_as_not_evaluated(monk
         or HttpResponse(),
     )
     request = RequestFactory().get(
-        "/inventory/computers/?agent_0=Ninja&agent_requirement_0=Not+evaluated"
+        "/inventory/computers/?agent_0=Ninja&agent_requirement_0=N%2FA+%E2%80%94+OS+unknown"
     )
     request.user = SimpleNamespace(is_authenticated=True)
     views.fleet_coverage(request)
@@ -318,12 +319,17 @@ def test_requirement_the_evaluator_did_not_assess_is_shown_as_not_evaluated(monk
     assert context["paginator"].count == 1
     row = context["device_rows"][0]
     assert row["device_id"] == "device-1"
-    assert row["agent_cells"][0]["rule_label"] == "Required · Not evaluated"
+    assert row["agent_cells"][0]["rule_label"] == "N/A — OS unknown"
     cards = {card["platform"]: card for card in context["platform_cards"]}
-    assert {item["name"]: item["count"] for item in cards["Ninja"]["requirement_exceptions"]} == {
-        "Not evaluated": 1,
-    }
-    assert "Not evaluated" in context["agent_filter_requirements"]
+    assert cards["Ninja"]["requirement_total"] == 1
+    assert cards["Ninja"]["requirement_exceptions"] == []
+    for label in ("N/A — OS unknown", "N/A — Offline", "No agents"):
+        assert label in context["agent_filter_requirements"]
+    assert "Not evaluated" not in context["agent_filter_requirements"]
+    statement = cursor.queries[1][0]
+    assert "WHEN 'os_unknown' THEN 'N/A — OS unknown'" in statement
+    assert "WHEN 'pending_cleanup' THEN 'N/A — Offline'" in statement
+    assert "ELSE 'No agents'" in statement
 
 
 def test_page_says_when_requirements_have_not_been_evaluated(monkeypatch):
@@ -401,7 +407,7 @@ def test_agents_column_filter_contains_displayed_values(monkeypatch):
     assert context["agents_query"] == "ninja online required · missing"
     assert context["paginator"].count == 1
     assert context["device_rows"][0]["device_id"] == "device-1"
-    assert context["filter_logic"] == "(Agents contains “ninja online required · missing”)"
+    assert context["filter_logic"] == "(Sources contains “ninja online required · missing”)"
 
 
 def test_coverage_includes_an_unattached_hudu_computer_as_its_own_row(monkeypatch):
@@ -458,7 +464,7 @@ def test_computers_csv_has_the_current_table_platform_columns(monkeypatch):
         "Lifecycle",
         "Hudu",
         "Hudu links",
-        "Agents",
+        "Sources",
     ]
     assert [
         "Acme",
@@ -470,7 +476,7 @@ def test_computers_csv_has_the_current_table_platform_columns(monkeypatch):
         "In Hudu",
         "Ninja — host-1, Auvik #42",
         "Ninja: Online; Required · Missing | SentinelOne: Online; Required"
-        " | Hudu: No status reported; N/A",
+        " | Hudu: No status; N/A",
     ] in rows
     assert [
         "Beta",
@@ -482,7 +488,7 @@ def test_computers_csv_has_the_current_table_platform_columns(monkeypatch):
         "In Hudu",
         "",
         "Ninja: No record; possible match: host-2; N/A | SentinelOne: No record; N/A"
-        " | Hudu: No status reported; N/A",
+        " | Hudu: No status; N/A",
     ] in rows
 
 
@@ -491,7 +497,7 @@ def test_coverage_template_has_clear_statuses_hudu_and_multiselect_filters():
 
     for label in (
         "Integration links in Hudu",
-        "Agents",
+        "Sources",
         "OS family",
         "Device type",
         "Role",
@@ -525,7 +531,7 @@ def test_coverage_template_has_clear_statuses_hudu_and_multiselect_filters():
     assert 'name="show_archived_hudu"' not in template
     assert "row.hudu_records" in template
     assert "Every Computer known to Operations" in template
-    assert "Agents" in template
+    assert "Sources" in template
     assert "Add condition" in template
     assert 'name="agent_{{ condition.index }}"' in template
     assert 'name="agent_requirement_{{ condition.index }}"' in template
@@ -667,7 +673,7 @@ def test_hudu_card_carries_requirement_counts_from_stored_verdicts(monkeypatch):
     # The Hudu line in the Agents column comes from the Hudu reader, not agent records.
     row = next(row for row in context["device_rows"] if row["device_id"] == "device-1")
     cell = next(cell for cell in row["agent_cells"] if cell["platform"] == "Hudu")
-    assert cell["record_status"] == "No status reported"
+    assert cell["record_status"] == "No status"
     assert cell["rule_label"] == "Required · Missing"
 
 
@@ -703,8 +709,10 @@ def test_hudu_cell_says_which_link_goes_where_and_hudu_is_always_listed(monkeypa
     template = Path(views.__file__).parents[2].joinpath("templates", "coverage.html")
     source = template.read_text(encoding="utf-8")
     assert source.count("Open in Hudu ↗") == 2
-    assert source.count(">Linked Computer</a>") == 2
-    assert "Not linked to a Computer" in source
+    assert source.count(">Computer details</a>") == 2
+    assert ">Not linked to a computer</span>" in source
+    assert ">Same name, not linked</span>" in source
+    assert "{{ row.source_record }} record</span>" in source
     assert "integration link{{ record.links|length|pluralize }} in Hudu" in source
     assert ">Hudu</a>" not in source
     assert ">Operations device</a>" not in source
@@ -725,3 +733,32 @@ def test_hudu_cell_says_which_link_goes_where_and_hudu_is_always_listed(monkeypa
     request.user = SimpleNamespace(is_authenticated=True)
     views.fleet_coverage(request)
     assert "Hudu" in captured["context"]["platforms"]
+
+
+def test_source_only_rows_are_marked_as_records_not_computers(monkeypatch):
+    context = _render_coverage_context(monkeypatch, "")
+    rows = {row["inventory_key"]: row for row in context["device_rows"]}
+    assert rows["hudu:hudu-observation-2"]["source_record"] == "Hudu"
+    assert rows["source:source-observation-1"]["source_record"] == "Ninja"
+    assert all(
+        not row.get("source_record") for key, row in rows.items() if key.startswith("device:")
+    )
+
+
+def test_no_status_row_shows_only_when_used_and_old_links_still_filter(monkeypatch):
+    context = _render_coverage_context(monkeypatch, "")
+    for card in context["platform_cards"]:
+        assert "No status" not in [item["name"] for item in card["counts"]] or any(
+            item["name"] == "No status" and item["count"] for item in card["counts"]
+        )
+    legacy = _render_coverage_context(
+        monkeypatch, "agent_0=Hudu&agent_state_0=No+status+reported"
+    )
+    assert legacy["agent_filter_conditions"][0]["states"] == ["No status"]
+
+
+def test_sources_column_has_a_source_record_requirement_header():
+    template = (Path(__file__).parents[3] / "templates/coverage.html").read_text(encoding="utf-8")
+    assert "<summary>Agents</summary>" not in template
+    assert template.count("<summary>Sources</summary>") == 2
+    assert '<span>Source</span><span>Record</span><span>Requirement</span>' in template

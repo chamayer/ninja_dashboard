@@ -14093,7 +14093,11 @@ def org_software_decide(request: HttpRequest, org_slug: str) -> HttpResponse:
 _SEV_RANK = (
     "CASE severity WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END"
 )
-_COVERAGE_STATES = ("Online", "Offline", "Stale", "Missing", "Not evaluated")
+# Requirements the evaluator does not apply (ADR-0036), with the reason.
+_NOT_APPLIED_STATES = ("N/A — OS unknown", "N/A — Offline", "No agents")
+# Record statuses renamed on the page; old bookmarked filter values still work.
+_LEGACY_RECORD_STATUSES = {"No status reported": "No status"}
+_COVERAGE_STATES = ("Online", "Offline", "Stale", "Missing", *_NOT_APPLIED_STATES)
 # Computers summary-card order; any other platform follows alphabetically.
 _COMPUTER_CARD_ORDER = ("Ninja", "SentinelOne", "LogMeIn", "R-U-ON", "ScreenConnect", "Hudu")
 # Computers Status filter, in display order. "Agent" means every catalogued
@@ -14116,12 +14120,12 @@ def _inventory_record_status(
     if platform == "Hudu":
         # Hudu assets are cmdb records, read by the dedicated Hudu reader.
         if row.get("hudu_current_count"):
-            return "No status reported"
+            return "No status"
         return "Withdrawn" if row.get("hudu_archived_count") else "No record"
     if source_status == "Current" or (
         not source_status and observation and observation["state"] == "Current"
     ):
-        return "No status reported"
+        return "No status"
     if source_status in {"Online", "Offline"}:
         return source_status
     if observation and observation["state"] == "Withdrawn":
@@ -14278,7 +14282,9 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
                            WHEN 'satisfied' THEN
                                CASE WHEN COALESCE(presence.online, FALSE) THEN 'Online'
                                     ELSE 'Offline' END
-                           ELSE 'Not evaluated'
+                           WHEN 'os_unknown' THEN 'N/A — OS unknown'
+                           WHEN 'pending_cleanup' THEN 'N/A — Offline'
+                           ELSE 'No agents'
                        END AS status,
                        FALSE AS hudu_present,
                        state.evaluated_at
@@ -14534,7 +14540,9 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
     coverage_status_rank = {
         "Missing": 0,
         "Stale": 1,
-        "Not evaluated": 2,
+        "N/A — OS unknown": 2,
+        "N/A — Offline": 2,
+        "No agents": 2,
         "Offline": 3,
         "Online": 4,
     }
@@ -14570,12 +14578,13 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
         "Offline",
         "Withdrawn",
         "No record",
-        "No status reported",
+        "No status",
         "Possible match",
     }
-    allowed_rule_statuses = {"Required", "Missing", "Stale", "Not evaluated", "N/A", "Exempt"}
+    allowed_rule_statuses = {"Required", "Missing", "Stale", *_NOT_APPLIED_STATES, "N/A", "Exempt"}
     for value in requested_record_status_filters:
         product, separator, status = value.partition("|")
+        status = _LEGACY_RECORD_STATUSES.get(status, status)
         if separator and product in platforms and status in allowed_record_statuses:
             record_status_filters.setdefault(product, []).append(status)
     for value in requested_rule_status_filters:
@@ -14626,7 +14635,10 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
         agent = request.GET.get(f"agent_{index}")
         states = [
             value
-            for value in request.GET.getlist(f"agent_state_{index}")
+            for value in (
+                _LEGACY_RECORD_STATUSES.get(raw, raw)
+                for raw in request.GET.getlist(f"agent_state_{index}")
+            )
             if value in allowed_record_statuses
         ]
         requirements = [
@@ -14766,6 +14778,8 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
             {
                 "inventory_key": f"source:{observation_id}",
                 "device_id": None,
+                # Not a Computer: a source record that is not linked to one.
+                "source_record": platform,
                 "client_id": client_id,
                 "client_slug": client_slug or "",
                 "client_name": client_name or "Unassigned",
@@ -14792,6 +14806,7 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
         inventory_rows.append(
             {
                 "inventory_key": f"hudu:{hudu['observation_id']}",
+                "source_record": "Hudu",
                 # A linked-but-retired/deleted device is not an active inventory
                 # computer. Keep this source record separate rather than linking
                 # a user to a stale device-detail route.
@@ -14889,10 +14904,10 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
             rule_label = "Exempt"
         elif coverage:
             rule_status = coverage.get("status")
-            if rule_status not in {"Missing", "Stale", "Not evaluated"}:
+            if rule_status not in {"Missing", "Stale", *_NOT_APPLIED_STATES}:
                 rule_status = "Required"
             rule_label = (
-                rule_status if rule_status == "Required" else f"Required · {rule_status}"
+                f"Required · {rule_status}" if rule_status in {"Missing", "Stale"} else rule_status
             )
         else:
             rule_status = "N/A"
@@ -14903,15 +14918,23 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
             "Offline": f"{platform} has a current record but reports it offline.",
             "Withdrawn": f"{platform} previously reported this Computer but no longer does.",
             "No record": f"No current {platform} record is linked to this Computer.",
-            "No status reported": f"{platform} has a current record without an online or offline status.",
+            "No status": f"{platform} still lists this Computer but does not say whether it is online.",
         }[record_status]
         rule_tooltip = {
             "Required": f"{platform} is required for this Computer.",
             "Missing": f"{platform} is required, but no qualifying current record was found.",
             "Stale": f"{platform} is required, but its qualifying record is stale.",
-            "Not evaluated": (
-                f"{platform} is required, but the evaluator did not assess it: the Computer "
-                "has no agent records or its operating system is unknown."
+            "N/A — OS unknown": (
+                f"{platform} is not applied: no source reports this Computer's operating "
+                "system, and the requirement is limited to particular operating systems."
+            ),
+            "N/A — Offline": (
+                f"{platform} is not applied: this Computer has been offline past the "
+                "retire-review threshold and is awaiting cleanup in Lifecycle."
+            ),
+            "No agents": (
+                f"{platform} is not applied: this Computer has no agent records; it is "
+                "tracked only by other sources (see the unenrolled finding)."
             ),
             "N/A": f"{platform} is not required for this Computer.",
             "Exempt": "This Computer has a saved SentinelOne exemption.",
@@ -14965,7 +14988,7 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
             return True
         return cell["rule_status"] in requirements or (
             "Required" in requirements
-            and cell["rule_status"] in {"Required", "Missing", "Stale", "Not evaluated"}
+            and cell["rule_status"] in {"Required", "Missing", "Stale"}
         )
 
     def matches(row: dict) -> bool:
@@ -14984,11 +15007,11 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
                 if name in agent_platforms
             }
             has_named_record = any(
-                cell["record_status"] in {"Online", "Offline", "No status reported"}
+                cell["record_status"] in {"Online", "Offline", "No status"}
                 for cell in named_products.values()
             )
             has_current_record = any(
-                cell["record_status"] in {"Online", "Offline", "No status reported"}
+                cell["record_status"] in {"Online", "Offline", "No status"}
                 for cell in row["platform_cells_by_name"].values()
             )
             scope_matches = {
@@ -15066,7 +15089,7 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
     record_status_order = (
         "Online",
         "Offline",
-        "No status reported",
+        "No status",
         "Withdrawn",
         "No record",
     )
@@ -15078,12 +15101,12 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
         record_counts = {status: 0 for status in record_status_order}
         requirement_total = 0
         requirement_counts = {
-            status: 0 for status in ("Missing", "Stale", "Not evaluated", "Exempt")
+            status: 0 for status in ("Missing", "Stale", "Exempt")
         }
         for inventory_row in inventory_rows:
             cell = inventory_row["platform_cells_by_name"][platform]
             record_counts[cell["record_status"]] += 1
-            if cell["rule_status"] in {"Required", "Missing", "Stale", "Not evaluated"}:
+            if cell["rule_status"] in {"Required", "Missing", "Stale"}:
                 requirement_total += 1
             if cell["rule_status"] in requirement_counts:
                 requirement_counts[cell["rule_status"]] += 1
@@ -15097,6 +15120,8 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
                         "url": agent_filter_url(platform, state=status),
                     }
                     for status in record_status_order
+                    # "No status" is a fallback no source produces today; show it only when used.
+                    if status != "No status" or record_counts[status]
                 ]
                 + [
                     {
@@ -15113,7 +15138,7 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
                         "count": requirement_counts[status],
                         "url": agent_filter_url(platform, requirement=status),
                     }
-                    for status in ("Missing", "Stale", "Not evaluated", "Exempt")
+                    for status in ("Missing", "Stale", "Exempt")
                     if requirement_counts[status]
                 ],
             }
@@ -15198,8 +15223,8 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
         filter_logic_parts.append(f"(Computer name contains “{device_query}”)")
         filter_summary_parts.append(f"Name contains “{device_query}”")
     if agents_query:
-        filter_logic_parts.append(f"(Agents contains “{agents_query}”)")
-        filter_summary_parts.append(f"Agents contains “{agents_query}”")
+        filter_logic_parts.append(f"(Sources contains “{agents_query}”)")
+        filter_summary_parts.append(f"Sources contains “{agents_query}”")
     scope_labels = _COMPUTER_SCOPE_LABELS
     if computer_scope_filters:
         filter_logic_parts.append(
@@ -15233,7 +15258,6 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
             {
                 "Missing": "Required · Missing",
                 "Stale": "Required · Stale",
-                "Not evaluated": "Required · Not evaluated",
             }.get(requirement, requirement)
             for requirement in condition["requirements"]
         )
@@ -15438,7 +15462,7 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
                 ("Hudu", "hudu"),
                 ("Hudu links", "hudu_links"),
                 (
-                    "Agents",
+                    "Sources",
                     lambda export_row: " | ".join(
                         inventory_agent_value(export_row["inventory_row"], platform)
                         for platform in platforms
@@ -15528,7 +15552,7 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
                 "Required",
                 "Missing",
                 "Stale",
-                "Not evaluated",
+                *_NOT_APPLIED_STATES,
                 "N/A",
                 "Exempt",
             ),
