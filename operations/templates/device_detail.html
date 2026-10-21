@@ -156,8 +156,9 @@
 
 <div class="dd-header">
     <div class="dd-crumbs">
-        <a href="{% url 'org_index' org_slug=device.client.slug %}">{{ device.client.display_name }}</a>
-        &nbsp;›&nbsp; <a href="{% url 'devices_page' %}">Devices</a>
+        <a href="{% url 'org_index' org_slug=device.client.slug %}">Clients</a>
+        &nbsp;›&nbsp; <a href="{% url 'org_index' org_slug=device.client.slug %}">{{ device.client.display_name }}</a>
+        &nbsp;›&nbsp; <a href="{% url 'org_devices' org_slug=device.client.slug %}">Computers</a>
         &nbsp;›&nbsp; {{ device.canonical_hostname }}
     </div>
     <div class="dd-title">

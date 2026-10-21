@@ -310,11 +310,14 @@
                 <a class="nav-link {% if active_section == 'home' %}active{% endif %}"
                    href="{% url 'home' %}">Dashboard</a>
 
+                <a class="nav-link {% if active_section == 'issues' %}active{% endif %}"
+                   href="{% url 'findings_queue' %}">Issues{% if nav_findings_count %} <span class="nav-badge">{{ nav_findings_count }}</span>{% endif %}</a>
+
                 <a class="nav-link {% if active_section == 'clients' %}active{% endif %}"
                    href="{% url 'org_index' org_slug='all' %}">Clients</a>
 
-                <a class="nav-link {% if active_section == 'inventory' %}active{% endif %}"
-                   href="{% url 'inventory_clients' %}">Inventory</a>
+                <a class="nav-link {% if active_section == 'devices' %}active{% endif %}"
+                   href="{% url 'devices_page' %}">Computers</a>
 
                 <a class="nav-link {% if active_section == 'patching' %}active{% endif %}"
                    href="{% url 'patching_queue' %}">Patching{% if nav_patching_open %} <span class="nav-badge">{{ nav_patching_open }}</span>{% endif %}</a>
@@ -322,14 +325,14 @@
                 <a class="nav-link {% if active_section == 'software' %}active{% endif %}"
                    href="{% url 'software_page' %}">Software</a>
 
-                <a class="nav-link {% if active_section == 'issues' %}active{% endif %}"
-                   href="{% url 'findings_queue' %}">Issues{% if nav_findings_count %} <span class="nav-badge">{{ nav_findings_count }}</span>{% endif %}</a>
+                <a class="nav-link {% if active_section == 'inventory' %}active{% endif %}"
+                   href="{% url 'inventory_clients' %}">Inventory</a>
 
                 <div class="nav-fill"></div>
                 <a class="nav-link {% if admin_group %}active{% endif %}"
                    href="{% url 'operations_admin_overview' %}">Admin</a>
             </div>
-            {% if current_client %}
+            {% if current_client and request.resolver_match.url_name != 'device_detail' %}
             <div class="nav-row nav-context-row" aria-label="Client navigation">
                 <span class="nav-client-crumb">Clients › {{ current_client.display_name }}</span>
                 <a class="nav-link nav-context {% if active_section == 'clients' and request.resolver_match.url_name == 'org_index' %}active{% endif %}" href="{% url 'org_index' org_slug=current_client.slug %}">Overview</a>
@@ -350,7 +353,7 @@
                 <a class="nav-link nav-context {% if request.resolver_match.url_name == 'inventory_clients' %}active{% endif %}"
                    href="{% url 'inventory_clients' %}">Clients</a>
                 <a class="nav-link nav-context {% if request.resolver_match.url_name == 'inventory_computers' or request.resolver_match.url_name == 'fleet_coverage' %}active{% endif %}"
-                   href="{% url 'inventory_computers' %}">Computer inventory</a>
+                   href="{% url 'inventory_computers' %}">Computers</a>
                 <div class="nav-fill"></div>
             </div>
             {% elif active_section == 'software' %}
