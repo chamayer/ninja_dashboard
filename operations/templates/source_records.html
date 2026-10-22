@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% load human_labels %}
+
+{% block title %}{{ source_name }} source records{% endblock %}
+
+{% block content %}
+<p><a href="{% url 'sources_status' %}">← Sources</a></p>
+<div class="card" style="margin-bottom:1rem;">
+  <h1 style="margin:0;">{{ source_name }} source records{% if source_client_name %} · {{ source_client_name }}{% endif %}</h1>
+  <p class="muted">{{ total }} current observation record{{ total|pluralize }} in this source instance. These are source-scoped records, not a Computer total; linked Computers remain visible where available.</p>
+  {% include "_csv_download.html" %}
+</div>
+
+<div class="card" style="margin-bottom:1rem;">
+  <form method="get" style="display:flex;gap:.7rem;align-items:end;flex-wrap:wrap;">
+    <label>State<br><select name="state">
+      <option value="all"{% if state == "all" %} selected{% endif %}>All current records</option>
+      <option value="active"{% if state == "active" %} selected{% endif %}>Active</option>
+      <option value="withdrawn"{% if state == "withdrawn" %} selected{% endif %}>Withdrawn</option>
+    </select></label>
+    <label>Entity type<br><select name="type"><option value="">All types</option>{% for value in entity_types %}<option value="{{ value }}"{% if entity_type == value %} selected{% endif %}>{{ value|humanize_label }}</option>{% endfor %}</select></label>
+    <button type="submit">Apply</button>
+  </form>
+</div>
+
+<div class="card">
+  <table class="ops-table" data-sortable>
+    <thead><tr><th>Type</th><th>Source record</th><th>State</th><th>Linked Computer</th><th>Observed</th><th>Last seen</th></tr></thead>
+    <tbody>{% for record in records %}
+      <tr>
+        <td>{{ record.entity_type|humanize_label }}</td>
+        <td><code>{{ record.external_id }}</code>{% if record.parent_external_id %}<br><span class="muted">parent <code>{{ record.parent_external_id }}</code></span>{% endif %}</td>
+        <td>{% if record.active %}<span class="badge badge-low">Active</span>{% else %}<span class="badge badge-high">Withdrawn</span>{% endif %}</td>
+        <td>{% if record.device_id and record.client_slug %}<a href="{% url 'device_detail' org_slug=record.client_slug device_id=record.device_id %}">{{ record.hostname|default:"Unnamed Computer" }}</a>{% elif record.hostname %}{{ record.hostname }}{% else %}<span class="muted">Not linked</span>{% endif %}</td>
+        <td>{{ record.observed_at|date:"Y-m-d H:i"|default:"—" }}</td>
+        <td>{{ record.last_seen_at|date:"Y-m-d H:i"|default:"—" }}</td>
+      </tr>
+    {% empty %}<tr><td colspan="6" class="muted">No source records match this filter.</td></tr>{% endfor %}</tbody>
+  </table>
+</div>
+
+{% if page_count > 1 %}
+<nav class="pager" aria-label="Source record pages">
+  <p class="muted" style="margin:0;">Page {{ page_number }} of {{ page_count }} · {{ page_size }} per page</p>
+  <div class="pager-links">
+    {% if has_previous %}<a class="pager-link" href="?{% if page_query %}{{ page_query }}&amp;{% endif %}page=1">First</a><a class="pager-link" href="?{% if page_query %}{{ page_query }}&amp;{% endif %}page={{ previous_page }}">Previous</a>{% endif %}
+    {% if has_next %}<a class="pager-link" href="?{% if page_query %}{{ page_query }}&amp;{% endif %}page={{ next_page }}">Next</a><a class="pager-link" href="?{% if page_query %}{{ page_query }}&amp;{% endif %}page={{ page_count }}">Last</a>{% endif %}
+  </div>
+</nav>
+{% endif %}
+{% endblock %}

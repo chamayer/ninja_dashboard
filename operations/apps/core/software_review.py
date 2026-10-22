@@ -15,6 +15,8 @@ from typing import Any
 
 from shared import software_coverage, software_settings
 
+from .computer_reads import current_computer_sql
+
 # The decision-prompt finding types, as a query predicate (they close when a
 # decision covers the title or its publisher).
 PROMPTS_SQL = """
@@ -67,14 +69,33 @@ TITLE_STATUS = """(CASE WHEN title_flags.rejected THEN 'reject'
        WHEN investigate_titles.title_key IS NOT NULL
             OR investigate_publishers.publisher_key IS NOT NULL THEN 'investigate'
        ELSE 'approve' END)"""
-TITLE_STATUS_COUNTS_SQL = f"""
-WITH {TITLE_STATUS_CTES}
-SELECT {TITLE_STATUS} AS status, count(*)::int
-  FROM operations.software_title_current sic
-  {TITLE_STATUS_JOINS}
- WHERE sic.tenant_id = 1
- GROUP BY 1
-"""
+def title_status_counts_sql(computer_selector: str) -> str:
+    """Count title statuses within the caller's current-Computer scope.
+
+    The materialized title rollup deliberately has no lifecycle invalidation
+    path. Status cards must therefore aggregate live installations joined to
+    the shared Computer population, just like the Products table.
+    """
+    return f"""
+    WITH current_titles AS (
+        SELECT sic.tenant_id, sic.canonical_name,
+               mode() WITHIN GROUP (ORDER BY sic.publisher) AS publisher
+          FROM operations.software_installations_current sic
+          JOIN operations.devices d
+            ON d.tenant_id = sic.tenant_id AND d.id = sic.device_id
+         WHERE sic.tenant_id = 1
+           AND sic.deleted_at IS NULL
+           AND sic.stale_since IS NULL
+           AND d.deleted_at IS NULL
+           AND {computer_selector}
+         GROUP BY sic.tenant_id, sic.canonical_name
+    ), {TITLE_STATUS_CTES}
+    SELECT {TITLE_STATUS} AS status, count(*)::int
+      FROM current_titles sic
+      {TITLE_STATUS_JOINS}
+     WHERE sic.tenant_id = 1
+     GROUP BY 1
+    """
 
 
 # Publishers whose installations an open prompt is about (its recorded publisher).
@@ -139,6 +160,7 @@ SELECT lower(i.canonical_name), i.device_id::text,
   JOIN operations.devices device
     ON device.tenant_id = i.tenant_id AND device.id = i.device_id
    AND device.deleted_at IS NULL
+   AND {current_computer_sql("device")}
   LEFT JOIN operations.clients client
     ON client.tenant_id = i.tenant_id AND client.id = i.client_id
   {software_coverage.EFFECTIVE_DECISION_JOINS}

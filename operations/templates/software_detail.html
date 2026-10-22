@@ -305,11 +305,7 @@
 
     <div class="sd-card">
         <h2>Installations
-            {% if install_rows|length == 500 %}
-                <span class="muted" style="font-size:0.8rem; font-weight:400;">(showing first 500)</span>
-            {% else %}
-                <span class="muted" style="font-size:0.8rem; font-weight:400;">({{ install_rows|length }})</span>
-            {% endif %}
+            <span class="muted" style="font-size:0.8rem; font-weight:400;">({{ installations }} total)</span>
         </h2>
         {% if install_rows %}
         <table data-sortable class="sd-table">
@@ -347,6 +343,21 @@
                 {% endfor %}
             </tbody>
         </table>
+        {% if install_pages > 1 %}
+        <nav class="pager" aria-label="Installation pages">
+            <p class="muted" style="margin:0;">Page {{ install_page }} of {{ install_pages }} · {{ install_page_size }} per page</p>
+            <div class="pager-links">
+                {% if install_has_previous %}
+                <a class="pager-link" href="?install_page=1">First</a>
+                <a class="pager-link" href="?install_page={{ install_previous_page }}">Previous</a>
+                {% endif %}
+                {% if install_has_next %}
+                <a class="pager-link" href="?install_page={{ install_next_page }}">Next</a>
+                <a class="pager-link" href="?install_page={{ install_pages }}">Last</a>
+                {% endif %}
+            </div>
+        </nav>
+        {% endif %}
         {% else %}
         <p class="muted">No active installations.</p>
         {% endif %}

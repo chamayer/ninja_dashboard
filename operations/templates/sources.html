@@ -82,12 +82,12 @@
     {% if s.source_kind == "reference" %}
     <div class="source-stat">Reference data source</div>
     {% else %}
-    <div class="source-stat">Source records: <strong>{{ s.active_record_count }}</strong> active &middot; {{ s.current_record_count }} total</div>
+    <div class="source-stat">Source records: <a href="{% url 'source_records' source_instance_id=s.id %}?state=active"><strong>{{ s.active_record_count }}</strong> active</a> &middot; <a href="{% url 'source_records' source_instance_id=s.id %}">{{ s.current_record_count }} total</a></div>
     {% endif %}
     {% for count in s.entity_counts %}
     <div class="source-stat">
         {{ count.entity_class|humanize_label }} · {{ count.entity_type|humanize_label }}:
-        <strong>{{ count.active_count }}</strong> active{% if count.withdrawn_count %} · {{ count.withdrawn_count }} withdrawn{% endif %}
+        <a href="{% url 'source_records' source_instance_id=s.id %}?type={{ count.entity_type|urlencode }}&amp;state=active"><strong>{{ count.active_count }}</strong> active</a>{% if count.withdrawn_count %} · <a href="{% url 'source_records' source_instance_id=s.id %}?type={{ count.entity_type|urlencode }}&amp;state=withdrawn">{{ count.withdrawn_count }} withdrawn</a>{% endif %}
     </div>
     {% empty %}
     <div class="source-stat">No current records</div>

@@ -123,11 +123,7 @@
 
     <div class="pd-card">
         <h2>Titles from {{ publisher }}
-            {% if title_rows|length == 500 %}
-                <span class="muted" style="font-size:0.8rem; font-weight:400;">(showing first 500)</span>
-            {% else %}
-                <span class="muted" style="font-size:0.8rem; font-weight:400;">({{ title_rows|length }})</span>
-            {% endif %}
+            <span class="muted" style="font-size:0.8rem; font-weight:400;">({{ title_count }} total)</span>
         </h2>
         {% if title_rows %}
         <table data-sortable class="pd-table">
@@ -180,6 +176,21 @@
                 {% endfor %}
             </tbody>
         </table>
+        {% if title_pages > 1 %}
+        <nav class="pager" aria-label="Publisher title pages">
+            <p class="muted" style="margin:0;">Page {{ title_page }} of {{ title_pages }} · {{ title_page_size }} per page</p>
+            <div class="pager-links">
+                {% if title_has_previous %}
+                <a class="pager-link" href="?title_page=1">First</a>
+                <a class="pager-link" href="?title_page={{ title_previous_page }}">Previous</a>
+                {% endif %}
+                {% if title_has_next %}
+                <a class="pager-link" href="?title_page={{ title_next_page }}">Next</a>
+                <a class="pager-link" href="?title_page={{ title_pages }}">Last</a>
+                {% endif %}
+            </div>
+        </nav>
+        {% endif %}
         {% else %}
         <p class="muted">No titles observed for this publisher.</p>
         {% endif %}

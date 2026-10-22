@@ -108,6 +108,7 @@ from .finding_actions import (
 from .forms import ClientPolicyForm
 from .identity_actions import run_identity_action
 from . import computer_naming, requirement_baselines
+from .computer_reads import current_computer_sql, current_computers
 from .models import (
     AdminFinding,
     Agent,
@@ -965,14 +966,16 @@ def home(request: HttpRequest) -> HttpResponse:  # noqa: PLR0912, PLR0915
         cur.execute("SET LOCAL operations.tenant_id = 1")
         cur.execute(
             f"""
-            SELECT COUNT(*)::int
+            SELECT COUNT(*)::int,
+                   COUNT(*) FILTER (
+                       WHERE last_contact_at >= NOW() - INTERVAL '{active_device_days} days'
+                   )::int
             FROM operations.v_device
             WHERE tenant_id = 1
               AND lifecycle_status <> 'retired'
-              AND last_contact_at >= NOW() - INTERVAL '{active_device_days} days'
             """
         )
-        active_devices = cur.fetchone()[0]
+        total_devices, active_devices = cur.fetchone()
 
     # One grouping-set scan supplies both the per-client/domain rollup and
     # the fleet-wide attention list. Keeping the two aggregate levels in one
@@ -1825,9 +1828,9 @@ def org_index(request: HttpRequest, org_slug: str) -> HttpResponse:
     if getattr(request, "current_client", None):
         client = request.current_client
         devices = list(
-            Device.objects.filter(tenant_id=1, client=client, deleted_at__isnull=True).only(
-                "device_type"
-            )
+            current_computers(
+                Device.objects.filter(tenant_id=1, client=client, deleted_at__isnull=True)
+            ).only("device_type")
         )
         ctx["device_count"] = len(devices)
         ctx["type_summary"] = _type_summary(devices)
@@ -1996,6 +1999,7 @@ def org_index(request: HttpRequest, org_slug: str) -> HttpResponse:
                                         OR last_contact_at < NOW() - INTERVAL '{active_device_days} days') AS stale
                 FROM operations.v_device
                 WHERE tenant_id = 1 AND client_id = %s
+                  AND {current_computer_sql()}
             """,
                 [str(client.id)],
             )
@@ -2083,6 +2087,7 @@ def org_index(request: HttpRequest, org_slug: str) -> HttpResponse:
                            v.os_group, v.last_contact_at
                       FROM operations.v_device v
                      WHERE v.tenant_id = 1 AND v.client_id = %s
+                       AND {current_computer_sql("v")}
                        AND NOT v.is_online_any
                 ), direct_severe AS (
                     SELECT f.subject_id AS device_id, COUNT(*)::int AS severe
@@ -2173,7 +2178,10 @@ def org_index(request: HttpRequest, org_slug: str) -> HttpResponse:
             .annotate(
                 device_count=Count(
                     "devices",
-                    filter=Q(devices__deleted_at__isnull=True),
+                    filter=(
+                        Q(devices__deleted_at__isnull=True)
+                        & ~Q(devices__lifecycle_status=Device.LifecycleStatus.RETIRED)
+                    ),
                 )
             )
             .order_by("-device_count", "display_name")
@@ -2187,7 +2195,9 @@ def org_index(request: HttpRequest, org_slug: str) -> HttpResponse:
             c.source_names = sorted(source_names_by_client.get(c.id, set()))
         fleet_type_counts = {
             row["device_type"]: row["count"]
-            for row in Device.objects.filter(tenant_id=1, deleted_at__isnull=True)
+            for row in current_computers(
+                Device.objects.filter(tenant_id=1, deleted_at__isnull=True)
+            )
             .values("device_type")
             .annotate(count=Count("id"))
         }
@@ -2223,7 +2233,9 @@ def org_devices(request: HttpRequest, org_slug: str) -> HttpResponse:
     """Device list for a specific client with server-side search/filter."""
     client = _get_client_by_slug(org_slug)
     active_device_days = get_device_status_policy()["active_device_days"]
-    base_qs = Device.objects.filter(tenant_id=1, client=client, deleted_at__isnull=True)
+    base_qs = current_computers(
+        Device.objects.filter(tenant_id=1, client=client, deleted_at__isnull=True)
+    )
     type_counts = {
         row["device_type"]: row["count"]
         for row in base_qs.values("device_type").annotate(count=Count("id"))
@@ -7067,11 +7079,23 @@ def _software_page_data(request: HttpRequest) -> dict:
         with transaction.atomic(), connection.cursor() as sc:
             sc.execute("SET LOCAL operations.tenant_id = 1")
             sc.execute(
-                """
-                SELECT safety_band, COUNT(*)::int
-                FROM operations.v_software_safety
-                WHERE tenant_id = 1
-                GROUP BY safety_band
+                f"""
+                SELECT safety.safety_band, COUNT(*)::int
+                FROM operations.v_software_safety safety
+                WHERE safety.tenant_id = 1
+                  AND EXISTS (
+                      SELECT 1
+                      FROM operations.software_installations_current sic
+                      JOIN operations.devices d
+                        ON d.tenant_id = sic.tenant_id AND d.id = sic.device_id
+                      WHERE sic.tenant_id = safety.tenant_id
+                        AND sic.canonical_name = safety.canonical_name
+                        AND sic.deleted_at IS NULL
+                        AND sic.stale_since IS NULL
+                        AND d.deleted_at IS NULL
+                        AND {current_computer_sql("d")}
+                  )
+                GROUP BY safety.safety_band
                 """
             )
             for band, count in sc.fetchall():
@@ -7099,13 +7123,15 @@ def _software_page_data(request: HttpRequest) -> dict:
         category_rows: list = []
         if capability_available:
             cur.execute(
-                """
+                f"""
                 SELECT COUNT(DISTINCT sic.canonical_name)
                 FROM operations.software_installations_current sic
+                JOIN operations.devices d ON d.id = sic.device_id AND d.tenant_id = sic.tenant_id
                 JOIN catalog.software_versions sv ON sv.id = sic.software_version_id
                 JOIN catalog.products p ON p.id = sv.product_id
                 JOIN catalog.v_product_capability_effective cap ON cap.product_uuid = p.product_uuid
                 WHERE sic.tenant_id = 1 AND sic.deleted_at IS NULL AND sic.stale_since IS NULL
+                  AND d.deleted_at IS NULL AND {current_computer_sql("d")}
                 """
             )
             (categorized_titles,) = cur.fetchone()
@@ -7116,14 +7142,16 @@ def _software_page_data(request: HttpRequest) -> dict:
                 # the endpoint_security capability, matching the unauthorized_av
                 # finding type name it already drives.
                 cur.execute(
-                    """
+                    f"""
                     SELECT CASE cap.capability WHEN 'endpoint_security' THEN 'av' ELSE cap.capability END,
                            COUNT(DISTINCT sic.canonical_name)
                     FROM operations.software_installations_current sic
+                    JOIN operations.devices d ON d.id = sic.device_id AND d.tenant_id = sic.tenant_id
                     JOIN catalog.software_versions sv ON sv.id = sic.software_version_id
                     JOIN catalog.products p ON p.id = sv.product_id
                     JOIN catalog.v_product_capability_effective cap ON cap.product_uuid = p.product_uuid
                     WHERE sic.tenant_id = 1 AND sic.deleted_at IS NULL AND sic.stale_since IS NULL
+                      AND d.deleted_at IS NULL AND {current_computer_sql("d")}
                     GROUP BY cap.capability
                     ORDER BY 2 DESC
                     """
@@ -7136,15 +7164,17 @@ def _software_page_data(request: HttpRequest) -> dict:
         descriptive_category_rows: list = []
         if product_category_available and not is_overview:
             cur.execute(
-                """
+                f"""
                 SELECT pce.category,
                        COUNT(DISTINCT sic.canonical_name),
                        GROUPING(pce.category) AS is_total
                 FROM operations.software_installations_current sic
+                JOIN operations.devices d ON d.id = sic.device_id AND d.tenant_id = sic.tenant_id
                 JOIN catalog.software_versions sv ON sv.id = sic.software_version_id
                 JOIN catalog.products p ON p.id = sv.product_id
                 JOIN catalog.v_product_category_effective pce ON pce.product_uuid = p.product_uuid
                 WHERE sic.tenant_id = 1 AND sic.deleted_at IS NULL AND sic.stale_since IS NULL
+                  AND d.deleted_at IS NULL AND {current_computer_sql("d")}
                 GROUP BY GROUPING SETS ((pce.category), ())
                 """
             )
@@ -7234,37 +7264,60 @@ def _software_page_data(request: HttpRequest) -> dict:
         needs_full_category_snapshot = bool(category_filter or product_category_filter or is_csv)
         title_page_size = 0 if is_overview and not is_csv else (page_size if is_csv else 100)
         category_cte_sql = (
-            """SELECT sic2.canonical_name,
+            f"""SELECT sic2.canonical_name,
                       array_agg(DISTINCT
                           CASE cap.capability WHEN 'endpoint_security' THEN 'av' ELSE cap.capability END
                       ) AS categories
                  FROM operations.software_installations_current sic2
+                 JOIN operations.devices d ON d.id = sic2.device_id AND d.tenant_id = sic2.tenant_id
                  JOIN catalog.software_versions sv ON sv.id = sic2.software_version_id
                  JOIN catalog.products p ON p.id = sv.product_id
                  JOIN catalog.v_product_capability_effective cap ON cap.product_uuid = p.product_uuid
                 WHERE sic2.tenant_id = 1 AND sic2.deleted_at IS NULL AND sic2.stale_since IS NULL
+                  AND d.deleted_at IS NULL AND {current_computer_sql("d")}
                 GROUP BY sic2.canonical_name"""
             if capability_available and needs_full_category_snapshot
             else "SELECT NULL::text AS canonical_name, NULL::text[] AS categories WHERE FALSE"
         )
         product_category_cte_sql = (
-            """SELECT sic2.canonical_name,
+            f"""SELECT sic2.canonical_name,
                       array_agg(DISTINCT pce.category) AS product_categories
                  FROM operations.software_installations_current sic2
+                 JOIN operations.devices d ON d.id = sic2.device_id AND d.tenant_id = sic2.tenant_id
                  JOIN catalog.software_versions sv ON sv.id = sic2.software_version_id
                  JOIN catalog.products p ON p.id = sv.product_id
                  JOIN catalog.v_product_category_effective pce ON pce.product_uuid = p.product_uuid
                 WHERE sic2.tenant_id = 1 AND sic2.deleted_at IS NULL AND sic2.stale_since IS NULL
+                  AND d.deleted_at IS NULL AND {current_computer_sql("d")}
                 GROUP BY sic2.canonical_name"""
             if product_category_available and needs_full_category_snapshot
             else "SELECT NULL::text AS canonical_name, NULL::text[] AS product_categories WHERE FALSE"
         )
         cur.execute(
             f"""
-            WITH totals AS (
+            WITH current_titles AS MATERIALIZED (
+                SELECT sic.tenant_id,
+                       sic.canonical_name,
+                       mode() WITHIN GROUP (ORDER BY sic.publisher) AS publisher,
+                       COUNT(*)::integer AS installations,
+                       COUNT(DISTINCT sic.device_id)::integer AS device_count,
+                       COUNT(DISTINCT sic.client_id)::integer AS client_count,
+                       MIN(sic.first_observed_at) AS first_observed_at,
+                       MAX(sic.last_observed_at) AS last_observed_at,
+                       MAX(sic.first_observed_at) AS latest_install
+                FROM operations.software_installations_current sic
+                JOIN operations.devices d
+                  ON d.tenant_id = sic.tenant_id AND d.id = sic.device_id
+                WHERE sic.tenant_id = 1
+                  AND sic.deleted_at IS NULL
+                  AND sic.stale_since IS NULL
+                  AND d.deleted_at IS NULL
+                  AND {current_computer_sql("d")}
+                GROUP BY sic.tenant_id, sic.canonical_name
+            ), totals AS (
                 SELECT COALESCE(SUM(installations), 0)::bigint AS installations,
                        COUNT(*)::bigint AS unique_titles
-                FROM operations.software_title_current
+                FROM current_titles
                 WHERE tenant_id = 1
             ),
             category_by_title AS ({category_cte_sql}),
@@ -7280,7 +7333,7 @@ def _software_page_data(request: HttpRequest) -> dict:
                        pcbt.product_categories,
                        {software_review.TITLE_STATUS} AS decision,
                        COUNT(*) OVER ()::bigint AS total_filtered
-                FROM operations.software_title_current sic
+                FROM current_titles sic
                 LEFT JOIN category_by_title cbt ON cbt.canonical_name = sic.canonical_name
                 LEFT JOIN product_category_by_title pcbt ON pcbt.canonical_name = sic.canonical_name
                 {software_review.TITLE_STATUS_JOINS}
@@ -7317,15 +7370,17 @@ def _software_page_data(request: HttpRequest) -> dict:
         product_categories_by_title: dict[str, list[str]] = {}
         if canonical_names and capability_available:
             cur.execute(
-                """
+                f"""
                 SELECT sic.canonical_name,
                        array_agg(DISTINCT CASE cap.capability
                            WHEN 'endpoint_security' THEN 'av' ELSE cap.capability END)
                 FROM operations.software_installations_current sic
+                JOIN operations.devices d ON d.id = sic.device_id AND d.tenant_id = sic.tenant_id
                 JOIN catalog.software_versions sv ON sv.id = sic.software_version_id
                 JOIN catalog.products p ON p.id = sv.product_id
                 JOIN catalog.v_product_capability_effective cap ON cap.product_uuid = p.product_uuid
                 WHERE sic.tenant_id = 1 AND sic.deleted_at IS NULL AND sic.stale_since IS NULL
+                  AND d.deleted_at IS NULL AND {current_computer_sql("d")}
                   AND sic.canonical_name = ANY(%s::text[])
                 GROUP BY sic.canonical_name
                 """,
@@ -7334,13 +7389,15 @@ def _software_page_data(request: HttpRequest) -> dict:
             categories_by_title = {name: categories for name, categories in cur.fetchall()}
         if canonical_names and product_category_available:
             cur.execute(
-                """
+                f"""
                 SELECT sic.canonical_name, array_agg(DISTINCT pce.category)
                 FROM operations.software_installations_current sic
+                JOIN operations.devices d ON d.id = sic.device_id AND d.tenant_id = sic.tenant_id
                 JOIN catalog.software_versions sv ON sv.id = sic.software_version_id
                 JOIN catalog.products p ON p.id = sv.product_id
                 JOIN catalog.v_product_category_effective pce ON pce.product_uuid = p.product_uuid
                 WHERE sic.tenant_id = 1 AND sic.deleted_at IS NULL AND sic.stale_since IS NULL
+                  AND d.deleted_at IS NULL AND {current_computer_sql("d")}
                   AND sic.canonical_name = ANY(%s::text[])
                 GROUP BY sic.canonical_name
                 """,
@@ -7364,12 +7421,15 @@ def _software_page_data(request: HttpRequest) -> dict:
 
         # Recent installations — last 24h, first-seen
         cur.execute(
-            """
+            f"""
             SELECT sic.canonical_name, sic.publisher, c.display_name AS client,
                    sic.first_observed_at
             FROM operations.software_installations_current sic
-            JOIN operations.clients c ON c.id = sic.client_id
+            JOIN operations.clients c ON c.id = sic.client_id AND c.tenant_id = sic.tenant_id
+            JOIN operations.devices d ON d.id = sic.device_id AND d.tenant_id = sic.tenant_id
             WHERE sic.tenant_id = 1 AND sic.deleted_at IS NULL
+              AND sic.stale_since IS NULL
+              AND d.deleted_at IS NULL AND {current_computer_sql("d")}
               AND sic.first_observed_at >= NOW() - INTERVAL '24 hours'
             ORDER BY sic.first_observed_at DESC
             LIMIT 10
@@ -7406,21 +7466,36 @@ def _software_page_data(request: HttpRequest) -> dict:
         with transaction.atomic(), connection.cursor() as sc:
             sc.execute("SET LOCAL operations.tenant_id = 1")
             sc.execute(
-                """
-                SELECT COUNT(*)::int
-                FROM operations.software_title_current
-                WHERE tenant_id = 1
-                  AND latest_install >= NOW() - INTERVAL '7 days'
+                f"""
+                SELECT COUNT(DISTINCT sic.canonical_name)::int
+                FROM operations.software_installations_current sic
+                JOIN operations.devices d
+                  ON d.tenant_id = sic.tenant_id AND d.id = sic.device_id
+                WHERE sic.tenant_id = 1
+                  AND sic.deleted_at IS NULL
+                  AND sic.stale_since IS NULL
+                  AND d.deleted_at IS NULL
+                  AND {current_computer_sql("d")}
+                  AND sic.first_observed_at >= NOW() - INTERVAL '7 days'
                 """
             )
             (this_week["new_products"],) = sc.fetchone()
             sc.execute(
-                """
-                SELECT canonical_name, device_count AS devices
-                FROM operations.software_title_current
-                WHERE tenant_id = 1
-                  AND latest_install >= NOW() - INTERVAL '7 days'
-                ORDER BY device_count DESC, canonical_name LIMIT 1
+                f"""
+                SELECT sic.canonical_name,
+                       COUNT(DISTINCT sic.device_id)::int AS devices
+                FROM operations.software_installations_current sic
+                JOIN operations.devices d
+                  ON d.tenant_id = sic.tenant_id AND d.id = sic.device_id
+                WHERE sic.tenant_id = 1
+                  AND sic.deleted_at IS NULL
+                  AND sic.stale_since IS NULL
+                  AND d.deleted_at IS NULL
+                  AND {current_computer_sql("d")}
+                  AND sic.first_observed_at >= NOW() - INTERVAL '7 days'
+                GROUP BY sic.canonical_name
+                ORDER BY devices DESC, sic.canonical_name
+                LIMIT 1
                 """
             )
             row = sc.fetchone()
@@ -7430,15 +7505,24 @@ def _software_page_data(request: HttpRequest) -> dict:
             with transaction.atomic(), connection.cursor() as sc:
                 sc.execute("SET LOCAL operations.tenant_id = 1")
                 sc.execute(
-                    """
+                    f"""
                     SELECT COUNT(*)::int
                     FROM operations.v_software_safety safety
-                    JOIN operations.software_title_current title
-                      ON title.tenant_id = safety.tenant_id
-                     AND title.canonical_name = safety.canonical_name
                     WHERE safety.tenant_id = 1
                       AND safety.safety_band = 'high'
-                      AND title.latest_install >= NOW() - INTERVAL '7 days'
+                      AND EXISTS (
+                          SELECT 1
+                          FROM operations.software_installations_current sic
+                          JOIN operations.devices d
+                            ON d.tenant_id = sic.tenant_id AND d.id = sic.device_id
+                          WHERE sic.tenant_id = safety.tenant_id
+                            AND sic.canonical_name = safety.canonical_name
+                            AND sic.deleted_at IS NULL
+                            AND sic.stale_since IS NULL
+                            AND d.deleted_at IS NULL
+                            AND {current_computer_sql("d")}
+                            AND sic.first_observed_at >= NOW() - INTERVAL '7 days'
+                      )
                     """
                 )
                 (this_week["new_high_risk"],) = sc.fetchone()
@@ -7512,7 +7596,7 @@ def _software_page_data(request: HttpRequest) -> dict:
     status_counts: dict[str, int] = {}
     with transaction.atomic(), connection.cursor() as sc:
         sc.execute("SET LOCAL operations.tenant_id = 1")
-        sc.execute(software_review.TITLE_STATUS_COUNTS_SQL)
+        sc.execute(software_review.title_status_counts_sql(current_computer_sql("d")))
         status_counts = dict(sc.fetchall())
     approved_titles = status_counts.get("approve", 0)
     rejected_titles = status_counts.get("reject", 0)
@@ -7678,13 +7762,19 @@ def software_detail(request: HttpRequest, name: str) -> HttpResponse:
     canonical_name = name.strip()
     if not canonical_name:
         return redirect("software_page")
+    try:
+        install_page = max(1, int(request.GET.get("install_page", "1")))
+    except ValueError:
+        install_page = 1
+    install_page_size = 100
+    install_offset = (install_page - 1) * install_page_size
 
     with transaction.atomic(), connection.cursor() as cur:
         cur.execute("SET LOCAL operations.tenant_id = 1")
 
         # Fleet-wide install rollup for this title.
         cur.execute(
-            """
+            f"""
             SELECT COUNT(*)                             AS installations,
                    COUNT(DISTINCT sic.device_id)        AS devices,
                    COUNT(DISTINCT sic.client_id)        AS clients,
@@ -7692,9 +7782,12 @@ def software_detail(request: HttpRequest, name: str) -> HttpResponse:
                    MAX(sic.last_observed_at)            AS last_observed,
                    MAX(sic.first_observed_at)           AS latest_install
             FROM operations.software_installations_current sic
+            JOIN operations.devices d ON d.id = sic.device_id AND d.tenant_id = sic.tenant_id
             WHERE sic.tenant_id = 1
               AND sic.deleted_at IS NULL
               AND sic.stale_since IS NULL
+              AND d.deleted_at IS NULL
+              AND {current_computer_sql("d")}
               AND LOWER(sic.canonical_name) = LOWER(%s)
             """,
             [canonical_name],
@@ -7740,13 +7833,15 @@ def software_detail(request: HttpRequest, name: str) -> HttpResponse:
         # for the same canonical_name usually indicate a rename / catalog
         # merge and are worth surfacing.
         cur.execute(
-            """
-            SELECT COALESCE(NULLIF(publisher, ''), '(unknown)') AS publisher,
+            f"""
+            SELECT COALESCE(NULLIF(sic.publisher, ''), '(unknown)') AS publisher,
                    COUNT(*)::int AS installs,
-                   COUNT(DISTINCT device_id)::int AS devices
-            FROM operations.software_installations_current
-            WHERE tenant_id = 1 AND deleted_at IS NULL AND stale_since IS NULL
-              AND LOWER(canonical_name) = LOWER(%s)
+                   COUNT(DISTINCT sic.device_id)::int AS devices
+            FROM operations.software_installations_current sic
+            JOIN operations.devices d ON d.id = sic.device_id AND d.tenant_id = sic.tenant_id
+            WHERE sic.tenant_id = 1 AND sic.deleted_at IS NULL AND sic.stale_since IS NULL
+              AND d.deleted_at IS NULL AND {current_computer_sql("d")}
+              AND LOWER(sic.canonical_name) = LOWER(%s)
             GROUP BY 1
             ORDER BY installs DESC
             """,
@@ -7758,15 +7853,17 @@ def software_detail(request: HttpRequest, name: str) -> HttpResponse:
 
         # Version breakdown — one row per distinct version.
         cur.execute(
-            """
-            SELECT COALESCE(NULLIF(version, ''), '(unknown)') AS version,
+            f"""
+            SELECT COALESCE(NULLIF(sic.version, ''), '(unknown)') AS version,
                    COUNT(*)::int AS installs,
-                   COUNT(DISTINCT device_id)::int AS devices,
-                   COUNT(DISTINCT client_id)::int AS clients,
-                   MAX(last_observed_at) AS last_observed
-            FROM operations.software_installations_current
-            WHERE tenant_id = 1 AND deleted_at IS NULL AND stale_since IS NULL
-              AND LOWER(canonical_name) = LOWER(%s)
+                   COUNT(DISTINCT sic.device_id)::int AS devices,
+                   COUNT(DISTINCT sic.client_id)::int AS clients,
+                   MAX(sic.last_observed_at) AS last_observed
+            FROM operations.software_installations_current sic
+            JOIN operations.devices d ON d.id = sic.device_id AND d.tenant_id = sic.tenant_id
+            WHERE sic.tenant_id = 1 AND sic.deleted_at IS NULL AND sic.stale_since IS NULL
+              AND d.deleted_at IS NULL AND {current_computer_sql("d")}
+              AND LOWER(sic.canonical_name) = LOWER(%s)
             GROUP BY 1
             ORDER BY installs DESC, version
             """,
@@ -7785,12 +7882,14 @@ def software_detail(request: HttpRequest, name: str) -> HttpResponse:
 
         # Install-location breakdown.
         cur.execute(
-            """
+            f"""
             SELECT COALESCE(NULLIF(install_location, ''), '(unknown)') AS location,
                    COUNT(*)::int AS installs
-            FROM operations.software_installations_current
-            WHERE tenant_id = 1 AND deleted_at IS NULL AND stale_since IS NULL
-              AND LOWER(canonical_name) = LOWER(%s)
+            FROM operations.software_installations_current sic
+            JOIN operations.devices d ON d.id = sic.device_id AND d.tenant_id = sic.tenant_id
+            WHERE sic.tenant_id = 1 AND sic.deleted_at IS NULL AND sic.stale_since IS NULL
+              AND d.deleted_at IS NULL AND {current_computer_sql("d")}
+              AND LOWER(sic.canonical_name) = LOWER(%s)
             GROUP BY 1
             ORDER BY installs DESC
             LIMIT 20
@@ -7799,24 +7898,27 @@ def software_detail(request: HttpRequest, name: str) -> HttpResponse:
         )
         location_rows = [{"location": row[0], "installs": row[1]} for row in cur.fetchall()]
 
-        # Per-device install list — bounded so a mega-title doesn't OOM.
+        # Per-device installation list. Its membership matches the header
+        # rollup; pagination limits rendering only, not the selected scope.
         cur.execute(
-            """
+            f"""
             SELECT sic.device_id, sic.client_id, c.slug, c.display_name,
                    d.canonical_hostname, d.device_role, d.os_group,
                    sic.version, sic.install_location, sic.install_date,
                    sic.first_observed_at, sic.last_observed_at
             FROM operations.software_installations_current sic
-            JOIN operations.clients c ON c.id = sic.client_id
-            JOIN operations.devices d ON d.id = sic.device_id
+            JOIN operations.clients c ON c.id = sic.client_id AND c.tenant_id = sic.tenant_id
+            JOIN operations.devices d ON d.id = sic.device_id AND d.tenant_id = sic.tenant_id
             WHERE sic.tenant_id = 1
               AND sic.deleted_at IS NULL
               AND sic.stale_since IS NULL
+              AND d.deleted_at IS NULL
+              AND {current_computer_sql("d")}
               AND LOWER(sic.canonical_name) = LOWER(%s)
             ORDER BY c.display_name, d.canonical_hostname
-            LIMIT 500
+            LIMIT %s OFFSET %s
             """,
-            [canonical_name],
+            [canonical_name, install_page_size, install_offset],
         )
         install_rows = [
             {
@@ -8020,15 +8122,18 @@ def software_detail(request: HttpRequest, name: str) -> HttpResponse:
         with transaction.atomic(), connection.cursor() as cur:
             cur.execute("SET LOCAL operations.tenant_id = 1")
             cur.execute(
-                """
+                f"""
                 SELECT c.id, c.display_name,
                        COUNT(DISTINCT sic.device_id)::int AS device_count,
                        COUNT(*)::int AS installation_count
                 FROM operations.software_installations_current sic
-                JOIN operations.clients c ON c.id = sic.client_id
+                JOIN operations.clients c ON c.id = sic.client_id AND c.tenant_id = sic.tenant_id
+                JOIN operations.devices d ON d.id = sic.device_id AND d.tenant_id = sic.tenant_id
                 WHERE sic.tenant_id = 1
                   AND sic.deleted_at IS NULL
                   AND sic.stale_since IS NULL
+                  AND d.deleted_at IS NULL
+                  AND {current_computer_sql("d")}
                   AND LOWER(sic.canonical_name) = LOWER(%s)
                 GROUP BY c.id, c.display_name
                 ORDER BY LOWER(c.display_name), c.id
@@ -8072,6 +8177,13 @@ def software_detail(request: HttpRequest, name: str) -> HttpResponse:
             "versions": version_rows,
             "locations": location_rows,
             "install_rows": install_rows,
+            "install_page": install_page,
+            "install_page_size": install_page_size,
+            "install_pages": max(1, -(-installations // install_page_size)),
+            "install_has_previous": install_page > 1,
+            "install_has_next": install_page * install_page_size < installations,
+            "install_previous_page": install_page - 1,
+            "install_next_page": install_page + 1,
             "global_decision": global_decision,
             "decision_scope_clients": decision_scope_clients,
             "decision_scope_devices": decision_scope_devices,
@@ -8354,25 +8466,28 @@ def software_publishers(request: HttpRequest) -> HttpResponse:
         params: list = []
         extra_where = ""
         if q_filter:
-            extra_where = "AND publisher ILIKE %s"
+            extra_where = "AND sic.publisher ILIKE %s"
             params.append(f"%{q_filter}%")
 
         cur.execute(
             f"""
-            SELECT COALESCE(NULLIF(publisher, ''), '(unknown)') AS publisher,
+            SELECT COALESCE(NULLIF(sic.publisher, ''), '(unknown)') AS publisher,
                    COUNT(*)::int AS installations,
-                   COUNT(DISTINCT canonical_name)::int AS titles,
-                   COUNT(DISTINCT device_id)::int AS devices,
-                   COUNT(DISTINCT client_id)::int AS clients,
-                   MAX(last_observed_at) AS last_observed
-            FROM operations.software_installations_current
-            WHERE tenant_id = 1
-              AND deleted_at IS NULL
-              AND stale_since IS NULL
+                   COUNT(DISTINCT sic.canonical_name)::int AS titles,
+                   COUNT(DISTINCT sic.device_id)::int AS devices,
+                   COUNT(DISTINCT sic.client_id)::int AS clients,
+                   MAX(sic.last_observed_at) AS last_observed
+            FROM operations.software_installations_current sic
+            JOIN operations.devices d
+              ON d.id = sic.device_id AND d.tenant_id = sic.tenant_id
+            WHERE sic.tenant_id = 1
+              AND sic.deleted_at IS NULL
+              AND sic.stale_since IS NULL
+              AND d.deleted_at IS NULL
+              AND {current_computer_sql("d")}
               {extra_where}
             GROUP BY 1
             ORDER BY installations DESC, publisher
-            LIMIT 500
             """,
             params,
         )
@@ -8459,6 +8574,12 @@ def software_publisher_detail(request: HttpRequest, publisher: str) -> HttpRespo
     pub = publisher.strip()
     if not pub:
         return redirect("software_publishers")
+    try:
+        title_page = max(1, int(request.GET.get("title_page", "1")))
+    except ValueError:
+        title_page = 1
+    title_page_size = 100
+    title_offset = (title_page - 1) * title_page_size
 
     with transaction.atomic(), connection.cursor() as cur:
         cur.execute("SET LOCAL operations.tenant_id = 1")
@@ -8479,37 +8600,42 @@ def software_publisher_detail(request: HttpRequest, publisher: str) -> HttpRespo
 
         # Rollup for the header tiles.
         cur.execute(
-            """
+            f"""
             SELECT COUNT(*)::int AS installations,
-                   COUNT(DISTINCT canonical_name)::int AS titles,
-                   COUNT(DISTINCT device_id)::int AS devices,
-                   COUNT(DISTINCT client_id)::int AS clients,
-                   MIN(first_observed_at) AS first_observed,
-                   MAX(last_observed_at) AS last_observed
-            FROM operations.software_installations_current
-            WHERE tenant_id = 1 AND deleted_at IS NULL AND stale_since IS NULL
-              AND LOWER(publisher) = LOWER(%s)
+                   COUNT(DISTINCT sic.canonical_name)::int AS titles,
+                   COUNT(DISTINCT sic.device_id)::int AS devices,
+                   COUNT(DISTINCT sic.client_id)::int AS clients,
+                   MIN(sic.first_observed_at) AS first_observed,
+                   MAX(sic.last_observed_at) AS last_observed
+            FROM operations.software_installations_current sic
+            JOIN operations.devices d ON d.id = sic.device_id AND d.tenant_id = sic.tenant_id
+            WHERE sic.tenant_id = 1 AND sic.deleted_at IS NULL AND sic.stale_since IS NULL
+              AND d.deleted_at IS NULL AND {current_computer_sql("d")}
+              AND LOWER(sic.publisher) = LOWER(%s)
             """,
             [pub],
         )
         installations, titles, devices, clients, first_observed, last_observed = cur.fetchone()
 
-        # Titles under this publisher (bounded).
+        # Titles under this publisher. Pagination limits presentation only;
+        # the header count remains the complete current-installation scope.
         cur.execute(
-            """
-            SELECT canonical_name,
+            f"""
+            SELECT sic.canonical_name,
                    COUNT(*)::int AS installs,
-                   COUNT(DISTINCT device_id)::int AS device_count,
-                   COUNT(DISTINCT client_id)::int AS client_count,
-                   MAX(last_observed_at) AS last_observed
-            FROM operations.software_installations_current
-            WHERE tenant_id = 1 AND deleted_at IS NULL AND stale_since IS NULL
-              AND LOWER(publisher) = LOWER(%s)
-            GROUP BY canonical_name
+                   COUNT(DISTINCT sic.device_id)::int AS device_count,
+                   COUNT(DISTINCT sic.client_id)::int AS client_count,
+                   MAX(sic.last_observed_at) AS last_observed
+            FROM operations.software_installations_current sic
+            JOIN operations.devices d ON d.id = sic.device_id AND d.tenant_id = sic.tenant_id
+            WHERE sic.tenant_id = 1 AND sic.deleted_at IS NULL AND sic.stale_since IS NULL
+              AND d.deleted_at IS NULL AND {current_computer_sql("d")}
+              AND LOWER(sic.publisher) = LOWER(%s)
+            GROUP BY sic.canonical_name
             ORDER BY installs DESC, canonical_name
-            LIMIT 500
+            LIMIT %s OFFSET %s
             """,
-            [pub],
+            [pub, title_page_size, title_offset],
         )
         title_rows_raw = cur.fetchall()
 
@@ -8517,7 +8643,7 @@ def software_publisher_detail(request: HttpRequest, publisher: str) -> HttpRespo
         # A publisher-wide decision may only be narrowed to a client/device
         # that actually runs one of its products.
         cur.execute(
-            """
+            f"""
             SELECT DISTINCT ON (sic.device_id)
                    sic.device_id, c.slug, c.display_name, d.canonical_hostname
               FROM operations.software_installations_current sic
@@ -8525,6 +8651,7 @@ def software_publisher_detail(request: HttpRequest, publisher: str) -> HttpRespo
               JOIN operations.devices d ON d.id = sic.device_id
              WHERE sic.tenant_id = 1 AND sic.deleted_at IS NULL
                AND sic.stale_since IS NULL
+               AND d.deleted_at IS NULL AND {current_computer_sql("d")}
                AND LOWER(sic.publisher) = LOWER(%s)
              ORDER BY sic.device_id, c.display_name, d.canonical_hostname
              LIMIT 500
@@ -8593,6 +8720,13 @@ def software_publisher_detail(request: HttpRequest, publisher: str) -> HttpRespo
             "first_observed": first_observed,
             "last_observed": last_observed,
             "title_rows": title_rows,
+            "title_page": title_page,
+            "title_page_size": title_page_size,
+            "title_pages": max(1, -(-titles // title_page_size)),
+            "title_has_previous": title_page > 1,
+            "title_has_next": title_page * title_page_size < titles,
+            "title_previous_page": title_page - 1,
+            "title_next_page": title_page + 1,
             "global_pub_decision": global_pub_decision,
             "decision_scope_clients": decision_scope_clients,
             "decision_scope_devices": decision_scope_devices,
@@ -8664,6 +8798,7 @@ def software_user_risk(request: HttpRequest) -> HttpResponse:
                    e.finding_type AS kind
             FROM operations.v_device_software_exposure e
             JOIN operations.devices d ON d.id = e.device_id AND d.deleted_at IS NULL
+                                      AND {current_computer_sql("d")}
             WHERE e.tenant_id = 1
               AND e.status IN ('open', 'acknowledged')
               AND e.finding_type <> 'whitelist_suggestion'
@@ -8689,6 +8824,7 @@ def software_user_risk(request: HttpRequest) -> HttpResponse:
              AND sic.deleted_at IS NULL
              AND sic.stale_since IS NULL
             JOIN operations.devices d ON d.id = sic.device_id AND d.deleted_at IS NULL
+                                      AND {current_computer_sql("d")}
             WHERE sd.tenant_id = 1
               AND sd.decision IN ('reject', 'investigate')
               AND sd.canonical_name <> ''
@@ -8707,6 +8843,7 @@ def software_user_risk(request: HttpRequest) -> HttpResponse:
              AND sic.deleted_at IS NULL
              AND sic.stale_since IS NULL
             JOIN operations.devices d ON d.id = sic.device_id AND d.deleted_at IS NULL
+                                      AND {current_computer_sql("d")}
             WHERE sd.tenant_id = 1
               AND sd.decision IN ('reject', 'investigate')
               AND sd.publisher <> ''
@@ -8735,6 +8872,7 @@ def software_user_risk(request: HttpRequest) -> HttpResponse:
                    ai.kind
             FROM device_user du
             JOIN operations.devices d ON d.id = du.ops_device_id AND d.deleted_at IS NULL
+                                      AND {current_computer_sql("d")}
             JOIN operations.clients c ON c.id = d.client_id AND c.deleted_at IS NULL
             JOIN all_items ai ON ai.device_id = d.id
             WHERE d.tenant_id = 1
@@ -8759,6 +8897,7 @@ def software_user_risk(request: HttpRequest) -> HttpResponse:
                        ai.kind
                 FROM device_user du
                 JOIN operations.devices d ON d.id = du.ops_device_id AND d.deleted_at IS NULL
+                                          AND {current_computer_sql("d")}
                 JOIN operations.clients c ON c.id = d.client_id AND c.deleted_at IS NULL
                 JOIN all_items ai ON ai.device_id = d.id
                 WHERE d.tenant_id = 1
@@ -10937,6 +11076,7 @@ def software_tech_checklist(request: HttpRequest) -> HttpResponse:
                e.severity
         FROM operations.v_device_software_exposure e
         JOIN operations.devices d ON d.id = e.device_id AND d.deleted_at IS NULL
+                                  AND {current_computer_sql("d")}
         JOIN operations.clients c ON c.id = d.client_id AND c.deleted_at IS NULL
         WHERE e.tenant_id = 1
           AND e.status IN ('open', 'acknowledged')
@@ -10977,6 +11117,7 @@ def software_tech_checklist(request: HttpRequest) -> HttpResponse:
          AND sic.deleted_at IS NULL
          AND sic.stale_since IS NULL
         JOIN operations.devices d ON d.id = sic.device_id AND d.deleted_at IS NULL
+                                  AND {current_computer_sql("d")}
         JOIN operations.clients c ON c.id = d.client_id AND c.deleted_at IS NULL
         WHERE sd.tenant_id = 1
           AND sd.decision IN ('reject', 'investigate')
@@ -11006,6 +11147,7 @@ def software_tech_checklist(request: HttpRequest) -> HttpResponse:
          AND sic.deleted_at IS NULL
          AND sic.stale_since IS NULL
         JOIN operations.devices d ON d.id = sic.device_id AND d.deleted_at IS NULL
+                                  AND {current_computer_sql("d")}
         JOIN operations.clients c ON c.id = d.client_id AND c.deleted_at IS NULL
         WHERE sd.tenant_id = 1
           AND sd.decision IN ('reject', 'investigate')
@@ -11145,11 +11287,15 @@ def software_tech_checklist(request: HttpRequest) -> HttpResponse:
     if q_filter or kind_filter:
         devices = [d for d in devices if _match_row(d)]
 
+    device_page = Paginator(devices, 100).get_page(request.GET.get("page"))
+    page_query = request.GET.copy()
+    page_query.pop("page", None)
+
     return render(
         request,
         "software_tech_checklist.html",
         {
-            "devices": devices[:500],
+            "devices": device_page.object_list,
             "device_count": len(devices),
             "total_items": sum(e["item_count"] for e in devices),
             "clients": clients,
@@ -11158,6 +11304,8 @@ def software_tech_checklist(request: HttpRequest) -> HttpResponse:
             "active_role": role_filter,
             "active_os": os_filter,
             "active_kind": kind_filter,
+            "page_obj": device_page,
+            "page_query": page_query.urlencode(),
             "software_tab": "checklist",
         },
     )
@@ -11192,6 +11340,12 @@ def devices_page(request: HttpRequest) -> HttpResponse:
     software_filter = (request.GET.get("software") or "").strip()  # canonical_name
     version_filter = (request.GET.get("version") or "").strip()
     software_publisher_filter = (request.GET.get("software_publisher") or "").strip()
+    is_csv = wants_csv(request)
+    try:
+        device_page = max(1, int(request.GET.get("page", "1")))
+    except ValueError:
+        device_page = 1
+    device_page_size = 100
 
     with transaction.atomic(), connection.cursor() as cur:
         cur.execute("SET LOCAL operations.tenant_id = 1")
@@ -11237,7 +11391,7 @@ def devices_page(request: HttpRequest) -> HttpResponse:
               AND f.subject_type = 'device'
             """
         )
-        coverage_issues, identity_issues = cur.fetchone()
+        agent_reporting_issues, inventory_issues = cur.fetchone()
         cur.execute(
             f"""
             SELECT COUNT(*)::int
@@ -11317,6 +11471,11 @@ def devices_page(request: HttpRequest) -> HttpResponse:
             params.extend(software_params)
 
         where_sql = " AND ".join(where)
+        cur.execute(
+            f"SELECT COUNT(*)::int FROM operations.v_device v WHERE {where_sql}",
+            params,
+        )
+        filtered_total = cur.fetchone()[0]
         # The severe-issue counts are aggregated ONCE for the page, not per row.
         #
         # `v_device_software_exposure` builds a `software_findings` CTE that is
@@ -11326,8 +11485,8 @@ def devices_page(request: HttpRequest) -> HttpResponse:
         # software-finding set. Measured 2026-08-17: 363 ms and ~670 MB of
         # buffer traffic for a single device, x500 rows = 176 s for this one
         # statement, which is what made /devices/ exceed the gunicorn worker
-        # timeout. Aggregating over the page's 500 devices in one pass returns
-        # identical counts in 1.3 s.
+        # timeout. Aggregating over one rendered page in one pass keeps the
+        # same bounded query shape.
         cur.execute(
             f"""
             WITH page AS MATERIALIZED (
@@ -11338,7 +11497,7 @@ def devices_page(request: HttpRequest) -> HttpResponse:
                 FROM operations.v_device v
                 WHERE {where_sql}
                 ORDER BY v.canonical_hostname
-                LIMIT 500
+                {"" if is_csv else "LIMIT %s OFFSET %s"}
             ),
             device_findings AS (
                 SELECT f.subject_id AS device_id, COUNT(*) AS n
@@ -11371,7 +11530,7 @@ def devices_page(request: HttpRequest) -> HttpResponse:
             LEFT JOIN device_exposure de ON de.device_id = p.device_id
             ORDER BY p.canonical_hostname
             """,
-            params,
+            params if is_csv else [*params, device_page_size, (device_page - 1) * device_page_size],
         )
         device_rows = cur.fetchall()
 
@@ -11432,7 +11591,7 @@ def devices_page(request: HttpRequest) -> HttpResponse:
         deleted_at__isnull=True,
     ).order_by("display_name")
 
-    if wants_csv(request):
+    if is_csv:
         return csv_response(
             devices,
             columns=[
@@ -11460,6 +11619,32 @@ def devices_page(request: HttpRequest) -> HttpResponse:
             "active_device_days": active_device_days,
             "os_rows": os_rows,
             "devices": devices,
+            "filtered_total": filtered_total,
+            "device_page": device_page,
+            "device_page_size": device_page_size,
+            "device_pages": max(1, -(-filtered_total // device_page_size)),
+            "device_has_previous": device_page > 1,
+            "device_has_next": device_page * device_page_size < filtered_total,
+            "device_previous_page": device_page - 1,
+            "device_next_page": device_page + 1,
+            "page_query": urlencode(
+                {
+                    key: value
+                    for key, value in {
+                        "q": q_filter,
+                        "os": os_filter,
+                        "role": role_filter,
+                        "online": online_filter,
+                        "state": state_filter,
+                        "client": client_filter,
+                        "lifecycle": lifecycle_filter,
+                        "software": software_filter,
+                        "version": version_filter,
+                        "software_publisher": software_publisher_filter,
+                    }.items()
+                    if value
+                }
+            ),
             "clients": clients,
             "active_q": q_filter,
             "active_os": os_filter,
@@ -11471,8 +11656,8 @@ def devices_page(request: HttpRequest) -> HttpResponse:
             "active_software": software_filter,
             "active_version": version_filter,
             "active_software_publisher": software_publisher_filter,
-            "coverage_issues": coverage_issues,
-            "identity_issues": identity_issues,
+            "agent_reporting_issues": agent_reporting_issues,
+            "inventory_issues": inventory_issues,
             "delayed_sources": delayed_sources,
         },
     )
@@ -11500,6 +11685,8 @@ def software_clients(request: HttpRequest) -> HttpResponse:
             "sic.tenant_id = 1",
             "sic.deleted_at IS NULL",
             "sic.stale_since IS NULL",
+            "d.deleted_at IS NULL",
+            current_computer_sql("d"),
         ]
         params: list = []
         if software_filter:
@@ -11518,6 +11705,7 @@ def software_clients(request: HttpRequest) -> HttpResponse:
                    COUNT(DISTINCT sic.device_id)::int AS device_count
             FROM operations.software_installations_current sic
             JOIN operations.clients c ON c.id = sic.client_id
+            JOIN operations.devices d ON d.id = sic.device_id AND d.tenant_id = sic.tenant_id
             WHERE {where_sql}
             GROUP BY c.id, c.display_name, c.slug
             ORDER BY device_count DESC, c.display_name
@@ -11705,7 +11893,7 @@ def patching_queue(request: HttpRequest) -> HttpResponse:
     # Device-population summary — how many devices exist in the
     # filtered slice, how many are in scope (Included). Reads
     # v_device (Track O). Scoped to client + role if filtered.
-    pop_where = ["tenant_id = %s"]
+    pop_where = ["tenant_id = %s", current_computer_sql()]
     pop_params: list = [1]
     if filtered_client_ids:
         pop_where.append("client_id = ANY(%s::uuid[])")
@@ -11979,6 +12167,12 @@ def patching_queue(request: HttpRequest) -> HttpResponse:
     scope_filter = request.GET.get("scope", "")
     posture_filter = request.GET.get("posture", "")
     device_rows: list = []
+    device_total = 0
+    try:
+        device_page = max(1, int(request.GET.get("device_page", "1")))
+    except ValueError:
+        device_page = 1
+    device_page_size = 100
     if scope_filter in ("Included", "Excluded", "Unmanaged", "Unknown") or posture_filter in (
         "active",
         "active-in-scope",
@@ -12037,6 +12231,16 @@ def patching_queue(request: HttpRequest) -> HttpResponse:
             cur.execute(
                 posture_cte
                 + f"""
+                SELECT COUNT(*)::int
+                FROM device_posture
+                WHERE {' AND '.join(base_where)}
+                """,
+                device_row_params,
+            )
+            device_total = cur.fetchone()[0]
+            cur.execute(
+                posture_cte
+                + f"""
                 SELECT device_id, canonical_hostname, client_id,
                        device_role, os_group,
                        NULL::text AS patching_scope_reason,
@@ -12045,9 +12249,9 @@ def patching_queue(request: HttpRequest) -> HttpResponse:
                 FROM device_posture
                 WHERE {' AND '.join(base_where)}
                 ORDER BY canonical_hostname
-                LIMIT 500
+                LIMIT %s OFFSET %s
                 """,
-                device_row_params,
+                [*device_row_params, device_page_size, (device_page - 1) * device_page_size],
             )
             device_rows = cur.fetchall()
 
@@ -12112,7 +12316,7 @@ def patching_queue(request: HttpRequest) -> HttpResponse:
 
     _SEV_ORDER = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
     findings = sorted(
-        qs[:500],
+        qs,
         key=lambda f: (
             _SEV_ORDER.get(f.severity, 9),
             -(f.last_detected_at or f.last_seen_at).timestamp(),
@@ -12174,6 +12378,9 @@ def patching_queue(request: HttpRequest) -> HttpResponse:
 
     page_query = request.GET.copy()
     page_query.pop("page", None)
+    device_page_query = request.GET.copy()
+    device_page_query.pop("page", None)
+    device_page_query.pop("device_page", None)
 
     # Preserve current filters as query-string fragment for scope
     # drilldown links.
@@ -12246,6 +12453,15 @@ def patching_queue(request: HttpRequest) -> HttpResponse:
             "active_posture": posture_filter,
             "filter_qs": filter_qs,
             "device_rows": device_rows,
+            "device_total": device_total,
+            "device_page": device_page,
+            "device_page_size": device_page_size,
+            "device_pages": max(1, -(-device_total // device_page_size)),
+            "device_has_previous": device_page > 1,
+            "device_has_next": device_page * device_page_size < device_total,
+            "device_previous_page": device_page - 1,
+            "device_next_page": device_page + 1,
+            "device_page_query": device_page_query.urlencode(),
             "page_query": page_query.urlencode(),
         },
     )
@@ -12745,8 +12961,8 @@ def inventory_clients(request: HttpRequest) -> HttpResponse:
         if row is not None:
             row["references"].append(reference)
 
-    active_computers = Device.objects.filter(tenant_id=1, deleted_at__isnull=True).exclude(
-        lifecycle_status=Device.LifecycleStatus.RETIRED
+    active_computers = current_computers(
+        Device.objects.filter(tenant_id=1, deleted_at__isnull=True)
     )
     for item in active_computers.values("client_id").annotate(n=Count("id")):
         row = rows_by_client.get(str(item["client_id"]))
@@ -13961,7 +14177,13 @@ def org_software(request: HttpRequest, org_slug: str) -> HttpResponse:
     page = max(1, int(request.GET.get("page", 1) or 1))
 
     base_params: list = [1, str(client.id)]
-    base_where = "tenant_id = %s AND client_id = %s AND deleted_at IS NULL"
+    base_where = f"""tenant_id = %s AND client_id = %s AND deleted_at IS NULL
+        AND stale_since IS NULL
+        AND device_id IN (
+            SELECT id FROM operations.devices
+            WHERE tenant_id = 1 AND deleted_at IS NULL
+              AND {current_computer_sql()}
+        )"""
     extra_where = ""
     extra_params: list = []
 
@@ -14130,7 +14352,10 @@ def org_software_devices(request: HttpRequest, org_slug: str) -> HttpResponse:
                 WHERE s.tenant_id = %s
                   AND s.client_id = %s
                   AND s.canonical_name = %s
-                  AND s.deleted_at IS NULL{pub_clause}
+                  AND s.deleted_at IS NULL
+                  AND s.stale_since IS NULL
+                  AND d.deleted_at IS NULL
+                  AND {current_computer_sql("d")}{pub_clause}
                 ORDER BY d.canonical_hostname
                 """,
                 params,
@@ -16043,6 +16268,154 @@ def sources_status(request: HttpRequest) -> HttpResponse:
     )
 
 
+@login_required
+def source_records(request: HttpRequest, source_instance_id: uuid.UUID) -> HttpResponse:
+    """List one source instance's current observation records.
+
+    This is deliberately an observation reader rather than an Entity or
+    Computer reader: the source-status totals count one current observation
+    per source-scoped identity, including withdrawn and unlinked records.
+    """
+    tenant_id = int(getattr(request, "tenant_id", 1))
+    state = (request.GET.get("state") or "all").strip().lower()
+    if state not in {"all", "active", "withdrawn"}:
+        state = "all"
+    entity_type = (request.GET.get("type") or "").strip()
+    try:
+        page_number = max(1, int(request.GET.get("page", "1")))
+    except ValueError:
+        page_number = 1
+    page_size = 100
+
+    clauses = ["observation.tenant_id = %s", "observation.source_instance_id = %s"]
+    params: list[object] = [tenant_id, source_instance_id]
+    if state == "active":
+        clauses.append("observation.active")
+    elif state == "withdrawn":
+        clauses.append("NOT observation.active")
+    if entity_type:
+        clauses.append("observation.entity_type = %s")
+        params.append(entity_type)
+    where_sql = " AND ".join(clauses)
+
+    with transaction.atomic(), connection.cursor() as cur:
+        cur.execute("SELECT set_config('operations.tenant_id', %s, TRUE)", (str(tenant_id),))
+        cur.execute(
+            """
+            SELECT instance.id, source.name, client.display_name
+              FROM operations.source_instances instance
+              JOIN operations.sources source ON source.id = instance.source_id
+              LEFT JOIN operations.clients client
+                ON client.id = instance.client_id AND client.tenant_id = instance.tenant_id
+             WHERE instance.tenant_id = %s AND instance.id = %s
+            """,
+            (tenant_id, source_instance_id),
+        )
+        source_row = cur.fetchone()
+        if source_row is None:
+            raise Http404("Source instance not found")
+
+        cur.execute(
+            f"SELECT COUNT(*)::int FROM operations.entity_observation_current observation WHERE {where_sql}",
+            params,
+        )
+        total = cur.fetchone()[0]
+        cur.execute(
+            """
+            SELECT DISTINCT entity_type
+              FROM operations.entity_observation_current
+             WHERE tenant_id = %s AND source_instance_id = %s
+             ORDER BY entity_type
+            """,
+            (tenant_id, source_instance_id),
+        )
+        entity_types = [row[0] for row in cur.fetchall()]
+
+        records_sql = f"""
+            SELECT observation.observation_id, observation.entity_type,
+                   observation.external_id, observation.parent_external_id,
+                   observation.active, observation.observed_at,
+                   observation.last_seen_at, observation.withdrawn_at,
+                   observation.device_id, device.canonical_hostname,
+                   client.slug, client.display_name
+              FROM operations.entity_observation_current observation
+              LEFT JOIN operations.devices device
+                ON device.tenant_id = observation.tenant_id AND device.id = observation.device_id
+              LEFT JOIN operations.clients client
+                ON client.tenant_id = observation.tenant_id AND client.id = observation.client_id
+             WHERE {where_sql}
+             ORDER BY observation.last_seen_at DESC NULLS LAST, observation.observation_id
+        """
+        if wants_csv(request):
+            cur.execute(records_sql, params)
+        else:
+            cur.execute(
+                records_sql + " LIMIT %s OFFSET %s",
+                [*params, page_size, (page_number - 1) * page_size],
+            )
+        records = [
+            {
+                "observation_id": row[0],
+                "entity_type": row[1],
+                "external_id": row[2],
+                "parent_external_id": row[3],
+                "active": row[4],
+                "observed_at": row[5],
+                "last_seen_at": row[6],
+                "withdrawn_at": row[7],
+                "device_id": row[8],
+                "hostname": row[9],
+                "client_slug": row[10],
+                "client_name": row[11],
+            }
+            for row in cur.fetchall()
+        ]
+
+    if wants_csv(request):
+        return csv_response(
+            records,
+            columns=[
+                ("Observation ID", "observation_id"),
+                ("Entity type", "entity_type"),
+                ("External ID", "external_id"),
+                ("Parent external ID", "parent_external_id"),
+                ("State", lambda row: "active" if row["active"] else "withdrawn"),
+                ("Observed", "observed_at"),
+                ("Last seen", "last_seen_at"),
+                ("Withdrawn", "withdrawn_at"),
+                ("Linked Computer", "hostname"),
+                ("Client", "client_name"),
+            ],
+            filename_stem=f"{source_row[1]}_source_records",
+        )
+
+    page_count = max(1, -(-total // page_size))
+    return render(
+        request,
+        "source_records.html",
+        {
+            "source_instance_id": source_instance_id,
+            "source_name": source_row[1],
+            "source_client_name": source_row[2],
+            "records": records,
+            "total": total,
+            "state": state,
+            "entity_type": entity_type,
+            "entity_types": entity_types,
+            "page_number": page_number,
+            "page_count": page_count,
+            "page_size": page_size,
+            "has_previous": page_number > 1,
+            "has_next": page_number < page_count,
+            "previous_page": page_number - 1,
+            "next_page": page_number + 1,
+            "page_query": urlencode(
+                {key: value for key, value in {"state": state if state != "all" else "", "type": entity_type}.items() if value}
+            ),
+        },
+    )
+
+
 def _source_schedule_minutes(value: str) -> int | None:
     prefix, separator, minutes_text = value.strip().partition(":")
     if prefix != "interval" or not separator:
@@ -17216,10 +17589,13 @@ def software_decision_create(request: HttpRequest) -> HttpResponse:
                 f"""
                 SELECT EXISTS (
                     SELECT 1
-                      FROM operations.software_installations_current
-                     WHERE tenant_id = 1 AND deleted_at IS NULL AND stale_since IS NULL
-                       AND {target_column} = %s
-                       AND LOWER({match_column}) = LOWER(%s)
+                      FROM operations.software_installations_current sic
+                      JOIN operations.devices d
+                        ON d.id = sic.device_id AND d.tenant_id = sic.tenant_id
+                     WHERE sic.tenant_id = 1 AND sic.deleted_at IS NULL AND sic.stale_since IS NULL
+                       AND d.deleted_at IS NULL AND {current_computer_sql("d")}
+                       AND sic.{target_column} = %s
+                       AND LOWER(sic.{match_column}) = LOWER(%s)
                 )
                 """,
                 (target_value, match_value),
@@ -18184,10 +18560,9 @@ def admin_data(request: HttpRequest) -> HttpResponse:
         ).count()
     )
     clients_count = Client.objects.filter(tenant_id=1, deleted_at__isnull=True).count()
-    devices_count = Device.objects.filter(
-        tenant_id=1,
-        deleted_at__isnull=True,
-    ).exclude(lifecycle_status=Device.LifecycleStatus.RETIRED).count()
+    devices_count = current_computers(
+        Device.objects.filter(tenant_id=1, deleted_at__isnull=True)
+    ).count()
 
     source_rows = sorted(
         sources,

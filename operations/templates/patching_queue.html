@@ -173,7 +173,7 @@
         Devices — {% if active_posture %}{{ active_posture|humanize_label }}{% else %}{{ active_scope|humanize_label }}{% endif %}
         {% if active_device_type %}<span style="font-weight:400;">— {{ active_device_type|humanize_label }}</span>{% endif %}
         {% if active_os_family %}<span style="font-weight:400;">— {{ active_os_family }}</span>{% endif %}
-        <span style="font-weight:400;">({{ device_rows|length }}{% if device_rows|length == 500 %}+{% endif %})</span>
+        <span style="font-weight:400;">({{ device_total }})</span>
     </h2>
     <table data-sortable class="ops-table">
         <thead>
@@ -216,6 +216,15 @@
             {% endfor %}
         </tbody>
     </table>
+    {% if device_pages > 1 %}
+    <nav class="pager" aria-label="Patching device pages">
+        <p class="muted" style="margin:0;">Page {{ device_page }} of {{ device_pages }} · {{ device_page_size }} per page</p>
+        <div class="pager-links">
+            {% if device_has_previous %}<a class="pager-link" href="?{% if device_page_query %}{{ device_page_query }}&amp;{% endif %}device_page=1">First</a><a class="pager-link" href="?{% if device_page_query %}{{ device_page_query }}&amp;{% endif %}device_page={{ device_previous_page }}">Previous</a>{% endif %}
+            {% if device_has_next %}<a class="pager-link" href="?{% if device_page_query %}{{ device_page_query }}&amp;{% endif %}device_page={{ device_next_page }}">Next</a><a class="pager-link" href="?{% if device_page_query %}{{ device_page_query }}&amp;{% endif %}device_page={{ device_pages }}">Last</a>{% endif %}
+        </div>
+    </nav>
+    {% endif %}
 </div>
 {% endif %}
 

@@ -38,10 +38,10 @@
         </div>
     </div>
     <p class="muted" style="margin-top:0.5rem;">A current view of computers across all clients — explore, filter, and drill in.</p>
-    {% if coverage_issues or identity_issues or delayed_sources %}
+    {% if agent_reporting_issues or inventory_issues or delayed_sources %}
     <div class="dv-chips" style="margin-top:0.6rem;">
-        {% if coverage_issues %}<a class="dv-chip" href="{% url 'findings_queue' %}?category=agents_reporting">{{ coverage_issues }} computer{{ coverage_issues|pluralize }} with a coverage gap</a>{% endif %}
-        {% if identity_issues %}<a class="dv-chip" href="{% url 'findings_queue' %}?category=inventory">{{ identity_issues }} computer{{ identity_issues|pluralize }} with an identity conflict</a>{% endif %}
+        {% if agent_reporting_issues %}<a class="dv-chip" href="{% url 'findings_queue' %}?category=agents_reporting">{{ agent_reporting_issues }} computer{{ agent_reporting_issues|pluralize }} with an agent or reporting issue</a>{% endif %}
+        {% if inventory_issues %}<a class="dv-chip" href="{% url 'findings_queue' %}?category=inventory">{{ inventory_issues }} computer{{ inventory_issues|pluralize }} with an inventory issue</a>{% endif %}
         {% if delayed_sources %}<a class="dv-chip" href="{% url 'sources_status' %}">{{ delayed_sources }} source{{ delayed_sources|pluralize }} delayed</a>{% endif %}
     </div>
     {% endif %}
@@ -162,7 +162,7 @@
 
 <div class="card">
     <h2 class="section-label">Computers
-      <span style="font-weight:400;">({{ devices|length }}{% if devices|length == 500 %}+{% endif %})</span>
+      <span style="font-weight:400;">({{ filtered_total }})</span>
     </h2>
     {% if devices %}
     <table class="ops-table" data-sortable>
@@ -211,6 +211,15 @@
             {% endfor %}
         </tbody>
     </table>
+    {% if device_pages > 1 %}
+    <nav class="pager" aria-label="Computer pages">
+        <p class="muted" style="margin:0;">Page {{ device_page }} of {{ device_pages }} · {{ device_page_size }} per page</p>
+        <div class="pager-links">
+            {% if device_has_previous %}<a class="pager-link" href="?{% if page_query %}{{ page_query }}&amp;{% endif %}page=1">First</a><a class="pager-link" href="?{% if page_query %}{{ page_query }}&amp;{% endif %}page={{ device_previous_page }}">Previous</a>{% endif %}
+            {% if device_has_next %}<a class="pager-link" href="?{% if page_query %}{{ page_query }}&amp;{% endif %}page={{ device_next_page }}">Next</a><a class="pager-link" href="?{% if page_query %}{{ page_query }}&amp;{% endif %}page={{ device_pages }}">Last</a>{% endif %}
+        </div>
+    </nav>
+    {% endif %}
     {% else %}
     <p class="muted">No computers match the current filter.</p>
     {% endif %}

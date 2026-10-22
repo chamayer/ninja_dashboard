@@ -122,13 +122,13 @@
 <div style="display:flex; justify-content:space-between; align-items:baseline; margin-bottom:1rem;">
     <div>
         <h1 style="margin:0;">Computer inventory</h1>
-        <p class="muted" style="margin:0.25rem 0 0;">Every Computer known to Operations, plus source records not linked to one: where each was found, and what is required.</p>
+        <p class="muted" style="margin:0.25rem 0 0;">Current Computers plus separately marked source records not linked to one: where each was found, and what is required.</p>
     </div>
     {% include "_csv_download.html" %}
 </div>
 
 <div class="coverage-result-heading">
-    <h2>All known Computers</h2>
+    <h2>All inventory rows</h2>
     <p>These counts are not changed by the filters below. {% if requirements_evaluated_at %}Requirements were last evaluated {{ requirements_evaluated_at|timesince }} ago ({{ requirements_evaluated_at|date:"M j, H:i" }}).{% else %}Requirement results are not available yet; they appear after the next evaluator run.{% endif %}</p>
 </div>
 <div class="coverage-cards">
@@ -153,9 +153,9 @@
     <h2>Filtered results</h2>
     <p>Filters: {{ filter_summary }}{% if filters_active %}<details class="coverage-filter-logic"><summary>Show exact logic</summary><div>{{ filter_logic }}</div></details>{% endif %}</p>
 </div>
-<section class="coverage-result-summary" aria-label="Filtered Computers results">
+<section class="coverage-result-summary" aria-label="Filtered inventory results">
     <div class="coverage-result-card"><span>Clients</span><strong>{{ filtered_summary.clients }}</strong></div>
-    <div class="coverage-result-card"><span>Computers</span><strong>{{ filtered_summary.devices }}</strong></div>
+    <div class="coverage-result-card"><span>Inventory rows</span><strong>{{ filtered_summary.devices }}</strong></div>
     <div class="coverage-result-card"><span>In Hudu</span><strong>{{ filtered_summary.in_hudu }}</strong></div>
     <div class="coverage-result-card"><span>Not in Hudu</span><strong>{{ filtered_summary.not_in_hudu }}</strong></div>
 </section>

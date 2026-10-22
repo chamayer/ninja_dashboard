@@ -19,7 +19,7 @@
       <select name="class">
         <option value="">All classes</option>
         {% for item in class_counts %}
-        <option value="{{ item.entity_class }}" {% if entity_class_filter == item.entity_class %}selected{% endif %}>{{ item.entity_class_display }} ({{ item.count }})</option>
+        <option value="{{ item.entity_class }}" {% if entity_class_filter == item.entity_class %}selected{% endif %}>{{ item.entity_class_display }} ({{ item.count }} {{ state_filter }})</option>
         {% endfor %}
       </select>
     </label>

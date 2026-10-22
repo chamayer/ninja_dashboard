@@ -107,9 +107,7 @@
     {% endfor %}
 </div>
 {% endfor %}
-{% if device_count > 500 %}
-<p class="muted">Showing first 500 devices (of {{ device_count }}). Filter by client to narrow.</p>
-{% endif %}
+{% include "_pagination.html" with page_obj=page_obj paginator=page_obj.paginator page_query=page_query page_size=100 %}
 {% else %}
 <p class="muted">Nothing on the checklist for the current filter.</p>
 {% endif %}

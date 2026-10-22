@@ -93,18 +93,20 @@ def entity_admin_list(request: HttpRequest) -> HttpResponse:
     search = (request.GET.get("q") or "").strip()
     clauses = ["tenant_id = %s"]
     params: list[object] = [tenant_id]
+    state_clauses: list[str] = []
     if entity_class:
         clauses.append("entity_class = %s")
         params.append(entity_class)
     if state == "current":
-        clauses.extend(("retired_at IS NULL", "deleted_at IS NULL"))
+        state_clauses.extend(("retired_at IS NULL", "deleted_at IS NULL"))
     elif state == "retired":
-        clauses.append("retired_at IS NOT NULL")
+        state_clauses.append("retired_at IS NOT NULL")
     elif state == "deleted":
-        clauses.append("deleted_at IS NOT NULL")
+        state_clauses.append("deleted_at IS NOT NULL")
     elif state != "all":
         state = "current"
-        clauses.extend(("retired_at IS NULL", "deleted_at IS NULL"))
+        state_clauses.extend(("retired_at IS NULL", "deleted_at IS NULL"))
+    clauses.extend(state_clauses)
     if search:
         clauses.append("(display_label ILIKE %s OR id::text = %s)")
         params.extend((f"%{search}%", search))
@@ -125,6 +127,7 @@ def entity_admin_list(request: HttpRequest) -> HttpResponse:
             SELECT entity_class, entity_class_display, count(*)::integer
               FROM operations.v_entity_admin_summary
              WHERE tenant_id = %s
+               {"AND " + " AND ".join(state_clauses) if state_clauses else ""}
              GROUP BY entity_class, entity_class_display
              ORDER BY entity_class_display
             """,
