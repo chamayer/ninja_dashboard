@@ -12712,26 +12712,29 @@ def _candidate_client_overlap(live, records_by_group) -> tuple[list[dict], int]:
     return overlap, len(devices)
 
 
-def _candidate_name_matches(live) -> tuple[list[dict], int]:
-    """Existing clients whose Computers carry the names of the candidate's
-    unlinked records.
+def _name_matches_by_row(live_by_row: dict[int, list[tuple[int, str]]]) -> dict[int, tuple]:
+    """Existing clients whose Computers carry the names of each row's unlinked
+    records, for many candidates in one query.
 
     Weaker evidence than a linked Computer: a record not yet matched to a
     Computer still reports a computer name. A name counts only when exactly one
     client owns a current Computer with it; names many clients use (generic
-    images, default names) say nothing about ownership. Returns the matching
-    clients, largest first, and how many unlinked records report a name.
+    images, default names) say nothing about ownership. Returns, per row, the
+    matching clients largest first and how many unlinked records report a name.
     """
-    if not live:
-        return [], 0
+    groups = [(row, key[0], key[1]) for row, keys in live_by_row.items() for key in keys]
+    result: dict[int, tuple] = {row: ([], 0) for row in live_by_row}
+    if not groups:
+        return result
     with transaction.atomic(), connection.cursor() as cur:
         cur.execute("SET LOCAL operations.tenant_id = 1")
         cur.execute(
             """
             WITH live_groups AS (
-                SELECT * FROM unnest(%s::int[], %s::text[]) AS g(source_id, external_id)
+                SELECT * FROM unnest(%s::int[], %s::int[], %s::text[])
+                    AS g(row_index, source_id, external_id)
             ), unlinked AS (
-                SELECT DISTINCT si.source_id, observation.entity_key,
+                SELECT DISTINCT g.row_index, si.source_id, observation.entity_key,
                        lower(observation.reported_name) AS name
                   FROM operations.v_entity_observation_admin_metadata observation
                   JOIN operations.source_instances si ON si.id = observation.source_instance_id
@@ -12748,48 +12751,53 @@ def _candidate_name_matches(live) -> tuple[list[dict], int]:
                    AND COALESCE(device.canonical_hostname, '') <> ''
                  GROUP BY 1
                 HAVING count(DISTINCT device.client_id) = 1
+            ), named AS (
+                SELECT row_index, count(*)::int AS named FROM unlinked GROUP BY 1
             )
-            SELECT client.id::text, client.display_name, count(*)::int AS records,
-                   (SELECT count(*)::int FROM unlinked) AS named
-              FROM unlinked
-              JOIN single_owner ON single_owner.name = unlinked.name
-              JOIN operations.clients client ON client.id::text = single_owner.client_id
-             WHERE client.deleted_at IS NULL
-             GROUP BY 1, 2
-             ORDER BY 3 DESC, 2
+            SELECT named.row_index, named.named, client.id::text, client.display_name,
+                   count(unlinked.entity_key)::int AS records
+              FROM named
+              LEFT JOIN unlinked ON unlinked.row_index = named.row_index
+              LEFT JOIN single_owner ON single_owner.name = unlinked.name
+              LEFT JOIN operations.clients client
+                ON client.id::text = single_owner.client_id AND client.deleted_at IS NULL
+             GROUP BY 1, 2, 3, 4
+             ORDER BY 1, 5 DESC, 4
             """,
-            ([key[0] for key in live], [key[1] for key in live]),
+            (
+                [group[0] for group in groups],
+                [group[1] for group in groups],
+                [group[2] for group in groups],
+            ),
         )
-        rows = cur.fetchall()
-        if not rows:
-            cur.execute(
-                """
-                SELECT count(DISTINCT (si.source_id, observation.entity_key))::int
-                  FROM operations.v_entity_observation_admin_metadata observation
-                  JOIN operations.source_instances si ON si.id = observation.source_instance_id
-                  JOIN unnest(%s::int[], %s::text[]) AS g(source_id, external_id)
-                    ON g.source_id = si.source_id AND g.external_id = observation.platform_group_id
-                 WHERE observation.entity_type <> 'org' AND observation.active
-                   AND observation.device_id IS NULL
-                   AND COALESCE(observation.reported_name, '') <> ''
-                """,
-                ([key[0] for key in live], [key[1] for key in live]),
-            )
-            return [], cur.fetchone()[0]
-    matches = [
-        {"client_id": client_id, "display_name": name, "record_count": records}
-        for client_id, name, records, _named in rows
-    ]
-    return matches, rows[0][3]
+        for row_index, named, client_id, name, records in cur.fetchall():
+            matches, _ = result[row_index]
+            if client_id:
+                matches.append(
+                    {"client_id": client_id, "display_name": name, "record_count": records}
+                )
+            result[row_index] = (matches, named)
+    return result
 
 
-def _add_candidate_evidence(candidates: list[dict], source_names: dict) -> None:
+def _candidate_name_matches(live) -> tuple[list[dict], int]:
+    """Name evidence for one candidate's live groups (see ``_name_matches_by_row``)."""
+    return _name_matches_by_row({0: list(live)})[0]
+
+
+def _add_candidate_evidence(
+    candidates: list[dict], source_names: dict, *, with_likely_client: bool = False
+) -> None:
     """Annotate client candidates with live evidence for the list view.
 
     ``source_refs`` keeps every source group ever seen under the name, so each
     group is checked against current observations: whether the source still
     reports it under this name and the source records currently in it.  Historical groups stay
     listed but marked and contribute no live evidence.
+
+    ``with_likely_client`` adds the existing client the evidence points to,
+    strongest first: Computers already linked, then computer names only that
+    client has (the same evidence the candidate page shows).
     """
     pairs = {
         (ref.get("source_id"), str(ref.get("external_id")))
@@ -12800,9 +12808,11 @@ def _add_candidate_evidence(candidates: list[dict], source_names: dict) -> None:
     newest_name = _newest_candidate_name_by_group()
     reported, records_by_group = _live_source_group_evidence(pairs)
 
-    for row in candidates:
+    live_by_row: dict[int, list[tuple[int, str]]] = {}
+    for index, row in enumerate(candidates):
         groups = []
         records: dict[str, tuple] = {}
+        live_by_row[index] = []
         for ref in row["refs"]:
             key = (ref.get("source_id"), str(ref.get("external_id")))
             state, renamed_to = _source_group_state(
@@ -12819,14 +12829,43 @@ def _add_candidate_evidence(candidates: list[dict], source_names: dict) -> None:
             )
             if state == "reported":
                 records.update(records_by_group.get(key, {}))
+                live_by_row[index].append(key)
         row["groups"] = sorted(groups, key=lambda group: (not group["reported"], group["source"]))
         row["reported_count"] = sum(1 for group in groups if group["reported"])
         row["renamed_to"] = sorted({group["renamed_to"] for group in groups if group["renamed_to"]})
         row["attached_count"] = sum(1 for group in groups if group["state"] == "attached")
         row["record_count"] = len(records)
-        row["computer_count"] = len(
-            {device_id for device_id, _owner in records.values() if device_id}
-        )
+        devices = {device_id: owner for device_id, owner in records.values() if device_id}
+        row["computer_count"] = len(devices)
+        row["likely_client"] = None
+        owners = Counter(owner for owner in devices.values() if owner)
+        if with_likely_client and owners:
+            (client_id, name), count = owners.most_common(1)[0]
+            row["likely_client"] = {
+                "client_id": client_id,
+                "display_name": name,
+                "basis": "linked",
+                "count": count,
+                "of": len(devices),
+            }
+
+    if not with_likely_client:
+        return
+    undecided = {
+        index: live_by_row[index]
+        for index, row in enumerate(candidates)
+        if row["likely_client"] is None
+    }
+    for index, (matches, named) in _name_matches_by_row(undecided).items():
+        if matches:
+            row = candidates[index]
+            row["likely_client"] = {
+                "client_id": matches[0]["client_id"],
+                "display_name": matches[0]["display_name"],
+                "basis": "names",
+                "count": matches[0]["record_count"],
+                "of": named,
+            }
 
 
 @login_required
@@ -13148,7 +13187,7 @@ def inventory_clients(request: HttpRequest) -> HttpResponse:
             tenant_id=1, status=ClientCandidate.Status.OPEN
         ).order_by("-last_seen_at", "display_name")
     ]
-    _add_candidate_evidence(new_clients, source_names)
+    _add_candidate_evidence(new_clients, source_names, with_likely_client=True)
     new_group_count = sum(len(row["refs"]) for row in new_clients)
     return render(
         request,

@@ -112,13 +112,15 @@ def test_candidate_page_counts_every_owned_computer_in_live_groups():
 
 
 def test_name_matches_count_names_only_one_client_owns():
-    rows = [("c1", "Freunds Fish", 25, 26), ("c2", "UTA", 1, 26)]
+    # (row, named records, client, name, records); a NULL client is an unmatched name.
+    rows = [(0, 26, "c1", "Freunds Fish", 16), (0, 26, None, None, 10), (0, 26, "c2", "UTA", 1)]
     with (
         mock.patch.object(views.transaction, "atomic", return_value=nullcontext()),
         mock.patch.object(views.connection, "cursor", return_value=_Cursor([rows])),
     ):
         matches, named = views._candidate_name_matches([(1, "g1")])
-    assert matches[0] == {"client_id": "c1", "display_name": "Freunds Fish", "record_count": 25}
+    assert matches[0] == {"client_id": "c1", "display_name": "Freunds Fish", "record_count": 16}
+    assert [m["client_id"] for m in matches] == ["c1", "c2"]
     assert named == 26
 
 
@@ -127,7 +129,7 @@ def test_name_matches_need_live_groups():
 
 
 def test_name_match_sql_ignores_names_several_clients_share():
-    source = inspect.getsource(views._candidate_name_matches)
+    source = inspect.getsource(views._name_matches_by_row)
     assert "HAVING count(DISTINCT device.client_id) = 1" in source
     assert "observation.device_id IS NULL" in source
     assert "device.lifecycle_status <> 'retired'" in source
