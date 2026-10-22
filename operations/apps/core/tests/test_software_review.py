@@ -238,3 +238,53 @@ def test_publisher_status_is_its_own_sortable_filterable_column():
     # Header labels are plain text (selectable); the header itself sorts.
     assert '<th data-sort-href="{{ col.href }}"' in template
     assert '<a href="{{ col.href }}">{{ col.label }}' not in template
+
+
+def test_rows_count_only_the_uncovered_computers():
+    details = {
+        "canonical_name": "Microsoft.WindowsStore",
+        "publisher": "",
+        "title_publisher": "Microsoft Corporation",
+        "fleet_device_count": 3917,
+        "client_count": 40,
+        "uncovered_device_count": 1,
+        "uncovered_client_count": 1,
+        "uncovered_publishers": [""],
+        "uncovered_publisher_count": 1,
+        "coverage_scope": "undecided",
+        "suggestion": "none",
+        "signals": [],
+    }
+    [group] = review.build_groups([("1", "rare_recent", "low", details, None, "device")])
+    [title] = group["titles"]
+    assert (title["devices"], title["clients"]) == (1, 1)
+    assert (title["fleet_devices"], title["covered_devices"]) == (3917, 3916)
+    assert title["uncovered_publishers"] == [""]
+    # Grouped under the publisher the uncovered installation reports.
+    assert group["publisher"] == ""
+
+
+def test_prompts_written_before_coverage_counts_fall_back_to_fleet_counts():
+    [group] = review.build_groups([_row("1", "whitelist_suggestion", "Old", "Acme", devices=7)])
+    [title] = group["titles"]
+    assert title["devices"] == 7 and title["covered_devices"] == 0
+
+
+def test_rare_targets_list_only_computers_the_prompt_is_about():
+    class Cursor:
+        def execute(self, sql, params):
+            assert "v_software_decision_keys" in sql
+
+        def fetchall(self):
+            return [
+                ("store", "d1", "PC-1", "acme", "Acme", True, True),
+                ("store", "d2", "PC-2", "acme", "Acme", False, True),
+                ("store", "d3", "PC-3", "acme", "Acme", False, False),
+            ]
+
+    undecided = {"title": "Store", "devices": 1, "coverage_scope": "undecided"}
+    title_open = {"title": "Store", "devices": 2, "coverage_scope": "title_open"}
+    groups = [{"titles": [undecided, title_open]}]
+    review.attach_device_targets(Cursor(), 1, groups, rare_limit=2)
+    assert [t["hostname"] for t in undecided["device_targets"]] == ["PC-1"]
+    assert [t["hostname"] for t in title_open["device_targets"]] == ["PC-1", "PC-2"]

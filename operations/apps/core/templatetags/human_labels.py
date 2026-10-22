@@ -19,6 +19,7 @@ import re
 from urllib.parse import urlencode
 
 from django import template
+from shared import software_coverage
 
 from apps.core import finding_registry
 
@@ -340,7 +341,10 @@ def finding_detail_text(finding):
         avs = d.get("av_products") or []
         return ", ".join(avs) if avs else "multiple AV products"
     if name == "rare_recent":
-        n = d.get("fleet_device_count") or d.get("machine_count")
+        # A prompt is about its uncovered installations (ADR-0039).
+        n = software_coverage.prompt_devices(d)
+        if n is None:
+            n = d.get("machine_count")
         days = d.get("first_seen_days")
         cn = d.get("canonical_name") or ""
         pieces = [cn] if cn else []
@@ -350,7 +354,7 @@ def finding_detail_text(finding):
             pieces.append(f"first seen {days}d ago")
         return " · ".join(pieces) if pieces else "rare install"
     if name == "whitelist_suggestion":
-        devices = d.get("fleet_device_count")
+        devices = software_coverage.prompt_devices(d)
         threshold = d.get("threshold")
         if devices is not None and threshold is not None:
             return f"installed on {devices} devices (review threshold {threshold})"

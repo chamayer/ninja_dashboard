@@ -28,11 +28,24 @@ def test_a_quiet_single_install_has_no_suggestion_or_signals():
     assert views._software_review_context({}) == "undecided software"
 
 
+def test_the_context_line_counts_only_uncovered_machines():
+    """Microsoft Store: decided on 3,916 computers, one install has no publisher."""
+    text = views._software_review_context({
+        "canonical_name": "Microsoft.WindowsStore", "publisher": "",
+        "title_publisher": "Microsoft Corporation", "fleet_device_count": 3917,
+        "client_count": 40, "uncovered_device_count": 1, "uncovered_client_count": 1,
+        "suggestion": "none", "signals": [],
+    })
+    assert text == "Microsoft.WindowsStore · on 1 machine (3917 in the fleet)"
+
+
 def test_sql_and_python_use_the_same_wording():
     """Issues sort and filter on the SQL text but show the Python text."""
     start = _VIEWS.index("WHEN finding_type_id IN (SELECT id FROM operations.finding_types WHERE name IN ('rare_recent', 'whitelist_suggestion'))")
-    sql = _VIEWS[start:start + 1800]
-    for fragment in ("' machine'", "' at '", "' clients'", "'first seen recently'",
+    end = _VIEWS.index("WHEN finding_type_id = (SELECT id FROM operations.finding_types WHERE name = 'vulnerable_software')", start)
+    sql = _VIEWS[start:end]
+    for fragment in ("' machine'", "' at '", "' clients'", "' in the fleet)'",
+                     "'uncovered_device_count'", "'first seen recently'",
                      "'suggested: '", "'signals: '", "replace(", "'undecided software'"):
         assert fragment in sql, fragment
     label_sql = views._suggestion_label_sql()

@@ -16,6 +16,15 @@ module-specific; root `../TODO.md` keeps cross-repo items and pointers.
       by the user; an alternative design (e.g. the decision itself naming
       the variant names it covers) still needs agreement.
 
+- [ ] **Publisher aliases for software decisions** (user backlogged
+      2026-10-22). Installations report one publisher under variants:
+      localised ("Корпорация Майкрософт"), typos ("Microsoft Coporation"),
+      legal forms ("Microsoft Corp"), product names, unresolved resource
+      strings. An admin-managed alias table (variant -> publisher) would let
+      one publisher decision cover them deliberately and visibly; needs a
+      migration and resolution in `shared/software_coverage.py` and
+      `v_software_decision_keys` consumers. Coverage stays strict without it
+      (ADR-0039).
 - [ ] **Server-side header sort/filter for paginated tables** (2026-10-22).
       Browser-side sort/filter now covers every unpaginated table
       (`base.html`). Paginated tables are marked `data-server-table` and get

@@ -26,6 +26,43 @@ production: index scan, 14 ms for 2 titles. Not validated: the ORM decision
 lookup and full page render against PostgreSQL. Committed and pushed with user
 approval (deploys; no migrations). Next action: check the deployed review page.
 
+## Software title coverage — prompts describe the uncovered installs
+
+Complete for prompts (deployment check pending); overview pending. Goal: a decision covers an install when that install's own effective
+decision (title, then publisher; device, client, global) approves it, and an
+undecided-software prompt (`whitelist_suggestion`, `rare_recent`) describes
+only the installs no decision covers. Today one uncovered install opens a
+title-wide prompt reported with whole-fleet counts (e.g. Microsoft Store: 1 of
+3,917 installs has a blank publisher). Per-install exposure
+(`v_device_software_exposure`) is already correct; the defect is the
+title-level facts in `ingest/software_reconcile.py` and every reader of them.
+Scope: shared per-install coverage SQL in `shared/`; reconcile facts and
+prompt details (uncovered counts, publishers, first seen; rare decided on the
+uncovered count; concern-under-publisher-approval keeps D9); readers updated
+consistently: Issues page (context line, sort), Software review (counts,
+grouping publisher, rare device targets, rare-limit preview), human labels,
+home dashboard software card, software overview. Strictness is unchanged: an
+install with a blank or different publisher string never inherits a publisher
+approval. Publisher aliases are backlogged (`TODO.md`), not in scope.
+Decisions to promote: ADR for the coverage rule.
+
+Checkpoint: prompt fix implemented locally (ADR-0039 Proposed). Done:
+`shared/software_coverage.py`; reconcile facts/prompts; Issues context and
+sort; Software review rows, grouping, rare targets, rare-limit preview, row
+note ("Already decided on N of M"); human labels; home card counts the
+prompts. Validation: ingest reconcile tests (4 new) and Operations suite pass
+except failures that also fail on clean HEAD (ingest operator_job_queue
+test; 4 condition-policy tests; domain-mapping guard, where my two pushed
+constants are now exempted). Production probe: per-title coverage live
+takes 4.5 s; 126 titles partly decided. Open decision for the user: the
+software overview's title status needs a persisted per-title coverage
+table written by the reconcile (migration) or must derive from the open
+findings. Measured: every title with uncovered installs has an open prompt
+(15,149; 0 missed; 92 extra are rare-with-concern or awaiting closure), so
+the overview can derive from the findings without a table (user: "ok for
+now"). Committed and pushed with user approval. Next action: verify the next
+reconcile rewrites prompts (e.g. Microsoft Store), then the overview change.
+
 ## Software review — filter by publisher status
 
 Complete (browser check pending). Goal: filter Software review by the publisher's publisher-wide

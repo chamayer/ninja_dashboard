@@ -32,7 +32,7 @@ from typing import Any
 from ingest import db, software_capabilities, software_readiness
 from ingest.conditions import load_active_profile
 from ingest.config import settings
-from shared import software_settings
+from shared import software_coverage, software_settings
 from shared.conditions.contracts import Condition, EvaluationCoverage, Participant
 from shared.conditions.engine import assess
 
@@ -42,36 +42,10 @@ ACTIVE_STATUSES = ("open", "acknowledged", "investigating", "suppressed")
 RESOLVABLE_STATUSES = ("open", "acknowledged")
 _ZERO_UUID = "00000000-0000-0000-0000-000000000000"
 
-# Effective decision per installation: title before publisher; device before
-# client before global (migration 113). ``i`` is the installation alias.
-EFFECTIVE_DECISION_JOINS = """
-  LEFT JOIN operations.v_software_decision_keys title_device
-    ON title_device.tenant_id = i.tenant_id AND title_device.match_kind = 'title'
-   AND title_device.scope = 'device' AND title_device.device_id = i.device_id
-   AND title_device.match_key = lower(i.canonical_name)
-  LEFT JOIN operations.v_software_decision_keys title_client
-    ON title_client.tenant_id = i.tenant_id AND title_client.match_kind = 'title'
-   AND title_client.scope = 'client' AND title_client.client_id = i.client_id
-   AND title_client.match_key = lower(i.canonical_name)
-  LEFT JOIN operations.v_software_decision_keys title_global
-    ON title_global.tenant_id = i.tenant_id AND title_global.match_kind = 'title'
-   AND title_global.scope = 'global' AND title_global.match_key = lower(i.canonical_name)
-  LEFT JOIN operations.v_software_decision_keys publisher_device
-    ON publisher_device.tenant_id = i.tenant_id AND publisher_device.match_kind = 'publisher'
-   AND publisher_device.scope = 'device' AND publisher_device.device_id = i.device_id
-   AND publisher_device.match_key = lower(i.publisher)
-  LEFT JOIN operations.v_software_decision_keys publisher_client
-    ON publisher_client.tenant_id = i.tenant_id AND publisher_client.match_kind = 'publisher'
-   AND publisher_client.scope = 'client' AND publisher_client.client_id = i.client_id
-   AND publisher_client.match_key = lower(i.publisher)
-  LEFT JOIN operations.v_software_decision_keys publisher_global
-    ON publisher_global.tenant_id = i.tenant_id AND publisher_global.match_kind = 'publisher'
-   AND publisher_global.scope = 'global' AND publisher_global.match_key = lower(i.publisher)
-"""
-_TITLE_DECISION = "COALESCE(title_device.decision, title_client.decision, title_global.decision)"
-_PUBLISHER_DECISION = (
-    "COALESCE(publisher_device.decision, publisher_client.decision, publisher_global.decision)"
-)
+# Effective decision per installation and what it covers (shared with Operations).
+EFFECTIVE_DECISION_JOINS = software_coverage.EFFECTIVE_DECISION_JOINS
+_TITLE_DECISION = software_coverage.TITLE_DECISION
+_PUBLISHER_DECISION = software_coverage.PUBLISHER_DECISION
 _LIVE = "i.tenant_id = %(tenant_id)s AND i.stale_since IS NULL AND i.deleted_at IS NULL"
 
 TITLE_FACTS_SQL = f"""
@@ -80,7 +54,9 @@ WITH installs AS (
            COALESCE(i.publisher, '') AS publisher, i.device_id, i.client_id,
            i.first_observed_at, product.product_uuid,
            {_TITLE_DECISION} AS title_decision,
-           {_PUBLISHER_DECISION} AS publisher_decision
+           {_PUBLISHER_DECISION} AS publisher_decision,
+           {software_coverage.UNDECIDED} AS undecided_install,
+           {software_coverage.TITLE_OPEN} AS title_open_install
       FROM operations.software_installations_current i
       LEFT JOIN catalog.software_versions version ON version.id = i.software_version_id
       LEFT JOIN catalog.products product ON product.id = version.product_id
@@ -95,12 +71,25 @@ SELECT title_key,
        min(first_observed_at) AS first_seen,
        (array_agg(DISTINCT product_uuid) FILTER (WHERE product_uuid IS NOT NULL))[1]
            AS product_uuid,
-       bool_or(title_decision IS NULL AND publisher_decision IS NULL) AS undecided,
        bool_or(COALESCE(title_decision, publisher_decision, '')
                NOT IN ('approve', 'approve_publisher')) AS has_unapproved,
        bool_or(title_decision IS NULL
                AND publisher_decision IN ('approve', 'approve_publisher'))
            AS has_publisher_only_approval,
+       -- The installations no decision covers, which a prompt describes
+       -- (ADR-0039), and those only a publisher approval covers (design D9).
+       count(DISTINCT device_id) FILTER (WHERE undecided_install) AS undecided_devices,
+       count(DISTINCT client_id) FILTER (WHERE undecided_install) AS undecided_clients,
+       min(first_observed_at) FILTER (WHERE undecided_install) AS undecided_first_seen,
+       mode() WITHIN GROUP (ORDER BY publisher) FILTER (WHERE undecided_install)
+           AS undecided_publisher,
+       array_agg(DISTINCT publisher) FILTER (WHERE undecided_install) AS undecided_publishers,
+       count(DISTINCT device_id) FILTER (WHERE title_open_install) AS title_open_devices,
+       count(DISTINCT client_id) FILTER (WHERE title_open_install) AS title_open_clients,
+       min(first_observed_at) FILTER (WHERE title_open_install) AS title_open_first_seen,
+       mode() WITHIN GROUP (ORDER BY publisher) FILTER (WHERE title_open_install)
+           AS title_open_publisher,
+       array_agg(DISTINCT publisher) FILTER (WHERE title_open_install) AS title_open_publishers,
        count(DISTINCT device_id) FILTER (
            WHERE COALESCE(title_decision, publisher_decision) = 'reject') AS rejected_devices,
        count(DISTINCT client_id) FILTER (
@@ -392,6 +381,23 @@ def _rule(ctx: Context, name: str) -> Callable[[str], bool]:
     return ctx.rules.get(name, _never)
 
 
+UNCOVERED_PUBLISHERS_SHOWN = 5
+
+
+def prompt_scope(facts: dict[str, Any], rare_concern: bool, rare_max: int) -> str | None:
+    """Which installations an undecided-software prompt is about, if one is due.
+
+    A prompt is about the installations no decision covers. A rare title with
+    another concern is also not answered by a publisher approval (design D9),
+    so its prompt covers every installation without a title decision.
+    """
+    if rare_concern and 0 < facts["title_open_devices"] <= rare_max:
+        return software_coverage.SCOPE_TITLE_OPEN
+    if facts["undecided_devices"]:
+        return software_coverage.SCOPE_UNDECIDED
+    return None
+
+
 def compute_desired(ctx: Context, report: RunReport) -> dict[str, list[Desired]]:
     """Return desired findings per enabled type. Pure over the loaded context."""
     cfg, types, tid = ctx.cfg, ctx.types, ctx.tenant_id
@@ -549,14 +555,18 @@ def compute_desired(ctx: Context, report: RunReport) -> dict[str, list[Desired]]
                             {"threat_hit_count": hits,
                              "reason": "community threat-intel accumulation"})
 
-        rare = facts["devices"] <= rare_max
-        rare_despite_publisher_approval = (
-            rare and not facts["undecided"] and not facts["has_unapproved"]
-            and facts["has_publisher_only_approval"]
-            and has_other_concern(title_key, "rare_recent")
-        )
-        if facts["undecided"] or rare_despite_publisher_approval:
-            recent = _recent(facts["first_seen"], ctx.now, recent_days)
+        scope = prompt_scope(facts, has_other_concern(title_key, "rare_recent"), rare_max)
+        if scope:
+            # The prompt describes only the installations it is about: their
+            # count decides rare, their publisher groups and closes it, and
+            # their first sighting dates it (ADR-0039). Fleet-wide facts stay
+            # as supporting evidence.
+            uncovered = facts[f"{scope}_devices"]
+            publisher_now = facts[f"{scope}_publisher"] or ""
+            publishers = sorted(facts[f"{scope}_publishers"] or [])
+            first_seen = facts[f"{scope}_first_seen"]
+            rare = uncovered <= rare_max
+            recent = _recent(first_seen, ctx.now, recent_days)
             signals = set(title_signals[title_key])
             if unauthorized_types[title_key]:
                 signals.add("unauthorized_capability")
@@ -566,15 +576,22 @@ def compute_desired(ctx: Context, report: RunReport) -> dict[str, list[Desired]]
                 signals.add("established_publisher")
             if facts["devices"] > rare_max:
                 signals.add("prevalent")
-            if vendor_key(facts["publisher"]) in ctx.known_vendors:
+            if vendor_key(publisher_now) in ctx.known_vendors:
                 signals.add("known_vendor")
-            if (ctx.publisher_approved.get((facts["publisher"] or "").lower(), 0)
+            if (ctx.publisher_approved.get(publisher_now.lower(), 0)
                     >= int(cfg["suggestion_min_approved_titles"])):
                 signals.add("publisher_approved")
             details = {
+                "publisher": publisher_now,
+                "title_publisher": facts["publisher"],
+                "coverage_scope": scope,
                 "fleet_device_count": facts["devices"],
                 "client_count": facts["clients"],
-                "first_seen_at": facts["first_seen"].isoformat() if facts["first_seen"] else None,
+                "uncovered_device_count": uncovered,
+                "uncovered_client_count": facts[f"{scope}_clients"],
+                "uncovered_publishers": publishers[:UNCOVERED_PUBLISHERS_SHOWN],
+                "uncovered_publisher_count": len(publishers),
+                "first_seen_at": first_seen.isoformat() if first_seen else None,
                 "recent": recent,
                 "signals": sorted(signals - supporting),
                 "evidence": sorted(signals & supporting),

@@ -56,6 +56,8 @@ KNOWN: dict[str, str] = {
     "_EDITABLE": "EXEMPT the model field names the Finding types page edits (schema, not a value-to-value mapping; operations/apps/core/finding_types_admin.py)",
     "_HANDLERS": "EXEMPT function dispatch for the Finding types page actions (operations/apps/core/finding_types_admin.py)",
     "_SOFTWARE_DECISION_PROMPT_TYPES": "EXEMPT names the two finding types that are undecided-software prompts (code identity of the emitter's types, used to count them; not a value-to-value mapping; operations/apps/core/views.py)",
+    "PUBLISHER_STATUS_CHOICES": "EXEMPT the four publisher-wide statuses Software review shows, sorts and filters on (a fixed display vocabulary over SoftwareDecision.Decision, not a value-to-value domain mapping; operations/apps/core/software_review.py)",
+    "_STATUS_BY_DECISION": "EXEMPT folds SoftwareDecision.Decision code values into those statuses (code identity of an enum, not a domain mapping; operations/apps/core/software_review.py)",
     "_SOFTWARE_PROMPTS": "EXEMPT names the two finding types that are undecided-software prompts, for which queue actions are offered (code identity, not a value-to-value mapping; operations/apps/core/finding_actions.py)",
     "_PUBLISHER_DECISIONS": "EXEMPT decoder for the legacy decisions CSV format, not a domain mapping - the file format is fixed and dead (ADR-0015 step 1)",
     "_TITLE_DECISIONS": "EXEMPT decoder for the legacy decisions CSV format, not a domain mapping - the file format is fixed and dead (ADR-0015 step 1)",

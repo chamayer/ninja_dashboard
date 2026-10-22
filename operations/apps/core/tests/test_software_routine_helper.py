@@ -142,7 +142,9 @@ def test_every_column_sorts_the_whole_table_in_both_directions():
 def test_flat_table_has_sortable_headers_and_a_toggle_to_group_by_publisher():
     template = (_ROOT / "templates" / "software_decisions.html").read_text(encoding="utf-8")
     row = (_ROOT / "templates" / "_software_review_row.html").read_text(encoding="utf-8")
-    assert '<a href="{{ col.href }}">{{ col.label }}{{ col.mark }}</a>' in template
+    # Header labels are plain text (selectable); the header itself sorts.
+    assert '<th data-sort-href="{{ col.href }}" tabindex="0"' in template
+    assert "{{ col.label }}{{ col.mark }}</th>" in template
     assert "Group by publisher" in template and "Show as one sortable table" in template
     assert '{% include "_software_review_row.html"' in template
     # An included template does not inherit the parent's {% load %}.
@@ -193,7 +195,7 @@ def test_titles_under_each_publisher_are_sortable_and_keep_their_publisher_open(
     views = (_ROOT / "apps" / "core" / "views.py").read_text(encoding="utf-8")
     # Sub-table headers are links that carry the publisher anchor ...
     assert '{% for col in title_columns %}' in template
-    assert '<a href="{{ col.href }}#pub-{{ group.publisher|slugify }}">' in template
+    assert '<th data-sort-href="{{ col.href }}#pub-{{ group.publisher|slugify }}"' in template
     # ... the page reopens that publisher after the reload ...
     assert 'id="pub-{{ group.publisher|slugify }}"' in template
     assert "location.hash.indexOf('#pub-') === 0" in template

@@ -1,7 +1,7 @@
 {% load human_labels %}
             <tr>
                 <td><input type="checkbox" class="bulk-cb" aria-label="Select {{ t.title }}" data-canonical="{{ t.title }}" data-publisher="{{ t.publisher }}"></td>
-                <td>{% if t.title %}<a href="{% url 'software_detail' name=t.title %}">{{ t.title }}</a>{% else %}<span class="muted">(no title recorded)</span>{% endif %}</td>
+                <td>{% if t.title %}<a href="{% url 'software_detail' name=t.title %}">{{ t.title }}</a>{% else %}<span class="muted">(no title recorded)</span>{% endif %}{% if t.covered_devices %}<div class="muted" style="font-size:0.72rem;">Already decided on {{ t.covered_devices }} of {{ t.fleet_devices }} computers. {% if t.uncovered_publishers %}The other {{ t.devices }} report publisher {% for p in t.uncovered_publishers %}{% if p %}“{{ p }}”{% else %}none{% endif %}{% if not forloop.last %}, {% endif %}{% endfor %}{% if t.uncovered_publisher_count > t.uncovered_publishers|length %} …{% endif %}.{% endif %}</div>{% endif %}</td>
                 {% if show_publisher %}<td>{{ t.publisher|default:"—" }}</td><td><span class="status-pill {{ t.publisher_status }}">{{ t.publisher_status_label }}</span></td>{% endif %}
                 <td><span class="pill sev-{{ t.severity }}">{{ t.type_label }} · {{ t.severity }}</span>{% if t.recent %}<span class="pill recent">recent</span>{% endif %}</td>
                 <td class="num">{% if t.title %}<a href="{% url 'devices_page' %}?software={{ t.title|urlencode }}&amp;software_publisher={{ t.publisher|urlencode }}">{{ t.devices }}</a>{% else %}{{ t.devices }}{% endif %}</td>

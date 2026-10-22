@@ -13,6 +13,8 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from shared import software_coverage
+
 # The decision-prompt finding types, as a query predicate (they close when a
 # decision covers the title or its publisher).
 PROMPTS_SQL = """
@@ -54,18 +56,24 @@ def evidence_labels(details: dict[str, Any]) -> list[str]:
     ]
 
 
-DEVICES_SQL = """
-SELECT DISTINCT lower(installation.canonical_name), installation.device_id::text,
-       device.canonical_hostname, client.slug, client.display_name
-  FROM operations.software_installations_current installation
+# Computers a rare prompt is about: only installations its decisions leave
+# uncovered (ADR-0039), flagged per coverage scope.
+DEVICES_SQL = f"""
+SELECT lower(i.canonical_name), i.device_id::text,
+       device.canonical_hostname, client.slug, client.display_name,
+       bool_or({software_coverage.UNDECIDED}) AS undecided,
+       bool_or({software_coverage.TITLE_OPEN}) AS title_open
+  FROM operations.software_installations_current i
   JOIN operations.devices device
-    ON device.tenant_id = installation.tenant_id AND device.id = installation.device_id
+    ON device.tenant_id = i.tenant_id AND device.id = i.device_id
    AND device.deleted_at IS NULL
   LEFT JOIN operations.clients client
-    ON client.tenant_id = installation.tenant_id AND client.id = installation.client_id
- WHERE installation.tenant_id = %s
-   AND installation.stale_since IS NULL AND installation.deleted_at IS NULL
-   AND lower(installation.canonical_name) = ANY(%s)
+    ON client.tenant_id = i.tenant_id AND client.id = i.client_id
+  {software_coverage.EFFECTIVE_DECISION_JOINS}
+ WHERE i.tenant_id = %s
+   AND i.stale_since IS NULL AND i.deleted_at IS NULL
+   AND lower(i.canonical_name) = ANY(%s)
+ GROUP BY 1, 2, 3, 4, 5
 """
 
 _RESOLVE_SQL = """
@@ -81,13 +89,16 @@ UPDATE operations.findings finding
    AND {predicate}
 """
 
-DEVICE_COUNTS_SQL = """
-SELECT (finding.finding_details->>'fleet_device_count')::int AS devices, count(*)
+# Open prompts by how many computers each is about (its uncovered ones).
+DEVICE_COUNTS_SQL = f"""
+SELECT ({software_coverage.PROMPT_DEVICES_SQL.replace("finding_details", "finding.finding_details")})::int
+           AS devices, count(*)
   FROM operations.findings finding
   JOIN operations.finding_types finding_type ON finding_type.id = finding.finding_type_id
  WHERE finding.tenant_id = %s AND finding.status IN ('open', 'acknowledged')
    AND finding_type.name IN ('whitelist_suggestion', 'rare_recent')
-   AND finding.finding_details->>'fleet_device_count' IS NOT NULL
+   AND {software_coverage.PROMPT_DEVICES_SQL.replace("finding_details", "finding.finding_details")}
+       IS NOT NULL
  GROUP BY 1
 """
 
@@ -135,7 +146,8 @@ def build_groups(
         if query and query not in title.lower() and query not in publisher.lower():
             continue
         signals = [s for s in (details.get("signals") or []) if isinstance(s, str)]
-        devices = int(details.get("fleet_device_count") or 0)
+        # The prompt is about its uncovered installations (ADR-0039).
+        devices = software_coverage.prompt_devices(details) or 0
         entry = {
             "finding_id": finding_id,
             "type_name": type_name,
@@ -144,7 +156,15 @@ def build_groups(
             "title": title,
             "publisher": publisher,
             "devices": devices,
-            "clients": int(details.get("client_count") or 0),
+            "clients": software_coverage.prompt_clients(details),
+            "fleet_devices": int(details.get("fleet_device_count") or devices),
+            "covered_devices": max(int(details.get("fleet_device_count") or devices) - devices, 0),
+            "title_publisher": details.get("title_publisher") or publisher,
+            "uncovered_publishers": [
+                p for p in (details.get("uncovered_publishers") or []) if isinstance(p, str)
+            ],
+            "uncovered_publisher_count": int(details.get("uncovered_publisher_count") or 0),
+            "coverage_scope": details.get("coverage_scope") or software_coverage.SCOPE_UNDECIDED,
             "recent": bool(details.get("recent")),
             "first_seen_at": details.get("first_seen_at"),
             "signals": signals,
@@ -273,15 +293,22 @@ def attach_device_targets(cur: Any, tenant_id: int, groups: list[dict], rare_lim
     if not titles:
         return
     cur.execute(DEVICES_SQL, (tenant_id, titles))
-    targets: dict[str, list[dict[str, str]]] = {}
-    for title_key, device_id, hostname, client_slug, client_name in cur.fetchall():
+    targets: dict[str, list[dict[str, Any]]] = {}
+    for title_key, device_id, hostname, client_slug, client_name, undecided, title_open in (
+        cur.fetchall()
+    ):
         targets.setdefault(title_key, []).append({
             "device_id": device_id, "hostname": hostname or device_id,
             "client_slug": client_slug or "", "client_name": client_name or "",
+            software_coverage.SCOPE_UNDECIDED: undecided,
+            software_coverage.SCOPE_TITLE_OPEN: title_open,
         })
     for group in groups:
         for title in group["titles"]:
-            title["device_targets"] = targets.get(title["title"].lower(), [])
+            scope = title.get("coverage_scope") or software_coverage.SCOPE_UNDECIDED
+            title["device_targets"] = [
+                target for target in targets.get(title["title"].lower(), []) if target[scope]
+            ]
 
 
 _APPROVED = ("approve", "approve_publisher")

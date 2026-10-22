@@ -43,7 +43,7 @@ from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 from django.utils.text import slugify
 from django.views.decorators.http import require_GET, require_POST
-from shared import software_settings
+from shared import software_coverage, software_settings
 from shared.jobs_registry import (
     EXECUTION_POOL_POLICIES,
     capability_state,
@@ -4631,11 +4631,14 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
             THEN COALESCE(NULLIF(concat_ws(' · ',
                     NULLIF(finding_details->>'canonical_name', ''),
                     NULLIF(finding_details->>'publisher', ''),
-                    CASE WHEN finding_details->>'fleet_device_count' IS NOT NULL
-                         THEN 'on ' || (finding_details->>'fleet_device_count') || ' machine'
-                              || CASE WHEN finding_details->>'fleet_device_count' <> '1' THEN 's' ELSE '' END
-                              || CASE WHEN COALESCE((finding_details->>'client_count')::int, 0) > 1
-                                      THEN ' at ' || (finding_details->>'client_count') || ' clients' ELSE '' END
+                    CASE WHEN COALESCE(finding_details->>'uncovered_device_count', finding_details->>'fleet_device_count') IS NOT NULL
+                         THEN 'on ' || COALESCE(finding_details->>'uncovered_device_count', finding_details->>'fleet_device_count') || ' machine'
+                              || CASE WHEN COALESCE(finding_details->>'uncovered_device_count', finding_details->>'fleet_device_count') <> '1' THEN 's' ELSE '' END
+                              || CASE WHEN COALESCE((COALESCE(finding_details->>'uncovered_client_count', finding_details->>'client_count'))::int, 0) > 1
+                                      THEN ' at ' || COALESCE(finding_details->>'uncovered_client_count', finding_details->>'client_count') || ' clients' ELSE '' END
+                              || CASE WHEN (finding_details->>'uncovered_device_count')::int
+                                           < (finding_details->>'fleet_device_count')::int
+                                      THEN ' (' || (finding_details->>'fleet_device_count') || ' in the fleet)' ELSE '' END
                     END,
                     CASE WHEN finding_details->>'recent' = 'true' THEN 'first seen recently' END,
                     CASE WHEN COALESCE(finding_details->>'suggestion', 'none') <> 'none'
@@ -4838,7 +4841,10 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
                 # Undecided software: the most widespread title first.
                 order = [
                     Cast(
-                        KeyTextTransform("fleet_device_count", "finding_details"),
+                        Coalesce(
+                            KeyTextTransform("uncovered_device_count", "finding_details"),
+                            KeyTextTransform("fleet_device_count", "finding_details"),
+                        ),
                         IntegerField(),
                     ).desc(nulls_last=True),
                     F("id").asc(),
@@ -5260,7 +5266,7 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
             "context": " · ".join(context_parts),
             "canonical_name": details.get("canonical_name", ""),
             "publisher": details.get("publisher", ""),
-            "fleet_device_count": details.get("fleet_device_count"),
+            "fleet_device_count": software_coverage.prompt_devices(details),
             "threshold": details.get("threshold"),
             # Undecided software is decided in bulk on the review page, which
             # groups titles by publisher and offers title and publisher options.
@@ -6093,12 +6099,16 @@ def _software_review_context(details: dict) -> str:
     """Issues context line for undecided software; mirrors the SQL branch above."""
     labels = dict(SoftwareSuggestionRule.Suggestion.choices)
     pieces = [details.get("canonical_name") or "", details.get("publisher") or ""]
-    devices = details.get("fleet_device_count")
+    # A prompt is about its uncovered installations; the fleet total is context.
+    devices = software_coverage.prompt_devices(details)
     if devices is not None:
-        text = f"on {devices} machine{'s' if str(devices) != '1' else ''}"
-        clients = details.get("client_count") or 0
-        if int(clients) > 1:
+        text = f"on {devices} machine{'s' if devices != 1 else ''}"
+        clients = software_coverage.prompt_clients(details)
+        if clients > 1:
             text += f" at {clients} clients"
+        fleet = details.get("fleet_device_count")
+        if details.get("uncovered_device_count") is not None and fleet and int(fleet) > devices:
+            text += f" ({fleet} in the fleet)"
         pieces.append(text)
     if details.get("recent") is True:
         pieces.append("first seen recently")

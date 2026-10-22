@@ -47,13 +47,27 @@ SUGGESTIONS = [
 
 
 def _title(name, devices, *, publisher="Acme Corp", clients=1, first_seen=None,
-           undecided=True, has_unapproved=True, publisher_only=False, product="p-" ):
+           undecided=True, has_unapproved=True, publisher_only=False, product="p-",
+           uncovered=None, uncovered_publishers=None):
+    """Title facts. By default every installation is uncovered when undecided,
+    and every installation is title-open when only a publisher approves it."""
+    first_seen = first_seen or NOW - timedelta(days=100)
+    open_devices = uncovered if uncovered is not None else (devices if undecided else 0)
+    pubs = uncovered_publishers if uncovered_publishers is not None else [publisher]
+    title_open = open_devices or (devices if publisher_only else 0)
     return {
         "title_key": name.lower(), "canonical_name": name, "publisher": publisher,
-        "devices": devices, "clients": clients,
-        "first_seen": first_seen or NOW - timedelta(days=100),
-        "product_uuid": f"{product}{name.lower()}", "undecided": undecided,
+        "devices": devices, "clients": clients, "first_seen": first_seen,
+        "product_uuid": f"{product}{name.lower()}",
         "has_unapproved": has_unapproved, "has_publisher_only_approval": publisher_only,
+        "undecided_devices": open_devices, "undecided_clients": 1 if open_devices else 0,
+        "undecided_first_seen": first_seen if open_devices else None,
+        "undecided_publisher": pubs[0] if open_devices else None,
+        "undecided_publishers": pubs if open_devices else None,
+        "title_open_devices": title_open, "title_open_clients": 1 if title_open else 0,
+        "title_open_first_seen": first_seen if title_open else None,
+        "title_open_publisher": pubs[0] if open_devices else (publisher if title_open else None),
+        "title_open_publishers": (pubs if open_devices else [publisher]) if title_open else None,
     }
 
 
@@ -98,6 +112,47 @@ def test_undecided_titles_split_at_the_rare_limit_with_no_gap():
     rare = {d.details["canonical_name"] for d in desired["rare_recent"]}
     non_approved = {d.details["canonical_name"] for d in desired["whitelist_suggestion"]}
     assert rare == {"A", "B"} and non_approved == {"C"}
+
+
+def test_a_prompt_describes_only_the_uncovered_installations():
+    """Microsoft Store: 3,917 computers, one with a blank publisher no decision covers."""
+    store = _title("Microsoft.WindowsStore", 3917, publisher="Microsoft Corporation",
+                   clients=40, uncovered=1, uncovered_publishers=[""])
+    desired, _ = _desired(_ctx([store]))
+    assert not desired.get("whitelist_suggestion")
+    [prompt] = desired["rare_recent"]
+    details = prompt.details
+    assert details["uncovered_device_count"] == 1
+    assert details["fleet_device_count"] == 3917
+    assert details["publisher"] == "" and details["title_publisher"] == "Microsoft Corporation"
+    assert details["uncovered_publishers"] == [""]
+    assert details["coverage_scope"] == "undecided"
+    # Fleet-wide prevalence stays supporting evidence for the decision.
+    assert "prevalent" in details["evidence"]
+
+
+def test_a_fully_covered_title_has_no_prompt():
+    covered = _title("Covered", 3917, undecided=False, has_unapproved=False,
+                     publisher_only=True)
+    desired, _ = _desired(_ctx([covered]))
+    assert not desired.get("whitelist_suggestion") and not desired.get("rare_recent")
+
+
+def test_uncovered_installations_above_the_rare_limit_stay_non_approved():
+    title = _title("Widely Odd", 500, uncovered=40, uncovered_publishers=["", "Acme Corp."])
+    desired, _ = _desired(_ctx([title]))
+    [prompt] = desired["whitelist_suggestion"]
+    assert prompt.details["uncovered_device_count"] == 40
+    assert prompt.details["uncovered_publisher_count"] == 2
+
+
+def test_rare_concern_under_publisher_approval_counts_title_open_installations():
+    title = _title("SuperCrack", 2, undecided=False, has_unapproved=False,
+                   publisher_only=True)
+    desired, _ = _desired(_ctx([title]))
+    [prompt] = desired["rare_recent"]
+    assert prompt.details["coverage_scope"] == "title_open"
+    assert prompt.details["uncovered_device_count"] == 2
 
 
 def test_recency_is_a_severity_signal_not_a_condition():
