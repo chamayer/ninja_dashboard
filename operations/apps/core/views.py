@@ -17171,10 +17171,11 @@ def _change_history_events(cur, computer_ids, before, users) -> list[dict]:
         verb = {"I": "added", "U": "changed", "D": "removed"}[operation]
         fields = ", ".join(changed or [])
         values = ""
+        old_values = _raw_json_object(before_values)
+        new_values = _raw_json_object(after_values)
         if operation == "U" and changed and len(changed) <= 3:
             values = "; ".join(
-                f"{col}: {(before_values or {}).get(col)} → {(after_values or {}).get(col)}"
-                for col in changed
+                f"{col}: {old_values.get(col)} → {new_values.get(col)}" for col in changed
             )
         event["changes"].append(
             f"{_HISTORY_TABLE_LABELS.get(table, table.replace('_', ' '))} {verb}"
