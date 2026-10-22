@@ -11,9 +11,11 @@ Limits that are deliberate rather than overlooked:
 * Displayed times carry no timezone, so `last_seen_at` is left null and the
   displayed text is kept in `raw_data["last_contact_text"]` — a time is never
   guessed. Parsing needs a decision on where the console's timezone comes from.
-* Only `ServerOn` agents (machine monitoring) become observations. Other types,
-  such as `ProcessOn` (process monitoring), are not devices; they are counted
-  and logged each run, and need their own stream before they can be shown.
+* Only `ServerOn` agents (machine monitoring) become observations. A
+  `ProcessOn` agent (process monitoring) is never a machine: when exactly one
+  `ServerOn` agent has the same group, name and private IP, the monitor is
+  listed on that machine's record (`process_monitors`); otherwise it is only
+  counted in the log. Other types are counted and logged each run.
 * `is_online` is set only when the State column is `ON` or `OFF`
   (the values the console returns). Any other value is preserved raw with `is_online` null.
 """
@@ -39,6 +41,8 @@ PLATFORM = "R-U-ON"
 # Agent type that is a machine. Other types (e.g. ProcessOn, a process monitor)
 # are not devices and must never be created as one.
 MACHINE_TYPE = "ServerOn"
+# Agent type that monitors a process on a machine; listed on that machine.
+MONITOR_TYPE = "ProcessOn"
 EXTERNAL_NAMESPACE = "agent"
 CONTAINER_EXTERNAL_NAMESPACE = "group"
 DEFAULT_BASE_URL = "https://www.r-u-on.com"
@@ -115,6 +119,36 @@ def parse_overview(page: str) -> list[dict]:
     return agents
 
 
+def _pairing_key(agent: dict) -> tuple[str, str, str] | None:
+    """Group, name and private IP; None when the name or IP is missing."""
+    name = agent["name"].strip().casefold()
+    ip = agent["private_ip"].strip()
+    if not name or not ip:
+        return None
+    return (group_id_for(agent["group"]), name, ip)
+
+
+def pair_monitors(agents: list[dict]) -> dict[str, str]:
+    """Map each process monitor's agent id to its machine agent's id.
+
+    A monitor pairs only when exactly one machine agent has the same group,
+    name and private IP. Anything less certain stays unpaired rather than
+    being attached to a guess.
+    """
+    machines: dict[tuple[str, str, str], list[str]] = {}
+    for agent in agents:
+        key = _pairing_key(agent) if agent["type"] == MACHINE_TYPE else None
+        if key:
+            machines.setdefault(key, []).append(agent["agent_id"])
+    pairs: dict[str, str] = {}
+    for agent in agents:
+        key = _pairing_key(agent) if agent["type"] == MONITOR_TYPE else None
+        matches = machines.get(key, []) if key else []
+        if len(matches) == 1:
+            pairs[agent["agent_id"]] = matches[0]
+    return pairs
+
+
 def _login(client: httpx.Client, base_url: str, username: str, password: str) -> None:
     client.get(f"{base_url}/").raise_for_status()
     resp = client.post(
@@ -144,7 +178,16 @@ def fetch(source: SourceConfig, observed_at: datetime) -> list[dict]:
     observations: list[dict] = []
     groups: dict[str, str] = {}
     skipped: collections.Counter[str] = collections.Counter()
+    pairs = pair_monitors(agents)
+    monitors_by_machine: dict[str, list[dict]] = {}
     for agent in agents:
+        if agent["agent_id"] in pairs:
+            monitors_by_machine.setdefault(pairs[agent["agent_id"]], []).append(agent)
+    unpaired = 0
+    for agent in agents:
+        if agent["type"] == MONITOR_TYPE:
+            unpaired += agent["agent_id"] not in pairs
+            continue
         if agent["type"] != MACHINE_TYPE:
             skipped[agent["type"] or "(blank)"] += 1
             continue
@@ -157,6 +200,20 @@ def fetch(source: SourceConfig, observed_at: datetime) -> list[dict]:
         if group_id:
             groups.setdefault(group_id, group_name or "")
         raw_data = dict(agent)
+        canonical_extra: dict[str, list[dict]] = {}
+        monitors = monitors_by_machine.get(agent["agent_id"])
+        if monitors:
+            # Only machines that have monitors gain the key, so every other
+            # record's content (and history) is unchanged.
+            raw_data["process_monitors"] = monitors
+            canonical_extra["process_monitors"] = [
+                {
+                    "agent_id": monitor["agent_id"],
+                    "name": monitor["name"],
+                    "is_online": parse_state(monitor["state"]),
+                }
+                for monitor in monitors
+            ]
         observations.append(
             {
                 "observed_at": observed_at,
@@ -179,10 +236,15 @@ def fetch(source: SourceConfig, observed_at: datetime) -> list[dict]:
                 "is_online": parse_state(agent["state"]),
                 "last_seen_at": None,
                 "raw_data": Json(raw_data),
+                "canonical_extra": canonical_extra,
             }
         )
     if skipped:
-        log.warning("R-U-ON: skipped non-machine agent types: %s", dict(skipped))
+        log.warning("R-U-ON: skipped unsupported agent types: %s", dict(skipped))
+    if unpaired:
+        log.warning(
+            "R-U-ON: %d process monitors matched no single machine agent", unpaired
+        )
     # Container-only rows keep a group with no agents visible, as for LMI.
     for group_id, group_name in groups.items():
         observations.append(

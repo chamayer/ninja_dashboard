@@ -11,12 +11,17 @@ from ingest.sources import SourceConfig
 
 
 def _row(
-    agent_id: str, name: str, state: str, last: str = "", kind: str = "ServerOn"
+    agent_id: str,
+    name: str,
+    state: str,
+    last: str = "",
+    kind: str = "ServerOn",
+    ip: str = "10.0.0.5",
 ) -> str:
     title = f' title="Last contact at {last}"' if last else ""
     return (
         f'<tr><td><a href="/ctrl?action=agentdetail&amp;agent={agent_id}">{name}</a></td>'
-        f"<td>{kind}</td><td>10.0.0.5</td><td>203.0.113.9</td>"
+        f"<td>{kind}</td><td>{ip}</td><td>203.0.113.9</td>"
         f"<td{title}>{state}</td></tr>"
     )
 
@@ -34,6 +39,7 @@ OVERVIEW = _page(
     GROUP_ACME,
     _row("101", "SRV-APP01", "ON"),
     _row("102", "SRV-OLD&amp;1", "OFF", "Tue, Oct 06 2026, 03:15PM"),
+    _row("103", "srv-app01", "OFF", kind="ProcessOn"),
     '<tr><td class="group"><span>Beta</span></td></tr>',
     _row("201", "BETA-DC", "Degraded"),
     _row("301", "BETA-DC-PROC", "ON", kind="ProcessOn"),
@@ -70,6 +76,7 @@ def test_parse_overview_reads_agents_groups_and_decodes_entities():
     assert [(a["agent_id"], a["name"], a["group"]) for a in agents] == [
         ("101", "SRV-APP01", "Acme  Corp"),
         ("102", "SRV-OLD&1", "Acme  Corp"),
+        ("103", "srv-app01", "Acme  Corp"),
         ("201", "BETA-DC", "Beta"),
         ("301", "BETA-DC-PROC", "Beta"),
     ]
@@ -153,10 +160,67 @@ def test_fetch_requires_credentials():
         ruon.fetch(source, datetime(2026, 10, 12, tzinfo=timezone.utc))
 
 
-def test_non_machine_agent_types_are_not_observed(monkeypatch, caplog):
+def test_paired_process_monitors_are_listed_on_their_machine(monkeypatch, caplog):
     monkeypatch.setattr(ruon.httpx, "Client", _FakeClient)
     with caplog.at_level("WARNING"):
         rows = ruon.fetch(_source(), datetime(2026, 10, 12, tzinfo=timezone.utc))
-    ids = [r["platform_device_id"] for r in rows if not r.get("_org_only")]
-    assert "301" not in ids
-    assert "ProcessOn" in caplog.text
+    machines = {r["platform_device_id"]: r for r in rows if not r.get("_org_only")}
+    # Monitors are never records of their own.
+    assert set(machines) == {"101", "102", "201"}
+    assert machines["101"]["canonical_extra"] == {
+        "process_monitors": [
+            {"agent_id": "103", "name": "srv-app01", "is_online": False}
+        ]
+    }
+    assert machines["101"]["raw_data"].obj["process_monitors"][0]["type"] == "ProcessOn"
+    # Machines without a monitor gain nothing, so their content is unchanged.
+    assert machines["102"]["canonical_extra"] == {}
+    assert "process_monitors" not in machines["102"]["raw_data"].obj
+    # BETA-DC-PROC has no machine agent with its name: counted, not attached.
+    assert "1 process monitors matched no single machine agent" in caplog.text
+    assert "ProcessOn" not in caplog.text.split("skipped", 1)[-1]
+
+
+def _agent(agent_id, name, kind, group="Acme", ip="10.0.0.5"):
+    return {
+        "agent_id": agent_id,
+        "name": name,
+        "type": kind,
+        "group": group,
+        "private_ip": ip,
+    }
+
+
+def test_a_monitor_pairs_only_with_one_machine_of_the_same_group_name_and_ip():
+    machine = _agent("1", "SRV1", "ServerOn")
+    assert ruon.pair_monitors([machine, _agent("9", "srv1", "ProcessOn")]) == {"9": "1"}
+    for monitor in (
+        _agent("9", "SRV1", "ProcessOn", ip="10.0.0.6"),
+        _agent("9", "SRV1", "ProcessOn", group="Other"),
+        _agent("9", "SRV2", "ProcessOn"),
+    ):
+        assert ruon.pair_monitors([machine, monitor]) == {}
+
+
+def test_a_monitor_is_not_paired_on_a_guess():
+    monitor = _agent("9", "SRV1", "ProcessOn")
+    twins = [_agent("1", "SRV1", "ServerOn"), _agent("2", "SRV1", "ServerOn")]
+    assert ruon.pair_monitors([*twins, monitor]) == {}
+    no_ip = [
+        _agent("1", "SRV1", "ServerOn", ip=""),
+        _agent("9", "SRV1", "ProcessOn", ip=""),
+    ]
+    assert ruon.pair_monitors(no_ip) == {}
+
+
+def test_other_agent_types_are_still_skipped(monkeypatch, caplog):
+    page = _page(GROUP_ACME, _row("401", "SRV-WEB", "ON", kind="WebOn"))
+    client = type("C", (_FakeClient,), {})
+    client.get = lambda self, url, params=None: type(
+        "R", (), {"text": page if params else "", "raise_for_status": lambda self: None}
+    )()
+    monkeypatch.setattr(ruon.httpx, "Client", client)
+    with caplog.at_level("WARNING"):
+        rows = ruon.fetch(_source(), datetime(2026, 10, 12, tzinfo=timezone.utc))
+    assert [r for r in rows if not r.get("_org_only")] == []
+    assert "WebOn" in caplog.text

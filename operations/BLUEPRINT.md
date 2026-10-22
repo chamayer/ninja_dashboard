@@ -1,3 +1,38 @@
+## R-U-ON process monitors shown on their computers
+
+Active (user approved 2026-10-22, including a deploying migration; the user
+chose this lighter design over separate monitor records). Goal: R-U-ON
+ProcessOn agents (process monitors; 4 in production, each beside a ServerOn
+agent for the same machine) appear on that Computer's R-U-ON source record
+instead of being dropped.
+Scope: `ingest/connectors/ruon.py`, migration 0338 (adds `process_monitors` to
+`v_entity_observation_admin_metadata`), `device_detail` view/template, tests.
+Decisions: a monitor pairs only when exactly one ServerOn agent has the same
+group, name (case-insensitive) and non-empty private IP; the paired list goes
+in the machine record's `canonical_data.process_monitors` (agent id, name,
+on/off) with the full agent rows in its raw data. Only machines with monitors
+gain the key, so other records' content and history are unchanged; a monitor
+flipping on/off now changes its machine record's history. Unpaired monitors
+are only counted in the run log. No new record type, shared ingest change or
+ADR: monitors are not records of their own. The view column is cast only from
+a JSON array, so a malformed value cannot break readers.
+
+Checkpoint: implemented; committed and pushed with user approval (deploys
+migration 0338). Validation: `test_ruon_connector.py` 12 pass (pairing rules, monitors listed on the machine, other machines
+unchanged, unpaired counted, other types still skipped);
+`test_ruon_process_monitors.py` 3 pass (view keeps 0334's columns and adds
+only the guarded list with grants/revokes; every unpacking of the extended
+Source records rows); `manage.py check` clean; `makemigrations --check` no
+changes; ruff clean on changed files (views.py unchanged at 86). Not
+validated: migration 0338 on PostgreSQL (no local database), the real R-U-ON
+markup for ProcessOn rows, and the deployed page. Pre-existing failures, not
+from this work: the domain-mapping ratchet (25 unlisted names from other work;
+this session's `COPIED_FIELDS` is now listed), `test_table_controls`
+(`software_tech_checklist.html`), `test_e5_generic_admin`
+(`ConditionPolicyActivationForm` missing).
+Next action: after deploy, open a Computer with an R-U-ON process monitor and
+check its Source records row (the monitor appears after the next R-U-ON run).
+
 ## Requirements page — edit baselines in the app
 
 Active. Goal: Admin → Config → Requirements edits requirement baselines the way

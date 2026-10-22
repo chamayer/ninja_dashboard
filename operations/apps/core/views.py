@@ -2920,6 +2920,8 @@ def device_detail(request: HttpRequest, org_slug: str, device_id: str) -> HttpRe
         with connection.cursor() as cur:
             cur.execute("SET LOCAL operations.tenant_id = 1")
             observations = _device_source_records(cur, [device.id]).get(str(device.id), [])
+            monitors = _device_process_monitors(cur, device.id)
+            observations = [(*row, monitors.get(str(row[0]), [])) for row in observations]
 
             cur.execute(
                 """
@@ -3482,7 +3484,7 @@ def device_detail(request: HttpRequest, org_slug: str, device_id: str) -> HttpRe
     ]
     current_agent_records = {
         (source, entity_type)
-        for _observation_id, source, entity_type, _external_id, _source_url, active, _last_seen, _reported_online, _last_contact, record_lifecycle in observations
+        for _observation_id, source, entity_type, _external_id, _source_url, active, _last_seen, _reported_online, _last_contact, record_lifecycle, _process_monitors in observations
         if active and record_lifecycle not in {"archived", "retired", "decommissioned"}
     }
     agent_summary = {
@@ -17883,6 +17885,23 @@ def _device_source_records(cur, device_ids) -> dict[str, list[tuple]]:
     for device_id, *row in cur.fetchall():
         records.setdefault(device_id, []).append(tuple(row))
     return records
+
+
+def _device_process_monitors(cur, device_id) -> dict[str, list[dict]]:
+    """Process monitors a source lists on this Computer's records, by record.
+
+    R-U-ON lists each paired ``ProcessOn`` agent on its machine's record.
+    Only the safe metadata view is read. The caller sets the tenant on ``cur``.
+    """
+    cur.execute(
+        """
+        SELECT observation_id::text, process_monitors
+          FROM operations.v_entity_observation_admin_metadata
+         WHERE tenant_id = %s AND device_id = %s AND process_monitors IS NOT NULL
+        """,
+        [1, str(device_id)],
+    )
+    return {observation_id: monitors for observation_id, monitors in cur.fetchall()}
 
 
 def _attach_merge_review_evidence(devices) -> None:
