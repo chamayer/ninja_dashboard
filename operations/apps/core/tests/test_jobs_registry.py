@@ -9,6 +9,7 @@ from shared.jobs_registry import (
     EMERGENCY_CHILD_CAPACITY,
     EXECUTION_POOL_POLICIES,
     READY_WINDOW_CAPACITY,
+    REPLAY_SAFE_RECOVERY_EVIDENCE,
     RegistryValidationError,
     capability_state,
     catalog_entries,
@@ -270,6 +271,7 @@ def test_registry_exposes_the_approved_pool_and_resource_policy():
     assert definition("software-classify").supersession_rank == 3
     assert definition("software-classify").supersession_family == "software-classifier"
     assert definition("resolver").snapshot_metadata()["recovery_mode"] == "replay_safe"
+    assert definition("ninja-enrichment").snapshot_metadata()["recovery_mode"] == "replay_safe"
     assert definition("patch-classify").snapshot_metadata()["recovery_mode"] == "replay_safe"
     assert definition("platform-evaluate").snapshot_metadata()["recovery_mode"] == "replay_safe"
     assert definition("patches").capacity_keys == ()
@@ -288,6 +290,19 @@ def test_registry_exposes_the_approved_pool_and_resource_policy():
     assert all(definition(key).result_contract == "rows_or_outcome" for key in definition_keys())
     assert all(
         definition(key).permission in {"administrator", "system"} for key in definition_keys()
+    )
+
+
+def test_ninja_enrichment_recovery_evidence_matches_the_approved_policy():
+    assert REPLAY_SAFE_RECOVERY_EVIDENCE["patches"] == (
+        "The Ninja patch/activity collector reads the vendor API and reconciles local "
+        "domain projections. A later replay converges to current source state and "
+        "has no vendor-side mutation."
+    )
+    assert REPLAY_SAFE_RECOVERY_EVIDENCE["ninja-enrichment"] == (
+        "The Ninja enrichment collector reads health, policy, custom-field, and "
+        "location endpoints and writes local evidence only. A later replay converges "
+        "to current source state and has no vendor-side mutation."
     )
 
 
