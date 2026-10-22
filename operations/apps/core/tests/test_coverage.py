@@ -134,17 +134,6 @@ class _Cursor:
                 ("device-1", "SentinelOne", True, None, None),
                 ("device-2", "Ninja", True, None, None),
             ],
-            [
-                (
-                    "source-observation-1",
-                    "client-3",
-                    "gamma",
-                    "Gamma",
-                    "source-only-host",
-                    "Ninja",
-                    True,
-                ),
-            ],
             # operations.agents with an agent.* entity type.
             [("Ninja",), ("SentinelOne",), ("R-U-ON",)],
         ]
@@ -254,11 +243,11 @@ def test_coverage_uses_effective_requirements_and_source_specific_filters(monkey
     )
     cards = {card["platform"]: card for card in context["platform_cards"]}
     assert {item["name"]: item["count"] for item in cards["Ninja"]["counts"]} == {
-        "Online": 3,
+        "Online": 2,
         "Offline": 0,
         "Withdrawn": 0,
-        "No record": 1,
-        "Total": 3,
+        "No record": 0,
+        "Total": 2,
     }
     assert cards["Ninja"]["requirement_total"] == 2
     assert {item["name"]: item["count"] for item in cards["Ninja"]["requirement_exceptions"]} == {
@@ -269,11 +258,11 @@ def test_coverage_uses_effective_requirements_and_source_specific_filters(monkey
         "Exempt": 1,
     }
     assert {item["name"]: item["count"] for item in context["hudu_card"]["counts"]} == {
-        "Current only": 2,
+        "Current only": 1,
         "Current + archived": 0,
         "Archived only": 0,
-        "No record": 2,
-        "Total": 2,
+        "No record": 1,
+        "Total": 1,
     }
 
 
@@ -355,10 +344,9 @@ def test_page_says_when_requirements_have_not_been_evaluated(monkeypatch):
     assert "they appear after the next evaluator run" in source
 
 
-def test_computer_shortcuts_distinguish_other_records_from_hudu(monkeypatch):
+def test_computer_shortcuts_apply_only_to_canonical_computers(monkeypatch):
     no_four = _render_coverage_context(monkeypatch, "computer_scope=no_product_records")
-    assert no_four["paginator"].count == 1
-    assert no_four["device_rows"][0]["inventory_key"] == "hudu:hudu-observation-2"
+    assert no_four["paginator"].count == 0
 
     no_current = _render_coverage_context(monkeypatch, "computer_scope=no_current_records")
     assert no_current["paginator"].count == 0
@@ -410,7 +398,7 @@ def test_agents_column_filter_contains_displayed_values(monkeypatch):
     assert context["filter_logic"] == "(Sources contains “ninja online required · missing”)"
 
 
-def test_coverage_includes_an_unattached_hudu_computer_as_its_own_row(monkeypatch):
+def test_coverage_keeps_unattached_source_evidence_out_of_computer_rows(monkeypatch):
     cursor = _Cursor()
     captured = {}
     monkeypatch.setattr(views, "connection", _Connection(cursor))
@@ -426,21 +414,9 @@ def test_coverage_includes_an_unattached_hudu_computer_as_its_own_row(monkeypatc
 
     views.fleet_coverage(request)
 
-    hudu_only = next(
-        row for row in captured["context"]["device_rows"]
-        if row["inventory_key"] == "hudu:hudu-observation-2"
-    )
-    assert hudu_only["hostname"] == "host-2"
-    assert hudu_only["hudu_present"] is True
-    assert hudu_only["hudu_links"] == []
-    assert hudu_only["possible_match"]["device_id"] == "device-2"
-    assert hudu_only["agent_cells"][0]["possible_match"]["device_id"] == "device-2"
-    source_only = next(
-        row for row in captured["context"]["device_rows"]
-        if row["inventory_key"] == "source:source-observation-1"
-    )
-    assert source_only["device_id"] is None
-    assert source_only["source_states"] == {"Ninja": "Online"}
+    rows = captured["context"]["device_rows"]
+    assert {row["device_id"] for row in rows} == {"device-1", "device-2"}
+    assert all(row["device_id"] is not None for row in rows)
 
 
 def test_computers_csv_has_the_current_table_platform_columns(monkeypatch):
@@ -481,14 +457,13 @@ def test_computers_csv_has_the_current_table_platform_columns(monkeypatch):
     assert [
         "Beta",
         "host-2",
-        "Unknown",
+        "Ubuntu",
+        "vm",
+        "server",
+        "active",
+        "Not in Hudu",
         "",
-        "",
-        "",
-        "In Hudu",
-        "",
-        "Ninja: No record; possible match: host-2; N/A | SentinelOne: No record; N/A"
-        " | Hudu: No status; N/A",
+        "Ninja: Online; Required | SentinelOne: No record; Exempt | Hudu: No record; N/A",
     ] in rows
 
 
@@ -530,7 +505,7 @@ def test_coverage_template_has_clear_statuses_hudu_and_multiselect_filters():
     assert "Archived records only" in template
     assert 'name="show_archived_hudu"' not in template
     assert "row.hudu_records" in template
-    assert "Every Computer known to Operations" in template
+    assert "All current Computers" in template
     assert "Sources" in template
     assert "Add condition" in template
     assert 'name="agent_{{ condition.index }}"' in template
@@ -696,8 +671,7 @@ def test_status_filter_counts_every_catalogued_agent(monkeypatch):
     views.fleet_coverage(request)
     context = captured["context"]
 
-    # The source-only Ninja record is online too, so it matches as well.
-    assert {row["device_id"] for row in context["device_rows"]} == {"device-1", "device-2", None}
+    assert {row["device_id"] for row in context["device_rows"]} == {"device-1", "device-2"}
     assert context["computer_scope_filters"] == ["any_online"]
     assert list(context["computer_scope_labels"]) == [
         "any_online", "any_offline", "missing_required", "stale_required",
@@ -712,7 +686,7 @@ def test_hudu_cell_says_which_link_goes_where_and_hudu_is_always_listed(monkeypa
     assert source.count(">Computer details</a>") == 2
     assert ">Not linked to a computer</span>" in source
     assert ">Same name, not linked</span>" in source
-    assert "{{ row.source_record }} record</span>" in source
+    assert "{{ row.source_record }} record</span>" not in source
     assert "integration link{{ record.links|length|pluralize }} in Hudu" in source
     assert ">Hudu</a>" not in source
     assert ">Operations device</a>" not in source
@@ -735,14 +709,11 @@ def test_hudu_cell_says_which_link_goes_where_and_hudu_is_always_listed(monkeypa
     assert "Hudu" in captured["context"]["platforms"]
 
 
-def test_source_only_rows_are_marked_as_records_not_computers(monkeypatch):
+def test_computer_rows_are_never_source_only_records(monkeypatch):
     context = _render_coverage_context(monkeypatch, "")
     rows = {row["inventory_key"]: row for row in context["device_rows"]}
-    assert rows["hudu:hudu-observation-2"]["source_record"] == "Hudu"
-    assert rows["source:source-observation-1"]["source_record"] == "Ninja"
-    assert all(
-        not row.get("source_record") for key, row in rows.items() if key.startswith("device:")
-    )
+    assert set(rows) == {"device:device-1", "device:device-2"}
+    assert all(not row.get("source_record") for row in rows.values())
 
 
 def test_no_status_row_shows_only_when_used_and_old_links_still_filter(monkeypatch):

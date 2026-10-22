@@ -65,13 +65,20 @@ from shared.patch_compliance import COMPLIANCE_MISSING_STATUSES, excluded_patch_
 
 from . import capability as capability_evidence
 from . import category as category_evidence
-from . import finding_registry, software_decision_rules, software_review
+from . import (
+    computer_naming,
+    finding_registry,
+    requirement_baselines,
+    software_decision_rules,
+    software_review,
+)
 from .capability_review_actions import decide_capability
 from .client_workspace import (
     build_client_directory,
     build_client_workspace,
     client_source_references,
 )
+from .computer_reads import current_computer_sql, current_computers
 from .conditions.live import load_active_profile
 from .conditions.operator import (
     ATTENTION_BLOCKED,
@@ -107,8 +114,6 @@ from .finding_actions import (
 )
 from .forms import ClientPolicyForm
 from .identity_actions import run_identity_action
-from . import computer_naming, requirement_baselines
-from .computer_reads import current_computer_sql, current_computers
 from .models import (
     AdminFinding,
     Agent,
@@ -129,7 +134,6 @@ from .models import (
     EntityType,
     EvaluatorConfig,
     Finding,
-    StoredFindingState,
     FindingType,
     MergeCandidate,
     NotificationEvent,
@@ -142,10 +146,27 @@ from .models import (
     SoftwareDecision,
     SoftwareSuggestionRule,
     Source,
+    StoredFindingState,
     SuppressionRule,
 )
 from .remote_access_approval import approve_remote_access
 from .software_decision_actions import decide_software, decision_for
+from .templatetags.human_labels import humanize_label
+
+
+def _source_record_type_label(entity_type: str) -> str:
+    """Return a readable source-record type without requiring a UI release.
+
+    Registered types retain their curated operator wording. A newly observed
+    type still appears immediately, with its dotted identifier converted to a
+    readable fallback (for example, ``monitor.process`` becomes
+    ``Monitor process``).
+    """
+    label = humanize_label(entity_type)
+    if label != entity_type:
+        return label
+    return re.sub(r"[._-]+", " ", entity_type).strip().capitalize()
+
 
 DEVICE_PAGE_SIZE = 100
 
@@ -14758,26 +14779,6 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
                     """
                 )
             source_observation_rows = cur.fetchall()
-            # Do not hide a current agent/VM record merely because it has not
-            # resolved to a live Computer.  Hudu has its dedicated inventory
-            # evidence reader above; these are the other computer-capable
-            # platform records.
-            cur.execute(
-                """
-                SELECT o.observation_id, o.client_id, o.client_slug, o.client_name,
-                       o.hostname, o.platform,
-                       CASE
-                           WHEN lower(o.canonical_data->>'is_online') IN ('true', 't', '1', 'yes', 'online') THEN TRUE
-                           WHEN lower(o.canonical_data->>'is_online') IN ('false', 'f', '0', 'no', 'offline') THEN FALSE
-                           WHEN lower(o.canonical_data->>'offline') IN ('true', 't', '1', 'yes') THEN FALSE
-                           WHEN lower(o.canonical_data->>'offline') IN ('false', 'f', '0', 'no') THEN TRUE
-                           WHEN o.entity_type = 'vm.guest' AND lower(o.canonical_data->>'power_state') = 'poweredon' THEN TRUE
-                           ELSE FALSE
-                       END AS reported_online
-                  FROM operations.v_computer_inventory_source_record_current o
-                """,
-            )
-            source_only_rows = cur.fetchall()
             cur.execute(
                 "SELECT name FROM operations.agents WHERE entity_type LIKE 'agent.%%'"
             )
@@ -14837,34 +14838,6 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
     for hudu in hudu_by_observation.values():
         if hudu["device_id"] is not None:
             hudu_by_device.setdefault(hudu["device_id"], []).append(hudu)
-
-    # An unlinked Hudu record is not a source identity merely because its name
-    # resembles a computer. When there is exactly one same-client/name
-    # canonical computer that already has a linked Hudu record, however, show
-    # that unlinked record beside the confirmed one. This is presentation-only:
-    # it neither creates a link nor changes Hudu presence or coverage.
-    canonical_devices_by_client_hostname: dict = {}
-    for device_id, computer in devices_by_id.items():
-        hostname = computer["hostname"].strip().lower()
-        if hostname:
-            canonical_devices_by_client_hostname.setdefault(
-                (computer["client_id"], hostname), []
-            ).append(device_id)
-    grouped_hudu_observation_ids = set()
-    for hudu in hudu_by_observation.values():
-        if hudu["device_id"] is not None or not hudu["hostname"]:
-            continue
-        candidates = canonical_devices_by_client_hostname.get(
-            (hudu["client_id"], hudu["hostname"].strip().lower()),
-            [],
-        )
-        if len(candidates) != 1:
-            continue
-        device_id = candidates[0]
-        if not hudu_by_device.get(device_id):
-            continue
-        hudu_by_device.setdefault(device_id, []).append(hudu)
-        grouped_hudu_observation_ids.add(hudu["observation_id"])
 
     coverage_rows = [
         {
@@ -15109,93 +15082,6 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
                 "possible_match": None,
             }
         )
-
-    for (
-        observation_id,
-        client_id,
-        client_slug,
-        client_name,
-        hostname,
-        platform,
-        reported_online,
-    ) in source_only_rows:
-        # A source-only record is deliberately not name-grouped.  A matching
-        # name is useful evidence, but is not proof that it is the same
-        # Computer as an existing row.
-        inventory_rows.append(
-            {
-                "inventory_key": f"source:{observation_id}",
-                "device_id": None,
-                # Not a Computer: a source record that is not linked to one.
-                "source_record": platform,
-                "client_id": client_id,
-                "client_slug": client_slug or "",
-                "client_name": client_name or "Unassigned",
-                "hostname": hostname or "",
-                "os_family": "",
-                "device_type": "",
-                "device_role": "",
-                "lifecycle_status": "",
-                "hudu_records": [],
-                "source_states": {platform: "Online" if reported_online else "Offline"},
-                "source_observations": {},
-                "platform_states": {},
-                "s1_exempt": False,
-                "possible_match": None,
-            }
-        )
-
-    for hudu in hudu_by_observation.values():
-        if hudu["observation_id"] in grouped_hudu_observation_ids:
-            continue
-        if hudu["device_id"] is not None and hudu["device_id"] in devices_by_id:
-            continue
-        client = clients_by_id.get(hudu["client_id"], {"slug": "", "name": "Unassigned"})
-        inventory_rows.append(
-            {
-                "inventory_key": f"hudu:{hudu['observation_id']}",
-                "source_record": "Hudu",
-                # A linked-but-retired/deleted device is not an active inventory
-                # computer. Keep this source record separate rather than linking
-                # a user to a stale device-detail route.
-                "device_id": None,
-                "client_id": hudu["client_id"],
-                "client_slug": client["slug"],
-                "client_name": client["name"],
-                "hostname": hudu["hostname"],
-                "os_family": "",
-                "device_type": "",
-                "device_role": "",
-                "lifecycle_status": "",
-                "hudu_records": [hudu],
-                "source_states": {},
-                "source_observations": {},
-                "platform_states": {},
-                "s1_exempt": False,
-                "possible_match": None,
-            }
-        )
-
-    devices_by_client_hostname: dict = {}
-    for row in inventory_rows:
-        if row["device_id"] is None or not row["hostname"]:
-            continue
-        devices_by_client_hostname.setdefault(
-            (row["client_id"], row["hostname"].strip().lower()),
-            [],
-        ).append(row)
-    for row in inventory_rows:
-        if row["device_id"] is not None or not row["hostname"]:
-            continue
-        candidates = devices_by_client_hostname.get(
-            (row["client_id"], row["hostname"].strip().lower()),
-            [],
-        )
-        ninja_candidates = [
-            candidate for candidate in candidates if "Ninja" in candidate["source_states"]
-        ]
-        if len(ninja_candidates) == 1:
-            row["possible_match"] = ninja_candidates[0]
 
     for row in inventory_rows:
         row.update(aggregate_hudu(row.pop("hudu_records")))
@@ -15988,6 +15874,7 @@ def sources_status(request: HttpRequest) -> HttpResponse:
                 counts_by_instance.setdefault(row[0], []).append(
                     {
                         "entity_type": row[1],
+                        "entity_type_label": _source_record_type_label(row[1]),
                         "entity_class": row[2],
                         "current_count": row[3],
                         "active_count": row[4],
@@ -16271,26 +16158,59 @@ def sources_status(request: HttpRequest) -> HttpResponse:
 
 
 @login_required
-def source_records(request: HttpRequest, source_instance_id: uuid.UUID) -> HttpResponse:
-    """List one source instance's current observation records.
+def source_records(
+    request: HttpRequest, source_instance_id: uuid.UUID | None = None
+) -> HttpResponse:
+    """List current observations across Inventory, optionally for one source.
 
-    This is deliberately an observation reader rather than an Entity or
-    Computer reader: the source-status totals count one current observation
-    per source-scoped identity, including withdrawn and unlinked records.
+    Observations are evidence, not Computers.  The reader deliberately makes
+    Computer attachment, client attribution, and a parent source-record
+    reference separate relationship facts.  Its distinct filter values come
+    from the current observation store, so newly registered types are visible
+    without changing this page.
     """
     tenant_id = int(getattr(request, "tenant_id", 1))
     state = (request.GET.get("state") or "all").strip().lower()
     if state not in {"all", "active", "withdrawn"}:
         state = "all"
     entity_type = (request.GET.get("type") or "").strip()
+    query = (request.GET.get("q") or "").strip()
+    relationship = (request.GET.get("relationship") or "all").strip()
+    if relationship not in {
+        "all",
+        "attached_computer",
+        "unlinked_computer",
+        "client_attributed",
+        "parent_record",
+        "has_relationship",
+        "no_relationship",
+    }:
+        relationship = "all"
+    source_filter = source_instance_id
+    if source_filter is None and request.GET.get("source"):
+        try:
+            source_filter = uuid.UUID(request.GET["source"])
+        except (TypeError, ValueError):
+            source_filter = None
+    client_filter = (request.GET.get("client") or "").strip()
+    try:
+        client_filter_id = uuid.UUID(client_filter) if client_filter else None
+    except (TypeError, ValueError):
+        client_filter_id = None
     try:
         page_number = max(1, int(request.GET.get("page", "1")))
     except ValueError:
         page_number = 1
     page_size = 100
 
-    clauses = ["observation.tenant_id = %s", "observation.source_instance_id = %s"]
-    params: list[object] = [tenant_id, source_instance_id]
+    clauses = ["observation.tenant_id = %s"]
+    params: list[object] = [tenant_id]
+    if source_filter is not None:
+        clauses.append("observation.source_instance_id = %s")
+        params.append(source_filter)
+    if client_filter_id is not None:
+        clauses.append("observation.client_id = %s")
+        params.append(client_filter_id)
     if state == "active":
         clauses.append("observation.active")
     elif state == "withdrawn":
@@ -16298,6 +16218,31 @@ def source_records(request: HttpRequest, source_instance_id: uuid.UUID) -> HttpR
     if entity_type:
         clauses.append("observation.entity_type = %s")
         params.append(entity_type)
+    if relationship == "attached_computer":
+        clauses.append("observation.device_id IS NOT NULL")
+    elif relationship == "unlinked_computer":
+        clauses.append("observation.device_id IS NULL")
+    elif relationship == "client_attributed":
+        clauses.append("observation.client_id IS NOT NULL")
+    elif relationship == "parent_record":
+        clauses.append("NULLIF(observation.parent_external_id, '') IS NOT NULL")
+    elif relationship == "has_relationship":
+        clauses.append(
+            "(observation.device_id IS NOT NULL OR observation.client_id IS NOT NULL "
+            "OR NULLIF(observation.parent_external_id, '') IS NOT NULL)"
+        )
+    elif relationship == "no_relationship":
+        clauses.append(
+            "observation.device_id IS NULL AND observation.client_id IS NULL "
+            "AND NULLIF(observation.parent_external_id, '') IS NULL"
+        )
+    if query:
+        clauses.append(
+            "(observation.external_id ILIKE %s OR observation.parent_external_id ILIKE %s "
+            "OR COALESCE(observation.canonical_data->>'hostname', '') ILIKE %s "
+            "OR COALESCE(observation.canonical_data->>'name', '') ILIKE %s)"
+        )
+        params.extend([f"%{query}%"] * 4)
     where_sql = " AND ".join(clauses)
 
     with transaction.atomic(), connection.cursor() as cur:
@@ -16309,12 +16254,21 @@ def source_records(request: HttpRequest, source_instance_id: uuid.UUID) -> HttpR
               JOIN operations.sources source ON source.id = instance.source_id
               LEFT JOIN operations.clients client
                 ON client.id = instance.client_id AND client.tenant_id = instance.tenant_id
-             WHERE instance.tenant_id = %s AND instance.id = %s
+             WHERE instance.tenant_id = %s
+             ORDER BY source.name, client.display_name NULLS FIRST, instance.id
             """,
-            (tenant_id, source_instance_id),
+            (tenant_id,),
         )
-        source_row = cur.fetchone()
-        if source_row is None:
+        source_rows = cur.fetchall()
+        source_choices = [
+            {
+                "id": row[0],
+                "label": row[1] + (f" · {row[2]}" if row[2] else ""),
+            }
+            for row in source_rows
+        ]
+        source_row = next((row for row in source_rows if row[0] == source_filter), None)
+        if source_filter is not None and source_row is None:
             raise Http404("Source instance not found")
 
         cur.execute(
@@ -16326,21 +16280,42 @@ def source_records(request: HttpRequest, source_instance_id: uuid.UUID) -> HttpR
             """
             SELECT DISTINCT entity_type
               FROM operations.entity_observation_current
-             WHERE tenant_id = %s AND source_instance_id = %s
+             WHERE tenant_id = %s
              ORDER BY entity_type
             """,
-            (tenant_id, source_instance_id),
+            (tenant_id,),
         )
-        entity_types = [row[0] for row in cur.fetchall()]
+        entity_types = [
+            {"value": row[0], "label": _source_record_type_label(row[0])}
+            for row in cur.fetchall()
+        ]
+        cur.execute(
+            """
+            SELECT id, slug, display_name
+              FROM operations.clients
+             WHERE tenant_id = %s AND deleted_at IS NULL
+             ORDER BY display_name
+            """,
+            (tenant_id,),
+        )
+        client_choices = [
+            {"id": str(row[0]), "slug": row[1], "name": row[2]} for row in cur.fetchall()
+        ]
 
         records_sql = f"""
-            SELECT observation.observation_id, observation.entity_type,
+            SELECT observation.observation_id, source.name, observation.entity_type,
                    observation.external_id, observation.parent_external_id,
                    observation.active, observation.observed_at,
                    observation.last_seen_at, observation.withdrawn_at,
                    observation.device_id, device.canonical_hostname,
-                   client.slug, client.display_name
+                   client.slug, client.display_name,
+                   CASE WHEN observation.device_id IS NOT NULL THEN TRUE ELSE FALSE END,
+                   CASE WHEN observation.client_id IS NOT NULL THEN TRUE ELSE FALSE END,
+                   CASE WHEN NULLIF(observation.parent_external_id, '') IS NOT NULL THEN TRUE ELSE FALSE END
               FROM operations.entity_observation_current observation
+              JOIN operations.source_instances instance
+                ON instance.tenant_id = observation.tenant_id AND instance.id = observation.source_instance_id
+              JOIN operations.sources source ON source.id = instance.source_id
               LEFT JOIN operations.devices device
                 ON device.tenant_id = observation.tenant_id AND device.id = observation.device_id
               LEFT JOIN operations.clients client
@@ -16358,17 +16333,22 @@ def source_records(request: HttpRequest, source_instance_id: uuid.UUID) -> HttpR
         records = [
             {
                 "observation_id": row[0],
-                "entity_type": row[1],
-                "external_id": row[2],
-                "parent_external_id": row[3],
-                "active": row[4],
-                "observed_at": row[5],
-                "last_seen_at": row[6],
-                "withdrawn_at": row[7],
-                "device_id": row[8],
-                "hostname": row[9],
-                "client_slug": row[10],
-                "client_name": row[11],
+                "source_name": row[1],
+                "entity_type": row[2],
+                "entity_type_label": _source_record_type_label(row[2]),
+                "external_id": row[3],
+                "parent_external_id": row[4],
+                "active": row[5],
+                "observed_at": row[6],
+                "last_seen_at": row[7],
+                "withdrawn_at": row[8],
+                "device_id": row[9],
+                "hostname": row[10],
+                "client_slug": row[11],
+                "client_name": row[12],
+                "has_computer": row[13],
+                "has_client": row[14],
+                "has_parent": row[15],
             }
             for row in cur.fetchall()
         ]
@@ -16378,6 +16358,7 @@ def source_records(request: HttpRequest, source_instance_id: uuid.UUID) -> HttpR
             records,
             columns=[
                 ("Observation ID", "observation_id"),
+                ("Source", "source_name"),
                 ("Entity type", "entity_type"),
                 ("External ID", "external_id"),
                 ("Parent external ID", "parent_external_id"),
@@ -16388,7 +16369,7 @@ def source_records(request: HttpRequest, source_instance_id: uuid.UUID) -> HttpR
                 ("Linked Computer", "hostname"),
                 ("Client", "client_name"),
             ],
-            filename_stem=f"{source_row[1]}_source_records",
+            filename_stem="inventory_source_records",
         )
 
     page_count = max(1, -(-total // page_size))
@@ -16396,14 +16377,19 @@ def source_records(request: HttpRequest, source_instance_id: uuid.UUID) -> HttpR
         request,
         "source_records.html",
         {
-            "source_instance_id": source_instance_id,
-            "source_name": source_row[1],
-            "source_client_name": source_row[2],
+            "source_instance_id": source_filter,
+            "source_name": source_row[1] if source_row else "",
+            "source_client_name": source_row[2] if source_row else "",
+            "source_choices": source_choices,
+            "client_choices": client_choices,
             "records": records,
             "total": total,
             "state": state,
             "entity_type": entity_type,
             "entity_types": entity_types,
+            "query": query,
+            "relationship": relationship,
+            "client_filter": str(client_filter_id) if client_filter_id else "",
             "page_number": page_number,
             "page_count": page_count,
             "page_size": page_size,
@@ -16412,7 +16398,18 @@ def source_records(request: HttpRequest, source_instance_id: uuid.UUID) -> HttpR
             "previous_page": page_number - 1,
             "next_page": page_number + 1,
             "page_query": urlencode(
-                {key: value for key, value in {"state": state if state != "all" else "", "type": entity_type}.items() if value}
+                {
+                    key: value
+                    for key, value in {
+                        "source": str(source_filter) if source_filter else "",
+                        "client": client_filter,
+                        "state": state if state != "all" else "",
+                        "type": entity_type,
+                        "relationship": relationship if relationship != "all" else "",
+                        "q": query,
+                    }.items()
+                    if value
+                }
             ),
         },
     )

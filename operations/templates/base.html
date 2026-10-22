@@ -464,6 +464,8 @@
                    href="{% url 'inventory_clients' %}">Clients</a>
                 <a class="nav-link nav-context {% if request.resolver_match.url_name == 'inventory_computers' or request.resolver_match.url_name == 'fleet_coverage' %}active{% endif %}"
                    href="{% url 'inventory_computers' %}">Computers</a>
+                <a class="nav-link nav-context {% if request.resolver_match.url_name == 'inventory_source_records' or request.resolver_match.url_name == 'source_records' %}active{% endif %}"
+                   href="{% url 'inventory_source_records' %}">Source records</a>
                 <div class="nav-fill"></div>
             </div>
             {% if current_client and request.resolver_match.url_name != 'device_detail' %}

@@ -278,6 +278,7 @@ urlpatterns = [
     path("coverage/", fleet_coverage, name="fleet_coverage"),
     path("inventory/clients/", inventory_clients, name="inventory_clients"),
     path("inventory/computers/", fleet_coverage, name="inventory_computers"),
+    path("inventory/source-records/", source_records, name="inventory_source_records"),
     path("sources/", sources_status, name="sources_status"),
     path("sources/<uuid:source_instance_id>/records/", source_records, name="source_records"),
     path("sources/<uuid:binding_id>/refresh/", source_refresh_run, name="source_refresh_run"),

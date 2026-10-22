@@ -47,14 +47,43 @@ def test_software_status_counts_are_parameterized_by_current_computer_scope():
     assert "AND {computer_selector}" in review
 
 
-def test_source_status_counts_have_an_observation_grain_destination():
+def test_source_records_is_a_generic_observation_reader_with_explicit_relationships():
     views = Path(__file__).parents[1].joinpath("views.py").read_text(encoding="utf-8")
     sources_template = Path(__file__).parents[3].joinpath("templates", "sources.html").read_text(
         encoding="utf-8"
     )
+    source_records_template = Path(__file__).parents[3].joinpath(
+        "templates", "source_records.html"
+    ).read_text(encoding="utf-8")
+    urls = Path(__file__).parents[3].joinpath("config", "urls.py").read_text(encoding="utf-8")
+
     assert "def source_records(" in views
     assert "operations.entity_observation_current observation" in views
+    assert "source_instance_id: uuid.UUID | None = None" in views
+    assert "observation.device_id IS NOT NULL" in views
+    assert "observation.client_id IS NOT NULL" in views
+    assert "observation.parent_external_id" in views
+    assert "_source_record_type_label" in views
+    assert 'path("inventory/source-records/", source_records, name="inventory_source_records")' in urls
     assert "source_records" in sources_template
+    assert "current record" in sources_template
+    assert "Record type" in source_records_template
+    assert "No resolved relationship" in source_records_template
+
+
+def test_computer_inventory_does_not_render_unlinked_source_records_as_computers():
+    views = Path(__file__).parents[1].joinpath("views.py").read_text(encoding="utf-8")
+    template = Path(__file__).parents[3].joinpath("templates", "coverage.html").read_text(
+        encoding="utf-8"
+    )
+    start = views.index("def fleet_coverage(")
+    end = views.index("def sources_status(", start)
+    section = views[start:end]
+
+    assert "v_computer_inventory_source_record_current" not in section
+    assert '"source_record": platform' not in section
+    assert "All current Computers" in template
+    assert "Review source records" in template
 
 
 def test_computer_overview_pages_html_and_exports_the_full_filtered_scope():

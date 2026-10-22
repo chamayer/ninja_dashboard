@@ -122,13 +122,13 @@
 <div style="display:flex; justify-content:space-between; align-items:baseline; margin-bottom:1rem;">
     <div>
         <h1 style="margin:0;">Computer inventory</h1>
-        <p class="muted" style="margin:0.25rem 0 0;">Current Computers plus separately marked source records not linked to one: where each was found, and what is required.</p>
+        <p class="muted" style="margin:0.25rem 0 0;">Current Computers, their source evidence, and what is required. <a href="{% url 'inventory_source_records' %}">Review source records</a> for unlinked or non-Computer evidence.</p>
     </div>
     {% include "_csv_download.html" %}
 </div>
 
 <div class="coverage-result-heading">
-    <h2>All inventory rows</h2>
+    <h2>All current Computers</h2>
     <p>These counts are not changed by the filters below. {% if requirements_evaluated_at %}Requirements were last evaluated {{ requirements_evaluated_at|timesince }} ago ({{ requirements_evaluated_at|date:"M j, H:i" }}).{% else %}Requirement results are not available yet; they appear after the next evaluator run.{% endif %}</p>
 </div>
 <div class="coverage-cards">
@@ -153,9 +153,9 @@
     <h2>Filtered results</h2>
     <p>Filters: {{ filter_summary }}{% if filters_active %}<details class="coverage-filter-logic"><summary>Show exact logic</summary><div>{{ filter_logic }}</div></details>{% endif %}</p>
 </div>
-<section class="coverage-result-summary" aria-label="Filtered inventory results">
+<section class="coverage-result-summary" aria-label="Filtered Computer results">
     <div class="coverage-result-card"><span>Clients</span><strong>{{ filtered_summary.clients }}</strong></div>
-    <div class="coverage-result-card"><span>Inventory rows</span><strong>{{ filtered_summary.devices }}</strong></div>
+    <div class="coverage-result-card"><span>Computers</span><strong>{{ filtered_summary.devices }}</strong></div>
     <div class="coverage-result-card"><span>In Hudu</span><strong>{{ filtered_summary.in_hudu }}</strong></div>
     <div class="coverage-result-card"><span>Not in Hudu</span><strong>{{ filtered_summary.not_in_hudu }}</strong></div>
 </section>
@@ -192,7 +192,7 @@
                 {% for row in device_rows %}
                 <tr>
                     <td>{% if row.client_slug %}<a href="{% url 'org_index' org_slug=row.client_slug %}">{{ row.client_name }}</a>{% else %}{{ row.client_name }}{% endif %}</td>
-                    <td>{% if row.device_id %}<a href="{% url 'device_detail' org_slug=row.client_slug device_id=row.device_id %}">{{ row.hostname|default:"Unnamed computer" }}</a>{% else %}{{ row.hostname|default:"Unnamed computer" }}{% endif %}{% if row.source_record %} <span class="source-record-tag" title="Not a computer in Operations — a {{ row.source_record }} record that isn't linked to any computer">{{ row.source_record }} record</span>{% endif %}{% if row.lifecycle_status == "pending_cleanup" %}<br><a href="{{ row.review_url }}" style="color:#b45309; font-size:0.78rem;">Needs review</a>{% endif %}</td>
+                    <td><a href="{% url 'device_detail' org_slug=row.client_slug device_id=row.device_id %}">{{ row.hostname|default:"Unnamed computer" }}</a>{% if row.lifecycle_status == "pending_cleanup" %}<br><a href="{{ row.review_url }}" style="color:#b45309; font-size:0.78rem;">Needs review</a>{% endif %}</td>
                     <td>{% if row.os_family %}{{ row.os_family }}{% else %}<span class="muted" title="No source has reported an operating system for this Computer">Unknown</span>{% endif %}</td><td>{{ row.device_type|default:"—" }}</td><td>{{ row.device_role|default:"—" }}</td>
                     <td class="coverage-hudu">{% if row.hudu_records %}{% if row.hudu_records|length == 1 %}{% with record=row.hudu_records.0 %}<div class="coverage-hudu-record"><div><strong>{% if record.is_archived %}Archived{% else %}Current{% endif %}</strong> <span class="coverage-hudu-status">({{ record.layout }})</span></div><div>{% if record.links %}<span title="{{ record.links|join:', ' }}">{{ record.links|length }} integration link{{ record.links|length|pluralize }} in Hudu</span>{% else %}<span class="muted">No integration links in Hudu</span>{% endif %}</div><div class="coverage-hudu-links">{% if record.url %}<a href="{{ record.url }}" rel="noopener" target="_blank" title="Opens in Hudu">Open in Hudu ↗</a>{% endif %}{% if record.device_id %}<a href="{% url 'device_detail' org_slug=record.device_client_slug device_id=record.device_id %}" title="Open this computer's page">Computer details</a>{% elif row.device_id %}<span class="muted" title="This Hudu asset has the same name as this computer but isn't linked to it">Same name, not linked</span>{% else %}<span class="muted" title="Not a computer in Operations — this Hudu asset isn't linked to any computer">Not linked to a computer</span>{% endif %}</div></div>{% endwith %}{% else %}<details class="coverage-hudu-details"><summary>{{ row.hudu_records|length }} records · {{ row.hudu_current_count }} current · {{ row.hudu_archived_count }} archived</summary>{% for record in row.hudu_records %}<div class="coverage-hudu-record"><div><strong>{% if record.is_archived %}Archived{% else %}Current{% endif %}</strong> <span class="coverage-hudu-status">({{ record.layout }})</span></div><div>{% if record.links %}<span title="{{ record.links|join:', ' }}">{{ record.links|length }} integration link{{ record.links|length|pluralize }} in Hudu</span>{% else %}<span class="muted">No integration links in Hudu</span>{% endif %}</div><div class="coverage-hudu-links">{% if record.url %}<a href="{{ record.url }}" rel="noopener" target="_blank" title="Opens in Hudu">Open in Hudu ↗</a>{% endif %}{% if record.device_id %}<a href="{% url 'device_detail' org_slug=record.device_client_slug device_id=record.device_id %}" title="Open this computer's page">Computer details</a>{% elif row.device_id %}<span class="muted" title="This Hudu asset has the same name as this computer but isn't linked to it">Same name, not linked</span>{% else %}<span class="muted" title="Not a computer in Operations — this Hudu asset isn't linked to any computer">Not linked to a computer</span>{% endif %}</div></div>{% endfor %}</details>{% endif %}{% else %}<span class="muted">Not in Hudu</span>{% endif %}</td>
                     <td class="agents-column">{% for cell in row.agent_cells %}<div class="agent-line"><span class="agent-name">{{ cell.platform }}</span><a class="agent-state-{{ cell.record_status|slugify }}" href="{{ cell.record_url }}" title="{{ cell.record_tooltip }}">{{ cell.record_status }}{% if cell.record_age %} · {{ cell.record_age }}{% endif %}</a><a class="agent-requirement{% if cell.attention %} attention{% endif %}" href="{{ cell.rule_url }}" title="{{ cell.rule_tooltip }}">{{ cell.rule_label }}</a>{% if cell.possible_match %}<span class="agent-match"><span class="muted">Possible:</span> <a href="{% url 'device_detail' org_slug=cell.possible_match.client_slug device_id=cell.possible_match.device_id %}">{{ cell.possible_match.hostname }}</a></span>{% endif %}</div>{% endfor %}</td>

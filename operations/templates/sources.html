@@ -86,8 +86,7 @@
     {% endif %}
     {% for count in s.entity_counts %}
     <div class="source-stat">
-        {{ count.entity_class|humanize_label }} · {{ count.entity_type|humanize_label }}:
-        <a href="{% url 'source_records' source_instance_id=s.id %}?type={{ count.entity_type|urlencode }}&amp;state=active"><strong>{{ count.active_count }}</strong> active</a>{% if count.withdrawn_count %} · <a href="{% url 'source_records' source_instance_id=s.id %}?type={{ count.entity_type|urlencode }}&amp;state=withdrawn">{{ count.withdrawn_count }} withdrawn</a>{% endif %}
+        {{ count.entity_type_label }}: <a href="{% url 'source_records' source_instance_id=s.id %}?type={{ count.entity_type|urlencode }}"><strong>{{ count.current_count }}</strong> current record{{ count.current_count|pluralize }}</a>{% if count.withdrawn_count %} · <a href="{% url 'source_records' source_instance_id=s.id %}?type={{ count.entity_type|urlencode }}&amp;state=withdrawn">{{ count.withdrawn_count }} withdrawn</a>{% endif %}
     </div>
     {% empty %}
     <div class="source-stat">No current records</div>
