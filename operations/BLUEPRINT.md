@@ -1,3 +1,31 @@
+## Software review — publisher status and why titles stay open
+
+Active. Goal: the Software review publisher row shows the publisher's current
+decision, and under an approved publisher each still-open title says why it
+was not covered, with an operator override.
+Scope: `software_review.py` (new `attach_publisher_status`), the queue view,
+`software_decisions.html`, `_software_review_row.html`,
+`_software_review_publisher_actions.html`. No schema, reconcile, or decision
+semantics change. Decisions: status comes from stored publisher-level
+decisions (global first, narrower scopes counted); hold reasons measured from
+live installs — concern signals (by design D9), installs whose publisher text
+differs from the approved one, installs with no publisher; none of these means
+the prompt is waiting on the next reconcile. Override = "Approve N open
+titles" through the existing bulk endpoint (title-level global approvals);
+Investigate/Reject publisher stay available to change the decision. Matching
+publisher variants automatically was declined (no alias table); alternative
+design is open in `TODO.md`. Production measure 2026-10-22: 196 of 15,240 open
+prompts sit under a globally approved publisher — 92 concern, 91 name
+variant, 13 blank publisher.
+
+Checkpoint: implemented. Validation: `manage.py check`
+clean; ruff check clean on changed Python (both files' format drift predates
+this change); `test_software_review.py` + review-context tests 17 pass (2 new);
+templates load and render with sample groups; hold query read-only against
+production: index scan, 14 ms for 2 titles. Not validated: the ORM decision
+lookup and full page render against PostgreSQL. Committed and pushed with user
+approval (deploys; no migrations). Next action: check the deployed review page.
+
 ## Client mappings — unattached evidence columns
 
 Complete (deployment check pending). Goal: replace the misleading "Records" column (`seen_count`, which

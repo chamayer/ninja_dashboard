@@ -16872,6 +16872,7 @@ def software_decisions_queue(request: HttpRequest) -> HttpResponse:
                 all_titles, page_number, per_page=100
             )
             page_groups = [{"titles": page_titles}]
+            software_review.attach_publisher_status(cur, 1, page_groups)
         else:
             page_titles = []
             page_groups, page_number, pages = software_review.paginate(
@@ -16889,6 +16890,7 @@ def software_decisions_queue(request: HttpRequest) -> HttpResponse:
                     }
                     for group in page_groups
                 ]
+            software_review.attach_publisher_status(cur, 1, page_groups)
             page_groups = software_review.trim_group_titles(page_groups)
         config = EvaluatorConfig.objects.filter(
             tenant_id=1, evaluator_name="software_classifier"

@@ -129,3 +129,50 @@ def test_classifier_settings_page_embeds_the_preview():
     assert 'id="rare-preview"' in template and 'json_script:"rare-distribution"' in template
     assert "Nothing changes until you save." in template
     assert "rare_distribution" in _VIEWS and "DEVICE_COUNTS_SQL" in _VIEWS
+
+
+class _HoldCursor(_Cursor):
+    def __init__(self, rows):
+        super().__init__()
+        self.rows = rows
+
+    def fetchall(self):
+        return self.rows
+
+
+def test_an_approved_publisher_shows_its_status_and_why_each_title_is_still_open(monkeypatch):
+    monkeypatch.setattr(review, "publisher_decisions", lambda tenant_id, keys: {
+        "adobe inc.": {"global": {"decision": "approve_publisher", "label": "Approved",
+                                  "approved": True, "decided_at": None, "decided_by": "op",
+                                  "reason": "vendor"}, "narrower": 1},
+    })
+    groups = review.build_groups([
+        _row("1", "whitelist_suggestion", "Bridge", "Adobe Inc.", suggestion="approve_publisher"),
+        _row("2", "rare_recent", "Helper", "Adobe Inc.", devices=1, signals=["install_path"]),
+        _row("3", "whitelist_suggestion", "Solo", "Other"),
+    ])
+    cur = _HoldCursor([
+        ("bridge", 10, 1, 3, ["Adobe Systems Incorporated"]),
+        ("helper", 1, 0, 0, None),
+    ])
+    review.attach_publisher_status(cur, 1, groups)
+    adobe = next(g for g in groups if g["publisher"] == "Adobe Inc.")
+    assert adobe["decision"]["label"] == "Approved" and adobe["narrower_decisions"] == 1
+    assert sorted(adobe["open_title_names"]) == ["Bridge", "Helper"]
+    assert adobe["suggestion"] == "decide_titles"
+    titles = {t["title"]: t["hold_reasons"] for t in adobe["titles"]}
+    assert titles["Bridge"] == [
+        "publisher name differs on 3 of 10 installs (Adobe Systems Incorporated)",
+        "no publisher on 1 of 10 installs",
+    ]
+    assert titles["Helper"] == ["rare with a concern, so the publisher approval does not cover it"]
+    other = next(g for g in groups if g["publisher"] == "Other")
+    assert "decision" not in other and "hold_reasons" not in other["titles"][0]
+    assert cur.calls[0][1][0] == ["bridge", "helper"]
+
+
+def test_a_title_with_no_remaining_cause_waits_for_the_next_check():
+    title = {"type_name": "whitelist_suggestion", "signals": []}
+    assert review.hold_reasons(title, 4, 0, 0, []) == [
+        "covered now; closes on the next software check"
+    ]

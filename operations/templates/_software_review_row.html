@@ -7,7 +7,7 @@
                 <td class="num">{% if t.title %}<a href="{% url 'devices_page' %}?software={{ t.title|urlencode }}&amp;software_publisher={{ t.publisher|urlencode }}">{{ t.devices }}</a>{% else %}{{ t.devices }}{% endif %}</td>
                 <td class="num">{% if t.title %}<a href="{% url 'software_clients' %}?software={{ t.title|urlencode }}&amp;software_publisher={{ t.publisher|urlencode }}">{{ t.clients }}</a>{% else %}{{ t.clients }}{% endif %}</td>
                 <td>{% for s in t.signals %}<span class="pill signal">{{ s|humanize_label }}</span>{% empty %}<span class="muted">—</span>{% endfor %}</td>
-                <td><span class="pill suggest-{{ t.suggestion }}">{{ t.suggestion_label }}</span>{% if t.evidence %}<div class="muted" style="font-size:0.72rem;">{{ t.evidence|join:", " }}</div>{% endif %}</td>
+                <td><span class="pill suggest-{{ t.suggestion }}">{{ t.suggestion_label }}</span>{% if t.evidence %}<div class="muted" style="font-size:0.72rem;">{{ t.evidence|join:", " }}</div>{% endif %}{% if t.hold_reasons %}<div class="muted" style="font-size:0.72rem;">Publisher is approved, but this title is still open:</div><ul class="hold-reasons">{% for reason in t.hold_reasons %}<li>{{ reason }}</li>{% endfor %}</ul>{% endif %}</td>
                 <td>
                     <div class="row-actions">
                         {% if t.default_scope == "device" and t.device_targets %}

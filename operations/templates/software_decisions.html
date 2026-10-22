@@ -32,6 +32,8 @@
   .pub-meta { color: var(--muted); font-size: 0.85rem; }
   .pub-actions { margin-left: auto; display: flex; gap: 0.3rem; flex-wrap: wrap; }
   .pub-actions form, .row-actions form { margin: 0; }
+  .pub-status { font-size: 0.75rem; margin-top: 0.2rem; font-weight: 400; }
+  .hold-reasons { margin: 0.2rem 0 0; padding-left: 1rem; font-size: 0.72rem; color: #92400e; }
 
   .sw-review-table { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
   .sw-review-table th, .sw-review-table td { padding: 0.4rem 0.6rem; border-top: 1px solid var(--border); text-align: left; vertical-align: top; }
@@ -164,7 +166,10 @@
         <tbody class="pub-block" id="pub-{{ group.publisher|slugify }}">
             <tr class="pub-summary">
                 <td><button type="button" class="pub-toggle" aria-expanded="{% if forloop.first %}true{% else %}false{% endif %}" aria-label="Show or hide the titles of {{ group.publisher|default:'no publisher' }}">{% if forloop.first %}&#9662;{% else %}&#9656;{% endif %}</button></td>
-                <td><strong>{% if group.publisher %}{{ group.publisher }}{% else %}<span class="muted">No publisher</span>{% endif %}</strong></td>
+                <td><strong>{% if group.publisher %}{{ group.publisher }}{% else %}<span class="muted">No publisher</span>{% endif %}</strong>
+                    {% if group.decision %}<div class="pub-status"><span class="decision-pill {{ group.decision.decision }}">{{ group.decision.label }} everywhere</span> <span class="muted">by {{ group.decision.decided_by|default:"unknown" }}{% if group.decision.decided_at %}, {{ group.decision.decided_at|date:"Y-m-d" }}{% endif %}</span>{% if group.decision.reason %}<div class="muted">“{{ group.decision.reason }}”</div>{% endif %}</div>{% endif %}
+                    {% if group.narrower_decisions %}<div class="pub-status muted">{{ group.narrower_decisions }} client or computer decision{{ group.narrower_decisions|pluralize }} on this publisher</div>{% elif group.publisher and not group.decision %}<div class="pub-status muted">No publisher decision yet</div>{% endif %}
+                </td>
                 {% if group.publisher %}
                 <td class="num"><a href="{% url 'software_publisher_detail' publisher=group.publisher %}">{{ group.title_count }}</a></td>
                 <td class="num"><a href="{% url 'devices_page' %}?software_publisher={{ group.publisher|urlencode }}">{{ group.devices }}</a></td>

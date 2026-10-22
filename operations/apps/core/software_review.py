@@ -280,6 +280,119 @@ def attach_device_targets(cur: Any, tenant_id: int, groups: list[dict], rare_lim
             title["device_targets"] = targets.get(title["title"].lower(), [])
 
 
+_APPROVED = ("approve", "approve_publisher")
+_DECISION_LABELS = {
+    "approve": "Approved", "approve_publisher": "Approved",
+    "investigate": "Investigating", "reject": "Rejected",
+}
+
+# Per open title under an approved publisher: how many live installs carry a
+# different publisher text or none, which is what keeps the approval off them.
+HOLD_SQL = """
+SELECT pair.title_key, count(*) AS installs,
+       count(*) FILTER (WHERE COALESCE(installation.publisher, '') = '') AS blank,
+       count(*) FILTER (WHERE COALESCE(installation.publisher, '') <> ''
+                          AND lower(installation.publisher) <> pair.publisher_key) AS differs,
+       array_agg(DISTINCT installation.publisher) FILTER (
+           WHERE COALESCE(installation.publisher, '') <> ''
+             AND lower(installation.publisher) <> pair.publisher_key) AS other_names
+  FROM unnest(%s::text[], %s::text[]) AS pair(title_key, publisher_key)
+  JOIN operations.software_installations_current installation
+    ON installation.tenant_id = %s AND lower(installation.canonical_name) = pair.title_key
+   AND installation.stale_since IS NULL AND installation.deleted_at IS NULL
+ GROUP BY pair.title_key
+"""
+
+
+HOLD_NAMES_SHOWN = 3
+
+
+def hold_reasons(title: dict[str, Any], installs: int, blank: int, differs: int,
+                 other_names: list[str]) -> list[str]:
+    """Why an approved publisher does not cover this open title, in plain words."""
+    reasons = []
+    if title["type_name"] == "rare_recent" and title["signals"]:
+        reasons.append("rare with a concern, so the publisher approval does not cover it")
+    if differs:
+        shown = sorted(other_names)[:HOLD_NAMES_SHOWN]
+        names = ", ".join(shown) + (" …" if len(other_names) > len(shown) else "")
+        reasons.append(f"publisher name differs on {differs} of {installs} installs ({names})")
+    if blank:
+        reasons.append(f"no publisher on {blank} of {installs} installs")
+    if not reasons:
+        reasons.append("covered now; closes on the next software check")
+    return reasons
+
+
+def publisher_decisions(tenant_id: int, keys: list[str]) -> dict[str, dict[str, Any]]:
+    """Stored publisher-level decisions by lower-case publisher: the global one
+    and how many narrower (client or computer) ones exist."""
+    from django.db.models.functions import Lower
+
+    from .models import SoftwareDecision
+
+    rows = (
+        SoftwareDecision.objects.filter(tenant_id=tenant_id)
+        .exclude(publisher="")
+        .annotate(publisher_key=Lower("publisher"))
+        .filter(publisher_key__in=keys)
+        .select_related("decided_by")
+    )
+    decisions: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        entry = decisions.setdefault(row.publisher_key, {"global": None, "narrower": 0})
+        if row.client_id is None and row.device_id is None:
+            entry["global"] = {
+                "decision": row.decision,
+                "label": _DECISION_LABELS.get(row.decision, row.decision),
+                "approved": row.decision in _APPROVED, "decided_at": row.decided_at,
+                "decided_by": row.decided_by.get_username() if row.decided_by else "",
+                "reason": row.reason or "",
+            }
+        else:
+            entry["narrower"] += 1
+    return decisions
+
+
+def attach_publisher_status(cur: Any, tenant_id: int, groups: list[dict]) -> None:
+    """The publisher's current decision on each group, and per title why it is still open.
+
+    Run before ``trim_group_titles`` so the override can name every open title.
+    """
+    keys = sorted({
+        key for g in groups
+        for key in [g.get("publisher", "").lower()] + [t["publisher"].lower() for t in g["titles"]]
+        if key
+    })
+    if not keys:
+        return
+    decisions = publisher_decisions(tenant_id, keys)
+    held = [
+        t for g in groups for t in g["titles"]
+        if (decisions.get(t["publisher"].lower()) or {}).get("global")
+        and decisions[t["publisher"].lower()]["global"]["approved"]
+    ]
+    facts: dict[str, tuple] = {}
+    if held:
+        cur.execute(HOLD_SQL, (
+            [t["title"].lower() for t in held], [t["publisher"].lower() for t in held], tenant_id,
+        ))
+        facts = {row[0]: row[1:] for row in cur.fetchall()}
+    for title in held:
+        installs, blank, differs, other_names = facts.get(title["title"].lower(), (0, 0, 0, None))
+        title["hold_reasons"] = hold_reasons(title, installs, blank, differs, other_names or [])
+    for group in groups:
+        status = decisions.get(group.get("publisher", "").lower())
+        if not status:
+            continue
+        group["decision"] = status["global"]
+        group["narrower_decisions"] = status["narrower"]
+        if status["global"] and status["global"]["approved"]:
+            group["open_title_names"] = [t["title"] for t in group["titles"] if t["title"]]
+            group["suggestion"] = "decide_titles"
+            group["suggestion_label"] = "Publisher approved; decide what it does not cover"
+
+
 def resolve_decided_prompts(
     cur: Any,
     *,

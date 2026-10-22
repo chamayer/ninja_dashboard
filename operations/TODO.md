@@ -7,6 +7,15 @@ module-specific; root `../TODO.md` keeps cross-repo items and pointers.
 
 ## Inbox
 
+- [ ] **Publisher approvals do not reach installs with a variant publisher
+      name** (2026-10-22). Reconcile matches `lower(i.publisher)` exactly,
+      so "Adobe Systems Incorporated" installs keep "Adobe Bridge" open under
+      an approved "Adobe Inc." (91 titles measured; 13 more with blank
+      publisher). The Software review page now says why per title and offers
+      an override. Automatic coverage via `publisher_aliases` was declined
+      by the user; an alternative design (e.g. the decision itself naming
+      the variant names it covers) still needs agreement.
+
 - [ ] **Client candidates: remaining follow-ups to ADR-0038** (2026-10-22).
       (a) Candidates whose groups simply stop reporting are never closed; they
       are marked "No longer reported" on Client mappings only — needs a
