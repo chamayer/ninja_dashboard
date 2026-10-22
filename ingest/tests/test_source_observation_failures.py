@@ -17,11 +17,13 @@ def test_source_collection_continues_then_reports_partial_failure(monkeypatch):
         return []
 
     monkeypatch.setitem(source_observations._FETCHERS, "Test", fetch)
-    monkeypatch.setattr(source_observations, "_write_observations", lambda *_args: 0)
+    monkeypatch.setattr(source_observations, "write_observations", lambda *_args: 0)
     monkeypatch.setattr(
         source_observations,
         "_record_source_run",
-        lambda source, _started, ok, **_kwargs: recorded.append((source.source_key, ok)),
+        lambda source, _started, ok, **_kwargs: recorded.append(
+            (source.source_key, ok)
+        ),
     )
     sources = [
         SimpleNamespace(
@@ -34,10 +36,10 @@ def test_source_collection_continues_then_reports_partial_failure(monkeypatch):
         for key in ("broken", "healthy")
     ]
 
-    with pytest.raises(source_observations.SourceObservationFailure, match="1 source collection") as exc:
-        source_observations.run_source_observations(
-            sources, datetime.now(timezone.utc)
-        )
+    with pytest.raises(
+        source_observations.SourceObservationFailure, match="1 source collection"
+    ) as exc:
+        source_observations.run_source_observations(sources, datetime.now(timezone.utc))
 
     assert exc.value.counts == {"Test": 0}
     assert attempted == ["broken", "healthy"]

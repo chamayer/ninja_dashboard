@@ -1,5 +1,6 @@
 from datetime import datetime, timezone
 import inspect
+from types import SimpleNamespace
 
 import pytest
 
@@ -88,3 +89,81 @@ def test_non_guest_keeps_ninja_node_identity_even_with_file_path() -> None:
 
 def test_normal_device_collection_does_not_write_legacy_snapshots() -> None:
     assert "ninja_core.device_snapshots" not in inspect.getsource(devices._run)
+
+
+def test_ninja_devices_publish_the_shared_source_row_contract(monkeypatch) -> None:
+    observed_at = datetime(2026, 10, 22, 12, tzinfo=timezone.utc)
+    captured: dict[str, object] = {}
+    monkeypatch.setattr(
+        devices,
+        "load_source_binding",
+        lambda _binding_id: SimpleNamespace(platform="Ninja"),
+    )
+    monkeypatch.setattr(
+        devices, "_ninja_organizations", lambda: {"7": {"name": "Acme"}}
+    )
+
+    def fake_write(source, rows, batch_id, timestamp, **kwargs):
+        captured.update(
+            source=source,
+            rows=rows,
+            batch_id=batch_id,
+            timestamp=timestamp,
+            callback=kwargs["after_current_write"],
+        )
+        return len(rows)
+
+    monkeypatch.setattr(devices, "write_observations", fake_write)
+    device_rows = [
+        {
+            "id": 41,
+            "uid": "node-41",
+            "organization_id": 7,
+            "node_class": "WINDOWS_WORKSTATION",
+            "is_virtual_machine": False,
+            "system_name": "nycd-pc01",
+            "display_name": "NYCD-PC01",
+            "dns_name": "nycd-pc01.example.test",
+            "serial_number": "SERIAL-41",
+            "mac_addresses": ["AA-BB-CC-DD-EE-FF"],
+            "os_name": "Windows 11",
+            "os_build_number": "26100",
+            "os_release_id": "24H2",
+        }
+    ]
+    snapshot_rows = [
+        {
+            "device_id": 41,
+            "offline": False,
+            "last_contact": observed_at,
+            "last_boot": None,
+            "needs_reboot": False,
+            "needs_reboot_reasons": None,
+            "last_user": "operator",
+            "maintenance_status": None,
+            "maintenance_start": None,
+            "maintenance_end": None,
+        }
+    ]
+
+    written = devices._write_ninja_observations(
+        device_rows,
+        snapshot_rows,
+        observed_at,
+        raw_by_id={41: {"system": {}}},
+    )
+
+    assert written == 2
+    device_row, organization_row = captured["rows"]
+    assert device_row["entity_type"] == "agent.rmm"
+    assert device_row["platform_group_id"] == "7"
+    assert device_row["container_external_id"] == "7"
+    assert device_row["canonical_extra"]["ninja_node_id"] == "41"
+    assert device_row["is_online"] is True
+    assert organization_row == {
+        "_org_only": True,
+        "container_external_namespace": "organization",
+        "container_external_id": "7",
+        "platform_group_id": "7",
+        "platform_group_name": "Acme",
+    }

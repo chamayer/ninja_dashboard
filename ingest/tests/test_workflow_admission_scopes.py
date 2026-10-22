@@ -98,19 +98,21 @@ def test_identity_source_refresh_reaches_platform_evaluate_at_tenant_scope():
     ]
 
 
-def test_ninja_refresh_reaches_platform_evaluate_through_patch_classify():
+def test_ninja_enrichment_reaches_platform_evaluate_through_patch_classify():
     root_id = uuid.uuid4()
-    cur = _RuleEnforcingCursor(root_id, "source-refresh", SOURCE_SCOPE)
+    cur = _RuleEnforcingCursor(root_id, "ninja-enrichment", TENANT_SCOPE)
     operator_job_queue._admit_workflow(
         cur,
-        "source-refresh",
+        "ninja-enrichment",
         root_id,
-        SOURCE_SCOPE,
-        frozenset({"ninja_source", "identity_source"}),
+        TENANT_SCOPE,
+        frozenset({"always"}),
     )
-    created = dict(cur.created)
-    assert created["patch-classify"] == TENANT_SCOPE
-    assert created["platform-evaluate"] == TENANT_SCOPE
+    assert dict(cur.created) == {
+        "patches": TENANT_SCOPE,
+        "patch-classify": TENANT_SCOPE,
+        "platform-evaluate": TENANT_SCOPE,
+    }
 
 
 def test_a_tenant_scoped_root_keeps_its_scope_through_inherit_edges():

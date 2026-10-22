@@ -20,39 +20,51 @@ for _name, _value in {
 }.items():
     os.environ.setdefault(_name, _value)
 
-from ingest import operator_job_queue
+from ingest import operator_job_queue  # noqa: E402
 
 
 def _progress() -> SimpleNamespace:
-    return SimpleNamespace(job_id=uuid4(), claim_token=uuid4(), update=lambda *_args: None)
+    return SimpleNamespace(
+        job_id=uuid4(), claim_token=uuid4(), update=lambda *_args: None
+    )
 
 
-def test_ninja_source_refresh_starts_patch_and_identity_follow_up(monkeypatch):
+def test_ninja_source_refresh_starts_device_and_identity_follow_up(monkeypatch):
     binding_id = uuid4()
-    monkeypatch.setattr(operator_job_queue, "_source_refresh_binding", lambda *_args: binding_id)
+    monkeypatch.setattr(
+        operator_job_queue, "_source_refresh_binding", lambda *_args: binding_id
+    )
     monkeypatch.setattr(
         "ingest.sources.load_source_binding",
-        lambda _binding_id: SimpleNamespace(platform="Ninja", source_name="Ninja", source_key=""),
+        lambda _binding_id: SimpleNamespace(
+            platform="Ninja", source_name="Ninja", source_key=""
+        ),
     )
-    monkeypatch.setattr("ingest.main.run_patching_once", lambda: True)
+    monkeypatch.setattr("ingest.main.run_ninja_devices_once", lambda: True)
 
     result = operator_job_queue._run_source_refresh(_progress())
 
     assert result.rows is None
-    assert result.signals == ("ninja_source", "identity_source")
+    assert result.signals == ("identity_source",)
     assert result.result == {"source_refresh": {"binding_id": str(binding_id)}}
 
 
-def test_vulnerability_reference_refresh_starts_matching_only_on_material_change(monkeypatch):
+def test_vulnerability_reference_refresh_starts_matching_only_on_material_change(
+    monkeypatch,
+):
     binding_id = uuid4()
-    monkeypatch.setattr(operator_job_queue, "_source_refresh_binding", lambda *_args: binding_id)
+    monkeypatch.setattr(
+        operator_job_queue, "_source_refresh_binding", lambda *_args: binding_id
+    )
     monkeypatch.setattr(
         "ingest.sources.load_source_binding",
         lambda _binding_id: SimpleNamespace(
             platform="reference.nvd", source_name="NVD", source_key="reference.nvd"
         ),
     )
-    monkeypatch.setattr("ingest.intel.nvd.run_once", lambda: MaterialCount(4, material_changed=True))
+    monkeypatch.setattr(
+        "ingest.intel.nvd.run_once", lambda: MaterialCount(4, material_changed=True)
+    )
 
     result = operator_job_queue._run_source_refresh(_progress())
 
@@ -60,22 +72,34 @@ def test_vulnerability_reference_refresh_starts_matching_only_on_material_change
     assert result.signals == ("reference_match_data",)
 
 
-def test_software_reference_refresh_starts_targeted_analysis_only_on_material_change(monkeypatch):
+def test_software_reference_refresh_starts_targeted_analysis_only_on_material_change(
+    monkeypatch,
+):
     binding_id = uuid4()
-    monkeypatch.setattr(operator_job_queue, "_source_refresh_binding", lambda *_args: binding_id)
+    monkeypatch.setattr(
+        operator_job_queue, "_source_refresh_binding", lambda *_args: binding_id
+    )
     monkeypatch.setattr(
         "ingest.sources.load_source_binding",
         lambda _binding_id: SimpleNamespace(
-            platform="reference.winget", source_name="Windows Package Manager", source_key="reference.winget"
+            platform="reference.winget",
+            source_name="Windows Package Manager",
+            source_key="reference.winget",
         ),
     )
-    monkeypatch.setattr("ingest.intel.winget.run_once", lambda: MaterialCount(0, material_changed=False))
+    monkeypatch.setattr(
+        "ingest.intel.winget.run_once", lambda: MaterialCount(0, material_changed=False)
+    )
     whole_fleet = []
-    monkeypatch.setattr(operator_job_queue, "_request_whole_fleet_findings", whole_fleet.append)
+    monkeypatch.setattr(
+        operator_job_queue, "_request_whole_fleet_findings", whole_fleet.append
+    )
 
     unchanged = operator_job_queue._run_source_refresh(_progress())
 
-    monkeypatch.setattr("ingest.intel.winget.run_once", lambda: MaterialCount(3, material_changed=True))
+    monkeypatch.setattr(
+        "ingest.intel.winget.run_once", lambda: MaterialCount(3, material_changed=True)
+    )
     changed = operator_job_queue._run_source_refresh(_progress())
 
     assert unchanged.signals == ()

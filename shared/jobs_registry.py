@@ -183,14 +183,26 @@ _RAW_DEFINITIONS = (
     ),
     JobDefinition(
         "patches",
-        "Ninja source cycle",
-        "Refresh computers, patches, and activity from Ninja.",
+        "Ninja patches and activity",
+        "Refresh Ninja patch and activity data for known Computers.",
         "source ingest",
         "collection",
         "run/patches",
         "source.Ninja",
         "run_log_like",
         "ingest.main.run_patching_once",
+    ),
+    JobDefinition(
+        "ninja-enrichment",
+        "Ninja enrichment",
+        "Refresh Ninja health, policies, custom fields, and locations.",
+        "source ingest",
+        "collection",
+        "run/ninja-enrichment",
+        "source.Ninja.enrichment",
+        "run_log_like",
+        "ingest.main.run_ninja_enrichment_once",
+        schedule_ids=("ninja_enrichment_cycle",),
     ),
     JobDefinition(
         "agent-observations",
@@ -708,9 +720,14 @@ REPLAY_SAFE_RECOVERY_EVIDENCE = MappingProxyType(
             "updates local findings. A later replay has no external mutation."
         ),
         "patches": (
-            "The Ninja collection cycle only reads the vendor API and reconciles local "
-            "source projections from the current response. A later replay converges to "
-            "current source state and has no vendor-side mutation."
+            "The Ninja patch/activity collector reads the vendor API and reconciles local "
+            "domain projections. A later replay converges to current source state and "
+            "has no vendor-side mutation."
+        ),
+        "ninja-enrichment": (
+            "The Ninja enrichment collector reads health, policy, custom-field, and "
+            "location endpoints and writes local evidence only. A later replay converges "
+            "to current source state and has no vendor-side mutation."
         ),
         "agent-observations": (
             "Agent observation collection only reads connected source APIs and writes "
@@ -793,7 +810,9 @@ REPLAY_SAFE_RECOVERY_EVIDENCE = MappingProxyType(
 _RECOVERY_MODE_BY_DEFINITION = MappingProxyType(
     {
         definition.key: (
-            "replay_safe" if definition.key in REPLAY_SAFE_RECOVERY_EVIDENCE else "manual_review"
+            "replay_safe"
+            if definition.key in REPLAY_SAFE_RECOVERY_EVIDENCE
+            else "manual_review"
         )
         for definition in _RAW_DEFINITIONS
     }
@@ -801,10 +820,15 @@ _RECOVERY_MODE_BY_DEFINITION = MappingProxyType(
 
 
 _SCHEDULE_DEFINITIONS = (
+    ScheduleDefinition(
+        "ninja_enrichment_cycle", "ninja-enrichment", "PATCH_INGEST_SCHEDULE_HOURS"
+    ),
     ScheduleDefinition("identity_resolver_cycle", "resolver", "constant:30", "minutes"),
     ScheduleDefinition("platform_evaluate_cycle", "platform-evaluate", "constant:4"),
     ScheduleDefinition(
-        "software_classify_cycle", "software-classify-only", "SOFTWARE_CLASSIFY_SCHEDULE_HOURS"
+        "software_classify_cycle",
+        "software-classify-only",
+        "SOFTWARE_CLASSIFY_SCHEDULE_HOURS",
     ),
     ScheduleDefinition(
         "software_classify_full_rebuild_cycle",
@@ -812,7 +836,9 @@ _SCHEDULE_DEFINITIONS = (
         "SOFTWARE_CLASSIFY_FULL_REBUILD_HOURS",
     ),
     ScheduleDefinition(
-        "software_enqueue_orgs_cycle", "software-enqueue-orgs", "SOFTWARE_INGEST_SCHEDULE_HOURS"
+        "software_enqueue_orgs_cycle",
+        "software-enqueue-orgs",
+        "SOFTWARE_INGEST_SCHEDULE_HOURS",
     ),
     ScheduleDefinition(
         "software_queue_drain_cycle",
@@ -820,10 +846,17 @@ _SCHEDULE_DEFINITIONS = (
         "SOFTWARE_QUEUE_POLL_MINUTES",
         "minutes",
     ),
-    ScheduleDefinition("source_action_requests_cycle", "source-actions", "constant:1", "minutes"),
-    ScheduleDefinition("run_log_recovery_cycle", "run-log-recovery", "constant:30", "minutes"),
     ScheduleDefinition(
-        "platform_health_evaluate_cycle", "platform-health-evaluate", "constant:30", "minutes"
+        "source_action_requests_cycle", "source-actions", "constant:1", "minutes"
+    ),
+    ScheduleDefinition(
+        "run_log_recovery_cycle", "run-log-recovery", "constant:30", "minutes"
+    ),
+    ScheduleDefinition(
+        "platform_health_evaluate_cycle",
+        "platform-health-evaluate",
+        "constant:30",
+        "minutes",
     ),
     ScheduleDefinition(
         "notifications_dispatch_cycle",
@@ -832,7 +865,10 @@ _SCHEDULE_DEFINITIONS = (
         "minutes",
     ),
     ScheduleDefinition(
-        "notifications_digest_cycle", "notifications-digest", "NOTIFY_DIGEST_HOUR", "cron-hour"
+        "notifications_digest_cycle",
+        "notifications-digest",
+        "NOTIFY_DIGEST_HOUR",
+        "cron-hour",
     ),
     ScheduleDefinition(
         "observation_history_retention_cycle",
@@ -841,7 +877,9 @@ _SCHEDULE_DEFINITIONS = (
         "cron-hour",
     ),
     ScheduleDefinition(
-        "agent_compliance_ingest_cycle", "agent-compliance", "AGENT_COMPLIANCE_SCHEDULE_HOURS"
+        "agent_compliance_ingest_cycle",
+        "agent-compliance",
+        "AGENT_COMPLIANCE_SCHEDULE_HOURS",
     ),
     ScheduleDefinition(
         "agent_compliance_evaluate_cycle",
@@ -849,22 +887,36 @@ _SCHEDULE_DEFINITIONS = (
         "AGENT_COMPLIANCE_SCHEDULE_HOURS",
     ),
     ScheduleDefinition("intel_nvd_cycle", "intel-nvd", "INTEL_NVD_SCHEDULE_HOURS"),
-    ScheduleDefinition("intel_cpe_dict_cycle", "intel-cpe-dict", "INTEL_CATALOG_SCHEDULE_HOURS"),
+    ScheduleDefinition(
+        "intel_cpe_dict_cycle", "intel-cpe-dict", "INTEL_CATALOG_SCHEDULE_HOURS"
+    ),
     ScheduleDefinition("intel_kev_cycle", "intel-kev", "INTEL_KEV_SCHEDULE_HOURS"),
     ScheduleDefinition("intel_epss_cycle", "intel-epss", "INTEL_EPSS_SCHEDULE_HOURS"),
-    ScheduleDefinition("intel_matcher_cycle", "intel-matcher", "INTEL_MATCHER_SCHEDULE_HOURS"),
-    ScheduleDefinition("intel_winget_cycle", "intel-winget", "INTEL_CATALOG_SCHEDULE_HOURS"),
+    ScheduleDefinition(
+        "intel_matcher_cycle", "intel-matcher", "INTEL_MATCHER_SCHEDULE_HOURS"
+    ),
+    ScheduleDefinition(
+        "intel_winget_cycle", "intel-winget", "INTEL_CATALOG_SCHEDULE_HOURS"
+    ),
     ScheduleDefinition(
         "intel_chocolatey_cycle", "intel-chocolatey", "INTEL_CATALOG_SCHEDULE_HOURS"
     ),
     ScheduleDefinition("intel_otx_cycle", "intel-otx", "INTEL_OSINT_SCHEDULE_HOURS"),
-    ScheduleDefinition("intel_abusech_cycle", "intel-abusech", "INTEL_OSINT_SCHEDULE_HOURS"),
-    ScheduleDefinition("intel_endoflife_cycle", "intel-endoflife", "INTEL_CATALOG_SCHEDULE_HOURS"),
+    ScheduleDefinition(
+        "intel_abusech_cycle", "intel-abusech", "INTEL_OSINT_SCHEDULE_HOURS"
+    ),
+    ScheduleDefinition(
+        "intel_endoflife_cycle", "intel-endoflife", "INTEL_CATALOG_SCHEDULE_HOURS"
+    ),
     ScheduleDefinition(
         "intel_capability_cycle", "intel-capability", "INTEL_CAPABILITY_SCHEDULE_HOURS"
     ),
-    ScheduleDefinition("intel_category_cycle", "intel-category", "INTEL_CATEGORY_SCHEDULE_HOURS"),
-    ScheduleDefinition("intel_lolrmm_cycle", "intel-lolrmm", "INTEL_CATALOG_SCHEDULE_HOURS"),
+    ScheduleDefinition(
+        "intel_category_cycle", "intel-category", "INTEL_CATEGORY_SCHEDULE_HOURS"
+    ),
+    ScheduleDefinition(
+        "intel_lolrmm_cycle", "intel-lolrmm", "INTEL_CATALOG_SCHEDULE_HOURS"
+    ),
 )
 
 EXECUTION_POOL_POLICIES = MappingProxyType(
@@ -881,7 +933,12 @@ EXECUTION_POOL_POLICIES = MappingProxyType(
             "minimum": 1,
             "maximum": 2,
         },
-        "capacity:control": {"label": "Control work", "capacity": 1, "minimum": 1, "maximum": 2},
+        "capacity:control": {
+            "label": "Control work",
+            "capacity": 1,
+            "minimum": 1,
+            "maximum": 2,
+        },
     }
 )
 READY_WINDOW_CAPACITY = 2
@@ -902,6 +959,7 @@ _GLOBAL_ONLY = frozenset(
 _RESOURCE_KEYS_BY_DEFINITION: dict[str, tuple[str, ...]] = {
     "source-refresh": ("tenant:{tenant_id}:source-binding:{scope_identity}",),
     "patches": ("tenant:{tenant_id}:ninja-source",),
+    "ninja-enrichment": ("tenant:{tenant_id}:ninja-enrichment",),
     "agent-observations": ("tenant:{tenant_id}:agent-sources",),
     "documentation-observations": ("tenant:{tenant_id}:documentation-source",),
     "software-classify": ("tenant:{tenant_id}:software-state",),
@@ -962,6 +1020,7 @@ for _key in ("software-classify", "software-classify-only", "software-classify-f
 _CAPACITY_KEYS_BY_DEFINITION: dict[str, tuple[str, ...]] = {
     "source-refresh": ("capacity:external-io",),
     "patches": (),
+    "ninja-enrichment": ("capacity:external-io",),
     "agent-observations": (),
     "documentation-observations": (),
     "software-classify": ("capacity:processing",),
@@ -1012,16 +1071,19 @@ _WORKFLOW_SUCCESSORS = MappingProxyType(
     {
         "source-refresh": (
             DependencyDefinition(
-                "patch-classify", "ninja.patch-snapshot", "ninja_source", "tenant"
-            ),
-            DependencyDefinition(
                 "resolver", "source.identity-observations", "identity_source", "tenant"
             ),
             DependencyDefinition(
-                "cmdb-evaluate", "source.documentation-observations", "documentation_source", "tenant"
+                "cmdb-evaluate",
+                "source.documentation-observations",
+                "documentation_source",
+                "tenant",
             ),
             DependencyDefinition(
-                "intel-matcher", "source.reference-match-data", "reference_match_data", "tenant"
+                "intel-matcher",
+                "source.reference-match-data",
+                "reference_match_data",
+                "tenant",
             ),
             DependencyDefinition(
                 "software-classify-only",
@@ -1030,19 +1092,25 @@ _WORKFLOW_SUCCESSORS = MappingProxyType(
                 "tenant",
             ),
         ),
-        "patches": (
-            DependencyDefinition("patch-classify", "ninja.patch-snapshot"),
-            DependencyDefinition("resolver", "ninja.identity-snapshot"),
+        "patches": (DependencyDefinition("patch-classify", "ninja.patch-snapshot"),),
+        "ninja-enrichment": (
+            DependencyDefinition("patches", "ninja.enrichment-snapshot"),
         ),
-        "patch-classify": (DependencyDefinition("platform-evaluate", "patch.findings"),),
+        "patch-classify": (
+            DependencyDefinition("platform-evaluate", "patch.findings"),
+        ),
         "resolver": (DependencyDefinition("platform-evaluate", "identity.current"),),
-        "agent-observations": (DependencyDefinition("resolver", "source.identity-observations"),),
+        "agent-observations": (
+            DependencyDefinition("resolver", "source.identity-observations"),
+        ),
         "documentation-observations": (
             DependencyDefinition("cmdb-evaluate", "source.documentation-observations"),
         ),
         "source-actions": (
             DependencyDefinition(
-                "cmdb-evaluate", "source.documentation-observations", "documentation_source"
+                "cmdb-evaluate",
+                "source.documentation-observations",
+                "documentation_source",
             ),
         ),
         # Software findings follow inventory only when a run added, changed or
@@ -1057,17 +1125,29 @@ _WORKFLOW_SUCCESSORS = MappingProxyType(
                 "software-classify-only", "software.inventory-fleet", "material_change"
             ),
         ),
-        "agent-compliance": (DependencyDefinition("resolver", "agent-compliance.observations"),),
-        "intel-nvd": (DependencyDefinition("intel-matcher", "intel.cves", "material_change"),),
-        "intel-cpe-dict": (DependencyDefinition("intel-matcher", "intel.cpes", "material_change"),),
-        "intel-kev": (DependencyDefinition("intel-matcher", "intel.kev", "material_change"),),
-        "intel-epss": (DependencyDefinition("intel-matcher", "intel.epss", "material_change"),),
+        "agent-compliance": (
+            DependencyDefinition("resolver", "agent-compliance.observations"),
+        ),
+        "intel-nvd": (
+            DependencyDefinition("intel-matcher", "intel.cves", "material_change"),
+        ),
+        "intel-cpe-dict": (
+            DependencyDefinition("intel-matcher", "intel.cpes", "material_change"),
+        ),
+        "intel-kev": (
+            DependencyDefinition("intel-matcher", "intel.kev", "material_change"),
+        ),
+        "intel-epss": (
+            DependencyDefinition("intel-matcher", "intel.epss", "material_change"),
+        ),
         # Routine intelligence changes feed the incremental classifier.  It touches
         # only installations whose source state is new or changed; the separately
         # scheduled full rebuild remains the weekly safety net for fleet-wide rule,
         # decision, and intelligence reconciliation.
         "intel-matcher": (
-            DependencyDefinition("software-classify-only", "software.cve-match", "material_change"),
+            DependencyDefinition(
+                "software-classify-only", "software.cve-match", "material_change"
+            ),
         ),
         "intel-winget": (
             DependencyDefinition(
@@ -1076,7 +1156,9 @@ _WORKFLOW_SUCCESSORS = MappingProxyType(
         ),
         "intel-chocolatey": (
             DependencyDefinition(
-                "software-classify-only", "software.chocolatey-signals", "material_change"
+                "software-classify-only",
+                "software.chocolatey-signals",
+                "material_change",
             ),
         ),
         "intel-capability": (
@@ -1085,7 +1167,9 @@ _WORKFLOW_SUCCESSORS = MappingProxyType(
             ),
         ),
         "intel-lolrmm": (
-            DependencyDefinition("software-classify-only", "software.lolrmm", "material_change"),
+            DependencyDefinition(
+                "software-classify-only", "software.lolrmm", "material_change"
+            ),
         ),
         "intel-otx": (
             DependencyDefinition(
@@ -1137,7 +1221,9 @@ if len(_SCHEDULE_INDEX) != len(_SCHEDULE_DEFINITIONS):
 if set(_SCHEDULE_INDEX) != {
     schedule_id for item in _DEFINITIONS for schedule_id in item.schedule_ids
 }:
-    raise RegistryValidationError("Jobs schedule metadata does not match registry definitions")
+    raise RegistryValidationError(
+        "Jobs schedule metadata does not match registry definitions"
+    )
 
 
 def definitions() -> tuple[JobDefinition, ...]:
@@ -1146,7 +1232,9 @@ def definitions() -> tuple[JobDefinition, ...]:
 
 def registry_digest() -> str:
     """Return one credential-free identity for the complete live registry."""
-    payload = [{"digest": item.snapshot_digest(), "key": item.key} for item in _DEFINITIONS]
+    payload = [
+        {"digest": item.snapshot_digest(), "key": item.key} for item in _DEFINITIONS
+    ]
     return hashlib.sha256(
         json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
     ).hexdigest()
@@ -1154,7 +1242,9 @@ def registry_digest() -> str:
 
 def schedule_definitions() -> tuple[ScheduleDefinition, ...]:
     """Return cadences for operation entry points, never dependent steps."""
-    dependent_keys = {successor.successor for item in _DEFINITIONS for successor in item.successors}
+    dependent_keys = {
+        successor.successor for item in _DEFINITIONS for successor in item.successors
+    }
     return tuple(
         schedule
         for schedule in _SCHEDULE_DEFINITIONS
@@ -1167,6 +1257,7 @@ _SYSTEM_SERVICE_KEYS = frozenset(
     {
         "source-refresh",
         "patches",
+        "ninja-enrichment",
         "agent-observations",
         "documentation-observations",
         "intel-nvd",
@@ -1187,8 +1278,15 @@ _SYSTEM_SERVICE_KEYS = frozenset(
 )
 _SOURCE_OWNED_DEFINITION_KEYS = frozenset(
     {
-        "intel-nvd", "intel-cpe-dict", "intel-kev", "intel-epss", "intel-winget",
-        "intel-chocolatey", "intel-lolrmm", "intel-otx", "intel-abusech",
+        "intel-nvd",
+        "intel-cpe-dict",
+        "intel-kev",
+        "intel-epss",
+        "intel-winget",
+        "intel-chocolatey",
+        "intel-lolrmm",
+        "intel-otx",
+        "intel-abusech",
         "intel-endoflife",
     }
 )
@@ -1207,7 +1305,11 @@ _JOB_MODE_PARENT = MappingProxyType(
 )
 _JOB_PRESENTATION = MappingProxyType(
     {
-        "patches": ("Refresh Ninja data", "Refresh computers, patches, and activity from Ninja."),
+        "patches": ("Refresh Ninja patches", "Refresh Ninja patch and activity data."),
+        "ninja-enrichment": (
+            "Refresh Ninja enrichment",
+            "Refresh Ninja health, policies, custom fields, and locations.",
+        ),
         "agent-observations": (
             "Refresh connected-agent data",
             "Refresh records from connected security and support tools.",
@@ -1225,7 +1327,10 @@ _JOB_PRESENTATION = MappingProxyType(
             "Update software status",
             "Update software findings using current inventory and intelligence.",
         ),
-        "patch-classify": ("Update patch status", "Update patch findings from current patch data."),
+        "patch-classify": (
+            "Update patch status",
+            "Update patch findings from current patch data.",
+        ),
         "platform-evaluate": (
             "Evaluate client status",
             "Update computer, coverage, identity, and lifecycle findings.",
@@ -1234,7 +1339,10 @@ _JOB_PRESENTATION = MappingProxyType(
             "Review Hudu records",
             "Update findings from current Hudu CMDB records.",
         ),
-        "resolver": ("Match records", "Match source records to the correct client and computer."),
+        "resolver": (
+            "Match records",
+            "Match source records to the correct client and computer.",
+        ),
         "parity-check": (
             "Check data consistency",
             "Check that collected data is represented in Operations.",
@@ -1243,12 +1351,18 @@ _JOB_PRESENTATION = MappingProxyType(
             "Update known exploited vulnerabilities",
             "Refresh CISA known exploited vulnerability data.",
         ),
-        "intel-nvd": ("Update vulnerability data", "Refresh vulnerability data from NVD."),
+        "intel-nvd": (
+            "Update vulnerability data",
+            "Refresh vulnerability data from NVD.",
+        ),
         "intel-cpe-dict": (
             "Update software matching data",
             "Refresh the CPE dictionary used for software matching.",
         ),
-        "intel-epss": ("Update vulnerability likelihood", "Refresh EPSS likelihood data."),
+        "intel-epss": (
+            "Update vulnerability likelihood",
+            "Refresh EPSS likelihood data.",
+        ),
         "intel-matcher": (
             "Match software to vulnerabilities",
             "Match installed software to known vulnerabilities.",
@@ -1261,7 +1375,10 @@ _JOB_PRESENTATION = MappingProxyType(
             "Update Chocolatey software data",
             "Refresh Chocolatey software data.",
         ),
-        "intel-capability": ("Update software capabilities", "Update known software capabilities."),
+        "intel-capability": (
+            "Update software capabilities",
+            "Update known software capabilities.",
+        ),
         "intel-lolrmm": (
             "Update remote-access software data",
             "Refresh remote-management software information.",
@@ -1274,11 +1391,26 @@ _JOB_PRESENTATION = MappingProxyType(
             "Update threat information (abuse.ch)",
             "Refresh abuse.ch threat information.",
         ),
-        "intel-endoflife": ("Update end-of-life data", "Refresh software end-of-life information."),
-        "intel-category": ("Update software categories", "Update software category information."),
-        "notifications-dispatch": ("Send alerts", "Deliver pending operational alerts."),
-        "notifications-digest": ("Send summary", "Deliver the scheduled operational summary."),
-        "retention-history": ("Clean up history", "Apply the configured history-retention policy."),
+        "intel-endoflife": (
+            "Update end-of-life data",
+            "Refresh software end-of-life information.",
+        ),
+        "intel-category": (
+            "Update software categories",
+            "Update software category information.",
+        ),
+        "notifications-dispatch": (
+            "Send alerts",
+            "Deliver pending operational alerts.",
+        ),
+        "notifications-digest": (
+            "Send summary",
+            "Deliver the scheduled operational summary.",
+        ),
+        "retention-history": (
+            "Clean up history",
+            "Apply the configured history-retention policy.",
+        ),
     }
 )
 
@@ -1347,7 +1479,9 @@ def operator_job_definitions() -> tuple[OperatorJobDefinition, ...]:
     result = []
     for key, execution_keys in members.items():
         item = _INDEX[key]
-        name, description = _JOB_PRESENTATION.get(key, (item.display_name, item.description))
+        name, description = _JOB_PRESENTATION.get(
+            key, (item.display_name, item.description)
+        )
         group_key = _OPERATOR_JOB_GROUP_BY_KEY[key]
         if group_key not in group_keys:
             raise RegistryValidationError(f"Operator Job {key} has an unknown group")
@@ -1399,7 +1533,9 @@ def workflow_edges(
         if prerequisite in ancestors:
             raise RegistryValidationError("Jobs workflow contains a cycle")
         for successor in definition(prerequisite).successors:
-            if successor.condition not in (conditions if root else frozenset({"always"})):
+            if successor.condition not in (
+                conditions if root else frozenset({"always"})
+            ):
                 continue
             definition(successor.successor)
             identity = (prerequisite, successor.successor, successor.revision_name)
@@ -1452,7 +1588,9 @@ def _validate_dependency_contracts() -> None:
             if successor.successor not in _INDEX:
                 errors.append(f"{job.key} has unknown successor {successor.successor}")
             if successor.successor in targets:
-                errors.append(f"{job.key} has duplicate successor {successor.successor}")
+                errors.append(
+                    f"{job.key} has duplicate successor {successor.successor}"
+                )
             targets.add(successor.successor)
             if revision_pattern.fullmatch(successor.revision_name) is None:
                 errors.append(f"{job.key} has invalid revision name")

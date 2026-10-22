@@ -32,7 +32,7 @@ ROOT = Path(__file__).resolve().parents[4]
 def test_registry_has_one_catalog_and_schedule_owner_per_definition():
     keys = definition_keys()
 
-    assert len(keys) == 36
+    assert len(keys) == 37
     assert {entry["id"] for entry in catalog_entries()} == keys
     assert scheduled_definition_keys() < keys
     assert definition("patches").lane == "collection"
@@ -81,7 +81,10 @@ def test_operator_jobs_have_one_visible_boundary_and_services_stay_outside():
     assert operator_job_key_for_execution("patches") is None
     assert operator_job_key_for_execution("source-demand-recovery") is None
     assert operator_job_key_for_execution("software-classify") == "software-classify-only"
-    assert next(job for job in jobs if job.key == "cmdb-evaluate").start_description == "After Hudu refresh"
+    assert (
+        next(job for job in jobs if job.key == "cmdb-evaluate").start_description
+        == "After Hudu refresh"
+    )
     assert set(system_service_definition_keys()).isdisjoint(visible_execution_keys)
     assert set(legacy_job_definition_keys()).isdisjoint(visible_execution_keys)
     assert (
@@ -105,18 +108,29 @@ def test_initial_workflow_edges_are_registered_and_acyclic():
     assert shape("patches") == (
         ("patches", "patch-classify", "ninja.patch-snapshot", "always"),
         ("patch-classify", "platform-evaluate", "patch.findings", "always"),
-        ("patches", "resolver", "ninja.identity-snapshot", "always"),
-        ("resolver", "platform-evaluate", "identity.current", "always"),
+    )
+    assert shape("ninja-enrichment") == (
+        ("ninja-enrichment", "patches", "ninja.enrichment-snapshot", "always"),
+        ("patches", "patch-classify", "ninja.patch-snapshot", "always"),
+        ("patch-classify", "platform-evaluate", "patch.findings", "always"),
     )
     # Software findings follow inventory only when inventory changed.
     assert shape("software-queue-drain") == ()
     assert shape("software-queue-drain", frozenset({"material_change"})) == (
-        ("software-queue-drain", "software-classify-only", "software.inventory-batch",
-         "material_change"),
+        (
+            "software-queue-drain",
+            "software-classify-only",
+            "software.inventory-batch",
+            "material_change",
+        ),
     )
     assert shape("software-enqueue-orgs", frozenset({"material_change"})) == (
-        ("software-enqueue-orgs", "software-classify-only", "software.inventory-fleet",
-         "material_change"),
+        (
+            "software-enqueue-orgs",
+            "software-classify-only",
+            "software.inventory-fleet",
+            "material_change",
+        ),
     )
     assert shape("agent-compliance") == (
         ("agent-compliance", "resolver", "agent-compliance.observations", "always"),
@@ -134,10 +148,6 @@ def test_initial_workflow_edges_are_registered_and_acyclic():
         ("source-refresh", "resolver", "source.identity-observations", "identity_source"),
         ("resolver", "platform-evaluate", "identity.current", "always"),
     )
-    assert shape("source-refresh", frozenset({"ninja_source"})) == (
-        ("source-refresh", "patch-classify", "ninja.patch-snapshot", "ninja_source"),
-        ("patch-classify", "platform-evaluate", "patch.findings", "always"),
-    )
     assert shape("source-refresh", frozenset({"reference_match_data"})) == (
         (
             "source-refresh",
@@ -154,10 +164,9 @@ def test_initial_workflow_edges_are_registered_and_acyclic():
             "reference_software_data",
         ),
     )
-    assert {
-        successor.scope_mode
-        for successor in definition("source-refresh").successors
-    } == {"tenant"}
+    assert {successor.scope_mode for successor in definition("source-refresh").successors} == {
+        "tenant"
+    }
     for item in definitions():
         for successor in item.successors:
             assert successor.scope_mode in {"inherit", "tenant"}
@@ -172,10 +181,7 @@ def test_checked_dispatcher_source_matches_registry_handler_keys():
         node.value
         for node in ast.walk(tree)
         if isinstance(node, ast.Assign)
-        and any(
-            isinstance(target, ast.Name) and target.id == "jobs"
-            for target in node.targets
-        )
+        and any(isinstance(target, ast.Name) and target.id == "jobs" for target in node.targets)
     )
 
     assert isinstance(jobs, ast.Dict)

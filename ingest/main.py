@@ -88,25 +88,34 @@ from shared.jobs_registry import definition_keys, validate_registry
 log = logging.getLogger("ingest.main")
 _AGENT_COMPLIANCE_LOCK = threading.Lock()
 _PATCH_CYCLE_LOCK_ID = 6_803_904_731_027_441
+_NINJA_DEVICE_CYCLE_LOCK_ID = 6_803_904_731_027_442
+_NINJA_ENRICHMENT_CYCLE_LOCK_ID = 6_803_904_731_027_443
+
 
 def run_once() -> None:
+    run_ninja_devices_once()
+    run_ninja_enrichment_once()
     run_patching_once()
 
 
-def run_patching_once() -> bool:
-    """Execute one full patch/Ninja ingest cycle. Modules run in dependency order
-    with per-module exception isolation: a failure in one module is
-    logged with status='failed' in run_log and the rest continue.
-    Shared `snapshot_at` so all rows from a single run carry the
-    same first/last_observed_at."""
+def run_ninja_devices_once() -> bool:
+    """Collect the Ninja identity snapshot and publish shared device evidence.
+
+    Organizations and devices are the only Ninja inputs that can establish a
+    Computer, attach a source record to a client, or change inventory state.
+    The device writer projects them through the shared source-observation
+    contract before this job reports success.
+    """
     with db.pool.connection() as lock_conn, lock_conn.cursor() as lock_cur:
-        lock_cur.execute("SELECT pg_try_advisory_lock(%s)", (_PATCH_CYCLE_LOCK_ID,))
+        lock_cur.execute(
+            "SELECT pg_try_advisory_lock(%s)", (_NINJA_DEVICE_CYCLE_LOCK_ID,)
+        )
         if not lock_cur.fetchone()[0]:
-            log.info("Patch ingest run skipped; another process holds the cycle lock")
+            log.info("Ninja device collection skipped; another process holds the lock")
             return False
         try:
-            with run_log("patch_cycle"):
-                log.info("Patch ingest run starting")
+            with run_log("ninja_devices"):
+                log.info("Ninja device collection starting")
                 snapshot_at = datetime.now(timezone.utc)
                 failures: list[tuple[str, Exception]] = []
                 with NinjaClient(
@@ -118,34 +127,118 @@ def run_patching_once() -> bool:
                 ) as client:
                     for failure in (
                         _safe("organizations", organizations.run, client),
+                        _safe("devices", devices.run, client, snapshot_at),
+                    ):
+                        if failure:
+                            failures.append(failure)
+                for failure in (
+                    _safe(
+                        "derived_refresh",
+                        refresh_after_collection,
+                        "Ninja device collection",
+                    ),
+                    _safe("windows_servicing", run_windows_servicing_once),
+                ):
+                    if failure:
+                        failures.append(failure)
+                _raise_step_failures("Ninja device collection", failures)
+                log.info("Ninja device collection complete")
+            return True
+        finally:
+            lock_cur.execute(
+                "SELECT pg_advisory_unlock(%s)", (_NINJA_DEVICE_CYCLE_LOCK_ID,)
+            )
+
+
+def run_ninja_enrichment_once() -> bool:
+    """Collect Ninja facts that enrich existing source records and Computers."""
+    with db.pool.connection() as lock_conn, lock_conn.cursor() as lock_cur:
+        lock_cur.execute(
+            "SELECT pg_try_advisory_lock(%s)", (_NINJA_ENRICHMENT_CYCLE_LOCK_ID,)
+        )
+        if not lock_cur.fetchone()[0]:
+            log.info(
+                "Ninja enrichment collection skipped; another process holds the lock"
+            )
+            return False
+        try:
+            with run_log("ninja_enrichment"):
+                log.info("Ninja enrichment collection starting")
+                snapshot_at = datetime.now(timezone.utc)
+                failures: list[tuple[str, Exception]] = []
+                with NinjaClient(
+                    base_url=settings.NINJA_BASE_URL,
+                    token_url=settings.NINJA_TOKEN_URL,
+                    client_id=settings.NINJA_CLIENT_ID,
+                    client_secret=settings.NINJA_CLIENT_SECRET.get_secret_value(),
+                    scope=settings.NINJA_SCOPE,
+                ) as client:
+                    for failure in (
                         _safe("locations", locations.run, client),
                         _safe("policies", policies.run, client),
-                        _safe("patching_enabled_policies", sync_patching_enabled_policies),
-                        _safe("devices", devices.run, client, snapshot_at),
+                        _safe(
+                            "patching_enabled_policies", sync_patching_enabled_policies
+                        ),
+                        _safe(
+                            "device_exemptions",
+                            devices.sync_operations_device_exemptions,
+                        ),
                         _safe("device_health", device_health.run, client, snapshot_at),
                         _safe("custom_fields", custom_fields.run, client, snapshot_at),
                     ):
                         if failure:
                             failures.append(failure)
-                    # Patching-scope matview reads ninja_core.custom_field_values +
-                    # ninja_core.policies + ops.devices; must refresh AFTER
-                    # custom_fields ingest lands. Track O batch O4.
-                    for failure in (
-                        _safe("patching_scope_refresh", devices.refresh_patching_scope_current),
-                        _safe("patches", patches_ingest.run, client, snapshot_at),
-                        _safe("activities", activities_ingest.run, client),
-                        _safe("troubleshooting_signal", refresh_device_troubleshooting_signal),
-                    ):
-                        if failure:
-                            failures.append(failure)
                 for failure in (
-                    _safe("derived_refresh", refresh_after_collection, "Ninja patch collection"),
-                    _safe("windows_servicing", run_windows_servicing_once),
+                    _safe(
+                        "patching_scope_refresh", devices.refresh_patching_scope_current
+                    ),
+                    _safe(
+                        "troubleshooting_signal", refresh_device_troubleshooting_signal
+                    ),
+                    _safe(
+                        "derived_refresh",
+                        refresh_after_collection,
+                        "Ninja enrichment collection",
+                    ),
                 ):
                     if failure:
                         failures.append(failure)
+                _raise_step_failures("Ninja enrichment collection", failures)
+                log.info("Ninja enrichment collection complete")
+            return True
+        finally:
+            lock_cur.execute(
+                "SELECT pg_advisory_unlock(%s)", (_NINJA_ENRICHMENT_CYCLE_LOCK_ID,)
+            )
+
+
+def run_patching_once() -> bool:
+    """Collect Ninja patch and activity domains without changing Computers."""
+    with db.pool.connection() as lock_conn, lock_conn.cursor() as lock_cur:
+        lock_cur.execute("SELECT pg_try_advisory_lock(%s)", (_PATCH_CYCLE_LOCK_ID,))
+        if not lock_cur.fetchone()[0]:
+            log.info("Patch ingest run skipped; another process holds the cycle lock")
+            return False
+        try:
+            with run_log("patch_cycle"):
+                log.info("Patch and activity collection starting")
+                snapshot_at = datetime.now(timezone.utc)
+                failures: list[tuple[str, Exception]] = []
+                with NinjaClient(
+                    base_url=settings.NINJA_BASE_URL,
+                    token_url=settings.NINJA_TOKEN_URL,
+                    client_id=settings.NINJA_CLIENT_ID,
+                    client_secret=settings.NINJA_CLIENT_SECRET.get_secret_value(),
+                    scope=settings.NINJA_SCOPE,
+                ) as client:
+                    for failure in (
+                        _safe("patches", patches_ingest.run, client, snapshot_at),
+                        _safe("activities", activities_ingest.run, client),
+                    ):
+                        if failure:
+                            failures.append(failure)
                 _raise_step_failures("Patch collection", failures)
-                log.info("Patch ingest run complete")
+                log.info("Patch and activity collection complete")
             return True
         finally:
             lock_cur.execute("SELECT pg_advisory_unlock(%s)", (_PATCH_CYCLE_LOCK_ID,))
@@ -179,39 +272,18 @@ def run_identity_resolver_once(*, refresh_current: bool = True):
 
 
 def run_ninja_observations_once() -> None:
-    """Sync Ninja orgs + devices into Operations without the full patch cycle.
+    """Sync Ninja orgs + devices into Operations without enrichment or patches.
 
-    Runs org/location/device sync only — populates operations.devices,
+    Runs org/device sync only — populates operations.devices,
     source links, and entity_observations (agent.rmm), then refreshes
     device_agent_presence_current. Skips device-health, patches, activities,
     and custom fields, so it completes in seconds instead of minutes.
     Used by the source run queue demand trigger.
     """
-    log.info("Ninja observations run starting")
-    snapshot_at = datetime.now(timezone.utc)
-    failures: list[tuple[str, Exception]] = []
-    with NinjaClient(
-        base_url=settings.NINJA_BASE_URL,
-        token_url=settings.NINJA_TOKEN_URL,
-        client_id=settings.NINJA_CLIENT_ID,
-        client_secret=settings.NINJA_CLIENT_SECRET.get_secret_value(),
-        scope=settings.NINJA_SCOPE,
-    ) as client:
-        for failure in (
-            _safe("organizations", organizations.run, client),
-            _safe("locations", locations.run, client),
-            _safe("devices", devices.run, client, snapshot_at),
-        ):
-            if failure:
-                failures.append(failure)
-    for failure in (
-        _safe("derived_refresh", refresh_after_collection, "Ninja observations collection"),
-        _safe("windows_servicing", run_windows_servicing_once),
-    ):
-        if failure:
-            failures.append(failure)
-    _raise_step_failures("Ninja observations", failures)
-    log.info("Ninja observations run complete")
+    if run_ninja_devices_once() is False:
+        raise RuntimeError(
+            "Ninja device collection could not acquire its execution lock"
+        )
 
 
 def run_agent_observations_once() -> None:
@@ -370,7 +442,9 @@ def _ninja_client() -> NinjaClient:
     )
 
 
-def run_software_fleet_check_once(count=None) -> operator_job_queue.JobExecutionResult | None:
+def run_software_fleet_check_once(
+    count=None,
+) -> operator_job_queue.JobExecutionResult | None:
     """Fetch every computer's software list and apply it (daily completeness check).
 
     The software findings run follows only when something changed.
@@ -461,6 +535,7 @@ def run_windows_servicing_once() -> None:
 def run_intel_nvd_once() -> None:
     try:
         from ingest.intel import nvd
+
         rows = nvd.run_once()
         log.info("Intel NVD complete: rows=%d", rows)
     except Exception:
@@ -470,6 +545,7 @@ def run_intel_nvd_once() -> None:
 def run_intel_cpe_dict_once() -> None:
     try:
         from ingest.intel import cpe_dict
+
         rows = cpe_dict.run_once()
         log.info("Intel CPE dict complete: rows=%d", rows)
     except Exception:
@@ -479,6 +555,7 @@ def run_intel_cpe_dict_once() -> None:
 def run_intel_kev_once() -> None:
     try:
         from ingest.intel import cisa_kev
+
         rows = cisa_kev.run_once()
         log.info("Intel CISA KEV complete: rows=%d", rows)
     except Exception:
@@ -488,6 +565,7 @@ def run_intel_kev_once() -> None:
 def run_intel_epss_once() -> None:
     try:
         from ingest.intel import epss
+
         rows = epss.run_once()
         log.info("Intel EPSS complete: rows=%d", rows)
     except Exception:
@@ -497,6 +575,7 @@ def run_intel_epss_once() -> None:
 def run_intel_matcher_once() -> None:
     try:
         from ingest.intel import matcher
+
         rows = matcher.run_once()
         log.info("Intel matcher complete: rows=%d", rows)
     except Exception:
@@ -506,6 +585,7 @@ def run_intel_matcher_once() -> None:
 def run_intel_winget_once() -> None:
     try:
         from ingest.intel import winget
+
         rows = winget.run_once()
         log.info("Intel Winget complete: rows=%d", rows)
     except Exception:
@@ -515,6 +595,7 @@ def run_intel_winget_once() -> None:
 def run_intel_chocolatey_once() -> None:
     try:
         from ingest.intel import chocolatey
+
         rows = chocolatey.run_once()
         log.info("Intel Chocolatey complete: rows=%d", rows)
     except Exception:
@@ -524,6 +605,7 @@ def run_intel_chocolatey_once() -> None:
 def run_intel_otx_once() -> None:
     try:
         from ingest.intel import otx
+
         rows = otx.run_once()
         log.info("Intel OTX complete: rows=%d", rows)
     except Exception:
@@ -533,6 +615,7 @@ def run_intel_otx_once() -> None:
 def run_intel_abusech_once() -> None:
     try:
         from ingest.intel import abusech
+
         rows = abusech.run_once()
         log.info("Intel abuse.ch complete: rows=%d", rows)
     except Exception:
@@ -605,9 +688,7 @@ def software_classify(tenant_id: int = 1, incremental: bool = True) -> int:
 
     del incremental
     report = software_reconcile.run(tenant_id).as_result()
-    return sum(
-        sum(report[key].values()) for key in ("opened", "refreshed", "resolved")
-    )
+    return sum(sum(report[key].values()) for key in ("opened", "refreshed", "resolved"))
 
 
 def run_software_classify_once(*, with_intel_pre_steps: bool = True) -> None:
@@ -625,18 +706,16 @@ def run_software_classify_once(*, with_intel_pre_steps: bool = True) -> None:
     # step is best-effort and never blocks the classifier itself.
     if with_intel_pre_steps and settings.INTEL_ENABLED:
         for step_name, step_fn in (
-            ("intel matcher pre-classify",     run_intel_matcher_once),
-            ("intel Winget pre-classify",      run_intel_winget_once),
-            ("intel Chocolatey pre-classify",  run_intel_chocolatey_once),
+            ("intel matcher pre-classify", run_intel_matcher_once),
+            ("intel Winget pre-classify", run_intel_winget_once),
+            ("intel Chocolatey pre-classify", run_intel_chocolatey_once),
         ):
             try:
                 step_fn()
             except Exception:
                 log.exception("Best-effort intel step failed: %s", step_name)
     try:
-        affected = software_classify(
-            tenant_id=1, incremental=not with_intel_pre_steps
-        )
+        affected = software_classify(tenant_id=1, incremental=not with_intel_pre_steps)
         log.info("Software classifier complete: affected=%d", affected)
     except Exception:
         log.exception("Software classifier failed")
@@ -691,8 +770,7 @@ def software_classify_overdue(
                   AND (%s::text IS NULL OR subject_ref->>'mode' = %s::text)
                 ORDER BY started_at DESC
                 LIMIT 1
-                """
-                ,
+                """,
                 (mode, mode),
             )
             row = cur.fetchone()
@@ -808,7 +886,9 @@ def _safe(name: str, func, *args) -> tuple[str, Exception] | None:
 def _raise_step_failures(context: str, failures: list[tuple[str, Exception]]) -> None:
     if failures:
         names = ", ".join(name for name, _ in failures)
-        raise RuntimeError(f"{context} had {len(failures)} failed required step(s): {names}")
+        raise RuntimeError(
+            f"{context} had {len(failures)} failed required step(s): {names}"
+        )
 
 
 def last_successful_run_at(domain: str | None = None) -> datetime | None:
@@ -821,8 +901,7 @@ def last_successful_run_at(domain: str | None = None) -> datetime | None:
             )
         else:
             cur.execute(
-                "SELECT MAX(finished_at) FROM ninja_core.run_log "
-                "WHERE status = 'ok'"
+                "SELECT MAX(finished_at) FROM ninja_core.run_log " "WHERE status = 'ok'"
             )
         row = cur.fetchone()
         return row[0] if row else None
@@ -837,7 +916,9 @@ def should_catch_up(
     last = last_successful_run_at(domain)
     if last is None:
         return False
-    return (now - last) > timedelta(hours=schedule_hours or settings.INGEST_SCHEDULE_HOURS)
+    return (now - last) > timedelta(
+        hours=schedule_hours or settings.INGEST_SCHEDULE_HOURS
+    )
 
 
 # ── HTTP endpoints ──────────────────────────────────────────────────
@@ -848,22 +929,33 @@ def should_catch_up(
 _READY = threading.Event()
 
 _HTTP_JOB_PATHS = {
-    "/run": "patches", "/run/patches": "patches",
+    "/run": "patches",
+    "/run/patches": "patches",
+    "/run/ninja-enrichment": "ninja-enrichment",
     "/run/agent-compliance": "agent-compliance",
     "/run/agent-compliance-evaluate": "agent-compliance-evaluate",
     "/run/agent-compliance-review-digest": "agent-compliance-review-digest",
-    "/run/resolver": "resolver", "/run/notifications/dispatch": "notifications-dispatch",
+    "/run/resolver": "resolver",
+    "/run/notifications/dispatch": "notifications-dispatch",
     "/run/platform-evaluate": "platform-evaluate",
     "/run/software-classify": "software-classify",
     "/run/software-classify-only": "software-classify-only",
-    "/run/intel-capability": "intel-capability", "/run/intel-category": "intel-category",
-    "/run/intel-lolrmm": "intel-lolrmm", "/run/patch-classify": "patch-classify",
-    "/run/parity-check": "parity-check", "/run/notifications/digest": "notifications-digest",
-    "/run/intel-nvd": "intel-nvd", "/run/intel-cpe-dict": "intel-cpe-dict",
-    "/run/intel-kev": "intel-kev", "/run/intel-epss": "intel-epss",
-    "/run/intel-matcher": "intel-matcher", "/run/intel-winget": "intel-winget",
-    "/run/intel-chocolatey": "intel-chocolatey", "/run/intel-otx": "intel-otx",
-    "/run/intel-abusech": "intel-abusech", "/run/intel-endoflife": "intel-endoflife",
+    "/run/intel-capability": "intel-capability",
+    "/run/intel-category": "intel-category",
+    "/run/intel-lolrmm": "intel-lolrmm",
+    "/run/patch-classify": "patch-classify",
+    "/run/parity-check": "parity-check",
+    "/run/notifications/digest": "notifications-digest",
+    "/run/intel-nvd": "intel-nvd",
+    "/run/intel-cpe-dict": "intel-cpe-dict",
+    "/run/intel-kev": "intel-kev",
+    "/run/intel-epss": "intel-epss",
+    "/run/intel-matcher": "intel-matcher",
+    "/run/intel-winget": "intel-winget",
+    "/run/intel-chocolatey": "intel-chocolatey",
+    "/run/intel-otx": "intel-otx",
+    "/run/intel-abusech": "intel-abusech",
+    "/run/intel-endoflife": "intel-endoflife",
 }
 
 
@@ -885,7 +977,9 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self._respond(410, b"software refreshes are requested from Operations\n")
         elif self.path.startswith("/run/sources"):
             self._respond(410, b"source refreshes are managed in Operations Sources\n")
-        elif self.path.startswith("/agent-compliance/action/") or self.path.startswith("/a/"):
+        elif self.path.startswith("/agent-compliance/action/") or self.path.startswith(
+            "/a/"
+        ):
             self._handle_agent_compliance_action()
         else:
             self.send_error(404)
@@ -971,8 +1065,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                 )
                 customers = [r[0] for r in cur.fetchall() if r[0]]
             options = "\n".join(
-                f'<option value="{escape(c)}">{escape(c)}</option>'
-                for c in customers
+                f'<option value="{escape(c)}">{escape(c)}</option>' for c in customers
             )
             body = f"""
                 <!doctype html>
@@ -1023,7 +1116,9 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             return
 
         if path == "/agent-compliance/action/ignore-device" and confirm != "1":
-            client_name = _text_param("client", "client_name", hex_names=("client_hex",)) or ""
+            client_name = (
+                _text_param("client", "client_name", hex_names=("client_hex",)) or ""
+            )
             hostname = _text_param("host", "hostname", hex_names=("host_hex",)) or ""
             if not client_name or not hostname:
                 self._respond(400, b"missing client or host\n")
@@ -1061,9 +1156,22 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             return
 
         if path == "/agent-compliance/action/merge-device" and confirm != "1":
-            client_name = _text_param("client", "client_name", hex_names=("client_hex",)) or ""
-            source_hostname = _text_param("source", "source_host", "host", "hostname", hex_names=("source_hex", "host_hex")) or ""
-            target_hostname = _text_param("target", "target_host", hex_names=("target_hex",)) or ""
+            client_name = (
+                _text_param("client", "client_name", hex_names=("client_hex",)) or ""
+            )
+            source_hostname = (
+                _text_param(
+                    "source",
+                    "source_host",
+                    "host",
+                    "hostname",
+                    hex_names=("source_hex", "host_hex"),
+                )
+                or ""
+            )
+            target_hostname = (
+                _text_param("target", "target_host", hex_names=("target_hex",)) or ""
+            )
             if not client_name or not source_hostname:
                 self._respond(400, b"missing client or source host\n")
                 return
@@ -1109,6 +1217,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
 
         if path == "/agent-compliance/action/add-source":
             import re as _re
+
             customer = _text_param("customer") or ""
             source_slug = (_text_param("source_slug") or "").strip().lower()
             source_name = _text_param("source_name") or ""
@@ -1117,7 +1226,9 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                 self._respond(400, b"missing field\n")
                 return
             if not _re.match(r"^[a-z0-9_]{2,40}$", source_slug):
-                self._respond(400, b"invalid slug (lowercase letters/digits/_, 2-40 chars)\n")
+                self._respond(
+                    400, b"invalid slug (lowercase letters/digits/_, 2-40 chars)\n"
+                )
                 return
             if not (base_url.startswith("http://") or base_url.startswith("https://")):
                 self._respond(400, b"base_url must start with http:// or https://\n")
@@ -1144,13 +1255,22 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                     ON CONFLICT (source_key) DO NOTHING
                     RETURNING source_id
                     """,
-                    (source_key, source_name, base_url, ext_guid_ref, secret_key_ref, customer),
+                    (
+                        source_key,
+                        source_name,
+                        base_url,
+                        ext_guid_ref,
+                        secret_key_ref,
+                        customer,
+                    ),
                 )
                 row = cur.fetchone()
             if not row:
                 self._respond(
                     400,
-                    f"customer '{customer}' not found, or source_key '{source_key}' already exists\n".encode("utf-8"),
+                    f"customer '{customer}' not found, or source_key '{source_key}' already exists\n".encode(
+                        "utf-8"
+                    ),
                 )
                 return
             body = f"""
@@ -1195,7 +1315,9 @@ class _Handler(http.server.BaseHTTPRequestHandler):
 
         if path == "/agent-compliance/action/manual-alias":
             platform = _text_param("platform") or ""
-            alias_value = _text_param("alias", "alias_value", hex_names=("alias_hex",)) or ""
+            alias_value = (
+                _text_param("alias", "alias_value", hex_names=("alias_hex",)) or ""
+            )
             if not platform or not alias_value:
                 self._respond(400, b"missing platform or alias\n")
                 return
@@ -1223,7 +1345,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                 rows.append(
                     "<tr>"
                     f"<td>{escape(customer)}</td>"
-                    f"<td><a href=\"{href}\">Alias here</a></td>"
+                    f'<td><a href="{href}">Alias here</a></td>'
                     "</tr>"
                 )
             body = f"""
@@ -1285,23 +1407,31 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                     self._respond(404, b"client not found\n")
                     return
                 client_id = int(row[0])
-            count = promote_alignment_aliases(client_id, platform=platform, alias_value=alias_value)
+            count = promote_alignment_aliases(
+                client_id, platform=platform, alias_value=alias_value
+            )
             _respond_with_refresh(f"added {count} alias row(s)", "alias added")
             return
 
         if path == "/agent-compliance/action/approve-customer":
-            customer_name = _text_param("name", "customer", "org", hex_names=("name_hex", "customer_hex"))
+            customer_name = _text_param(
+                "name", "customer", "org", hex_names=("name_hex", "customer_hex")
+            )
             if not customer_name:
                 self._respond(400, b"missing customer name\n")
                 return
             if approve_customer_name(customer_name, updated_by="operator_dashboard"):
-                _respond_with_refresh(f"approved customer {customer_name}", "customer approved")
+                _respond_with_refresh(
+                    f"approved customer {customer_name}", "customer approved"
+                )
             else:
                 self._respond(400, b"blank customer name\n")
             return
 
         if path == "/agent-compliance/action/set-requirement":
-            customer_name = _text_param("customer", "client_name", hex_names=("customer_hex", "client_hex"))
+            customer_name = _text_param(
+                "customer", "client_name", hex_names=("customer_hex", "client_hex")
+            )
             scope = _text_param("scope") or ""
             profile = _text_param("profile") or ""
             if not customer_name or not scope or not profile:
@@ -1323,7 +1453,9 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             return
 
         if path == "/agent-compliance/action/toggle-platform-requirement":
-            customer_name = _text_param("customer", "client_name", hex_names=("customer_hex", "client_hex"))
+            customer_name = _text_param(
+                "customer", "client_name", hex_names=("customer_hex", "client_hex")
+            )
             scope = _text_param("scope") or ""
             platform = _text_param("platform") or ""
             if not customer_name or not scope or not platform:
@@ -1367,7 +1499,9 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             return
 
         if path == "/agent-compliance/action/ignore-device":
-            client_name = _text_param("client", "client_name", hex_names=("client_hex",))
+            client_name = _text_param(
+                "client", "client_name", hex_names=("client_hex",)
+            )
             hostname = _text_param("host", "hostname", hex_names=("host_hex",))
             days_value = _text_param("days") or "30"
             if not client_name or not hostname:
@@ -1398,7 +1532,9 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                 self._respond(404, b"device not found\n")
                 return
             client_id, norm_name = row
-            if add_device_ignore(client_id, norm_name, display_name=hostname, expires_days=expires_days):
+            if add_device_ignore(
+                client_id, norm_name, display_name=hostname, expires_days=expires_days
+            ):
                 _respond_with_refresh(
                     f"ignored {norm_name} for {expires_days} day(s)",
                     "device ignored",
@@ -1408,7 +1544,9 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             return
 
         if path == "/agent-compliance/action/confirm-missing":
-            client_name = _text_param("client", "client_name", hex_names=("client_hex",))
+            client_name = _text_param(
+                "client", "client_name", hex_names=("client_hex",)
+            )
             hostname = _text_param("host", "hostname", hex_names=("host_hex",))
             platform = _text_param("platform")
             if not client_name or not hostname:
@@ -1452,9 +1590,19 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             return
 
         if path == "/agent-compliance/action/merge-device":
-            client_name = _text_param("client", "client_name", hex_names=("client_hex",))
-            source_hostname = _text_param("source", "source_host", "host", "hostname", hex_names=("source_hex", "host_hex"))
-            target_hostname = _text_param("target", "target_host", hex_names=("target_hex",))
+            client_name = _text_param(
+                "client", "client_name", hex_names=("client_hex",)
+            )
+            source_hostname = _text_param(
+                "source",
+                "source_host",
+                "host",
+                "hostname",
+                hex_names=("source_hex", "host_hex"),
+            )
+            target_hostname = _text_param(
+                "target", "target_host", hex_names=("target_hex",)
+            )
             if not client_name or not source_hostname or not target_hostname:
                 self._respond(400, b"missing client, source host, or target host\n")
                 return
@@ -1475,14 +1623,19 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             return
 
         if path == "/agent-compliance/action/set-max-age":
-            customer_name = _text_param("customer", "client_name", hex_names=("customer_hex", "client_hex"))
+            customer_name = _text_param(
+                "customer", "client_name", hex_names=("customer_hex", "client_hex")
+            )
             scope = _text_param("scope") or ""
             days_value = _text_param("days") or ""
             if not customer_name or not scope or not days_value:
                 self._respond(400, b"missing customer, scope, or days\n")
                 return
             result = set_customer_max_age(
-                customer_name, scope, days_value, updated_by="operator_dashboard",
+                customer_name,
+                scope,
+                days_value,
+                updated_by="operator_dashboard",
             )
             if result is None:
                 self._respond(400, b"invalid customer, scope, or days (1-365)\n")
@@ -1494,7 +1647,12 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             return
 
         if path == "/agent-compliance/action/bulk-ignore-stale":
-            client_name = _text_param("client", "client_name", "customer", hex_names=("client_hex", "customer_hex"))
+            client_name = _text_param(
+                "client",
+                "client_name",
+                "customer",
+                hex_names=("client_hex", "customer_hex"),
+            )
             days_value = _text_param("days") or "30"
             if not client_name:
                 self._respond(400, b"missing client\n")
@@ -1523,7 +1681,9 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             return
 
         if path == "/agent-compliance/action/unignore-device":
-            client_name = _text_param("client", "client_name", hex_names=("client_hex",))
+            client_name = _text_param(
+                "client", "client_name", hex_names=("client_hex",)
+            )
             hostname = _text_param("host", "hostname", hex_names=("host_hex",))
             if not client_name or not hostname:
                 self._respond(400, b"missing client or host\n")
@@ -1581,18 +1741,32 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             return
 
         if path == "/agent-compliance/action/set-customer-alert":
-            customer_name = _text_param("customer", "client_name", hex_names=("customer_hex", "client_hex"))
+            customer_name = _text_param(
+                "customer", "client_name", hex_names=("customer_hex", "client_hex")
+            )
             alert_key = (_text_param("alert") or "").lower()
             state = (_text_param("state") or "").lower()
             profiles = {
                 "missing_ninja": ("missing_required_platform", "Ninja", "critical"),
-                "missing_sentinelone": ("missing_required_platform", "SentinelOne", "critical"),
+                "missing_sentinelone": (
+                    "missing_required_platform",
+                    "SentinelOne",
+                    "critical",
+                ),
                 "missing_logmein": ("missing_required_platform", "LogMeIn", "high"),
-                "missing_screenconnect": ("missing_required_platform", "ScreenConnect", "high"),
+                "missing_screenconnect": (
+                    "missing_required_platform",
+                    "ScreenConnect",
+                    "high",
+                ),
                 "stale": ("stale_required_platform", None, "medium"),
                 "offline": ("stale_required_platform", None, "medium"),
             }
-            if not customer_name or alert_key not in profiles or state not in {"on", "off"}:
+            if (
+                not customer_name
+                or alert_key not in profiles
+                or state not in {"on", "off"}
+            ):
                 self._respond(400, b"missing customer, alert, or valid state\n")
                 return
             finding_type, affected_platform, severity = profiles[alert_key]
@@ -1695,7 +1869,9 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             return
         try:
             software_queue.enqueue_activity(int(raw), reason="operator.refresh")
-            run_id = operator_job_queue.request_system_job("software-queue-drain", self.path)
+            run_id = operator_job_queue.request_system_job(
+                "software-queue-drain", self.path
+            )
         except Exception:
             log.exception("software device refresh request failed")
             self._respond(503, b"refresh could not be queued\n")

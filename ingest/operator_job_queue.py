@@ -51,6 +51,7 @@ class JobExecutionResult:
     signals: tuple[str, ...] = ()
     result: dict[str, object] | None = None
 
+
 # The registry is the executable catalog. `_execute` below is the one handler
 # resolver, and focused tests verify that every registry definition has one.
 validate_registry(executable_keys=definition_keys())
@@ -215,7 +216,10 @@ def _schedule_enabled(job_key: str) -> tuple[bool, str]:
         "notification_digest": settings.NOTIFY_DIGEST_ENABLED,
         "software_queue": settings.SOFTWARE_QUEUE_ENABLED,
     }.get(job.capability, False)
-    return enabled, "Available" if enabled else f"Disabled — {job.capability} is not enabled."
+    return (
+        enabled,
+        "Available" if enabled else f"Disabled — {job.capability} is not enabled.",
+    )
 
 
 def reconcile_schedule_catalog() -> bool:
@@ -231,12 +235,22 @@ def reconcile_schedule_catalog() -> bool:
                 revision = hashlib.sha256(
                     json.dumps(
                         {"cadence": cadence, "enabled": enabled},
-                        sort_keys=True, separators=(",", ":"),
+                        sort_keys=True,
+                        separators=(",", ":"),
                     ).encode()
                 ).hexdigest()
                 cur.execute(
                     "SELECT operations.jobs_reconcile_schedule_v2(%s, %s, %s, %s, %s, %s::jsonb, %s, %s)",
-                    (1, job.key, job.snapshot_digest(), "tenant:1", revision, json.dumps(cadence), enabled, capability_reason),
+                    (
+                        1,
+                        job.key,
+                        job.snapshot_digest(),
+                        "tenant:1",
+                        revision,
+                        json.dumps(cadence),
+                        enabled,
+                        capability_reason,
+                    ),
                 )
             # A Job that now starts only after its prerequisite must not retain
             # an old independent tenant schedule. The registry owns this
@@ -367,16 +381,21 @@ def _admit_workflow(
             f"workflow:{root_run_id}:{edge.dependent}:{edge.revision_name}".encode()
         ).hexdigest()
         dependent_scope = (
-            scopes[edge.prerequisite]
-            if edge.scope_mode == "inherit"
-            else "tenant:1"
+            scopes[edge.prerequisite] if edge.scope_mode == "inherit" else "tenant:1"
         )
         scopes[edge.dependent] = dependent_scope
         cur.execute(
             f"SELECT {request_api}(%s, %s, %s, %s, %s, %s, NULL, %s::jsonb, %s::jsonb, %s)",
             (
-                1, dependent.key, dependent.snapshot_digest(), dependent_scope,
-                request_identity, "dependency", "{}", "{}", root_run_id,
+                1,
+                dependent.key,
+                dependent.snapshot_digest(),
+                dependent_scope,
+                request_identity,
+                "dependency",
+                "{}",
+                "{}",
+                root_run_id,
             ),
         )
         dependent_id = cur.fetchone()[0]
@@ -387,8 +406,12 @@ def _admit_workflow(
         cur.execute(
             "SELECT operations.jobs_add_revision_dependency_v1(%s, %s, %s, %s, %s, %s)",
             (
-                1, dependent_id, prerequisite_id, edge.revision_name,
-                dependent_scope, required_revision,
+                1,
+                dependent_id,
+                prerequisite_id,
+                edge.revision_name,
+                dependent_scope,
+                required_revision,
             ),
         )
 
@@ -442,12 +465,10 @@ def _run_source_refresh(progress: "V1JobProgress") -> JobExecutionResult:
     progress.update(f"Collecting {source_label} information", "")
     observed_at = datetime.now(timezone.utc)
     if source.platform == "Ninja":
-        if main.run_patching_once() is False:
+        if main.run_ninja_devices_once() is False:
             raise RuntimeError("Ninja collection could not acquire its execution lock")
         rows = None
-        # Ninja publishes both computer identity and patch snapshots.  Keep
-        # their follow-up analysis in the binding-scoped source workflow.
-        signals = ("ninja_source", "identity_source")
+        signals = ("identity_source",)
     elif source.source_key.startswith("reference."):
         from ingest.intel import (
             abusech,
@@ -476,13 +497,18 @@ def _run_source_refresh(progress: "V1JobProgress") -> JobExecutionResult:
         try:
             handler = handlers[source.source_key]
         except KeyError as exc:
-            raise ValueError(f"Unsupported reference source: {source.source_key}") from exc
+            raise ValueError(
+                f"Unsupported reference source: {source.source_key}"
+            ) from exc
         result = handler()
         rows = int(result) if isinstance(result, int) else None
         if not bool(getattr(result, "material_changed", False)):
             signals = ()
         elif source.source_key in {
-            "reference.nvd", "reference.cpe", "reference.kev", "reference.epss",
+            "reference.nvd",
+            "reference.cpe",
+            "reference.kev",
+            "reference.epss",
         }:
             signals = ("reference_match_data",)
         else:
@@ -493,7 +519,11 @@ def _run_source_refresh(progress: "V1JobProgress") -> JobExecutionResult:
         counts = run_source_observations([source], observed_at)
         rows = sum(counts.values())
         main.refresh_after_collection(f"{source_label} source refresh")
-        signals = ("identity_source",) if is_identity_source(source) else ("documentation_source",)
+        signals = (
+            ("identity_source",)
+            if is_identity_source(source)
+            else ("documentation_source",)
+        )
     return JobExecutionResult(
         rows=rows,
         signals=signals,
@@ -546,15 +576,19 @@ def produce_due_schedules() -> int:
                             run_id = cur.fetchone()[0]
                             if run_id is not None:
                                 cur.execute(
-                                "SELECT definition_key, scope_identity FROM operations.job_schedules "
-                                "WHERE tenant_id = 1 AND id = %s",
-                                (schedule_id,),
-                            )
+                                    "SELECT definition_key, scope_identity FROM operations.job_schedules "
+                                    "WHERE tenant_id = 1 AND id = %s",
+                                    (schedule_id,),
+                                )
                                 definition_key, scope_identity = cur.fetchone()
-                                _admit_workflow(cur, definition_key, run_id, scope_identity)
+                                _admit_workflow(
+                                    cur, definition_key, run_id, scope_identity
+                                )
                                 admitted += 1
                     except Exception:
-                        log.exception("durable Jobs schedule %s was deferred", schedule_id)
+                        log.exception(
+                            "durable Jobs schedule %s was deferred", schedule_id
+                        )
             finally:
                 cur.execute("SELECT operations.jobs_release_schedule_leader()")
     except PoolTimeout:
@@ -601,13 +635,21 @@ class V1JobProgress:
                 cur.execute("SET LOCAL operations.tenant_id = 1")
                 cur.execute(
                     "SELECT operations.jobs_record_v1_count(%s, %s, %s, %s, %s, %s)",
-                    (1, self.job_id, self.claim_token, max(0, int(done)),
-                     None if total is None else max(0, int(total)), unit[:40]),
+                    (
+                        1,
+                        self.job_id,
+                        self.claim_token,
+                        max(0, int(done)),
+                        None if total is None else max(0, int(total)),
+                        unit[:40],
+                    ),
                 )
         except UndefinedFunction:
             self.heartbeat()
         except RaiseException as exc:
-            raise JobProgressRejected("Jobs ledger rejected the progress count.") from exc
+            raise JobProgressRejected(
+                "Jobs ledger rejected the progress count."
+            ) from exc
 
     def cancel_requested(self) -> bool:
         with db.transaction() as cur:
@@ -645,8 +687,16 @@ def request_system_job(job_key: str, request_source: str) -> uuid.UUID:
         cur.execute("SET LOCAL operations.tenant_id = 1")
         cur.execute(
             f"SELECT {request_api}(%s, %s, %s, %s, %s, %s, NULL, %s::jsonb, %s::jsonb, NULL)",
-            (1, job.key, job.snapshot_digest(), "tenant:1", request_identity,
-             "automatic", "{}", "{}"),
+            (
+                1,
+                job.key,
+                job.snapshot_digest(),
+                "tenant:1",
+                request_identity,
+                "automatic",
+                "{}",
+                "{}",
+            ),
         )
         row = cur.fetchone()
         if row is not None:
@@ -760,8 +810,14 @@ def _execute(job_key: str, progress: V1JobProgress) -> int | JobExecutionResult 
     )
 
     jobs = {
-        "source-refresh": ("Collecting source information", lambda: _run_source_refresh(progress)),
-        "patch-classify": ("Classifying changed patch state", lambda: main.patch_classify(tenant_id=1, incremental=True)),
+        "source-refresh": (
+            "Collecting source information",
+            lambda: _run_source_refresh(progress),
+        ),
+        "patch-classify": (
+            "Classifying changed patch state",
+            lambda: main.patch_classify(tenant_id=1, incremental=True),
+        ),
         "platform-evaluate": (
             "Evaluating platform conditions",
             lambda: _platform_evaluate_and_check(),
@@ -770,7 +826,10 @@ def _execute(job_key: str, progress: V1JobProgress) -> int | JobExecutionResult 
             "Evaluating CMDB conditions",
             lambda: sum(cmdb_findings.evaluate(dry_run=False).values()),
         ),
-        "parity-check": ("Checking operational parity", lambda: main.parity_check_run(tenant_id=1)),
+        "parity-check": (
+            "Checking operational parity",
+            lambda: main.parity_check_run(tenant_id=1),
+        ),
         "software-classify-only": (
             "Reconciling software findings",
             lambda: _software_reconcile(progress),
@@ -779,8 +838,18 @@ def _execute(job_key: str, progress: V1JobProgress) -> int | JobExecutionResult 
             "Reconciling software findings",
             lambda: _software_reconcile(progress),
         ),
-        "resolver": ("Resolving computer identity", lambda: main.run_identity_resolver_once()),
-        "patches": ("Collecting Ninja information", lambda: main.run_patching_once()),
+        "resolver": (
+            "Resolving computer identity",
+            lambda: main.run_identity_resolver_once(),
+        ),
+        "patches": (
+            "Collecting Ninja patches and activity",
+            lambda: main.run_patching_once(),
+        ),
+        "ninja-enrichment": (
+            "Collecting Ninja enrichment",
+            lambda: main.run_ninja_enrichment_once(),
+        ),
         "agent-observations": (
             "Collecting agent observations",
             lambda: main.run_agent_observations_once(),
@@ -832,12 +901,18 @@ def _execute(job_key: str, progress: V1JobProgress) -> int | JobExecutionResult 
         ),
         "intel-nvd": ("Refreshing NVD intelligence", nvd.run_once),
         "intel-cpe-dict": ("Refreshing CPE dictionary", cpe_dict.run_once),
-        "intel-kev": ("Refreshing exploited-vulnerability intelligence", cisa_kev.run_once),
+        "intel-kev": (
+            "Refreshing exploited-vulnerability intelligence",
+            cisa_kev.run_once,
+        ),
         "intel-epss": ("Refreshing exploit-likelihood scores", epss.run_once),
         "intel-matcher": ("Matching software to vulnerabilities", matcher.run_once),
         "intel-winget": ("Refreshing Windows package intelligence", winget.run_once),
         "intel-chocolatey": ("Refreshing Chocolatey intelligence", chocolatey.run_once),
-        "intel-capability": ("Projecting software capabilities", capability_match.run_once),
+        "intel-capability": (
+            "Projecting software capabilities",
+            capability_match.run_once,
+        ),
         "intel-lolrmm": ("Refreshing remote-management intelligence", lolrmm.run_once),
         "intel-otx": ("Refreshing threat intelligence", otx.run_once),
         "intel-abusech": ("Refreshing malware intelligence", abusech.run_once),
@@ -848,9 +923,13 @@ def _execute(job_key: str, progress: V1JobProgress) -> int | JobExecutionResult 
         "intel-category": ("Refreshing software categories", category_match.run_once),
     }
     if job_key == "software-classify":
-        return _software_classify_with_intel(progress, matcher, winget, chocolatey, main)
+        return _software_classify_with_intel(
+            progress, matcher, winget, chocolatey, main
+        )
     if job_key in ("software-classify-only", "software-classify-full"):
-        return _software_reconcile(progress, whole_fleet=job_key == "software-classify-full")
+        return _software_reconcile(
+            progress, whole_fleet=job_key == "software-classify-full"
+        )
     if job_key not in jobs:
         raise ValueError(f"Unknown registered job: {job_key}")
     stage, job = jobs[job_key]
@@ -859,11 +938,14 @@ def _execute(job_key: str, progress: V1JobProgress) -> int | JobExecutionResult 
     if (
         bool(getattr(result, "material_changed", False))
         and job_key not in _software_title_scoped_producers()
-        and any(s.successor == "software-classify-only" for s in definition(job_key).successors)
+        and any(
+            s.successor == "software-classify-only"
+            for s in definition(job_key).successors
+        )
     ):
         _request_whole_fleet_findings(job_key)
-    if job_key == "patches" and result is False:
-        raise RuntimeError("Patch collection could not acquire its database execution lock")
+    if job_key in ("patches", "ninja-enrichment") and result is False:
+        raise RuntimeError(f"{job_key} could not acquire its database execution lock")
     if isinstance(result, JobExecutionResult):
         return result
     if bool(getattr(result, "material_changed", False)) and any(
@@ -906,7 +988,9 @@ def _platform_evaluate_and_check():
     return affected
 
 
-def _software_reconcile(progress: V1JobProgress, *, whole_fleet: bool) -> JobExecutionResult:
+def _software_reconcile(
+    progress: V1JobProgress, *, whole_fleet: bool
+) -> JobExecutionResult:
     """Reconcile software findings and publish the exposure read model.
 
     The routine run (``software-classify-only``) covers only the titles the
@@ -940,8 +1024,10 @@ def _software_reconcile(progress: V1JobProgress, *, whole_fleet: bool) -> JobExe
     software_inventory.refresh_exposure_read_model()
     software_reconcile.consume_targets(1, target_ids)
     result = report.as_result()
-    rows = sum(result["opened"].values()) + sum(result["refreshed"].values()) + sum(
-        result["resolved"].values()
+    rows = (
+        sum(result["opened"].values())
+        + sum(result["refreshed"].values())
+        + sum(result["resolved"].values())
     )
     return JobExecutionResult(rows=rows, result=result)
 

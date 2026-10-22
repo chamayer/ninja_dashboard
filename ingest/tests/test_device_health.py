@@ -4,6 +4,7 @@ import importlib
 import inspect
 from contextlib import contextmanager
 from datetime import datetime, timezone
+from uuid import uuid4
 
 import pytest
 
@@ -81,3 +82,57 @@ def test_normal_health_collection_does_not_write_legacy_snapshots() -> None:
     assert "ninja_core.device_health_snapshots" not in inspect.getsource(
         device_health.run
     )
+
+
+def test_health_links_through_the_ninja_source_instance(monkeypatch) -> None:
+    class Cursor:
+        def __init__(self):
+            self.executed: list[tuple[str, object]] = []
+
+        def execute(self, statement, params=None):
+            self.executed.append((statement, params))
+
+        def fetchone(self):
+            return (True,)
+
+        @staticmethod
+        def fetchall():
+            return [("42", device_id, client_id)]
+
+    cursor = Cursor()
+    device_id = uuid4()
+    client_id = uuid4()
+    source_instance_id = uuid4()
+    run_id = uuid4()
+
+    @contextmanager
+    def transaction():
+        yield cursor
+
+    monkeypatch.setattr(device_health.db, "transaction", transaction)
+    monkeypatch.setattr(
+        device_health,
+        "begin_run",
+        lambda *_args, **_kwargs: (run_id, source_instance_id),
+    )
+    monkeypatch.setattr(
+        device_health, "write_current_rows", lambda _cur, rows: len(rows)
+    )
+    monkeypatch.setattr(device_health, "complete_run", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(device_health, "reconcile_complete_run", lambda *_args: None)
+
+    observed_at = datetime(2026, 10, 22, 12, tzinfo=timezone.utc)
+    assert (
+        device_health._write_health_observations(
+            [device_health._to_row(_health_record(), observed_at)],
+            {42: _health_record()},
+            {42: "WINDOWS_WORKSTATION"},
+            observed_at,
+        )
+        == 1
+    )
+
+    source_query, params = cursor.executed[-1]
+    assert "o.source_instance_id = %s" in source_query
+    assert "o.source_id" not in source_query
+    assert params == (1, source_instance_id, ["42"])

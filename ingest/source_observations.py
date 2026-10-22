@@ -30,6 +30,7 @@ import hashlib
 import logging
 import uuid
 from datetime import datetime
+from collections.abc import Callable
 from typing import Any
 
 from psycopg.types.json import Json
@@ -72,6 +73,7 @@ class SourceObservationFailure(RuntimeError):
             f"{failure_count} source collection(s) failed; retained diagnostics identify them"
         )
         self.counts = dict(counts)
+
 
 # Sources outside the identity-signal set carry no independent identity
 # evidence: they either already know their device or have none. Gating here
@@ -127,7 +129,7 @@ def run_source_observations(
             continue
         try:
             rows = _FETCHERS[source.platform](source, observed_at)
-            written = _write_observations(source, rows, batch_id, observed_at)
+            written = write_observations(source, rows, batch_id, observed_at)
             counts[source.platform] = counts.get(source.platform, 0) + written
             _record_source_run(source, observed_at, ok=True, rows=written)
             log.info(
@@ -244,12 +246,22 @@ def _record_unmatched_groups(
         )
 
 
-def _write_observations(
+def write_observations(
     source: SourceConfig,
     rows: list[dict[str, Any]],
     batch_id: uuid.UUID,
     observed_at: datetime,
+    after_current_write: Callable[[Any, list[dict[str, Any]], uuid.UUID], None]
+    | None = None,
 ) -> int:
+    """Write normalized source rows through the shared Operations contract.
+
+    Connectors supply source-specific facts, stable record identity, and a
+    container identity. This writer owns client attachment, Computer identity,
+    current/history state, and snapshot reconciliation for every source.
+    ``after_current_write`` is reserved for compact source-history facts that
+    need the canonical current-record UUID after the shared write succeeds.
+    """
     if not rows:
         return 0
 
@@ -302,12 +314,24 @@ def _write_observations(
                         container_external_id,
                     ]
                 continue
-            entity_key = str(row.get("platform_device_id") or "")
+            entity_key = str(
+                row.get("entity_key") or row.get("platform_device_id") or ""
+            )
             if not entity_key:
                 continue
+            entity_type = str(
+                row.get("entity_type") or source.entity_type or ""
+            ).strip()
+            if not entity_type:
+                raise ValueError("connector row is missing entity_type")
             external_namespace = str(row.get("external_namespace") or "").strip()
             if not external_namespace:
                 raise ValueError("connector row is missing external_namespace")
+            external_id = str(row.get("external_id") or entity_key).strip()
+            parent_external_namespace = str(
+                row.get("parent_external_namespace") or ""
+            ).strip()
+            parent_external_id = str(row.get("parent_external_id") or "").strip()
             hostname = row.get("hostname") or ""
             raw = row.get("raw_data") or {}
             if isinstance(raw, Json):
@@ -317,18 +341,21 @@ def _write_observations(
             guest_info = (
                 raw.get("GuestInfo") if isinstance(raw.get("GuestInfo"), dict) else {}
             )
-            serial = (
+            serial = row.get("serial_number") or (
                 raw.get("serialNumber")
                 or raw.get("biosSerialNumber")
                 or raw.get("serial_number")
                 or guest_info.get("MachineSerialNumber")
                 or None
             )
+            macs = row.get("macs")
+            if not isinstance(macs, list):
+                macs = extract_macs(raw)
             os_name = row.get("os_name") or None
             canonical_data: dict[str, Any] = {
                 "hostname": hostname,
                 "platform": source.platform,
-                "entity_type": source.entity_type,
+                "entity_type": entity_type,
                 # platform_group_id lets the client resolver backfill
                 # device observations once the org attaches to a client.
                 "platform_group_id": str(row.get("platform_group_id") or ""),
@@ -337,7 +364,7 @@ def _write_observations(
                 ),
                 "is_online": row.get("is_online"),
                 "serial_number": serial,
-                "macs": extract_macs(raw),
+                "macs": macs,
                 # None when the source gives no explicit signal — never guessed.
                 "device_role": row.get("device_type"),
                 "os_name": os_name,
@@ -383,20 +410,24 @@ def _write_observations(
             if client_id is None and group_id:
                 client_id = link_map.get(group_id)
 
-            if source.entity_type in identity_entity_types(cur):
+            if entity_type in identity_entity_types(cur):
                 device_id = resolve_device_fast(
                     cur,
                     _TENANT_ID,
                     source.platform,
                     entity_key,
-                    entity_type=source.entity_type,
+                    entity_type=entity_type,
                     serial=serial,
                     vm_uuid=canonical_data.get("vm_uuid"),
                     # The one SQL normalization (ADR-0034 section 1).
                     hostname=record_name_short(
-                        cur, source.platform, source.entity_type, hostname,
+                        cur,
+                        source.platform,
+                        entity_type,
+                        hostname,
                         canonical_data.get("domain"),
-                    ) or None,
+                    )
+                    or None,
                     macs=canonical_data["macs"],
                     client_id=client_id,
                     policies=identity_policies,
@@ -448,10 +479,10 @@ def _write_observations(
                     "source_instance_id": source_instance_id,
                     "last_seen_binding_id": source.source_binding_id,
                     "external_namespace": external_namespace,
-                    "parent_external_namespace": "",
-                    "parent_external_id": "",
-                    "external_id": entity_key,
-                    "entity_type": source.entity_type,
+                    "parent_external_namespace": parent_external_namespace,
+                    "parent_external_id": parent_external_id,
+                    "external_id": external_id,
+                    "entity_type": entity_type,
                     "entity_key": entity_key,
                     "platform": source.platform,
                     "subplatform": "",
@@ -559,7 +590,9 @@ def _write_observations(
             written = write_current_rows(cur, current_rows)
             # A record that joined or left a Computer renames it now, in
             # this transaction (ADR-0034 section 6).
-            name_changed_attachments(cur, attached_before, attachments(cur, current_rows))
+            name_changed_attachments(
+                cur, attached_before, attachments(cur, current_rows)
+            )
         is_complete_snapshot = not getattr(source, "is_partial_snapshot", False)
         complete_run(
             cur,
@@ -568,6 +601,8 @@ def _write_observations(
             is_complete_snapshot=is_complete_snapshot,
             identity_rows=current_rows,
         )
+        if after_current_write is not None:
+            after_current_write(cur, current_rows, run_id)
         if is_complete_snapshot:
             reconcile_complete_run(cur, run_id)
             # A group is unmatched only if NO row in the batch resolved it.
@@ -575,3 +610,8 @@ def _write_observations(
                 unmatched_groups.pop(gid, None)
             _record_unmatched_groups(cur, source, unmatched_groups, placeholder_names)
     return len(obs_rows)
+
+
+# Kept private-name compatible for focused callers/tests during the transition
+# to the public shared writer.
+_write_observations = write_observations

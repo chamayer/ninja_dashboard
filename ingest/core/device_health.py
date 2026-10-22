@@ -192,16 +192,22 @@ def _write_health_observations(
             device_ids = [str(row["device_id"]) for row in rows]
             cur.execute(
                 """
-                SELECT dl.external_id, dl.device_id, d.client_id
-                  FROM operations.v_device_source_link dl
+                SELECT DISTINCT ON (o.canonical_data ->> 'ninja_node_id')
+                       o.canonical_data ->> 'ninja_node_id' AS ninja_node_id,
+                       o.device_id,
+                       d.client_id
+                  FROM operations.entity_observation_current o
                   JOIN operations.devices d
-                    ON d.id = dl.device_id AND d.tenant_id = dl.tenant_id
-                  JOIN operations.sources s
-                    ON s.id = dl.source_id AND lower(s.name) = 'ninja'
-                 WHERE dl.tenant_id = %s
-                   AND dl.external_id = ANY(%s)
+                    ON d.id = o.device_id AND d.tenant_id = o.tenant_id
+                 WHERE o.tenant_id = %s
+                   AND o.source_instance_id = %s
+                   AND o.active
+                   AND o.subplatform = ''
+                   AND o.entity_type <> 'org'
+                   AND o.canonical_data ->> 'ninja_node_id' = ANY(%s)
+                 ORDER BY o.canonical_data ->> 'ninja_node_id', o.observed_at DESC
                 """,
-                (_TENANT_ID, device_ids),
+                (_TENANT_ID, source_instance_id, device_ids),
             )
             link_map = {row[0]: (row[1], row[2]) for row in cur.fetchall()}
 

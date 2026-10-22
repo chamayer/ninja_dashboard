@@ -41,6 +41,8 @@ from ingest.normalize import (
 from ingest.observation_runs import begin_run, complete_run, reconcile_complete_run
 from ingest.observations import write_current_rows, write_daily_presence_rows
 from ingest.runlog import run_log
+from ingest.source_observations import write_observations
+from ingest.sources import load_source_binding
 from ingest.util import ninja_epoch_to_dt
 
 log = logging.getLogger(__name__)
@@ -282,7 +284,6 @@ def _run(client: NinjaClient, snapshot_at: datetime) -> tuple[int, int]:
                 conflict_keys=["id"],
             )
             missing_count = _mark_missing_devices(cur, current_ids, snapshot_at)
-            _sync_operations_device_exemptions(cur)
 
         obs_count = _write_ninja_observations(
             device_rows,
@@ -456,6 +457,18 @@ def _sync_operations_device_exemptions(cur: object) -> None:
     )
 
 
+def sync_operations_device_exemptions() -> None:
+    """Apply policy- and tag-based Ninja exemptions during enrichment.
+
+    This deliberately runs after the policy collection rather than in the
+    device identity job: policies enrich an already established Computer but
+    are not required to establish its identity.
+    """
+    with db.transaction() as cur:
+        cur.execute(f"SET LOCAL operations.tenant_id = {_TENANT_ID}")
+        _sync_operations_device_exemptions(cur)
+
+
 def _record_source_run(
     started_at: datetime, ok: bool, rows: int, error: str = ""
 ) -> None:
@@ -478,6 +491,174 @@ def _record_source_run(
 
 
 def _write_ninja_observations(
+    device_rows: list[dict],
+    snapshot_rows: list[dict],
+    snapshot_at: datetime,
+    vm_tracking: dict[int, dict[str, object]] | None = None,
+    raw_by_id: dict[int, dict] | None = None,
+) -> int:
+    """Publish Ninja device evidence through the shared source writer.
+
+    Ninja retains its raw staging tables for its richer domain collectors, but
+    Devices enter Operations with the same normalized contract as every other
+    source.  The shared writer owns source-link lookup, client attachment,
+    identity resolution, history, and snapshot reconciliation.
+    """
+    if not device_rows:
+        return 0
+
+    source = load_source_binding(NINJA_SOURCE_BINDING_ID)
+    if source.platform != "Ninja":
+        raise RuntimeError("Ninja source binding has an unexpected platform")
+    snapshot_by_id = {row["device_id"]: row for row in snapshot_rows}
+    organizations = _ninja_organizations()
+    source_rows: list[dict] = []
+    unknown_classes: dict[str, int] = {}
+
+    for record in device_rows:
+        entity_type = entity_type_for_node_class(record["node_class"])
+        if entity_type == "unknown":
+            node_class = record["node_class"] or ""
+            unknown_classes[node_class] = unknown_classes.get(node_class, 0) + 1
+        raw = (raw_by_id or {}).get(record["id"]) or {}
+        identity = _ninja_observation_identity(
+            {
+                "id": record["id"],
+                "organization_id": record["organization_id"],
+                "entity_type": entity_type,
+                "vmx_path": raw.get("files"),
+            }
+        )
+        snapshot = snapshot_by_id.get(record["id"], {})
+        offline = snapshot.get("offline")
+        last_contact = snapshot.get("last_contact")
+        last_boot = snapshot.get("last_boot")
+        raw_system = raw.get("system") or {}
+        organization_id = str(record["organization_id"])
+        organization = organizations.get(organization_id, {})
+        canonical_extra: dict[str, object] = {
+            "node_class": record["node_class"],
+            "ninja_organization_id": organization_id,
+            "ninja_node_id": str(record["id"]),
+            "ninja_node_uid": str(record["uid"]) if record.get("uid") else None,
+            "is_vm": record.get("is_virtual_machine"),
+            "last_contact_at": last_contact.isoformat() if last_contact else None,
+            "offline": offline,
+            "last_boot_time_at": last_boot.isoformat() if last_boot else None,
+            "needs_reboot": snapshot.get("needs_reboot"),
+            "needs_reboot_reasons": snapshot.get("needs_reboot_reasons"),
+            "last_user": snapshot.get("last_user"),
+            "maintenance_status": snapshot.get("maintenance_status"),
+            "maintenance_start_at": (
+                snapshot["maintenance_start"].isoformat()
+                if snapshot.get("maintenance_start")
+                else None
+            ),
+            "maintenance_end_at": (
+                snapshot["maintenance_end"].isoformat()
+                if snapshot.get("maintenance_end")
+                else None
+            ),
+            "os_build_number": record["os_build_number"],
+            "os_release_id": record["os_release_id"],
+            "service_tag": raw.get("serviceTag") or raw_system.get("serviceTag"),
+        }
+        if identity["vmx_path"]:
+            canonical_extra.update(
+                {
+                    "vmx_path": identity["vmx_path"],
+                    "vmx_path_normalized": identity["vmx_path_normalized"],
+                    "guest_tools_status": raw.get("toolStatus"),
+                    "guest_tools_install_type": raw.get("toolsInstallType"),
+                    "guest_tools_version": raw.get("toolsVersion"),
+                }
+            )
+        vm_extras = (vm_tracking or {}).get(record["id"])
+        if vm_extras:
+            _add_vm_canonical_measurements(canonical_extra, vm_extras)
+        hostname = record["system_name"] or record["display_name"] or record["dns_name"]
+        source_rows.append(
+            {
+                "entity_type": entity_type,
+                "platform_device_id": str(record["id"]),
+                "entity_key": identity["entity_key"],
+                "external_namespace": identity["external_namespace"],
+                "parent_external_namespace": identity["parent_external_namespace"],
+                "parent_external_id": identity["parent_external_id"],
+                "external_id": identity["external_id"],
+                "container_external_namespace": NINJA_ORG_EXTERNAL_NAMESPACE,
+                "container_external_id": organization_id,
+                "platform_group_id": organization_id,
+                "platform_group_name": organization.get("name") or "",
+                "hostname": hostname,
+                "serial_number": record["serial_number"],
+                "macs": sorted(
+                    {
+                        m
+                        for m in (
+                            normalize_mac(value)
+                            for value in (record.get("mac_addresses") or [])
+                            if isinstance(value, str)
+                        )
+                        if m
+                    }
+                ),
+                "device_type": infer_device_role(
+                    record["os_name"], record["node_class"]
+                ),
+                "os_name": record["os_name"],
+                "domain_name": (
+                    record["dns_name"].split(".", 1)[1]
+                    if record["dns_name"] and "." in record["dns_name"]
+                    else None
+                ),
+                "is_online": None if offline is None else not offline,
+                "last_seen_at": last_contact,
+                "canonical_extra": canonical_extra,
+                "raw_data": Json(raw),
+            }
+        )
+
+    for organization_id, organization in organizations.items():
+        source_rows.append(
+            {
+                "_org_only": True,
+                "container_external_namespace": NINJA_ORG_EXTERNAL_NAMESPACE,
+                "container_external_id": organization_id,
+                "platform_group_id": organization_id,
+                "platform_group_name": organization.get("name") or "",
+            }
+        )
+
+    def write_daily_presence(cur, current_rows: list[dict], run_id: uuid.UUID) -> None:
+        written = write_daily_presence_rows(
+            cur,
+            (row for row in current_rows if row["entity_type"] != "org"),
+            snapshot_run_id=run_id,
+            observed_at=snapshot_at,
+        )
+        log.info("Inserted %d Ninja daily presence rows", written)
+
+    written = write_observations(
+        source,
+        source_rows,
+        uuid.uuid4(),
+        snapshot_at,
+        after_current_write=write_daily_presence,
+    )
+    if unknown_classes:
+        log.warning("Ninja records with unmapped node_class: %s", unknown_classes)
+    return written
+
+
+def _ninja_organizations() -> dict[str, dict[str, object]]:
+    """Read staged org metadata solely for the normalized container rows."""
+    with db.transaction() as cur:
+        cur.execute("SELECT id, name FROM ninja_core.organizations")
+        return {str(row[0]): {"name": row[1] or ""} for row in cur.fetchall()}
+
+
+def _write_ninja_observations_legacy(
     device_rows: list[dict],
     snapshot_rows: list[dict],
     snapshot_at: datetime,
@@ -671,9 +852,13 @@ def _write_ninja_observations(
                         vm_uuid=canonical_data.get("vm_uuid"),
                         # The one SQL normalization (ADR-0034 section 1).
                         hostname=record_name_short(
-                            cur, "Ninja", entity_type, canonical_data["hostname"],
+                            cur,
+                            "Ninja",
+                            entity_type,
+                            canonical_data["hostname"],
                             canonical_data.get("domain"),
-                        ) or None,
+                        )
+                        or None,
                         macs=canonical_data["macs"],
                         client_id=client_id,
                         policies=identity_policies,
@@ -788,9 +973,7 @@ def _write_ninja_observations(
                 identity_rows=current_rows,
             )
             device_current_rows = [
-                row
-                for row in current_rows
-                if row["entity_type"] != "org"
+                row for row in current_rows if row["entity_type"] != "org"
             ]
             rollup_written = write_daily_presence_rows(
                 cur,
