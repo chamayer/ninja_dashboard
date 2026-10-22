@@ -18,20 +18,21 @@
   </div>
 </div>
 <div class="card">
-  <p class="muted ic-legend"><strong>Coverage</strong> — for each source: computers with a current record from that source / the client's active computers (retired excluded). Green = every computer, amber = some missing, red = none. <strong>Gaps</strong> = sources that do not cover every computer. Hover a source for details.</p>
+  <p class="muted ic-legend"><strong>Coverage</strong> — for each source: computers with a current record from that source / the client's active computers (retired excluded). Green = every computer, amber = some missing, red = none. <strong>First / last seen</strong> = earliest and latest time any source reported this client. Hover a source for details.</p>
   <table class="ops-table" data-sortable>
-    <thead><tr><th>Client</th><th class="num">Computers</th><th>Coverage by source</th><th class="num">Gaps</th><th class="num">Name differences</th><th></th></tr></thead>
+    <thead><tr><th>Client</th><th class="num">Computers</th><th>Coverage by source</th><th class="num">First seen</th><th class="num">Last seen</th><th class="num">Name differences</th><th></th></tr></thead>
     <tbody>
     {% for row in rows %}
     <tr>
       <td><a href="{% url 'org_index' org_slug=row.client.slug %}">{{ row.client.display_name }}</a></td>
       <td class="num"><a href="{% url 'org_devices' org_slug=row.client.slug %}">{{ row.computer_count }}</a></td>
-      <td><div class="ic-cov">{% for item in row.coverage %}<span class="badge {% if item.complete %}badge-low{% elif item.covered %}badge-medium{% elif row.computer_count %}badge-high{% else %}badge-info{% endif %}" title="{{ item.covered }} of {{ row.computer_count }} active computer{{ row.computer_count|pluralize }} {{ item.covered|pluralize:'has,have' }} a current {{ item.source }} record · {% if item.groups %}{{ item.groups }} {{ item.source }} group{{ item.groups|pluralize }} mapped to this client{% else %}no {{ item.source }} group mapped to this client{% endif %}">{{ item.source }} {{ item.covered }}/{{ row.computer_count }}{% if item.groups > 1 %} <small>· {{ item.groups }} groups</small>{% endif %}</span>{% empty %}<span class="muted">No attached source record</span>{% endfor %}</div></td>
-      <td class="num">{% if row.gap_count %}{{ row.gap_count }}{% else %}<span class="muted">0</span>{% endif %}</td>
+      <td><div class="ic-cov">{% for item in row.coverage %}<span class="badge {% if item.complete %}badge-low{% elif item.covered %}badge-medium{% elif row.computer_count %}badge-high{% else %}badge-info{% endif %}" title="{{ item.covered }} of {{ row.computer_count }} active computer{{ row.computer_count|pluralize }} {{ item.covered|pluralize:'has,have' }} a current {{ item.source }} record · {% if item.groups %}{{ item.groups }} {{ item.source }} group{{ item.groups|pluralize }} mapped to this client{% else %}no {{ item.source }} group mapped to this client{% endif %}{% if item.last_seen %} · last seen {{ item.last_seen|date:"Y-m-d H:i" }}{% endif %}">{{ item.source }} {{ item.covered }}/{{ row.computer_count }}{% if item.groups > 1 %} <small>· {{ item.groups }} groups</small>{% endif %}</span>{% empty %}<span class="muted">No attached source record</span>{% endfor %}</div></td>
+      <td class="num muted">{{ row.first_seen|date:"Y-m-d"|default:"—" }}</td>
+      <td class="num muted">{{ row.last_seen|date:"Y-m-d H:i"|default:"—" }}</td>
       <td class="num">{% if row.name_difference_count %}<a class="badge badge-high" href="{% url 'findings_queue' %}?category=inventory&amp;type=client_name_differences&amp;issue=client_name_conflict&amp;client={{ row.client.slug }}">{{ row.name_difference_count }} open</a>{% else %}<span class="muted">0</span>{% endif %}</td>
       <td><a href="{% url 'client_mappings' %}?client_id={{ row.client.id }}">Source records</a></td>
     </tr>
-    {% empty %}<tr><td colspan="6">No clients match this search.</td></tr>{% endfor %}
+    {% empty %}<tr><td colspan="7">No clients match this search.</td></tr>{% endfor %}
     </tbody>
   </table>
 </div>

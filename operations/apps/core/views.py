@@ -12646,6 +12646,7 @@ def inventory_clients(request: HttpRequest) -> HttpResponse:
             "client": client,
             "computer_count": 0,
             "groups": {},
+            "references": [],
             "covered": {},
             "name_difference_count": 0,
         }
@@ -12654,8 +12655,7 @@ def inventory_clients(request: HttpRequest) -> HttpResponse:
     for reference in client_source_references():
         row = rows_by_client.get(str(reference["client_id"]))
         if row is not None:
-            source = reference["source_name"]
-            row["groups"][source] = row["groups"].get(source, 0) + 1
+            row["references"].append(reference)
 
     active_computers = Device.objects.filter(tenant_id=1, deleted_at__isnull=True).exclude(
         lifecycle_status=Device.LifecycleStatus.RETIRED
@@ -12698,16 +12698,33 @@ def inventory_clients(request: HttpRequest) -> HttpResponse:
 
     for row in rows_by_client.values():
         total = row["computer_count"]
+        references = row["references"]
+        row["first_seen"] = min(
+            (r["first_seen_at"] for r in references if r["first_seen_at"]), default=None
+        )
+        row["last_seen"] = max(
+            (r["last_seen_at"] for r in references if r["last_seen_at"]), default=None
+        )
+        for reference in references:
+            source = reference["source_name"]
+            row["groups"][source] = row["groups"].get(source, 0) + 1
         row["coverage"] = [
             {
                 "source": source,
                 "covered": row["covered"].get(source, 0),
                 "groups": row["groups"].get(source, 0),
+                "last_seen": max(
+                    (
+                        r["last_seen_at"]
+                        for r in references
+                        if r["source_name"] == source and r["last_seen_at"]
+                    ),
+                    default=None,
+                ),
                 "complete": total > 0 and row["covered"].get(source, 0) >= total,
             }
             for source in sorted(set(row["groups"]) | set(row["covered"]))
         ]
-        row["gap_count"] = sum(1 for item in row["coverage"] if total and not item["complete"])
 
     open_candidates = ClientCandidate.objects.filter(
         tenant_id=1, status=ClientCandidate.Status.OPEN
