@@ -152,7 +152,7 @@ def drain_client_resolution() -> int:
                         "normalized_name": normalized,
                         "candidate_client_ids": [str(cid) for cid in matches],
                     },
-                    severity="high",
+                    severity="critical",
                     admin=True,
                 )
                 _upsert_candidate(
@@ -174,7 +174,7 @@ def drain_client_resolution() -> int:
                     "external_name": group_name,
                 },
                 details={"normalized_name": normalized},
-                severity="medium",
+                severity="critical",
                 admin=True,
             )
 
@@ -467,7 +467,7 @@ def _emit_unnamed_source_group_finding(
             gen_random_uuid(), 1, %s, %s, NULL,
             'source_binding', %s, '', NULL,
             %s::jsonb, %s,
-            'low', 'confirmed', 'open',
+            'critical', 'confirmed', 'open',
             %s, %s, %s
         )
         ON CONFLICT (tenant_id, condition_key)
@@ -475,7 +475,8 @@ def _emit_unnamed_source_group_finding(
         DO UPDATE SET
             last_seen_at = NOW(),
             last_detected_at = NOW(),
-            finding_details = EXCLUDED.finding_details
+            finding_details = EXCLUDED.finding_details,
+            severity = EXCLUDED.severity
         """,
         (
             _TENANT_ID, ft_id, binding_id,
@@ -520,7 +521,9 @@ def _emit_finding(
                 WHERE status IN ('open', 'acknowledged', 'investigating', 'suppressed')
             DO UPDATE SET
                 last_detected_at = EXCLUDED.last_detected_at,
-                details          = EXCLUDED.details
+                details          = EXCLUDED.details,
+                subject_ref      = EXCLUDED.subject_ref,
+                severity         = EXCLUDED.severity
             """,
             (
                 _TENANT_ID, ft_id, condition_key, severity,
@@ -551,6 +554,7 @@ def _emit_finding(
                 last_seen_at     = EXCLUDED.last_seen_at,
                 last_detected_at = EXCLUDED.last_detected_at,
                 finding_details  = EXCLUDED.finding_details,
+                severity         = EXCLUDED.severity,
                 status           = CASE
                     WHEN findings.status = 'resolved' THEN 'open'
                     ELSE findings.status
@@ -767,7 +771,7 @@ def _check_name_drift(cur) -> None:
                 "observed_name": observed_name,
                 "peer_source_names": peer_names,
             },
-            severity="low" if mapping_state == "automatic" else "medium",
+            severity="critical",
             admin=False,
             client_id=client_id,
         )
@@ -863,7 +867,7 @@ def _check_mapping_topology(cur) -> None:
                 "source_group_names": source_group_names,
                 "source_link_ids": source_link_ids,
             },
-            severity="high" if kind == "split" else "medium",
+            severity="critical",
             admin=True,
         )
     _resolve_unseen_topology_findings(cur, "client_link_collision", "split", active["split"])

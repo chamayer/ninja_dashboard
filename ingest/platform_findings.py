@@ -94,7 +94,9 @@ def _upsert_admin_finding(
             WHERE status IN ('open', 'acknowledged', 'investigating', 'suppressed')
         DO UPDATE SET
             last_detected_at = EXCLUDED.last_detected_at,
-            details = EXCLUDED.details
+            details = EXCLUDED.details,
+            subject_ref = EXCLUDED.subject_ref,
+            severity = EXCLUDED.severity
         RETURNING id
         """,
         (
@@ -234,7 +236,7 @@ def _eval_source_failures(
             cur,
             finding_type_id=finding_type_id,
             condition_key=key,
-            severity="high",
+            severity="critical",
             now=now,
             subject_ref={
                 "source_binding_id": problem.binding_id,
@@ -595,13 +597,12 @@ def _eval_jobs_schedule_failures(
         key = f"jobs_schedule_failure:{schedule_id}"
         keys.append(key)
         counts["jobs_schedule_failure"] += 1
-        outcome = str(row.get("last_outcome") or "")
         _emit_jobs_finding(
             cur,
             finding_type_id=finding_type_id,
             type_name="jobs_schedule_failure",
             condition_key=key,
-            severity="high" if outcome in {"failed", "stalled"} else "medium",
+            severity="critical",
             subject_key=schedule_id,
             details={
                 **row,
@@ -632,7 +633,7 @@ def _eval_jobs_required_disabled(
             finding_type_id=finding_type_id,
             type_name="jobs_required_disabled",
             condition_key=key,
-            severity="high",
+            severity="critical",
             subject_key=schedule_id,
             details={
                 **row,
@@ -665,7 +666,7 @@ def _eval_jobs_queue_backlog(
             finding_type_id=finding_type_id,
             type_name="jobs_queue_backlog",
             condition_key=key,
-            severity="high" if set(row["breached"]) == {"depth", "age"} else "medium",
+            severity="critical" if set(row["breached"]) == {"depth", "age"} else "medium",
             subject_key=queue_key,
             details={
                 **row,
@@ -695,7 +696,7 @@ def _eval_jobs_repeated_failures(
             finding_type_id=finding_type_id,
             type_name="jobs_repeated_failure",
             condition_key=key,
-            severity="high",
+            severity="critical",
             subject_key=job_key,
             details={**row, "control_section": "runs", "job_key": job_key},
             now=now,
@@ -722,7 +723,7 @@ def _eval_jobs_timeouts(
             finding_type_id=finding_type_id,
             type_name="jobs_timeout",
             condition_key=key,
-            severity="high",
+            severity="critical",
             subject_key=run_id,
             details={**row, "control_section": "runs"},
             now=now,
@@ -749,7 +750,7 @@ def _eval_jobs_unmet_dependencies(
             finding_type_id=finding_type_id,
             type_name="jobs_unmet_dependency",
             condition_key=key,
-            severity="high" if row.get("state") == "blocked" else "medium",
+            severity="critical" if row.get("state") == "blocked" else "medium",
             subject_key=dependency_id,
             details={**row, "control_section": "dependencies"},
             now=now,

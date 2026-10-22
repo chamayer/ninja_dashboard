@@ -260,7 +260,9 @@ def _upsert_admin_finding(
             WHERE status IN ('open', 'acknowledged', 'investigating', 'suppressed')
         DO UPDATE SET
             last_detected_at = EXCLUDED.last_detected_at,
-            details          = EXCLUDED.details
+            details          = EXCLUDED.details,
+            subject_ref      = EXCLUDED.subject_ref,
+            severity         = EXCLUDED.severity
         RETURNING id
         """,
         (
@@ -2741,7 +2743,7 @@ def _upsert_finding(
     details: dict[str, Any],
     assessment: tuple[tuple[Signal, ...], EvaluationCoverage] | None = None,
 ) -> int:
-    """UPSERT a finding. Severity is immutable; confidence and timestamps update."""
+    """Refresh one finding while preserving its episode and operator state."""
     cur.execute(
         """
         INSERT INTO operations.findings (
@@ -2758,6 +2760,10 @@ def _upsert_finding(
         ON CONFLICT (tenant_id, condition_key)
             WHERE condition_key > '' AND status IN ('open', 'acknowledged', 'investigating', 'suppressed')
         DO UPDATE SET
+            client_id       = EXCLUDED.client_id,
+            subject_id      = EXCLUDED.subject_id,
+            finding_details = EXCLUDED.finding_details,
+            severity        = EXCLUDED.severity,
             confidence      = EXCLUDED.confidence,
             last_seen_at    = EXCLUDED.last_seen_at,
             last_detected_at = EXCLUDED.last_detected_at,

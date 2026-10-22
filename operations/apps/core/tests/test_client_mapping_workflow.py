@@ -57,3 +57,16 @@ def test_inventory_client_coverage_shows_each_source_name_as_evidence():
     assert "item.reported_names|join" in page
     assert "no current source name" in page
     assert '"reported_names": sorted(' in _VIEWS
+
+
+def test_client_mapping_conflicts_are_prominent_on_client_and_fleet_dashboards():
+    inventory = _template("inventory_clients.html")
+    client_dashboard = _template("org_index.html")
+    dashboard = _template("home.html")
+
+    assert "Client mapping conflicts" in inventory
+    assert "critical</a>" in inventory
+    assert "Critical client mapping conflict" in client_dashboard
+    assert "client_mapping_conflict_url" in client_dashboard
+    assert "critical client mapping conflict" in dashboard
+    assert "client_mapping_conflict_clients" in _VIEWS

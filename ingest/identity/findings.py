@@ -593,6 +593,8 @@ def _upsert(
                 subject_id       = EXCLUDED.subject_id,
                 client_id        = EXCLUDED.client_id,
                 finding_details  = EXCLUDED.finding_details,
+                severity         = EXCLUDED.severity,
+                confidence       = EXCLUDED.confidence,
                 last_seen_at     = EXCLUDED.last_seen_at,
                 last_detected_at = EXCLUDED.last_detected_at
             RETURNING id

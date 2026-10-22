@@ -574,9 +574,14 @@ def _upsert(
         ON CONFLICT (tenant_id, condition_key)
             WHERE condition_key > '' AND status IN ('open', 'acknowledged', 'investigating', 'suppressed')
         DO UPDATE SET
+            client_id        = EXCLUDED.client_id,
+            subject_type     = EXCLUDED.subject_type,
+            subject_id       = EXCLUDED.subject_id,
             last_seen_at     = EXCLUDED.last_seen_at,
             last_detected_at = EXCLUDED.last_detected_at,
             finding_details  = EXCLUDED.finding_details,
+            severity         = EXCLUDED.severity,
+            confidence       = EXCLUDED.confidence,
             status           = CASE
                 WHEN findings.status = 'resolved' THEN 'open'
                 ELSE findings.status

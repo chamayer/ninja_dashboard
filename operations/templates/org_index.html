@@ -22,6 +22,8 @@
   .context-primary span, .context-stat span { display:block; margin-top:0.18rem; color:var(--muted); font-size:0.7rem; }
   .context-stat strong { display:block; font-size:1.15rem; color:#1a1a2e; }
   .context-label { color:var(--muted); font-size:0.67rem; font-weight:700; letter-spacing:.05em; text-transform:uppercase; }
+  .client-mapping-alert { margin:0 0 1rem; padding:.85rem 1rem; color:#7f1d1d; background:#fff1f2; border:1px solid #fecdd3; border-left:4px solid #dc2626; border-radius:7px; }
+  .client-mapping-alert h2 { margin:0; font-size:.95rem; }.client-mapping-alert p { margin:.3rem 0 0; font-size:.78rem; }.client-mapping-alert a { color:#991b1b; font-weight:750; }
 
   .domain-grid { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:0.7rem; margin-bottom:1rem; }
   .domain-panel { display:flex; flex-direction:column; min-height:190px; padding:1rem; background:#fff; border:1px solid var(--border); border-radius:7px; }
@@ -110,6 +112,13 @@
     {% if issue_trend %}<br>{{ issue_trend.open_now }} open issues · {% if issue_trend.open_change > 0 %}up {{ issue_trend.open_change }}{% elif issue_trend.open_change < 0 %}down {{ issue_trend.open_change_abs }}{% else %}unchanged{% endif %} from 7 days ago{% endif %}
   </div>
 </div>
+
+{% if client_mapping_conflict_count %}
+<section class="client-mapping-alert" aria-label="Critical client mapping conflict">
+  <h2>Critical client mapping conflict</h2>
+  <p>{{ client_mapping_conflict_count }} active mapping conflict{{ client_mapping_conflict_count|pluralize }} can misattribute this client’s inventory and coverage. <a href="{{ client_mapping_conflict_url }}">Review mapping conflicts →</a></p>
+</section>
+{% endif %}
 
 <section class="context-strip" aria-label="Client context">
   <div class="context-primary">

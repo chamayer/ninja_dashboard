@@ -375,9 +375,13 @@ def _maybe_create_candidate(
             ON CONFLICT (tenant_id, condition_key)
             WHERE condition_key > '' AND status IN ('open', 'acknowledged', 'investigating', 'suppressed')
             DO UPDATE SET
+                client_id = EXCLUDED.client_id,
+                subject_id = EXCLUDED.subject_id,
                 last_seen_at = NOW(),
                 last_detected_at = NOW(),
-                finding_details = EXCLUDED.finding_details
+                finding_details = EXCLUDED.finding_details,
+                severity = EXCLUDED.severity,
+                confidence = EXCLUDED.confidence
             """,
             (
                 TENANT_ID,
@@ -1781,10 +1785,13 @@ def _upsert_shared_serial_findings(cur, finding_type_id: int) -> int:
         ON CONFLICT (tenant_id, condition_key)
         WHERE condition_key > '' AND status IN ('open', 'acknowledged', 'investigating', 'suppressed')
         DO UPDATE SET
+            client_id = EXCLUDED.client_id,
             subject_id = EXCLUDED.subject_id,
             last_seen_at = NOW(),
             last_detected_at = NOW(),
-            finding_details = EXCLUDED.finding_details
+            finding_details = EXCLUDED.finding_details,
+            severity = EXCLUDED.severity,
+            confidence = EXCLUDED.confidence
         RETURNING id, condition_key, subject_id
         """,
         (TENANT_ID, finding_type_id),
@@ -1888,9 +1895,13 @@ def _upsert_cross_client_serial_findings(cur, finding_type_id: int) -> int:
         ON CONFLICT (tenant_id, condition_key)
         WHERE condition_key > '' AND status IN ('open', 'acknowledged', 'investigating', 'suppressed')
         DO UPDATE SET
+            client_id = EXCLUDED.client_id,
+            subject_id = EXCLUDED.subject_id,
             last_seen_at = NOW(),
             last_detected_at = NOW(),
-            finding_details = EXCLUDED.finding_details
+            finding_details = EXCLUDED.finding_details,
+            severity = EXCLUDED.severity,
+            confidence = EXCLUDED.confidence
         """,
         (TENANT_ID, finding_type_id),
     )
@@ -2121,9 +2132,13 @@ def _sync_device_attributes(cur) -> None:
             ON CONFLICT (tenant_id, condition_key)
             WHERE condition_key > '' AND status IN ('open', 'acknowledged', 'investigating', 'suppressed')
             DO UPDATE SET
+                client_id = EXCLUDED.client_id,
+                subject_id = EXCLUDED.subject_id,
                 last_seen_at = NOW(),
                 last_detected_at = NOW(),
-                finding_details = EXCLUDED.finding_details
+                finding_details = EXCLUDED.finding_details,
+                severity = EXCLUDED.severity,
+                confidence = EXCLUDED.confidence
             """,
             (ft_placeholder, TENANT_ID),
         )
@@ -2180,16 +2195,20 @@ def _sync_device_attributes(cur) -> None:
                     'first_seen_at', u.first_seen_at
                 ),
                 'unmatched_source_group:' || u.source_id || ':' || u.external_id,
-                'medium', 'confirmed', 'open',
+                'critical', 'confirmed', 'open',
                 u.first_seen_at, u.last_seen_at, NOW()
             FROM operations.unmatched_source_groups u
             WHERE u.tenant_id = %s AND u.status = 'pending'
             ON CONFLICT (tenant_id, condition_key)
             WHERE condition_key > '' AND status IN ('open', 'acknowledged', 'investigating', 'suppressed')
             DO UPDATE SET
+                client_id = EXCLUDED.client_id,
+                subject_id = EXCLUDED.subject_id,
                 last_seen_at = NOW(),
                 last_detected_at = NOW(),
-                finding_details = EXCLUDED.finding_details
+                finding_details = EXCLUDED.finding_details,
+                severity = EXCLUDED.severity,
+                confidence = EXCLUDED.confidence
             """,
             (ft_unmatched, TENANT_ID),
         )
@@ -2251,9 +2270,13 @@ def _sync_device_attributes(cur) -> None:
             ON CONFLICT (tenant_id, condition_key)
             WHERE condition_key > '' AND status IN ('open', 'acknowledged', 'investigating', 'suppressed')
             DO UPDATE SET
+                client_id = EXCLUDED.client_id,
+                subject_id = EXCLUDED.subject_id,
                 last_seen_at = NOW(),
                 last_detected_at = NOW(),
-                finding_details = EXCLUDED.finding_details
+                finding_details = EXCLUDED.finding_details,
+                severity = EXCLUDED.severity,
+                confidence = EXCLUDED.confidence
             """,
             (ft_placeholder_mac, TENANT_ID),
         )

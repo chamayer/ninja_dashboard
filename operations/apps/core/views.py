@@ -1105,6 +1105,37 @@ def home(request: HttpRequest) -> HttpResponse:  # noqa: PLR0912, PLR0915
             stats["total"] += row["n"]
             stats["new_total"] += row["new"]
 
+    client_mapping_types = (
+        "client_name_conflict",
+        "client_link_collision",
+        "client_source_group_merge",
+        "client_unattached_group",
+        "unnamed_source_group",
+        "unmatched_source_group",
+    )
+    client_mapping_entity_findings = Finding.objects.filter(
+        tenant_id=1,
+        finding_type__name__in=client_mapping_types,
+        status__in=_FINDING_ACTIVE_STATUSES,
+    )
+    client_mapping_conflict_count = (
+        client_mapping_entity_findings.count()
+        + AdminFinding.objects.filter(
+            tenant_id=1,
+            finding_type__name__in=client_mapping_types,
+            status__in=_FINDING_ACTIVE_STATUSES,
+        ).count()
+    )
+    client_mapping_conflict_clients = (
+        client_mapping_entity_findings.exclude(client_id__isnull=True)
+        .values("client_id")
+        .distinct()
+        .count()
+    )
+    client_mapping_conflict_url = f"{reverse('findings_queue')}?" + urlencode(
+        {"category": "inventory"}
+    )
+
     patching_by_client: dict = {}
     source_rows: dict = {}
     recent_patch_activity = {"installed": 0, "failed": 0}
@@ -1803,6 +1834,9 @@ def home(request: HttpRequest) -> HttpResponse:  # noqa: PLR0912, PLR0915
             "kpis": kpis,
             "attention_items": attention_items[:6],
             "attention_group_count": len(attention_items),
+            "client_mapping_conflict_count": client_mapping_conflict_count,
+            "client_mapping_conflict_clients": client_mapping_conflict_clients,
+            "client_mapping_conflict_url": client_mapping_conflict_url,
             "domain_summaries": domain_summaries,
             "movement": movement,
             "system_status": system_status,
@@ -1856,6 +1890,29 @@ def org_index(request: HttpRequest, org_slug: str) -> HttpResponse:
         ctx["device_count"] = len(devices)
         ctx["type_summary"] = _type_summary(devices)
         ctx["client_links"] = client_source_references(client_id=client.id)
+        ctx["client_mapping_conflict_count"] = Finding.objects.filter(
+            tenant_id=1,
+            client=client,
+            finding_type__name__in=(
+                "client_name_conflict",
+                "client_link_collision",
+                "client_source_group_merge",
+                "client_unattached_group",
+                "unnamed_source_group",
+                "unmatched_source_group",
+            ),
+            status__in=_FINDING_ACTIVE_STATUSES,
+        ).count()
+        ctx["client_mapping_conflict_url"] = (
+            f"{reverse('findings_queue')}?"
+            + urlencode(
+                {
+                    "category": "inventory",
+                    "type": "client_mapping",
+                    "client": client.slug,
+                }
+            )
+        )
         ctx["policy_count"] = ClientPolicy.objects.filter(tenant_id=1, client=client).count()
         ctx["policy_categories"] = list(
             ClientPolicy.objects.filter(tenant_id=1, client=client)

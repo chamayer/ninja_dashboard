@@ -425,6 +425,8 @@ def _sync_findings(
             ON CONFLICT (tenant_id, condition_key)
                 WHERE condition_key > '' AND status IN ('open', 'acknowledged', 'investigating', 'suppressed')
             DO UPDATE SET
+                client_id = EXCLUDED.client_id,
+                subject_id = EXCLUDED.subject_id,
                 finding_details = EXCLUDED.finding_details,
                 severity = EXCLUDED.severity,
                 confidence = EXCLUDED.confidence,
