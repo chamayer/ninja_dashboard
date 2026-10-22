@@ -7,6 +7,16 @@ module-specific; root `../TODO.md` keeps cross-repo items and pointers.
 
 ## Inbox
 
+- [ ] **Scoped baseline requirements replace instead of add** (2026-10-22).
+      In `ingest/evaluator.py` `_evaluate_coverage.resolve_tier`, a server
+      gets the profile/global items scoped `server` *instead of* the `all`
+      items (`scopes.get(dev_role) or scopes.get("all")`), while client
+      overrides and the finding-resolution SQL in the same file treat scopes
+      as additive. The Requirements page therefore offers baseline items for
+      all devices only. Needs a decision on whether scoped baseline items
+      should add to the all-devices list (a findings behaviour change for any
+      existing scoped items; measure them in production first).
+
 - [ ] **Publisher approvals do not reach installs with a variant publisher
       name** (2026-10-22). Reconcile matches `lower(i.publisher)` exactly,
       so "Adobe Systems Incorporated" installs keep "Adobe Bridge" open under

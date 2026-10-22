@@ -5,67 +5,80 @@
 {% block content %}
 <div class="card">
     <div style="display:flex; align-items:center; justify-content:space-between; gap:1rem;">
-        <h1 style="margin:0;">Requirement profiles</h1>
+        <h1 style="margin:0;">Requirements</h1>
         {% include "_csv_download.html" %}
     </div>
     <p class="muted">
-        Each profile is a reusable baseline of required
-        (entity_type, platform, device_scope) rows evaluated per device.
-        A client can independently require or exempt a service from its
-        Configuration page; clients without a profile use tenant defaults.
-        Edit items via <a href="{% url 'admin:index' %}">Django admin</a>
-        until inline CRUD lands.
+        These are the baselines clients inherit. A client with no profile uses
+        the global requirements; a client with a profile uses that profile's
+        list instead. Each client can still require or exempt a single service
+        on its Configuration page. The profile marked "default for new clients"
+        is only preselected when a new client is accepted. Changes apply at the
+        next requirement evaluation.
+    </p>
+    <p class="muted">
+        Services are required here for all eligible devices. A servers-only
+        baseline entry would replace the whole list for servers rather than add
+        to it, so it is not offered; any that already exist can be removed.
+        Require a service on servers only from a client's Configuration page.
     </p>
 </div>
 
-{% for r in rows %}
-<div class="card">
+<div class="card" id="global">
     <h2 style="margin-top: 0;">
-        {{ r.profile.name }}
-        {% if r.profile.is_tenant_default %}<span class="badge badge-info">tenant default</span>{% endif %}
+        Global requirements
         <span class="muted" style="font-size: 0.85rem; font-weight: 400; margin-left: 0.5rem;">
-            {{ r.client_count }} client{{ r.client_count|pluralize }} · {{ r.items|length }} item{{ r.items|length|pluralize }}
+            used by {{ global_client_count }} client{{ global_client_count|pluralize }} with no profile
         </span>
     </h2>
-    {% if r.profile.description %}
-    <p class="muted">{{ r.profile.description }}</p>
-    {% endif %}
-
-    {% if r.items %}
-    <table data-sortable class="ops-table">
-        <thead>
-            <tr>
-                <th>Entity type</th>
-                <th>Platform</th>
-                <th>Scope</th>
-                <th>Severity</th>
-                <th>Gap (h)</th>
-                <th>Probable</th>
-                <th>Confirmed</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for i in r.items %}
-            <tr>
-                <td class="mono">{{ i.entity_type }}</td>
-                <td>{{ i.platform }}</td>
-                <td class="muted">{{ i.device_scope }}</td>
-                <td><span class="badge badge-{{ i.severity }}">{{ i.severity }}</span></td>
-                <td class="num">{{ i.gap_after_hours }}</td>
-                <td class="num">{{ i.confidence_probable }}</td>
-                <td class="num">{{ i.confidence_confirmed }}</td>
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
-    {% else %}
-    <p class="muted"><em>Empty profile — this client declares no required platforms.
-        No coverage findings will fire for their devices.</em></p>
-    {% endif %}
+    {% include "_requirement_baseline_table.html" with service_rows=global_service_rows target="global" %}
 </div>
-{% empty %}
-<div class="card">
-    <p class="muted">No requirement profiles configured yet.</p>
+
+{% for r in rows %}
+<div class="card" id="profile-{{ r.profile.id }}">
+    <h2 style="margin-top: 0;">
+        {{ r.profile.name }}
+        {% if r.profile.is_tenant_default %}<span class="badge badge-info">default for new clients</span>{% endif %}
+        <span class="muted" style="font-size: 0.85rem; font-weight: 400; margin-left: 0.5rem;">
+            {{ r.client_count }} client{{ r.client_count|pluralize }} · {{ r.items|length }} requirement{{ r.items|length|pluralize }}
+        </span>
+    </h2>
+    {% if r.profile.description %}<p class="muted">{{ r.profile.description }}</p>{% endif %}
+    <div style="display:flex; align-items:end; gap:.6rem; flex-wrap:wrap; margin-bottom:.8rem;">
+        <form method="post" style="display:flex; align-items:end; gap:.6rem; flex-wrap:wrap;">
+            {% csrf_token %}<input type="hidden" name="action" value="update_profile"><input type="hidden" name="profile_id" value="{{ r.profile.id }}">
+            <label>Name<br><input name="name" value="{{ r.profile.name }}" maxlength="120" required></label>
+            <label>Description<br><input name="description" value="{{ r.profile.description }}" maxlength="240" size="40"></label>
+            <label><input type="checkbox" name="is_tenant_default"{% if r.profile.is_tenant_default %} checked{% endif %}> Default for new clients</label>
+            <button type="submit">Save profile</button>
+        </form>
+        <form method="post" onsubmit="return confirm('Delete the {{ r.profile.name|escapejs }} profile and its requirements?');">
+            {% csrf_token %}<input type="hidden" name="action" value="delete_profile"><input type="hidden" name="profile_id" value="{{ r.profile.id }}">
+            <button type="submit"{% if r.client_count %} disabled title="Assigned to {{ r.client_count }} client{{ r.client_count|pluralize }}; move them to another baseline first."{% endif %}>Delete profile</button>
+        </form>
+    </div>
+    {% if not r.items %}
+    <p class="muted"><em>Empty profile — clients using it have no required services
+        unless their Configuration page adds one.</em></p>
+    {% endif %}
+    {% include "_requirement_baseline_table.html" with service_rows=r.service_rows target=r.profile.id %}
 </div>
 {% endfor %}
+
+<div class="card" id="new-profile">
+    <h2 style="margin-top: 0;">New profile</h2>
+    <form method="post" style="display:flex; align-items:end; gap:.6rem; flex-wrap:wrap;">
+        {% csrf_token %}<input type="hidden" name="action" value="create_profile">
+        <label>Name<br><input name="name" maxlength="120" required></label>
+        <label>Description<br><input name="description" maxlength="240" size="40"></label>
+        <label>Start from<br>
+            <select name="start_from">
+                <option value="global">Global requirements</option>
+                {% for profile in profiles %}<option value="{{ profile.id }}">{{ profile.name }} profile</option>{% endfor %}
+                <option value="">Empty</option>
+            </select>
+        </label>
+        <button type="submit">Create profile</button>
+    </form>
+</div>
 {% endblock %}

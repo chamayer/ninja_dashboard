@@ -107,7 +107,7 @@ from .finding_actions import (
 )
 from .forms import ClientPolicyForm
 from .identity_actions import run_identity_action
-from . import computer_naming
+from . import computer_naming, requirement_baselines
 from .models import (
     AdminFinding,
     Agent,
@@ -136,6 +136,7 @@ from .models import (
     NotificationRule,
     ProductAuthorization,
     RequirementProfile,
+    RequirementProfileItem,
     SoftwareCatalog,
     SoftwareDecision,
     SoftwareSuggestionRule,
@@ -18304,25 +18305,274 @@ def admin_data(request: HttpRequest) -> HttpResponse:
     )
 
 
+def _requirements_redirect(anchor: str = "") -> HttpResponse:
+    url = reverse("requirement_profiles_list")
+    return redirect(f"{url}#{anchor}" if anchor else url)
+
+
+def _profile_details_form(request: HttpRequest, profile=None) -> tuple[str, str] | None:
+    """Validated name and description, or None after reporting the problem."""
+    name = (request.POST.get("name") or "").strip()
+    description = (request.POST.get("description") or "").strip()
+    name_limit = RequirementProfile._meta.get_field("name").max_length
+    description_limit = RequirementProfile._meta.get_field("description").max_length
+    if not name or len(name) > name_limit or len(description) > description_limit:
+        messages.error(
+            request,
+            f"A profile needs a name of up to {name_limit} characters and a description "
+            f"of up to {description_limit}.",
+        )
+        return None
+    taken = RequirementProfile.objects.filter(tenant_id=1, name__iexact=name)
+    if profile is not None:
+        taken = taken.exclude(id=profile.id)
+    if taken.exists():
+        messages.error(request, f"A profile named {name} already exists.")
+        return None
+    return name, description
+
+
+def _set_new_client_default(profile, is_default: bool) -> None:
+    """Make this profile the one preselected for new clients, or stop it being one."""
+    if is_default and not profile.is_tenant_default:
+        # Only one default may exist; clear the old one first.
+        for other in RequirementProfile.objects.filter(tenant_id=1, is_tenant_default=True):
+            other.is_tenant_default = False
+            other.save(update_fields=["is_tenant_default"])
+    if profile.is_tenant_default != is_default:
+        profile.is_tenant_default = is_default
+        profile.save(update_fields=["is_tenant_default"])
+
+
+def _profile_audit_state(profile) -> dict:
+    return {
+        "name": profile.name,
+        "description": profile.description,
+        "default_for_new_clients": profile.is_tenant_default,
+    }
+
+
+def _create_requirement_profile(request: HttpRequest) -> HttpResponse:
+    details = _profile_details_form(request)
+    if details is None:
+        return _requirements_redirect("new-profile")
+    start_from = request.POST.get("start_from") or ""
+    if start_from == "global":
+        source_rows = list(
+            CoverageRequirement.objects.filter(tenant_id=1, client__isnull=True, enabled=True)
+        )
+    elif start_from:
+        source = get_object_or_404(RequirementProfile, id=start_from, tenant_id=1)
+        source_rows = list(source.items.all())
+    else:
+        source_rows = []
+    profile = RequirementProfile.objects.create(
+        tenant_id=1, name=details[0], description=details[1]
+    )
+    copied: set[tuple] = set()
+    for row in source_rows:
+        # Global rows are not unique by service, so copy each shape once.
+        shape = (row.entity_type, row.platform, row.device_scope)
+        if shape in copied:
+            continue
+        copied.add(shape)
+        RequirementProfileItem.objects.create(
+            tenant_id=1,
+            profile=profile,
+            **{field: getattr(row, field) for field in requirement_baselines.COPIED_FIELDS},
+        )
+    _audit(
+        request,
+        "requirement_profile.create",
+        profile.id,
+        None,
+        {
+            **_profile_audit_state(profile),
+            "start_from": start_from or "empty",
+            "items": len(copied),
+        },
+        entity_type="requirement_profile",
+    )
+    messages.success(request, f"Profile {profile.name} created with {len(copied)} requirements.")
+    return _requirements_redirect(f"profile-{profile.id}")
+
+
+def _update_requirement_profile(request: HttpRequest, profile) -> HttpResponse:
+    details = _profile_details_form(request, profile)
+    if details is None:
+        return _requirements_redirect(f"profile-{profile.id}")
+    before = _profile_audit_state(profile)
+    profile.name, profile.description = details
+    profile.save(update_fields=["name", "description"])
+    _set_new_client_default(profile, request.POST.get("is_tenant_default") == "on")
+    after = _profile_audit_state(profile)
+    if after != before:
+        _audit(
+            request,
+            "requirement_profile.update",
+            profile.id,
+            before,
+            after,
+            entity_type="requirement_profile",
+        )
+    messages.success(request, f"Profile {profile.name} saved.")
+    return _requirements_redirect(f"profile-{profile.id}")
+
+
+def _delete_requirement_profile(request: HttpRequest, profile) -> HttpResponse:
+    # A deleted client still holds its profile (the reference is protected),
+    # so every client counts.
+    in_use = Client.objects.filter(tenant_id=1, requirement_profile=profile).count()
+    if in_use:
+        messages.error(
+            request,
+            f"Profile {profile.name} is assigned to {in_use} client{'s' if in_use != 1 else ''}. "
+            "Move them to another baseline on their Configuration page first.",
+        )
+        return _requirements_redirect(f"profile-{profile.id}")
+    before = {
+        **_profile_audit_state(profile),
+        "items": [
+            f"{item.platform}:{item.entity_type}:{item.device_scope}"
+            for item in profile.items.all()
+        ],
+    }
+    profile_id = profile.id
+    profile.delete()
+    _audit(
+        request,
+        "requirement_profile.delete",
+        profile_id,
+        before,
+        None,
+        entity_type="requirement_profile",
+    )
+    messages.success(request, f"Profile {before['name']} deleted.")
+    return _requirements_redirect()
+
+
+def _set_baseline_requirement(request: HttpRequest) -> HttpResponse:
+    """Require or stop requiring one service in the global or a profile baseline."""
+    target = request.POST.get("target") or ""
+    mode = request.POST.get("mode")
+    profile = (
+        None
+        if target == "global"
+        else get_object_or_404(RequirementProfile, id=target, tenant_id=1)
+    )
+    anchor = "global" if profile is None else f"profile-{profile.id}"
+    label = "global requirements" if profile is None else f"{profile.name} profile"
+    entity_type = "coverage_requirement" if profile is None else "requirement_profile_item"
+
+    if mode == "required":
+        agent = get_object_or_404(Agent, id=request.POST.get("agent_id"))
+        if profile is None:
+            rows = CoverageRequirement.objects.filter(
+                tenant_id=1, client__isnull=True, device_scope=requirement_baselines.ALL_SCOPE
+            )
+        else:
+            rows = profile.items.filter(device_scope=requirement_baselines.ALL_SCOPE)
+        existing = next(
+            (row for row in rows if requirement_baselines.matches_agent(row, agent)), None
+        )
+        was_required = existing is not None and (profile is not None or existing.enabled)
+        if existing is None:
+            model = CoverageRequirement if profile is None else RequirementProfileItem
+            extra = {} if profile is None else {"profile": profile}
+            row = model.objects.create(
+                tenant_id=1, **extra, **requirement_baselines.new_item_values(agent)
+            )
+        else:
+            row = existing
+            if not was_required:
+                # Re-enable the removed global row so its thresholds come back too.
+                row.enabled = True
+                row.save(update_fields=["enabled"])
+        if not was_required:
+            _audit(
+                request,
+                "requirement_baseline.require",
+                row.id,
+                {"baseline": label, "service": agent.name, "required": False},
+                {"baseline": label, "service": agent.name, "scope": row.device_scope},
+                entity_type=entity_type,
+            )
+        messages.success(request, f"{agent.name} is required in the {label}.")
+    elif mode == "not_required":
+        item_id = request.POST.get("item_id")
+        if profile is None:
+            row = get_object_or_404(
+                CoverageRequirement, id=item_id, tenant_id=1, client__isnull=True
+            )
+            row.enabled = False
+            row.save(update_fields=["enabled"])
+        else:
+            row = get_object_or_404(
+                RequirementProfileItem, id=item_id, tenant_id=1, profile=profile
+            )
+            row.delete()
+        _audit(
+            request,
+            "requirement_baseline.remove",
+            item_id,
+            {"baseline": label, "service": row.platform, "scope": row.device_scope},
+            {"baseline": label, "service": row.platform, "required": False},
+            entity_type=entity_type,
+        )
+        messages.success(request, f"{row.platform} is no longer required in the {label}.")
+    else:
+        messages.error(request, "Choose Required or Not required.")
+    return _requirements_redirect(anchor)
+
+
 @login_required
+@transaction.atomic
 def requirement_profiles_list(request: HttpRequest) -> HttpResponse:
+    """Edit the global requirements and each requirement profile."""
+    if request.method == "POST":
+        action = request.POST.get("action")
+        baseline_actions = {
+            "create_profile": _create_requirement_profile,
+            "set_requirement": _set_baseline_requirement,
+        }
+        profile_actions = {
+            "update_profile": _update_requirement_profile,
+            "delete_profile": _delete_requirement_profile,
+        }
+        if action in baseline_actions:
+            return baseline_actions[action](request)
+        if action not in profile_actions:
+            messages.error(request, "That change is not recognised.")
+            return _requirements_redirect()
+        profile = get_object_or_404(
+            RequirementProfile, id=request.POST.get("profile_id"), tenant_id=1
+        )
+        return profile_actions[action](request, profile)
+
+    agents = list(Agent.objects.all().order_by("name"))
     profiles = list(
         RequirementProfile.objects.filter(tenant_id=1)
         .prefetch_related("items")
         .order_by("-is_tenant_default", "name")
     )
+    client_counts = dict(
+        Client.objects.filter(tenant_id=1, deleted_at__isnull=True)
+        .values("requirement_profile_id")
+        .annotate(n=Count("id"))
+        .values_list("requirement_profile_id", "n")
+    )
+    global_required = CoverageRequirement.objects.filter(
+        tenant_id=1, client__isnull=True, enabled=True
+    )
     rows = []
     for p in profiles:
-        client_count = Client.objects.filter(
-            tenant_id=1,
-            requirement_profile=p,
-            deleted_at__isnull=True,
-        ).count()
+        items = list(p.items.all())
         rows.append(
             {
                 "profile": p,
-                "items": list(p.items.all().order_by("device_scope", "entity_type", "platform")),
-                "client_count": client_count,
+                "items": sorted(items, key=lambda i: (i.device_scope, i.entity_type, i.platform)),
+                "service_rows": requirement_baselines.baseline_rows(agents, items),
+                "client_count": client_counts.get(p.id, 0),
             }
         )
     if wants_csv(request):
@@ -18350,6 +18600,9 @@ def requirement_profiles_list(request: HttpRequest) -> HttpResponse:
             "admin_group": "config",
             "admin_tab": "requirements",
             "rows": rows,
+            "profiles": profiles,
+            "global_service_rows": requirement_baselines.baseline_rows(agents, global_required),
+            "global_client_count": client_counts.get(None, 0),
         },
     )
 

@@ -1,0 +1,31 @@
+<table class="ops-table">
+  <thead><tr><th>Service</th><th>Scope</th><th>Status</th><th>Severity</th><th>Gap (h)</th><th>Probable (h)</th><th>Confirmed (h)</th><th>Setting</th></tr></thead>
+  <tbody>
+  {% for row in service_rows %}
+    <tr>
+      <td><strong>{{ row.name }}</strong><br><span class="muted">{{ row.entity_type }}</span></td>
+      <td>{% if row.scope == "all" %}All eligible devices{% elif row.scope == "server" %}Servers only{% else %}{{ row.scope|title }} only{% endif %}</td>
+      <td>{% if row.required %}<span class="badge badge-info">Required</span>{% else %}<span class="muted">Not required</span>{% endif %}</td>
+      {% if row.item %}
+      <td><span class="badge badge-{{ row.item.severity }}">{{ row.item.severity }}</span></td>
+      <td class="num">{{ row.item.gap_after_hours }}</td>
+      <td class="num">{{ row.item.confidence_probable }}</td>
+      <td class="num">{{ row.item.confidence_confirmed }}</td>
+      {% else %}<td class="muted">—</td><td class="muted">—</td><td class="muted">—</td><td class="muted">—</td>{% endif %}
+      <td><form method="post" style="display:flex; gap:.45rem; align-items:center;">
+          {% csrf_token %}<input type="hidden" name="action" value="set_requirement"><input type="hidden" name="target" value="{{ target }}">
+          {% if row.item %}<input type="hidden" name="item_id" value="{{ row.item.id }}">{% endif %}
+          {% if row.agent and row.scope == "all" %}
+          <input type="hidden" name="agent_id" value="{{ row.agent.id }}">
+          <select name="mode">
+            <option value="required" {% if row.required %}selected{% endif %}>Required</option>
+            <option value="not_required" {% if not row.required %}selected{% endif %}>Not required</option>
+          </select><button type="submit">Save</button>
+          {% else %}
+          <input type="hidden" name="mode" value="not_required"><button type="submit">Remove</button>
+          {% endif %}
+        </form></td>
+    </tr>
+  {% empty %}<tr><td colspan="8" class="muted">No services have been configured yet.</td></tr>{% endfor %}
+  </tbody>
+</table>

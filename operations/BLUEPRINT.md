@@ -1,3 +1,37 @@
+## Requirements page — edit baselines in the app
+
+Active. Goal: Admin → Config → Requirements edits requirement baselines the way
+a client's Configuration page edits its exceptions, replacing the dead
+"edit via Django admin" pointer (the models were never registered there).
+Scope: `requirement_baselines.py` (new, pure row building and item matching),
+`requirement_profiles_list` view (POST actions), `requirement_profiles.html`,
+tests. No schema, evaluator, or client-page change.
+Decisions: two baselines exist and both are edited here — the global
+requirements (client-less `coverage_requirements`, used by clients with no
+profile) and each profile's items. "Default for new clients"
+(`is_tenant_default`) only preselects a profile when a client is accepted; the
+page says so. Per service: Required / Not required. New items take the
+service's default thresholds (migration 0312 precedent). Removing a global
+requirement disables the row (reversible); a profile item has no enabled flag
+and is deleted (history trigger records it). New profiles may start empty, from
+the global requirements, or from another profile. A profile assigned to any
+client (including deleted ones; FK is PROTECT) cannot be deleted.
+Baseline items are offered for "All eligible devices" only: the evaluator's
+`resolve_tier` uses a role-scoped baseline list *instead of* the all-devices
+list (client overrides add on top), so a servers-only baseline item would
+silently drop every other requirement for servers. Existing scoped items are
+shown and removable. The replace-vs-add inconsistency is recorded in `TODO.md`.
+
+Checkpoint: implemented; committed and pushed with user approval (deploys; no
+migrations). Validation: `test_requirement_baselines.py`
+6 pass (row building, legacy matching, default thresholds, audit/guard
+source checks, table render) with related table/jobs/client-config tests (27
+total); `manage.py check` clean; ruff clean on new files and on the new
+`views.py` code (file total unchanged at the 86 pre-existing findings). Not
+validated: the POST actions against PostgreSQL (no local database) and the
+page in a browser. Next action: try create/require/remove/delete on the
+deployed page.
+
 ## Software review — publisher status and why titles stay open
 
 Active. Goal: the Software review publisher row shows the publisher's current
