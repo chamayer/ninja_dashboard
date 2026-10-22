@@ -1,3 +1,47 @@
+## Client mappings — unattached evidence columns
+
+Complete (deployment check pending). Goal: replace the misleading "Records" column (`seen_count`, which
+counts resolver passes, not records) on Client mappings › unattached with live
+evidence an operator can act on without opening the candidate.
+
+Scope: `client_mappings` view and template; candidate detail header drops the
+"seen N×" figure. No schema or resolver change; `seen_count` stays stored.
+Decisions: per source group, show whether the source still reports it
+(historical `source_refs` remain visible, marked "no longer reported");
+"Source records" counts active records in still-reported groups (matched on
+`platform_group_id`, the resolver's own attachment key, scoped by source), with
+"N linked" for those already matched to a Computer — production showed records
+in unattached groups are mostly unlinked, so a Computer count read ~0; "Likely
+client" is the client owning most linked Computers (evidence), else a clearly
+labelled similar-name suggestion. Reads use
+`v_entity_observation_admin_metadata` (raw observation table is revoked).
+Candidates are keyed by name, so a group renamed at the source sits under two
+candidates; the candidate with the newest `source_refs` entry owns the group
+and older names show "→ new name" with no live evidence. Candidate last-seen
+is one resolver-stamped date for the whole name, so per-group state is shown
+on the source badges.
+
+Extended (user-approved): ADR-0038 (Proposed) — the resolver moves a renamed
+unattached group off other open candidates and closes an emptied one as
+`renamed` (`_release_renamed_group`); migration 0337 adds the choice (no SQL).
+On deploy this also closes existing stale candidates such as "Rise NYC" on the
+next resolver pass. Issues queue: `client_name_conflict` rows now name their
+own source and name instead of the same peer list on every row. Remaining
+follow-ups are in `TODO.md`.
+
+Checkpoint: implemented locally. Validation: `manage.py check` and
+`makemigrations --check` clean; `sqlmigrate 0337` is a no-op; Ruff repo total
+unchanged (116); views.py format drift unchanged (58 hunks); operations tests
+(evidence, coverage, findings queue) 88 pass; ingest rename and
+drift-contract tests 6 pass. Production read-only check (2026-10-22, as
+`operations_app`, rolled back): both evidence queries run under the app role;
+Rise NYC's 3 groups resolve as renamed to Rize NYC; 464 active records sit in
+open candidates' groups, 79 linked. Not validated: the resolver UPDATE path
+against PostgreSQL; `test_resolver_maintenance.py` cannot load without DB
+settings. Committed and pushed with user approval (deploys and applies
+0337). Next action: verify the deployed page and that the resolver closes
+"Rise NYC" as renamed, then move this section out of the active blueprint.
+
 ## Client setup visibility and Inventory › Clients coverage
 
 Complete (deployment check pending). Goal: make unmapped source clients (open client candidates) and

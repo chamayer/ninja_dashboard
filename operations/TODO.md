@@ -7,6 +7,16 @@ module-specific; root `../TODO.md` keeps cross-repo items and pointers.
 
 ## Inbox
 
+- [ ] **Client candidates: remaining follow-ups to ADR-0038** (2026-10-22).
+      (a) Candidates whose groups simply stop reporting are never closed; they
+      are marked "No longer reported" on Client mappings only — needs a
+      decision on whether and when to close them. (b) `seen_count` still
+      counts resolver passes and is no longer displayed; stop incrementing or
+      drop it. (c) `client_name_conflict` findings could show the group's
+      previous source name ("previously Rise NYC, same group id"); org names
+      are in `entity_observation_history.material_data`, but confirm an index
+      serves an org-history lookup per attached group before adding it to the
+      hourly `_check_name_drift` query.
 - [ ] **Sign-in follow-ups (after PLAN-013):** (1) replace the `is_staff`
       edit checks in `finding_types_admin.py`, `software_policy.py`, the
       client-mappings view, `home.html`, and `sources.html` with group

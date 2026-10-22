@@ -6,6 +6,7 @@ import logging
 import os
 import re
 import uuid
+from collections import Counter
 from datetime import datetime, timedelta
 from datetime import timezone as dt_timezone
 from urllib import request as _urllib_request
@@ -5139,15 +5140,16 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
             if f.finding_type.name == "client_name_conflict":
                 source_name = source_names_by_id.get(details.get("source_id"), "Source")
                 observed_name = details.get("observed_name") or "(unnamed group)"
-                peer_names = [
+                # Each finding is one source group; name it first, then the
+                # names the client's other sources use.
+                other_names = [
                     str(name).strip()
                     for name in (details.get("peer_source_names") or [])
-                    if str(name).strip()
+                    if str(name).strip() and str(name).strip() != observed_name
                 ]
-                if len(peer_names) > 1:
-                    context_parts.append("Source names: " + " ↔ ".join(peer_names))
-                else:
-                    context_parts.append(f"{source_name} reports “{observed_name}”")
+                context_parts.append(f"{source_name} reports “{observed_name}”")
+                if other_names:
+                    context_parts.append("other sources: " + ", ".join(other_names))
             else:
                 context_parts.append("client-wide")
         elif f.subject_type in (
@@ -12418,6 +12420,158 @@ def client_source_reference_detail(request: HttpRequest, source_link_id: str) ->
     )
 
 
+def _newest_candidate_name_by_group() -> dict[tuple[int, str], tuple[str, str]]:
+    """Map each source group to the candidate name holding its newest reference.
+
+    Candidates are keyed by name while a source group is identified by its id,
+    so a group renamed at the source appears under both names.  The newest
+    reference shows which name the source uses now.
+    """
+    newest: dict[tuple[int, str], tuple[datetime, str, str]] = {}
+    for candidate in ClientCandidate.objects.filter(tenant_id=1).only(
+        "normalized_name", "display_name", "source_refs"
+    ):
+        for ref in candidate.source_refs or []:
+            key = (ref.get("source_id"), str(ref.get("external_id")))
+            seen = parse_datetime(ref.get("observed_at") or "") or datetime.min
+            if timezone.is_naive(seen):
+                seen = seen.replace(tzinfo=dt_timezone.utc)  # noqa: UP017 - module idiom
+            if key not in newest or seen > newest[key][0]:
+                name = candidate.display_name or candidate.normalized_name
+                newest[key] = (seen, candidate.normalized_name, name)
+    return {key: (normalized, name) for key, (_, normalized, name) in newest.items()}
+
+
+def _live_source_group_evidence(
+    pairs: set[tuple[int, str]],
+) -> tuple[dict[tuple[int, str], bool], dict[tuple[int, str], dict[str, tuple | None]]]:
+    """Current org observations (with attachment) and source records per group."""
+    reported: dict[tuple[int, str], bool] = {}
+    records_by_group: dict[tuple[int, str], dict[str, tuple]] = {}
+    if not pairs:
+        return reported, records_by_group
+    source_ids = [pair[0] for pair in pairs]
+    external_ids = [pair[1] for pair in pairs]
+    with transaction.atomic(), connection.cursor() as cur:
+        cur.execute("SET LOCAL operations.tenant_id = 1")
+        cur.execute(
+            """
+            SELECT si.source_id, observation.entity_key,
+                   bool_or(observation.client_id IS NOT NULL)
+              FROM operations.v_entity_observation_admin_metadata observation
+              JOIN operations.source_instances si ON si.id = observation.source_instance_id
+             WHERE observation.entity_type = 'org'
+               AND observation.active
+               AND (si.source_id, observation.entity_key) IN (
+                   SELECT * FROM unnest(%s::int[], %s::text[]))
+             GROUP BY si.source_id, observation.entity_key
+            """,
+            (source_ids, external_ids),
+        )
+        reported = {(source_id, key): attached for source_id, key, attached in cur.fetchall()}
+        cur.execute(
+            """
+            SELECT DISTINCT si.source_id, observation.platform_group_id, observation.entity_key,
+                   observation.device_id, client.id, client.display_name
+              FROM operations.v_entity_observation_admin_metadata observation
+              JOIN operations.source_instances si ON si.id = observation.source_instance_id
+              LEFT JOIN operations.devices device
+                     ON device.id = observation.device_id AND device.deleted_at IS NULL
+              LEFT JOIN operations.clients client ON client.id = device.client_id
+             WHERE observation.entity_type <> 'org'
+               AND observation.active
+               AND (si.source_id, observation.platform_group_id) IN (
+                   SELECT * FROM unnest(%s::int[], %s::text[]))
+            """,
+            (source_ids, external_ids),
+        )
+        # Records in an unattached group are mostly not yet linked to a
+        # Computer, so each source record counts; a linked Computer adds its
+        # owning client as evidence.
+        for source_id, group_id, entity_key, device_id, client_id, client_name in cur.fetchall():
+            records_by_group.setdefault((source_id, group_id), {})[f"{source_id}:{entity_key}"] = (
+                str(device_id) if device_id else None,
+                (str(client_id), client_name) if client_id else None,
+            )
+    return reported, records_by_group
+
+
+def _source_group_state(key, normalized_name, newest_name, reported) -> tuple[str, str]:
+    owner = newest_name.get(key)
+    if owner and owner[0] != normalized_name:
+        return "renamed", owner[1]
+    if key not in reported:
+        return "gone", ""
+    return ("attached" if reported[key] else "reported"), ""
+
+
+def _add_candidate_evidence(candidates: list[dict], source_names: dict) -> None:
+    """Annotate client candidates with live evidence for the list view.
+
+    ``source_refs`` keeps every source group ever seen under the name, so each
+    group is checked against current observations: whether the source still
+    reports it under this name, the source records currently in it, and
+    which existing client already owns the Computers those records link to.  Historical groups stay
+    listed but marked and contribute no live evidence.
+    """
+    from difflib import get_close_matches
+
+    pairs = {
+        (ref.get("source_id"), str(ref.get("external_id")))
+        for row in candidates
+        for ref in row["refs"]
+        if ref.get("source_id") and ref.get("external_id")
+    }
+    newest_name = _newest_candidate_name_by_group()
+    reported, records_by_group = _live_source_group_evidence(pairs)
+    known_names = {
+        client.display_name: (str(client.id), client.display_name)
+        for client in Client.objects.filter(tenant_id=1, deleted_at__isnull=True)
+    }
+    for alias in ClientNameAlias.objects.filter(tenant_id=1, enabled=True).select_related("client"):
+        known_names[alias.alias] = (str(alias.client_id), alias.client.display_name)
+
+    for row in candidates:
+        groups = []
+        records: dict[str, tuple] = {}
+        for ref in row["refs"]:
+            key = (ref.get("source_id"), str(ref.get("external_id")))
+            state, renamed_to = _source_group_state(
+                key, row["candidate"].normalized_name, newest_name, reported
+            )
+            groups.append(
+                {
+                    "source": source_names.get(ref.get("source_id"), "Unknown source"),
+                    "external_name": ref.get("external_name") or "",
+                    "reported": state == "reported",
+                    "state": state,
+                    "renamed_to": renamed_to,
+                }
+            )
+            if state == "reported":
+                records.update(records_by_group.get(key, {}))
+        row["groups"] = sorted(groups, key=lambda group: (not group["reported"], group["source"]))
+        row["reported_count"] = sum(1 for group in groups if group["reported"])
+        row["renamed_to"] = sorted({group["renamed_to"] for group in groups if group["renamed_to"]})
+        row["attached_count"] = sum(1 for group in groups if group["state"] == "attached")
+        devices = {device_id: owner for device_id, owner in records.values() if device_id}
+        row["record_count"] = len(records)
+        row["computer_count"] = len(devices)
+        owners = Counter(owner for owner in devices.values() if owner)
+        row["likely_client"] = None
+        row["similar_client"] = None
+        if owners:
+            (client_id, client_name), count = owners.most_common(1)[0]
+            row["likely_client"] = {"id": client_id, "name": client_name, "count": count}
+        elif row["candidate"].display_name:
+            matches = get_close_matches(
+                row["candidate"].display_name, list(known_names), n=1, cutoff=0.6
+            )
+            if matches:
+                client_id, client_name = known_names[matches[0]]
+                row["similar_client"] = {"id": client_id, "name": client_name}
+
+
 @login_required
 @require_admin
 def client_mappings(request: HttpRequest) -> HttpResponse:
@@ -12554,6 +12708,7 @@ def client_mappings(request: HttpRequest) -> HttpResponse:
             if source_filter and source_filter not in candidate_sources:
                 continue
             candidates.append({"candidate": candidate, "sources": candidate_sources, "refs": refs})
+        _add_candidate_evidence(candidates, source_names)
 
     ambiguity_types = (
         "client_link_collision",

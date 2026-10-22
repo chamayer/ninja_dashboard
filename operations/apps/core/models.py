@@ -596,6 +596,7 @@ class ClientCandidate(UUIDTenantScopedModel):
         ACCEPTED = "accepted", "Accepted"
         MAPPED = "mapped", "Mapped"
         EXCLUDED = "excluded", "Excluded"
+        RENAMED = "renamed", "Renamed at source"
 
     normalized_name = models.CharField(max_length=240)
     display_name = models.CharField(max_length=240, blank=True, default="")

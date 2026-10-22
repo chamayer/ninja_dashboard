@@ -297,6 +297,7 @@ def _upsert_candidate(
         "external_name": display_name,
         "observed_at": observed_at.isoformat() if observed_at else None,
     }
+    _release_renamed_group(cur, normalized, display_name, source_id, entity_key)
     cur.execute(
         "SELECT source_refs, status FROM operations.client_candidates"
         " WHERE tenant_id = %s AND normalized_name = %s",
@@ -335,6 +336,69 @@ def _upsert_candidate(
         """,
         (display_name, display_name, json.dumps(refs), _TENANT_ID, normalized),
     )
+
+
+def _release_renamed_group(
+    cur,
+    normalized: str,
+    display_name: str,
+    source_id: int | None,
+    entity_key: str,
+) -> None:
+    """Move a source group renamed at its source off its previous candidate.
+
+    Candidates are keyed by name; the source group id is the identity.  The
+    current observation's name is what the source uses now, so an open
+    candidate still holding this group under another name loses the ref.  An
+    open candidate left with no groups is closed as renamed, with the new name
+    as its reason.  Candidates an operator already decided are history and are
+    left untouched (ADR-0038).
+    """
+    if source_id is None:
+        return
+    cur.execute(
+        """
+        SELECT id, source_refs FROM operations.client_candidates
+         WHERE tenant_id = %s
+           AND normalized_name <> %s
+           AND status = 'open'
+           AND source_refs @> %s::jsonb
+        """,
+        (
+            _TENANT_ID,
+            normalized,
+            json.dumps([{"source_id": source_id, "external_id": entity_key}]),
+        ),
+    )
+    for candidate_id, refs in cur.fetchall():
+        remaining = [
+            r
+            for r in (refs or [])
+            if (r.get("source_id"), r.get("external_id")) != (source_id, entity_key)
+        ]
+        if remaining:
+            cur.execute(
+                "UPDATE operations.client_candidates SET source_refs = %s::jsonb"
+                " WHERE id = %s",
+                (json.dumps(remaining), candidate_id),
+            )
+            continue
+        cur.execute(
+            """
+            UPDATE operations.client_candidates
+            SET source_refs = %s::jsonb,
+                status = 'renamed',
+                resolved_at = NOW(),
+                resolved_by = 'resolver',
+                resolved_reason = %s
+            WHERE id = %s
+            """,
+            (
+                json.dumps(refs or []),
+                f'renamed at source to "{display_name}"'[:240],
+                candidate_id,
+            ),
+        )
 
 
 def _clear_candidate(cur, normalized: str, client_id: uuid.UUID) -> None:
