@@ -16918,12 +16918,24 @@ def client_candidate_accept(request, candidate_id) -> HttpResponse:
         suffix += 1
         slug = f"{base_slug}-{suffix}"
 
+    # A client is anchored by a tenant-scoped entity that shares its id
+    # (ADR-0012; migration 0120 made the anchor required).
+    reason = f"candidate.accept:{candidate.id}"[:120]
+    entity = Entity.objects.create(
+        tenant_id=1,
+        entity_class_id="client",
+        scope_kind=Entity.ScopeKind.TENANT,
+        created_reason=reason,
+        updated_reason=reason,
+    )
     client = Client.objects.create(
+        id=entity.id,
+        entity=entity,
         tenant_id=1,
         slug=slug,
         display_name=display_name,
         requirement_profile=profile,
-        created_reason=f"candidate.accept:{candidate.id}",
+        created_reason=reason,
     )
 
     ClientNameAlias.objects.update_or_create(
