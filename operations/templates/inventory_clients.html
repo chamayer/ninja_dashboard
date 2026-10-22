@@ -7,6 +7,9 @@
   .ic-cov { display: flex; flex-wrap: wrap; gap: 0.3rem; }
   .ic-cov .badge { white-space: nowrap; }
   .ic-cov .badge small { opacity: 0.75; }
+  /* New / discovered clients: a fixed window that scrolls, header kept in view. */
+  .new-clients-window { max-height: 17rem; overflow-y: auto; border: 1px solid var(--border); border-radius: 4px; }
+  .new-clients-window thead { position: sticky; top: 0; z-index: 1; background: var(--surface, #fff); }
 </style>
 <div class="card">
   <h1>Client inventory</h1>
@@ -21,6 +24,7 @@
 <section class="card" id="new-clients">
   <h2>New / discovered clients <span class="muted" style="font-size:.85rem; font-weight:400;">{{ new_client_count }} name{{ new_client_count|pluralize }} · {{ new_group_count }} source group{{ new_group_count|pluralize }}</span></h2>
   <p class="muted">Reported by a source but not set up in Operations. Review each one to accept it as a new client, map it to an existing client, or exclude it. These are the same records Issues lists as unattached client source groups.</p>
+  <div class="new-clients-window">
   <table class="ops-table">
     <thead><tr><th>Reported name</th><th>Sources</th><th class="num">Source records</th><th class="num">First / last seen</th><th></th></tr></thead>
     <tbody>
@@ -35,7 +39,8 @@
     {% endfor %}
     </tbody>
   </table>
-  <p style="margin:.6rem 0 0;">{% if new_client_count > new_clients|length %}Showing {{ new_clients|length }} of {{ new_client_count }}. {% endif %}<a href="{{ new_clients_issues_url }}">All {{ new_group_count }} in Issues →</a></p>
+  </div>
+  <p style="margin:.6rem 0 0;"><a href="{{ new_clients_issues_url }}">All {{ new_group_count }} in Issues →</a></p>
 </section>
 {% endif %}
 

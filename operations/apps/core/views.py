@@ -12961,9 +12961,6 @@ def client_mappings(request: HttpRequest) -> HttpResponse:
     )
 
 
-NEW_CLIENTS_SHOWN = 15
-
-
 @login_required
 def inventory_clients(request: HttpRequest) -> HttpResponse:
     """Client inventory: computers and how fully each source covers them.
@@ -13082,7 +13079,7 @@ def inventory_clients(request: HttpRequest) -> HttpResponse:
             "rows": list(rows_by_client.values()),
             "query": query,
             "open_candidates": len(new_clients),
-            "new_clients": new_clients[:NEW_CLIENTS_SHOWN],
+            "new_clients": new_clients,
             "new_client_count": len(new_clients),
             "new_group_count": new_group_count,
             "new_clients_issues_url": (
