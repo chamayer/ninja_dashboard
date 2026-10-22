@@ -13,7 +13,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from shared import software_coverage
+from shared import software_coverage, software_settings
 
 # The decision-prompt finding types, as a query predicate (they close when a
 # decision covers the title or its publisher).
@@ -26,6 +26,78 @@ SELECT finding.id::text, finding_type.name, finding.severity, finding.finding_de
    AND finding.status IN ('open', 'acknowledged')
    AND finding_type.name IN ('whitelist_suggestion', 'rare_recent')
 """
+
+# A title's decision status, read from the records the software reconcile keeps
+# per title (ADR-0039) so the overview agrees with Issues and Software review:
+# rejected while a rejected-software finding is open, awaiting while an
+# undecided-software prompt is open, investigating while an investigate
+# decision applies, otherwise decided. Each set is built once and hash-joined
+# to the title rows (alias ``sic``); a per-row EXISTS would rescan findings.
+TITLE_STATUSES = ("reject", "pending", "investigate", "approve")
+TITLE_STATUS_CTES = """
+title_flags AS (
+    SELECT lower(finding.finding_details->>'canonical_name') AS title_key,
+           bool_or(finding_type.name = 'rejected_software_installed') AS rejected,
+           bool_or(finding_type.name IN ('whitelist_suggestion', 'rare_recent')) AS awaiting
+      FROM operations.findings finding
+      JOIN operations.finding_types finding_type ON finding_type.id = finding.finding_type_id
+     WHERE finding.tenant_id = 1 AND finding.status IN ('open', 'acknowledged')
+       AND finding_type.name IN ('rejected_software_installed', 'whitelist_suggestion', 'rare_recent')
+     GROUP BY 1
+),
+investigate_titles AS (
+    SELECT DISTINCT lower(canonical_name) AS title_key
+      FROM operations.software_decisions
+     WHERE tenant_id = 1 AND decision = 'investigate' AND canonical_name <> ''
+       AND client_id IS NULL AND device_id IS NULL
+),
+investigate_publishers AS (
+    SELECT DISTINCT lower(publisher) AS publisher_key
+      FROM operations.software_decisions
+     WHERE tenant_id = 1 AND decision = 'investigate' AND canonical_name = ''
+       AND publisher <> '' AND client_id IS NULL AND device_id IS NULL
+)"""
+TITLE_STATUS_JOINS = """
+  LEFT JOIN title_flags ON title_flags.title_key = lower(sic.canonical_name)
+  LEFT JOIN investigate_titles ON investigate_titles.title_key = lower(sic.canonical_name)
+  LEFT JOIN investigate_publishers
+    ON investigate_publishers.publisher_key = lower(COALESCE(sic.publisher, ''))"""
+TITLE_STATUS = """(CASE WHEN title_flags.rejected THEN 'reject'
+       WHEN title_flags.awaiting THEN 'pending'
+       WHEN investigate_titles.title_key IS NOT NULL
+            OR investigate_publishers.publisher_key IS NOT NULL THEN 'investigate'
+       ELSE 'approve' END)"""
+TITLE_STATUS_COUNTS_SQL = f"""
+WITH {TITLE_STATUS_CTES}
+SELECT {TITLE_STATUS} AS status, count(*)::int
+  FROM operations.software_title_current sic
+  {TITLE_STATUS_JOINS}
+ WHERE sic.tenant_id = 1
+ GROUP BY 1
+"""
+
+
+# Publishers whose installations an open prompt is about (its recorded publisher).
+AWAITING_PUBLISHERS_SQL = """
+SELECT count(DISTINCT lower(finding.finding_details->>'publisher'))::int
+  FROM operations.findings finding
+  JOIN operations.finding_types finding_type ON finding_type.id = finding.finding_type_id
+ WHERE finding.tenant_id = %s AND finding.status IN ('open', 'acknowledged')
+   AND finding_type.name IN ('whitelist_suggestion', 'rare_recent')
+   AND COALESCE(finding.finding_details->>'publisher', '') <> ''
+"""
+
+
+def prompt_types_switched_off(config: dict[str, Any]) -> list[str]:
+    """Undecided-software prompt types an administrator has switched off, whose
+    titles therefore cannot show as awaiting."""
+    effective = software_settings.effective(config or {})
+    return [
+        label
+        for key, label in (("non_approved_enabled", "non-approved"), ("rare_enabled", "rare"))
+        if not effective.get(key, True)
+    ]
+
 
 def _details(raw: Any) -> dict[str, Any]:
     """Finding details from a raw cursor row.

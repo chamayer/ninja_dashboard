@@ -100,7 +100,8 @@
             <option value="">Any</option>
             <option value="approved" {% if active_decision == 'approved' %}selected{% endif %}>Approved</option>
             <option value="rejected" {% if active_decision == 'rejected' %}selected{% endif %}>Rejected</option>
-            <option value="pending"  {% if active_decision == 'pending'  %}selected{% endif %}>Undecided</option>
+            <option value="investigating" {% if active_decision == 'investigating' %}selected{% endif %}>Investigating</option>
+            <option value="pending"  {% if active_decision == 'pending'  %}selected{% endif %}>Awaiting decision</option>
         </select>
     </div>
     <div>
@@ -194,10 +195,10 @@
                     {% endif %}
                 </td>
                 <td>
-                    {% if t.decision %}
-                        <span class="decision-pill {{ t.decision }}">{{ t.decision|humanize_label|default:t.decision|title }}</span>
+                    {% if t.decision == "pending" or not t.decision %}
+                        <span class="decision-pill none">Awaiting decision</span>
                     {% else %}
-                        <span class="decision-pill none">Undecided</span>
+                        <span class="decision-pill {{ t.decision }}">{{ t.decision|humanize_label|default:t.decision|title }}</span>
                     {% endif %}
                 </td>
                 <td class="actions">

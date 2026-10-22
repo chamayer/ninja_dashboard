@@ -6,7 +6,12 @@ from pathlib import Path
 
 import pytest
 
-from apps.core import finding_actions, software_decision_actions, software_decision_rules
+from apps.core import (
+    finding_actions,
+    software_decision_actions,
+    software_decision_rules,
+    software_review,
+)
 from apps.core.models import SoftwareDecision
 from apps.core.templatetags import human_labels
 
@@ -91,8 +96,10 @@ def test_every_page_that_records_a_decision_collects_the_comment():
 
 def test_products_list_matches_decisions_ignoring_case_and_shows_the_main_publisher():
     assert "sd.canonical_name = sic.canonical_name" not in _VIEWS
-    assert _VIEWS.count("LOWER(sd.canonical_name) = LOWER(sic.canonical_name)") == 3
-    assert "LOWER(canonical_name) AS canonical_name" in _VIEWS
+    # Title status (ADR-0039) joins on lower-cased names and publishers.
+    assert "title_flags.title_key = lower(sic.canonical_name)" in software_review.TITLE_STATUS_JOINS
+    assert "lower(finding.finding_details->>'canonical_name')" in software_review.TITLE_STATUS_CTES
+    assert "lower(COALESCE(sic.publisher, ''))" in software_review.TITLE_STATUS_JOINS
     assert "main_publisher" not in _VIEWS
     assert "filtered.publisher," in _VIEWS
 
@@ -104,4 +111,6 @@ def test_unfiltered_software_first_view_defers_category_enrichment_to_displayed_
 
 def test_products_first_view_uses_a_bounded_page_and_one_decision_rollup():
     assert "else (page_size if is_csv else 100)" in _VIEWS
-    assert "decision_by_title AS" in _VIEWS
+    # One status rollup, built once and hash-joined, for the column and filters.
+    assert _VIEWS.count("{software_review.TITLE_STATUS_CTES}") == 1
+    assert "decision_by_title AS" not in _VIEWS

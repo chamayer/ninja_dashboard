@@ -62,7 +62,7 @@ approval (deploys; no migrations). Next action: check the deployed review page.
 
 ## Software title coverage — prompts describe the uncovered installs
 
-Complete for prompts (deployment check pending); overview pending. Goal: a decision covers an install when that install's own effective
+Complete (deployment check pending). Goal: a decision covers an install when that install's own effective
 decision (title, then publisher; device, client, global) approves it, and an
 undecided-software prompt (`whitelist_suggestion`, `rare_recent`) describes
 only the installs no decision covers. Today one uncovered install opens a
@@ -95,7 +95,12 @@ findings. Measured: every title with uncovered installs has an open prompt
 (15,149; 0 missed; 92 extra are rare-with-concern or awaiting closure), so
 the overview can derive from the findings without a table (user: "ok for
 now"). Committed and pushed with user approval. Next action: verify the next
-reconcile rewrites prompts (e.g. Microsoft Store), then the overview change.
+reconcile rewrites prompts (e.g. Microsoft Store).
+Overview (`/software/`, Products tab) now reads the same per-title status
+(`software_review.TITLE_STATUS*`: rejected finding > open prompt >
+investigate decision > decided), no table. Production timing: counts 0.74 s
+warm, filter 0.32 s (old wrong query 83 ms); index declined as not worth a
+migration. Committed and pushed with user approval.
 
 ## Software review — filter by publisher status
 

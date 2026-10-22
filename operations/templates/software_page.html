@@ -182,7 +182,7 @@
     <a class="tile" href="?decision=pending">
         <div class="tile-label">Awaiting review</div>
         <div class="tile-value {% if pending_decisions %}has-open{% endif %}">{{ pending_decisions }}</div>
-        <div class="tile-note">no approve or reject decision yet</div>
+        <div class="tile-note">{% if prompts_switched_off %}{{ prompts_switched_off|join:" and " }} prompts are switched off, so their titles are not counted{% else %}titles with installs no decision covers{% endif %}</div>
     </a>
     <a class="tile tile-alert" href="?safety=high">
         <div class="tile-label">High risk</div>

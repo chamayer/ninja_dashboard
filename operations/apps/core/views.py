@@ -7155,14 +7155,6 @@ def _software_page_data(request: HttpRequest) -> dict:
                     descriptive_category_rows.append((category, count))
             descriptive_category_rows.sort(key=lambda row: row[1], reverse=True)
 
-        # Decisions rollup
-        cur.execute(
-            """
-            SELECT decision, COUNT(*) FROM operations.software_decisions
-            WHERE tenant_id = 1 GROUP BY decision
-            """
-        )
-        decision_counts = {row[0]: row[1] for row in cur.fetchall()}
 
         # Titles-across-the-fleet aggregate. One row per canonical
         # product with rollup counts. Filter by name, category,
@@ -7210,38 +7202,17 @@ def _software_page_data(request: HttpRequest) -> dict:
         elif product_category_filter:
             where_clauses.append("%s = ANY(COALESCE(pcbt.product_categories, ARRAY[]::text[]))")
             params.append(product_category_filter)
-        if decision_filter == "approved":
-            where_clauses.append(
-                "(EXISTS (SELECT 1 FROM operations.software_decisions sd "
-                " WHERE sd.tenant_id = sic.tenant_id "
-                "   AND LOWER(sd.canonical_name) = LOWER(sic.canonical_name) "
-                "   AND sd.decision IN ('approve','approve_publisher'))"
-                " OR EXISTS (SELECT 1 FROM operations.software_decisions sd "
-                " WHERE sd.tenant_id = sic.tenant_id "
-                "   AND sd.publisher <> '' "
-                "   AND LOWER(sd.publisher) = LOWER(COALESCE(sic.publisher, '')) "
-                "   AND sd.decision IN ('approve','approve_publisher')))"
-            )
-        elif decision_filter == "rejected":
-            where_clauses.append(
-                "(EXISTS (SELECT 1 FROM operations.software_decisions sd "
-                " WHERE sd.tenant_id = sic.tenant_id "
-                "   AND LOWER(sd.canonical_name) = LOWER(sic.canonical_name) "
-                "   AND sd.decision = 'reject')"
-                " OR EXISTS (SELECT 1 FROM operations.software_decisions sd "
-                " WHERE sd.tenant_id = sic.tenant_id "
-                "   AND sd.publisher <> '' "
-                "   AND LOWER(sd.publisher) = LOWER(COALESCE(sic.publisher, '')) "
-                "   AND sd.decision = 'reject'))"
-            )
-        elif decision_filter == "pending":
-            where_clauses.append(
-                "NOT EXISTS (SELECT 1 FROM operations.software_decisions sd "
-                " WHERE sd.tenant_id = sic.tenant_id "
-                "   AND (LOWER(sd.canonical_name) = LOWER(sic.canonical_name) "
-                "        OR (sd.publisher <> '' "
-                "            AND LOWER(sd.publisher) = LOWER(COALESCE(sic.publisher, '')))))"
-            )
+        # Decision filters read the same per-title status as the overview counts
+        # and the Status column (ADR-0039), not raw decision rows.
+        status_filter = {
+            "approved": "approve",
+            "rejected": "reject",
+            "pending": "pending",
+            "investigating": "investigate",
+        }.get(decision_filter)
+        if status_filter:
+            where_clauses.append(f"{software_review.TITLE_STATUS} = %s")
+            params.append(status_filter)
         if safety_filter_names:
             # Filter to the pre-computed canonical set for this risk
             # band — avoids re-evaluating v_software_safety per row.
@@ -7298,13 +7269,7 @@ def _software_page_data(request: HttpRequest) -> dict:
             ),
             category_by_title AS ({category_cte_sql}),
             product_category_by_title AS ({product_category_cte_sql}),
-            decision_by_title AS (
-                SELECT tenant_id, LOWER(canonical_name) AS canonical_name,
-                       MIN(decision) AS decision
-                FROM operations.software_decisions
-                WHERE tenant_id = 1 AND canonical_name <> ''
-                GROUP BY tenant_id, LOWER(canonical_name)
-            ),
+            {software_review.TITLE_STATUS_CTES},
             filtered AS (
                 SELECT sic.canonical_name,
                        sic.publisher,
@@ -7313,14 +7278,12 @@ def _software_page_data(request: HttpRequest) -> dict:
                        sic.latest_install AS last_install,
                        cbt.categories,
                        pcbt.product_categories,
-                       decision_by_title.decision,
+                       {software_review.TITLE_STATUS} AS decision,
                        COUNT(*) OVER ()::bigint AS total_filtered
                 FROM operations.software_title_current sic
                 LEFT JOIN category_by_title cbt ON cbt.canonical_name = sic.canonical_name
                 LEFT JOIN product_category_by_title pcbt ON pcbt.canonical_name = sic.canonical_name
-                LEFT JOIN decision_by_title
-                  ON decision_by_title.tenant_id = sic.tenant_id
-                 AND decision_by_title.canonical_name = LOWER(sic.canonical_name)
+                {software_review.TITLE_STATUS_JOINS}
                 WHERE {where_sql}
                   AND sic.device_count >= {min_devices_int}
                 ORDER BY {sort_sql}
@@ -7485,23 +7448,9 @@ def _software_page_data(request: HttpRequest) -> dict:
     try:
         with transaction.atomic(), connection.cursor() as sc:
             sc.execute("SET LOCAL operations.tenant_id = 1")
-            # Publishers with at least one fleet install and no
-            # global publisher-scope decision.
-            sc.execute(
-                """
-                SELECT COUNT(DISTINCT LOWER(sic.publisher))::int
-                FROM operations.software_title_current sic
-                WHERE sic.tenant_id = 1
-                  AND COALESCE(sic.publisher, '') <> ''
-                  AND NOT EXISTS (
-                      SELECT 1 FROM operations.software_decisions sd
-                      WHERE sd.tenant_id = 1
-                        AND sd.publisher <> ''
-                        AND sd.client_id IS NULL AND sd.device_id IS NULL
-                        AND LOWER(sd.publisher) = LOWER(sic.publisher)
-                  )
-                """
-            )
+            # Publishers whose installations an open prompt is about: the
+            # publisher those uncovered installations report (ADR-0039).
+            sc.execute(software_review.AWAITING_PUBLISHERS_SQL, [1])
             (workflow_state["publishers_undecided"],) = sc.fetchone()
     except Exception:
         pass
@@ -7558,65 +7507,23 @@ def _software_page_data(request: HttpRequest) -> dict:
         else 0
     )
 
-    # Product-level decision counts. A publisher-scope decision applies
-    # to every product from that publisher, so the raw
-    # SoftwareDecision row count is wrong. Count DISTINCT canonical_names
-    # that have EITHER a title-scope decision or a matching publisher-
-    # scope decision at global scope.
-    approved_titles = rejected_titles = investigate_titles = 0
-    try:
-        with transaction.atomic(), connection.cursor() as sc:
-            sc.execute("SET LOCAL operations.tenant_id = 1")
-            sc.execute(
-                """
-                -- Pre-aggregate the decisions, then join. This was three
-                -- correlated EXISTS subqueries evaluated per title, i.e.
-                -- 20,631 x 3 scans of software_decisions: 1,484 ms measured
-                -- against production. Aggregating first and hash-joining the
-                -- result measures 83 ms for the same three numbers.
-                WITH scoped AS (
-                    SELECT canonical_name, LOWER(publisher) AS pub, decision
-                    FROM operations.software_decisions
-                    WHERE tenant_id = 1 AND client_id IS NULL AND device_id IS NULL
-                      AND decision IN ('approve','approve_publisher','reject','investigate')
-                ), by_name AS (
-                    SELECT canonical_name,
-                           BOOL_OR(decision IN ('approve','approve_publisher')) AS appr,
-                           BOOL_OR(decision = 'reject') AS rej,
-                           BOOL_OR(decision = 'investigate') AS inv
-                    FROM scoped WHERE canonical_name <> '' GROUP BY 1
-                ), by_pub AS (
-                    SELECT pub,
-                           BOOL_OR(decision IN ('approve','approve_publisher')) AS appr,
-                           BOOL_OR(decision = 'reject') AS rej,
-                           BOOL_OR(decision = 'investigate') AS inv
-                    FROM scoped WHERE pub <> '' GROUP BY 1
-                )
-                SELECT
-                    COUNT(DISTINCT sic.canonical_name)
-                        FILTER (WHERE COALESCE(n.appr, FALSE) OR COALESCE(p.appr, FALSE)) AS approved,
-                    COUNT(DISTINCT sic.canonical_name)
-                        FILTER (WHERE COALESCE(n.rej, FALSE) OR COALESCE(p.rej, FALSE)) AS rejected,
-                    COUNT(DISTINCT sic.canonical_name)
-                        FILTER (WHERE COALESCE(n.inv, FALSE) OR COALESCE(p.inv, FALSE)) AS investigating
-                FROM operations.software_title_current sic
-                LEFT JOIN by_name n ON n.canonical_name = sic.canonical_name
-                LEFT JOIN by_pub  p ON p.pub = LOWER(COALESCE(sic.publisher, ''))
-                WHERE sic.tenant_id = 1
-                """
-            )
-            row = sc.fetchone() or (0, 0, 0)
-            approved_titles = row[0] or 0
-            rejected_titles = row[1] or 0
-            investigate_titles = row[2] or 0
-    except Exception:
-        # Fall back to raw counts if the join fails somehow.
-        approved_titles = decision_counts.get("approve", 0)
-        rejected_titles = decision_counts.get("reject", 0)
-        investigate_titles = decision_counts.get("investigate", 0)
-    pending_decisions = unique_titles - approved_titles - rejected_titles - investigate_titles
-    if pending_decisions < 0:
-        pending_decisions = 0
+    # Title status counts from the records the software reconcile keeps per
+    # title (ADR-0039), so they agree with Issues and Software review.
+    status_counts: dict[str, int] = {}
+    with transaction.atomic(), connection.cursor() as sc:
+        sc.execute("SET LOCAL operations.tenant_id = 1")
+        sc.execute(software_review.TITLE_STATUS_COUNTS_SQL)
+        status_counts = dict(sc.fetchall())
+    approved_titles = status_counts.get("approve", 0)
+    rejected_titles = status_counts.get("reject", 0)
+    investigate_titles = status_counts.get("investigate", 0)
+    pending_decisions = status_counts.get("pending", 0)
+    classifier = EvaluatorConfig.objects.filter(
+        tenant_id=1, evaluator_name="software_classifier"
+    ).first()
+    prompts_switched_off = software_review.prompt_types_switched_off(
+        classifier.config if classifier else {}
+    )
 
     titles = []
     for row in title_rows:
@@ -7684,6 +7591,7 @@ def _software_page_data(request: HttpRequest) -> dict:
         "rejected_titles": rejected_titles,
         "investigate_titles": investigate_titles,
         "pending_decisions": pending_decisions,
+        "prompts_switched_off": prompts_switched_off,
         "software_issues": software_issues,
         "whitelist_suggestions": whitelist_suggestions,
         "high_risk_titles": high_risk_titles,
