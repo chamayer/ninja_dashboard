@@ -37,6 +37,18 @@ module-specific; root `../TODO.md` keeps cross-repo items and pointers.
       by the user; an alternative design (e.g. the decision itself naming
       the variant names it covers) still needs agreement.
 
+- [ ] **Explore: a finding when a Ninja automation action fails** (user
+      backlogged 2026-10-22). Idea only, not designed. Ninja reports
+      automation outcomes (scripts, scheduled tasks, condition actions) as
+      activities; `ingest/activities/ingest.py` already pulls
+      `/v2/activities`, filtered server-side by `type=` and `status=` from
+      INGEST_ACTIVITY_SOURCES / INGEST_ACTIVITY_TYPES_INCLUDE (note the
+      `status` query vs `statusCode` field asymmetry documented there).
+      To explore: which activity types and status codes mean a failed
+      automation (probe the live API, do not assume), whether a failure
+      should be per device or per automation, when it clears (next
+      success), and noise control for flaky scripts. Operations stays
+      read-only toward Ninja.
 - [ ] **Publisher aliases for software decisions** (user backlogged
       2026-10-22). Installations report one publisher under variants:
       localised ("Корпорация Майкрософт"), typos ("Microsoft Coporation"),
