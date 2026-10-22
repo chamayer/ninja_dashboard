@@ -18,6 +18,9 @@
         {% if likely_client %}
         <strong>Likely client:</strong> {{ likely_client.display_name }}
         <span class="muted">— already owns {{ likely_client.device_count }} of the {{ linked_total }} linked computer{{ linked_total|pluralize }} in these groups. Preselected under Map to existing.</span>
+        {% elif name_match %}
+        <strong>Likely client:</strong> {{ name_match.display_name }}
+        <span class="muted">— {{ name_match.record_count }} of the {{ named_total }} unlinked record{{ named_total|pluralize }} in these groups report computer names that only this client's computers have. Preselected under Map to existing.</span>
         {% elif fuzzy %}
         <strong>No computer evidence.</strong> <span class="muted">Closest name: {{ fuzzy.0.client_name }} — check before mapping.</span>
         {% else %}
@@ -90,6 +93,36 @@
     </table>
     {% else %}
     <p class="muted">No device overlap with any known client.</p>
+    {% endif %}
+</div>
+
+<div class="card">
+    <h2>Computer name matches</h2>
+    <p class="muted" style="font-size: 0.85rem; margin-top: 0;">
+        Records in these groups not yet linked to a computer still report a
+        computer name. A name counts only when exactly one existing client has a
+        current computer with it; names many clients share are ignored.
+        {{ named_total }} unlinked record{{ named_total|pluralize }} report a name.
+    </p>
+    {% if name_matches %}
+    <table style="width: 100%; border-collapse: collapse;">
+        <thead>
+            <tr style="text-align: left; border-bottom: 1px solid var(--border);">
+                <th style="padding: 0.4rem;">Existing client</th>
+                <th style="padding: 0.4rem;">Records whose computer name only it has</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for m in name_matches %}
+            <tr style="border-bottom: 1px solid var(--border);">
+                <td style="padding: 0.4rem;"><strong>{{ m.display_name }}</strong></td>
+                <td style="padding: 0.4rem;">{{ m.record_count }} of {{ named_total }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p class="muted">No unlinked record reports a computer name unique to one client.</p>
     {% endif %}
 </div>
 
@@ -171,7 +204,7 @@
                 <select name="client_id" style="width: 100%; padding: 0.3rem;">
                     <option value="">— pick one —</option>
                     {% for c in all_clients %}
-                        <option value="{{ c.id }}"{% if likely_client and likely_client.client_id == c.id|stringformat:"s" %} selected{% endif %}>{{ c.display_name }}</option>
+                        <option value="{{ c.id }}"{% if suggested_client_id and suggested_client_id == c.id|stringformat:"s" %} selected{% endif %}>{{ c.display_name }}</option>
                     {% endfor %}
                 </select>
             </label>

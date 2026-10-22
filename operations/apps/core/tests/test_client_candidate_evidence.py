@@ -1,3 +1,4 @@
+import inspect
 from contextlib import nullcontext
 from pathlib import Path
 from types import SimpleNamespace
@@ -96,7 +97,11 @@ def test_candidate_page_counts_every_owned_computer_in_live_groups():
     records += [(2, "h1", "b1", "x1", "c2", "Domes"), (2, "h1", "b2", None, None, None)]
     atomic, cursor, candidate_qs = _patched([reported, records], [row["candidate"]])
     with atomic, cursor, candidate_qs:
-        overlap, linked = views._candidate_client_overlap(row["candidate"])
+        live, records_by_group = views._candidate_live_groups(row["candidate"])
+        overlap, linked = views._candidate_client_overlap(live, records_by_group)
+
+    # The group the source no longer reports adds nothing.
+    assert live == [(2, "h1")]
 
     # Not capped at a sample: all 30 owned computers count.
     assert overlap == [
@@ -104,6 +109,28 @@ def test_candidate_page_counts_every_owned_computer_in_live_groups():
         {"client_id": "c2", "display_name": "Domes", "device_count": 1},
     ]
     assert linked == 31
+
+
+def test_name_matches_count_names_only_one_client_owns():
+    rows = [("c1", "Freunds Fish", 25, 26), ("c2", "UTA", 1, 26)]
+    with (
+        mock.patch.object(views.transaction, "atomic", return_value=nullcontext()),
+        mock.patch.object(views.connection, "cursor", return_value=_Cursor([rows])),
+    ):
+        matches, named = views._candidate_name_matches([(1, "g1")])
+    assert matches[0] == {"client_id": "c1", "display_name": "Freunds Fish", "record_count": 25}
+    assert named == 26
+
+
+def test_name_matches_need_live_groups():
+    assert views._candidate_name_matches([]) == ([], 0)
+
+
+def test_name_match_sql_ignores_names_several_clients_share():
+    source = inspect.getsource(views._candidate_name_matches)
+    assert "HAVING count(DISTINCT device.client_id) = 1" in source
+    assert "observation.device_id IS NULL" in source
+    assert "device.lifecycle_status <> 'retired'" in source
 
 
 def test_group_renamed_at_the_source_belongs_to_the_newest_name():

@@ -12671,13 +12671,9 @@ def _source_group_state(key, normalized_name, newest_name, reported) -> tuple[st
     return ("attached" if reported[key] else "reported"), ""
 
 
-def _candidate_client_overlap(candidate) -> tuple[list[dict], int]:
-    """Existing clients that already own Computers in this candidate's live groups.
-
-    Counts every active record in the groups the source still reports under
-    this name (not a sample), so the strongest map-to-existing signal is
-    complete. Returns the owning clients, largest first, and how many
-    Computers in the groups are linked at all.
+def _candidate_live_groups(candidate) -> tuple[list[tuple[int, str]], dict]:
+    """The candidate's source groups the source still reports under this name,
+    and the active records in them (renamed, attached, and gone groups excluded).
     """
     refs = candidate.source_refs or []
     pairs = {
@@ -12687,21 +12683,104 @@ def _candidate_client_overlap(candidate) -> tuple[list[dict], int]:
     }
     newest_name = _newest_candidate_name_by_group()
     reported, records_by_group = _live_source_group_evidence(pairs)
+    live = [
+        key
+        for key in pairs
+        if _source_group_state(key, candidate.normalized_name, newest_name, reported)[0]
+        == "reported"
+    ]
+    return live, records_by_group
+
+
+def _candidate_client_overlap(live, records_by_group) -> tuple[list[dict], int]:
+    """Existing clients that already own Computers in the candidate's live groups.
+
+    Counts every active record in those groups (not a sample), so the strongest
+    map-to-existing signal is complete. Returns the owning clients, largest
+    first, and how many Computers in the groups are linked at all.
+    """
     devices: dict[str, tuple | None] = {}
-    for key in pairs:
-        state, _renamed_to = _source_group_state(
-            key, candidate.normalized_name, newest_name, reported
-        )
-        if state == "reported":
-            for device_id, owner in records_by_group.get(key, {}).values():
-                if device_id:
-                    devices[device_id] = owner
+    for key in live:
+        for device_id, owner in records_by_group.get(key, {}).values():
+            if device_id:
+                devices[device_id] = owner
     owners = Counter(owner for owner in devices.values() if owner)
     overlap = [
         {"client_id": client_id, "display_name": name, "device_count": count}
         for (client_id, name), count in owners.most_common()
     ]
     return overlap, len(devices)
+
+
+def _candidate_name_matches(live) -> tuple[list[dict], int]:
+    """Existing clients whose Computers carry the names of the candidate's
+    unlinked records.
+
+    Weaker evidence than a linked Computer: a record not yet matched to a
+    Computer still reports a computer name. A name counts only when exactly one
+    client owns a current Computer with it; names many clients use (generic
+    images, default names) say nothing about ownership. Returns the matching
+    clients, largest first, and how many unlinked records report a name.
+    """
+    if not live:
+        return [], 0
+    with transaction.atomic(), connection.cursor() as cur:
+        cur.execute("SET LOCAL operations.tenant_id = 1")
+        cur.execute(
+            """
+            WITH live_groups AS (
+                SELECT * FROM unnest(%s::int[], %s::text[]) AS g(source_id, external_id)
+            ), unlinked AS (
+                SELECT DISTINCT si.source_id, observation.entity_key,
+                       lower(observation.reported_name) AS name
+                  FROM operations.v_entity_observation_admin_metadata observation
+                  JOIN operations.source_instances si ON si.id = observation.source_instance_id
+                  JOIN live_groups g
+                    ON g.source_id = si.source_id AND g.external_id = observation.platform_group_id
+                 WHERE observation.entity_type <> 'org' AND observation.active
+                   AND observation.device_id IS NULL
+                   AND COALESCE(observation.reported_name, '') <> ''
+            ), single_owner AS (
+                SELECT lower(device.canonical_hostname) AS name, min(device.client_id::text) AS client_id
+                  FROM operations.devices device
+                 WHERE device.tenant_id = 1 AND device.deleted_at IS NULL
+                   AND device.lifecycle_status <> 'retired' AND device.client_id IS NOT NULL
+                   AND COALESCE(device.canonical_hostname, '') <> ''
+                 GROUP BY 1
+                HAVING count(DISTINCT device.client_id) = 1
+            )
+            SELECT client.id::text, client.display_name, count(*)::int AS records,
+                   (SELECT count(*)::int FROM unlinked) AS named
+              FROM unlinked
+              JOIN single_owner ON single_owner.name = unlinked.name
+              JOIN operations.clients client ON client.id::text = single_owner.client_id
+             WHERE client.deleted_at IS NULL
+             GROUP BY 1, 2
+             ORDER BY 3 DESC, 2
+            """,
+            ([key[0] for key in live], [key[1] for key in live]),
+        )
+        rows = cur.fetchall()
+        if not rows:
+            cur.execute(
+                """
+                SELECT count(DISTINCT (si.source_id, observation.entity_key))::int
+                  FROM operations.v_entity_observation_admin_metadata observation
+                  JOIN operations.source_instances si ON si.id = observation.source_instance_id
+                  JOIN unnest(%s::int[], %s::text[]) AS g(source_id, external_id)
+                    ON g.source_id = si.source_id AND g.external_id = observation.platform_group_id
+                 WHERE observation.entity_type <> 'org' AND observation.active
+                   AND observation.device_id IS NULL
+                   AND COALESCE(observation.reported_name, '') <> ''
+                """,
+                ([key[0] for key in live], [key[1] for key in live]),
+            )
+            return [], cur.fetchone()[0]
+    matches = [
+        {"client_id": client_id, "display_name": name, "record_count": records}
+        for client_id, name, records, _named in rows
+    ]
+    return matches, rows[0][3]
 
 
 def _add_candidate_evidence(candidates: list[dict], source_names: dict) -> None:
@@ -16696,7 +16775,9 @@ def client_candidate_detail(request: HttpRequest, candidate_id) -> HttpResponse:
                         }
                     )
 
-    device_overlap, linked_total = _candidate_client_overlap(candidate)
+    live_groups, records_by_group = _candidate_live_groups(candidate)
+    device_overlap, linked_total = _candidate_client_overlap(live_groups, records_by_group)
+    name_matches, named_total = _candidate_name_matches(live_groups)
 
     # Fuzzy suggestions against known client display names + aliases.
     known_names: dict[str, tuple] = {}
@@ -16738,6 +16819,15 @@ def client_candidate_detail(request: HttpRequest, candidate_id) -> HttpResponse:
             "sample_devices": sample_devices,
             "device_overlap": device_overlap,
             "likely_client": device_overlap[0] if device_overlap else None,
+            # Strongest evidence first: linked Computers, then unique computer names.
+            "name_match": name_matches[0] if name_matches else None,
+            "name_matches": name_matches,
+            "named_total": named_total,
+            "suggested_client_id": (
+                device_overlap[0]["client_id"]
+                if device_overlap
+                else (name_matches[0]["client_id"] if name_matches else "")
+            ),
             "linked_total": linked_total,
             "fuzzy": fuzzy,
             "all_clients": all_clients,
