@@ -16812,6 +16812,11 @@ def software_decisions_queue(request: HttpRequest) -> HttpResponse:
     query = (request.GET.get("q") or "").strip()
     kind = (request.GET.get("kind") or "").strip()
     suggestion = (request.GET.get("suggestion") or "").strip()
+    publisher_status = (request.GET.get("publisher_status") or "").strip()
+    if publisher_status not in {
+        value for value, _label in software_review.PUBLISHER_STATUS_CHOICES
+    }:
+        publisher_status = ""
     try:
         page_number = int(request.GET.get("page") or 1)
     except ValueError:
@@ -16827,7 +16832,9 @@ def software_decisions_queue(request: HttpRequest) -> HttpResponse:
     title_sort = request.GET.get("tsort") or ""
     title_dir = "asc" if request.GET.get("tdir") == "asc" else "desc"
     if title_sort not in {
-        name for name, _label, _numeric in software_review.SORT_COLUMNS if name != "publisher"
+        name
+        for name, _label, _numeric in software_review.SORT_COLUMNS
+        if name not in {"publisher", "publisher_status"}
     }:
         title_sort = ""
     with transaction.atomic(), connection.cursor() as cur:
@@ -16836,6 +16843,11 @@ def software_decisions_queue(request: HttpRequest) -> HttpResponse:
         groups = software_review.build_groups(
             cur.fetchall(), query=query, kind=kind, suggestion=suggestion
         )
+        # Before sorting and paging, so the Publisher status column sorts and
+        # filters across every page and the export agrees.
+        software_review.stamp_publisher_status(1, groups)
+        if publisher_status:
+            groups = software_review.filter_by_publisher_status(groups, publisher_status)
         if view_mode == "groups":
             groups = software_review.sort_groups(groups, sort_key, sort_dir)
         all_titles = software_review.sort_titles(
@@ -16857,6 +16869,7 @@ def software_decisions_queue(request: HttpRequest) -> HttpResponse:
                 columns=[
                     ("Title", "title"),
                     ("Publisher", "publisher"),
+                    ("Publisher status", "publisher_status_label"),
                     ("Type", "type_label"),
                     ("Severity", "severity"),
                     ("Devices", "devices"),
@@ -16921,6 +16934,7 @@ def software_decisions_queue(request: HttpRequest) -> HttpResponse:
         else:
             next_dir = "desc" if numeric else "asc"
         columns.append({
+            "name": name,
             "label": label,
             "numeric": numeric,
             "href": _href(view=view_mode, sort=name, dir=next_dir),
@@ -16928,7 +16942,7 @@ def software_decisions_queue(request: HttpRequest) -> HttpResponse:
         })
     title_columns = []
     for name, label, numeric in software_review.SORT_COLUMNS:
-        if name == "publisher":
+        if name in {"publisher", "publisher_status"}:
             continue
         if name == title_sort:
             next_dir = "asc" if title_dir == "desc" else "desc"
@@ -16965,6 +16979,8 @@ def software_decisions_queue(request: HttpRequest) -> HttpResponse:
             "active_q": query,
             "active_kind": kind,
             "active_suggestion": suggestion,
+            "active_publisher_status": publisher_status,
+            "publisher_status_choices": software_review.PUBLISHER_STATUS_CHOICES,
             "suggestion_choices": SoftwareSuggestionRule.Suggestion.choices,
             "decision_choices": SoftwareDecision.Decision.choices,
         },

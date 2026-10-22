@@ -1,0 +1,16 @@
+{% comment %}
+Header filter for one Software review column. The list is paginated, so the
+controls submit the page's filter form (id "sw-filter") to the server instead
+of filtering only the rows on screen.
+{% endcomment %}
+<td>{% if col.name == "title" or col.name == "publisher" and view_mode != "table" %}<input type="search" name="q" form="sw-filter" value="{{ active_q }}" placeholder="Filter title or publisher…" aria-label="Filter by title or publisher">{% elif col.name == "type" %}<select name="kind" form="sw-filter" onchange="this.form.submit()" aria-label="Filter by type">
+    <option value="">Any</option>
+    <option value="whitelist_suggestion"{% if active_kind == 'whitelist_suggestion' %} selected{% endif %}>Non-approved</option>
+    <option value="rare_recent"{% if active_kind == 'rare_recent' %} selected{% endif %}>Rare</option>
+</select>{% elif col.name == "suggestion" %}<select name="suggestion" form="sw-filter" onchange="this.form.submit()" aria-label="Filter by suggestion">
+    <option value="">Any</option>
+    {% for value, label in suggestion_choices %}<option value="{{ value }}"{% if active_suggestion == value %} selected{% endif %}>{{ label }}</option>{% endfor %}
+</select>{% elif col.name == "publisher_status" %}<select name="publisher_status" form="sw-filter" onchange="this.form.submit()" aria-label="Filter by publisher status">
+    <option value="">Any</option>
+    {% for value, label in publisher_status_choices %}<option value="{{ value }}"{% if active_publisher_status == value %} selected{% endif %}>{{ label }}</option>{% endfor %}
+</select>{% endif %}</td>

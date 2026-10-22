@@ -361,8 +361,21 @@
         });
         header.parentNode.insertBefore(filterRow, header.nextSibling);
       }
+      // Server-sorted headers (paginated lists) navigate to their sort URL;
+      // the label stays plain text so it can be selected.
+      function followSort(th, event) {
+        if (event.target.closest('a, button, input, select, label, summary, details')) return;
+        if (String(window.getSelection ? window.getSelection() : '').trim()) return;
+        window.location.href = th.getAttribute('data-sort-href');
+      }
       document.addEventListener('DOMContentLoaded', function() {
         document.querySelectorAll('table').forEach(enhanceTable);
+        document.querySelectorAll('th[data-sort-href]').forEach(function(th) {
+          th.addEventListener('click', function(event) { followSort(th, event); });
+          th.addEventListener('keydown', function(event) {
+            if (event.key === 'Enter') followSort(th, event);
+          });
+        });
           document.querySelectorAll('[data-nav-toggle]').forEach(function(button) {
             button.addEventListener('click', function() {
               var target = document.getElementById(button.getAttribute('aria-controls'));

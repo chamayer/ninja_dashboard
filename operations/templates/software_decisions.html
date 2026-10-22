@@ -33,6 +33,14 @@
   .pub-actions { margin-left: auto; display: flex; gap: 0.3rem; flex-wrap: wrap; }
   .pub-actions form, .row-actions form { margin: 0; }
   .pub-status { font-size: 0.75rem; margin-top: 0.2rem; font-weight: 400; }
+  .status-pill { display: inline-block; padding: 0.1rem 0.45rem; border-radius: 999px; font-size: 0.75rem; font-weight: 600; white-space: nowrap; }
+  .status-pill.approved { background: #dcfce7; color: #166534; }
+  .status-pill.investigating { background: #fef3c7; color: #92400e; }
+  .status-pill.rejected { background: #fee2e2; color: #991b1b; }
+  .status-pill.none { background: #f3f4f6; color: #6b7280; font-weight: 400; }
+  th[data-sort-href] { cursor: pointer; }
+  th[data-sort-href]:hover { color: var(--accent); }
+  tr.table-filter-row select { width: 100%; min-width: 6rem; font-size: 0.78rem; }
   .hold-reasons { margin: 0.2rem 0 0; padding-left: 1rem; font-size: 0.72rem; color: #92400e; }
 
   .sw-review-table { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
@@ -76,11 +84,8 @@
 </div>
 
 <div class="card">
-    <form action="" method="get" class="filterbar">
-        <div>
-            <label>Search</label>
-            <input type="search" name="q" value="{{ active_q }}" placeholder="title or publisher…" style="min-width:200px;">
-        </div>
+    <form action="" method="get" class="filterbar" id="sw-filter">
+        {% if view_mode != "table" %}
         <div>
             <label>Type</label>
             <select name="kind" onchange="this.form.submit()">
@@ -89,20 +94,13 @@
                 <option value="rare_recent"{% if active_kind == 'rare_recent' %} selected{% endif %}>Rare</option>
             </select>
         </div>
-        <div>
-            <label>Suggestion</label>
-            <select name="suggestion" onchange="this.form.submit()">
-                <option value="">Any</option>
-                {% for value, label in suggestion_choices %}
-                <option value="{{ value }}"{% if active_suggestion == value %} selected{% endif %}>{{ label }}</option>
-                {% endfor %}
-            </select>
-        </div>
+        {% endif %}
         <input type="hidden" name="view" value="{{ view_mode }}">
         <input type="hidden" name="sort" value="{{ sort_key }}">
         <input type="hidden" name="dir" value="{{ sort_dir }}">
-        <div><button type="submit">Apply</button></div>
-        {% if active_q or active_kind or active_suggestion %}<a class="clear" href="?">Clear</a>{% endif %}
+        <div><button type="submit">Apply filters</button></div>
+        {% if active_q or active_kind or active_suggestion or active_publisher_status %}<a class="clear" href="?view={{ view_mode }}">Clear filters</a>{% endif %}
+        <span class="muted" style="align-self:center; font-size:0.8rem;">Filter from the column headers; they search every page.</span>
     </form>
 </div>
 
@@ -136,16 +134,17 @@
             <tr>
                 <th style="width:2rem;"></th>
                 {% for col in columns %}
-                <th{% if col.numeric %} class="num"{% endif %}><a href="{{ col.href }}">{{ col.label }}{{ col.mark }}</a></th>
+                <th data-sort-href="{{ col.href }}" tabindex="0"{% if col.numeric %} class="num"{% endif %}>{{ col.label }}{{ col.mark }}</th>
                 {% endfor %}
                 <th style="text-align:right;">Decide this title</th>
             </tr>
+            <tr class="table-filter-row"><td></td>{% for col in columns %}{% include "_software_review_filter_cell.html" %}{% endfor %}<td></td></tr>
         </thead>
         <tbody>
             {% for t in titles %}
             {% include "_software_review_row.html" with show_publisher=True %}
             {% empty %}
-            <tr><td colspan="9" class="muted">No software is waiting for a decision.</td></tr>
+            <tr><td colspan="10" class="muted">No software is waiting for a decision.</td></tr>
             {% endfor %}
         </tbody>
     </table>
@@ -157,18 +156,20 @@
             <tr>
                 <th style="width:2rem;"></th>
                 {% for col in columns %}
-                <th{% if col.numeric %} class="num"{% endif %}><a href="{{ col.href }}">{{ col.label }}{{ col.mark }}</a></th>
+                <th data-sort-href="{{ col.href }}" tabindex="0"{% if col.numeric %} class="num"{% endif %}>{{ col.label }}{{ col.mark }}</th>
                 {% endfor %}
                 <th>Decide the publisher</th>
             </tr>
+            <tr class="table-filter-row"><td></td>{% for col in columns %}{% include "_software_review_filter_cell.html" %}{% endfor %}<td></td></tr>
         </thead>
         {% for group in groups %}
         <tbody class="pub-block" id="pub-{{ group.publisher|slugify }}">
             <tr class="pub-summary">
                 <td><button type="button" class="pub-toggle" aria-expanded="{% if forloop.first %}true{% else %}false{% endif %}" aria-label="Show or hide the titles of {{ group.publisher|default:'no publisher' }}">{% if forloop.first %}&#9662;{% else %}&#9656;{% endif %}</button></td>
-                <td><strong>{% if group.publisher %}{{ group.publisher }}{% else %}<span class="muted">No publisher</span>{% endif %}</strong>
-                    {% if group.decision %}<div class="pub-status"><span class="decision-pill {{ group.decision.decision }}">{{ group.decision.label }} everywhere</span> <span class="muted">by {{ group.decision.decided_by|default:"unknown" }}{% if group.decision.decided_at %}, {{ group.decision.decided_at|date:"Y-m-d" }}{% endif %}</span>{% if group.decision.reason %}<div class="muted">“{{ group.decision.reason }}”</div>{% endif %}</div>{% endif %}
-                    {% if group.narrower_decisions %}<div class="pub-status muted">{{ group.narrower_decisions }} client or computer decision{{ group.narrower_decisions|pluralize }} on this publisher</div>{% elif group.publisher and not group.decision %}<div class="pub-status muted">No publisher decision yet</div>{% endif %}
+                <td><strong>{% if group.publisher %}{{ group.publisher }}{% else %}<span class="muted">No publisher</span>{% endif %}</strong></td>
+                <td><span class="status-pill {{ group.publisher_status }}">{{ group.publisher_status_label }}</span>
+                    {% if group.decision %}<div class="pub-status muted">by {{ group.decision.decided_by|default:"unknown" }}{% if group.decision.decided_at %}, {{ group.decision.decided_at|date:"Y-m-d" }}{% endif %}</div>{% if group.decision.reason %}<div class="pub-status muted">“{{ group.decision.reason }}”</div>{% endif %}{% endif %}
+                    {% if group.narrower_decisions %}<div class="pub-status muted">{{ group.narrower_decisions }} client or computer decision{{ group.narrower_decisions|pluralize }}</div>{% endif %}
                 </td>
                 {% if group.publisher %}
                 <td class="num"><a href="{% url 'software_publisher_detail' publisher=group.publisher %}">{{ group.title_count }}</a></td>
@@ -186,13 +187,13 @@
             </tr>
             <tr class="pub-titles"{% if not forloop.first %} hidden{% endif %}>
                 <td></td>
-                <td colspan="7">
+                <td colspan="8">
                     <table class="sw-review-table">
                         <thead>
                             <tr>
                                 <th style="width:2rem;"></th>
                                 {% for col in title_columns %}
-                                <th{% if col.numeric %} class="num"{% endif %}><a href="{{ col.href }}#pub-{{ group.publisher|slugify }}">{{ col.label }}{{ col.mark }}</a></th>
+                                <th data-sort-href="{{ col.href }}#pub-{{ group.publisher|slugify }}" tabindex="0"{% if col.numeric %} class="num"{% endif %}>{{ col.label }}{{ col.mark }}</th>
                                 {% endfor %}
                                 <th style="text-align:right;">Decide this title</th>
                             </tr>
@@ -210,7 +211,7 @@
             </tr>
         </tbody>
         {% empty %}
-        <tbody><tr><td colspan="8" class="muted">No software is waiting for a decision.</td></tr></tbody>
+        <tbody><tr><td colspan="9" class="muted">No software is waiting for a decision.</td></tr></tbody>
         {% endfor %}
     </table>
 </div>

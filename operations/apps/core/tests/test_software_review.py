@@ -176,3 +176,65 @@ def test_a_title_with_no_remaining_cause_waits_for_the_next_check():
     assert review.hold_reasons(title, 4, 0, 0, []) == [
         "covered now; closes on the next software check"
     ]
+
+
+def test_publisher_status_filter_uses_the_publisher_wide_decision(monkeypatch):
+    decisions = {
+        "acme": {"global": {"decision": "approve_publisher"}, "narrower": 0},
+        "beta": {"global": {"decision": "investigate"}, "narrower": 0},
+        "gamma": {"global": None, "narrower": 2},
+    }
+    monkeypatch.setattr(review, "publisher_decisions", lambda tenant_id, keys: decisions)
+    groups = review.build_groups(
+        [
+            _row("1", "whitelist_suggestion", "Acme Paint", "Acme"),
+            _row("2", "whitelist_suggestion", "Beta Tool", "Beta"),
+            _row("3", "whitelist_suggestion", "Gamma App", "Gamma"),
+            _row("4", "whitelist_suggestion", "Loose", ""),
+        ]
+    )
+
+    review.stamp_publisher_status(1, groups)
+
+    def publishers(status):
+        return [g["publisher"] for g in review.filter_by_publisher_status(groups, status)]
+
+    assert publishers("approved") == ["Acme"]
+    assert publishers("investigating") == ["Beta"]
+    assert publishers("rejected") == []
+    # Client or computer decisions are not publisher-wide; no publisher is "none".
+    assert sorted(publishers("none")) == ["", "Gamma"]
+    # Titles carry their publisher's status for the table view and export.
+    acme = next(g for g in groups if g["publisher"] == "Acme")
+    assert acme["titles"][0]["publisher_status_label"] == "Approved"
+    # The column sorts across every group: approved first, no decision last.
+    ordered = review.sort_groups(groups, "publisher_status", "asc")
+    assert [g["publisher_status"] for g in ordered] == [
+        "approved",
+        "investigating",
+        "none",
+        "none",
+    ]
+    titles = review.sort_titles([t for g in groups for t in g["titles"]], "publisher_status", "asc")
+    assert titles[0]["title"] == "Acme Paint"
+
+
+def test_publisher_status_filter_runs_before_sorting_and_paging():
+    section = _VIEWS[_VIEWS.index("def software_decisions_queue") :]
+    for step in ("stamp_publisher_status", "filter_by_publisher_status"):
+        assert section.index(step) < section.index("software_review.sort_groups(")
+        assert section.index(step) < section.index("software_review.paginate(")
+        assert section.index(step) < section.index("wants_csv(request)")
+
+
+def test_publisher_status_is_its_own_sortable_filterable_column():
+    template = (
+        Path(__file__).resolve().parents[3] / "templates" / "software_decisions.html"
+    ).read_text(encoding="utf-8")
+    assert ("publisher_status", "Publisher status", False) in review.GROUP_COLUMNS
+    assert ("publisher_status", "Publisher status", False) in review.SORT_COLUMNS
+    assert 'class="status-pill {{ group.publisher_status }}"' in template
+    assert template.count('{% include "_software_review_filter_cell.html" %}') == 2
+    # Header labels are plain text (selectable); the header itself sorts.
+    assert '<th data-sort-href="{{ col.href }}"' in template
+    assert '<a href="{{ col.href }}">{{ col.label }}' not in template

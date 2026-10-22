@@ -26,6 +26,42 @@ production: index scan, 14 ms for 2 titles. Not validated: the ORM decision
 lookup and full page render against PostgreSQL. Committed and pushed with user
 approval (deploys; no migrations). Next action: check the deployed review page.
 
+## Software review — filter by publisher status
+
+Complete (browser check pending). Goal: filter Software review by the publisher's publisher-wide
+decision (Approved / Investigating / Rejected / No publisher-wide decision).
+Scope: `software_review.filter_by_publisher_status` (reuses
+`publisher_decisions`, the same source as the publisher row), the queue view
+(filter applied after grouping, before sorting, paging and CSV), and the
+filter bar in `software_decisions.html`. Client or computer decisions are not
+publisher-wide and count as "none". The Issues-page variant was declined as
+too heavy. Revised per user: Publisher status is its own column in both views
+(`stamp_publisher_status` on every group before sort/filter/page, sortable via
+`GROUP_COLUMNS`/`SORT_COLUMNS`, in the CSV); decision detail moved out of the
+Publisher cell; filters live in a header row that submits the server form
+(`_software_review_filter_cell.html`); sort headers are plain text with
+`data-sort-href` so labels are selectable. Merge review: each Computer's source
+records sit in their own bordered panel ("Computer N of M").
+Microsoft finding (production, 2026-10-22): 23 open non-approved titles under
+the approved "Microsoft Corporation" each have 1-11 installs with a blank,
+Russian-localised, or unresolved publisher string; coverage requires every
+install to match, so they stay open. Rule change awaits a user decision.
+
+Checkpoint: implemented locally. Validation: 53 targeted tests pass (new
+publisher-status column, sort, and template tests); templates compile; JS
+syntax checks; Ruff total and format drift unchanged;
+`manage.py check` clean. Not validated: against production data or in a
+browser. Committed and pushed with user approval. Next action: redesign title
+coverage (see Microsoft finding) as its own blueprint.
+
+Follow-up in the same pending commit (user feedback on Client mappings):
+"Likely client" moved off the list onto the candidate page, counted from all
+live records (`_candidate_client_overlap`) instead of the 25-device sample,
+and preselected under Map to existing; header text is selectable again (a
+text selection does not trigger a sort). Production 2026-10-22 17:24 UTC:
+0337 applied 16:54, but no source has collected since 14:36, so the resolver
+has not run on the new code and "Rise NYC" is still open.
+
 ## Sortable and filterable tables
 
 Complete (browser check pending). Goal: every table sorts and filters from its column headers.

@@ -188,6 +188,7 @@ def build_groups(
 SORT_COLUMNS = (
     ("title", "Title", False),
     ("publisher", "Publisher", False),
+    ("publisher_status", "Publisher status", False),
     ("type", "Type", False),
     ("devices", "Devices", True),
     ("clients", "Clients", True),
@@ -202,6 +203,7 @@ def sort_titles(titles: list[dict[str, Any]], key: str, direction: str) -> list[
     keys = {
         "title": lambda t: t["title"].lower(),
         "publisher": lambda t: (t["publisher"] == "", t["publisher"].lower()),
+        "publisher_status": lambda t: _STATUS_ORDER.get(t.get("publisher_status", "none"), 9),
         "type": lambda t: (t["type_label"], severity_rank.get(t["severity"], 9)),
         "devices": lambda t: t["devices"],
         "clients": lambda t: t["clients"],
@@ -217,6 +219,7 @@ def sort_titles(titles: list[dict[str, Any]], key: str, direction: str) -> list[
 
 GROUP_COLUMNS = (
     ("publisher", "Publisher", False),
+    ("publisher_status", "Publisher status", False),
     ("titles", "Titles", True),
     ("installs", "Installs", True),
     ("clients", "Clients (widest title)", True),
@@ -229,6 +232,7 @@ def sort_groups(groups: list[dict[str, Any]], key: str, direction: str) -> list[
     """Sort the publisher rows by any of their totals."""
     keys = {
         "publisher": lambda g: (g["publisher"] == "", g["publisher"].lower()),
+        "publisher_status": lambda g: _STATUS_ORDER.get(g.get("publisher_status", "none"), 9),
         "titles": lambda g: len(g["titles"]),
         "installs": lambda g: g["devices"],
         "clients": lambda g: g["clients"],
@@ -391,6 +395,49 @@ def attach_publisher_status(cur: Any, tenant_id: int, groups: list[dict]) -> Non
             group["open_title_names"] = [t["title"] for t in group["titles"] if t["title"]]
             group["suggestion"] = "decide_titles"
             group["suggestion_label"] = "Publisher approved; decide what it does not cover"
+
+
+PUBLISHER_STATUS_CHOICES = (
+    ("approved", "Approved"),
+    ("investigating", "Investigating"),
+    ("rejected", "Rejected"),
+    ("none", "No publisher-wide decision"),
+)
+_STATUS_BY_DECISION = {
+    "approve": "approved",
+    "approve_publisher": "approved",
+    "investigate": "investigating",
+    "reject": "rejected",
+}
+
+
+_STATUS_LABELS = dict(PUBLISHER_STATUS_CHOICES)
+_STATUS_ORDER = {value: rank for rank, (value, _label) in enumerate(PUBLISHER_STATUS_CHOICES)}
+
+
+def stamp_publisher_status(tenant_id: int, groups: list[dict]) -> None:
+    """Record each publisher's publisher-wide status on its group and titles.
+
+    Runs on every group before sorting, filtering and paging, so the
+    Publisher status column sorts and filters across all pages. Uses the same
+    stored decisions as ``attach_publisher_status``. Client or computer
+    decisions are not publisher-wide and count as "none".
+    """
+    keys = sorted({g["publisher"].lower() for g in groups if g["publisher"]})
+    decisions = publisher_decisions(tenant_id, keys) if keys else {}
+    for group in groups:
+        decided = (decisions.get(group["publisher"].lower()) or {}).get("global")
+        status = _STATUS_BY_DECISION.get(decided["decision"], "none") if decided else "none"
+        group["publisher_status"] = status
+        group["publisher_status_label"] = _STATUS_LABELS[status]
+        for title in group["titles"]:
+            title["publisher_status"] = status
+            title["publisher_status_label"] = _STATUS_LABELS[status]
+
+
+def filter_by_publisher_status(groups: list[dict], status: str) -> list[dict]:
+    """Keep the publisher groups stamped with ``status``."""
+    return [group for group in groups if group.get("publisher_status") == status]
 
 
 def resolve_decided_prompts(
