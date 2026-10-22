@@ -12785,6 +12785,43 @@ def _candidate_name_matches(live) -> tuple[list[dict], int]:
     return _name_matches_by_row({0: list(live)})[0]
 
 
+def _client_source_ids(client_ids: set[str]) -> dict[str, set[int]]:
+    """Sources in which each client already has its own attached group."""
+    if not client_ids:
+        return {}
+    with transaction.atomic(), connection.cursor() as cur:
+        cur.execute("SET LOCAL operations.tenant_id = 1")
+        cur.execute(
+            """
+            SELECT DISTINCT client_id::text, source_id
+              FROM operations.v_client_source_mapping_effective
+             WHERE tenant_id = 1 AND client_id::text = ANY(%s)
+               AND mapping_state <> 'ignored'
+            """,
+            [sorted(client_ids)],
+        )
+        result: dict[str, set[int]] = {}
+        for client_id, source_id in cur.fetchall():
+            result.setdefault(client_id, set()).add(source_id)
+    return result
+
+
+def _first_unseparated(options: list[dict], live, separate: dict[str, set[int]]):
+    """The strongest suggested client a source does not already keep separate.
+
+    When a source reports the new client as its own group and the suggested
+    client has its own, different group in that same source, the source says
+    they are separate clients; shared computers then point to a misfiled
+    source group, not to the same client (e.g. NYCD Management vs City
+    Painting in Hudu, Ninja and SentinelOne).
+    """
+    own_sources = {key[0] for key in live}
+    for option in options:
+        if not separate.get(option["client_id"], set()) & own_sources:
+            return option
+    return None
+
+
 def _add_candidate_evidence(
     candidates: list[dict], source_names: dict, *, with_likely_client: bool = False
 ) -> None:
@@ -12839,33 +12876,41 @@ def _add_candidate_evidence(
         row["computer_count"] = len(devices)
         row["likely_client"] = None
         owners = Counter(owner for owner in devices.values() if owner)
-        if with_likely_client and owners:
-            (client_id, name), count = owners.most_common(1)[0]
-            row["likely_client"] = {
+        row["linked_options"] = [
+            {
                 "client_id": client_id,
                 "display_name": name,
                 "basis": "linked",
                 "count": count,
                 "of": len(devices),
             }
+            for (client_id, name), count in owners.most_common()
+        ]
 
     if not with_likely_client:
         return
-    undecided = {
-        index: live_by_row[index]
-        for index, row in enumerate(candidates)
-        if row["likely_client"] is None
-    }
-    for index, (matches, named) in _name_matches_by_row(undecided).items():
-        if matches:
-            row = candidates[index]
-            row["likely_client"] = {
-                "client_id": matches[0]["client_id"],
-                "display_name": matches[0]["display_name"],
+    name_matches = _name_matches_by_row(live_by_row)
+    name_options = {
+        index: [
+            {
+                "client_id": match["client_id"],
+                "display_name": match["display_name"],
                 "basis": "names",
-                "count": matches[0]["record_count"],
+                "count": match["record_count"],
                 "of": named,
             }
+            for match in matches
+        ]
+        for index, (matches, named) in name_matches.items()
+    }
+    separate = _client_source_ids(
+        {option["client_id"] for row in candidates for option in row["linked_options"]}
+        | {option["client_id"] for options in name_options.values() for option in options}
+    )
+    for index, row in enumerate(candidates):
+        row["likely_client"] = _first_unseparated(
+            row["linked_options"], live_by_row[index], separate
+        ) or _first_unseparated(name_options.get(index, []), live_by_row[index], separate)
 
 
 @login_required
@@ -16817,6 +16862,26 @@ def client_candidate_detail(request: HttpRequest, candidate_id) -> HttpResponse:
     live_groups, records_by_group = _candidate_live_groups(candidate)
     device_overlap, linked_total = _candidate_client_overlap(live_groups, records_by_group)
     name_matches, named_total = _candidate_name_matches(live_groups)
+    # A client a source already keeps separate from this one is not suggested.
+    separate = _client_source_ids(
+        {item["client_id"] for item in device_overlap}
+        | {item["client_id"] for item in name_matches}
+    )
+    likely_client = _first_unseparated(device_overlap, live_groups, separate)
+    name_match = None if likely_client else _first_unseparated(name_matches, live_groups, separate)
+    own_sources = {key[0] for key in live_groups}
+    source_names_by_id = {source.id: source.name for source in Source.objects.all()}
+    ruled_out = [
+        {
+            "display_name": item["display_name"],
+            "sources": sorted(
+                source_names_by_id.get(source_id, "?")
+                for source_id in separate.get(item["client_id"], set()) & own_sources
+            ),
+        }
+        for item in (device_overlap[:1] + name_matches[:1])
+        if separate.get(item["client_id"], set()) & own_sources
+    ]
 
     # Fuzzy suggestions against known client display names + aliases.
     known_names: dict[str, tuple] = {}
@@ -16857,16 +16922,13 @@ def client_candidate_detail(request: HttpRequest, candidate_id) -> HttpResponse:
             "per_source": per_source,
             "sample_devices": sample_devices,
             "device_overlap": device_overlap,
-            "likely_client": device_overlap[0] if device_overlap else None,
+            "likely_client": likely_client,
             # Strongest evidence first: linked Computers, then unique computer names.
-            "name_match": name_matches[0] if name_matches else None,
+            "name_match": name_match,
+            "ruled_out": {item["display_name"]: item for item in ruled_out}.values(),
             "name_matches": name_matches,
             "named_total": named_total,
-            "suggested_client_id": (
-                device_overlap[0]["client_id"]
-                if device_overlap
-                else (name_matches[0]["client_id"] if name_matches else "")
-            ),
+            "suggested_client_id": (likely_client or name_match or {}).get("client_id", ""),
             "linked_total": linked_total,
             "fuzzy": fuzzy,
             "all_clients": all_clients,

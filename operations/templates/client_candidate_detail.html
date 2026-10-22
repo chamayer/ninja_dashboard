@@ -14,6 +14,9 @@
         status <span class="badge badge-{{ candidate.status }}">{{ candidate.get_status_display }}</span>
     </p>
     {% if candidate.status == "open" %}
+    {% for item in ruled_out %}
+    <p class="muted" style="margin: 0.5rem 0 0;">{{ item.display_name }} is not suggested: {{ item.sources|join:", " }} already keep{% if item.sources|length == 1 %}s{% endif %} it as a separate client from this one.</p>
+    {% endfor %}
     <p style="margin: 0.5rem 0 0;">
         {% if likely_client %}
         <strong>Likely client:</strong> {{ likely_client.display_name }}

@@ -178,3 +178,16 @@ def test_unattached_table_replaces_resolver_pass_count():
     assert "Likely client" not in mapping
     assert "Likely client" in detail
     assert "No longer reported" in mapping
+
+
+def test_a_client_a_source_keeps_separate_is_not_suggested():
+    """NYCD Management: Hudu, Ninja and SentinelOne each keep it apart from City Painting."""
+    hudu, ninja, s1, lmi = 1, 2, 3, 4
+    live = [(hudu, "95"), (ninja, "82"), (s1, "256")]
+    options = [
+        {"client_id": "city-painting", "display_name": "City Painting"},
+        {"client_id": "other", "display_name": "Other"},
+    ]
+    separate = {"city-painting": {hudu, lmi, ninja, s1}, "other": {lmi}}
+    assert views._first_unseparated(options, live, separate)["client_id"] == "other"
+    assert views._first_unseparated(options[:1], live, separate) is None
