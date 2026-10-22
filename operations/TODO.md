@@ -7,6 +7,17 @@ module-specific; root `../TODO.md` keeps cross-repo items and pointers.
 
 ## Inbox
 
+- [ ] **Public IP as a client-attribution hint** (user backlogged 2026-10-22).
+      When several Computers already attached to a client report the same
+      public IP, show that as supporting evidence beside the existing
+      likely-client suggestion for an unattached source record or group.
+      Hint only — never automatic attachment, and never for deciding two
+      records are the same Computer (private IPs repeat across clients, DHCP
+      churns, VPN/RDS hosts share addresses). Needs an operator-managed list
+      of shared addresses to ignore (ISP NAT, cloud egress, VPN providers).
+      Measure first: how many unattached records carry a public IP that
+      matches exactly one client.
+
 - [ ] **Scoped baseline requirements replace instead of add** (2026-10-22).
       In `ingest/evaluator.py` `_evaluate_coverage.resolve_tier`, a server
       gets the profile/global items scoped `server` *instead of* the `all`
