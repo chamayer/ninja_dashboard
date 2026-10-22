@@ -80,6 +80,14 @@ def test_operator_jobs_have_one_visible_boundary_and_services_stay_outside():
 
     assert "patches" not in {job.key for job in jobs}
     assert operator_job_key_for_execution("patches") is None
+    ninja_enrichment = next(job for job in jobs if job.key == "ninja-enrichment")
+    assert ninja_enrichment.group_key == "source-data"
+    assert ninja_enrichment.name == "Refresh Ninja enrichment"
+    assert ninja_enrichment.description == (
+        "Refresh Ninja locations, policies and patching scope, device exemptions, "
+        "health, custom fields, troubleshooting signals, and derived Operations state."
+    )
+    assert operator_job_key_for_execution("ninja-enrichment") == "ninja-enrichment"
     assert operator_job_key_for_execution("source-demand-recovery") is None
     assert operator_job_key_for_execution("software-classify") == "software-classify-only"
     assert (

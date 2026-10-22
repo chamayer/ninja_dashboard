@@ -195,7 +195,8 @@ _RAW_DEFINITIONS = (
     JobDefinition(
         "ninja-enrichment",
         "Ninja enrichment",
-        "Refresh Ninja health, policies, custom fields, and locations.",
+        "Refresh Ninja locations, policies and patching scope, device exemptions, "
+        "health, custom fields, troubleshooting signals, and derived Operations state.",
         "source ingest",
         "collection",
         "run/ninja-enrichment",
@@ -1257,7 +1258,6 @@ _SYSTEM_SERVICE_KEYS = frozenset(
     {
         "source-refresh",
         "patches",
-        "ninja-enrichment",
         "agent-observations",
         "documentation-observations",
         "intel-nvd",
@@ -1308,7 +1308,8 @@ _JOB_PRESENTATION = MappingProxyType(
         "patches": ("Refresh Ninja patches", "Refresh Ninja patch and activity data."),
         "ninja-enrichment": (
             "Refresh Ninja enrichment",
-            "Refresh Ninja health, policies, custom fields, and locations.",
+            "Refresh Ninja locations, policies and patching scope, device exemptions, "
+            "health, custom fields, troubleshooting signals, and derived Operations state.",
         ),
         "agent-observations": (
             "Refresh connected-agent data",
@@ -1437,6 +1438,7 @@ _OPERATOR_JOB_GROUPS = (
 )
 _OPERATOR_JOB_GROUP_BY_KEY = MappingProxyType(
     {
+        "ninja-enrichment": "source-data",
         "software-queue-drain": "source-data",
         "intel-capability": "software-data",
         "intel-category": "software-data",
