@@ -10084,7 +10084,9 @@ def admin_jobs(request: HttpRequest) -> HttpResponse:
             and item["needs_attention"]
         ]
     state_order = {"failed": 0, "running": 1, "waiting": 2, "ready": 3}
-    jobs.sort(key=lambda item: (state_order.get(item["state"], 4), item["name"].lower()))
+    for item in jobs:
+        item["status_rank"] = state_order.get(item["state"], 4)
+    jobs.sort(key=lambda item: (item["status_rank"], item["name"].lower()))
     jobs_by_group: dict[str, list[dict]] = {}
     for job in jobs:
         jobs_by_group.setdefault(job["group_key"], []).append(job)

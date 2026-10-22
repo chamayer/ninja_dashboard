@@ -106,16 +106,17 @@
 </form>
 
 {% if job_groups %}
-<table class="jobs-table">
-  <thead><tr><th></th><th>Job</th><th>Status</th><th>Schedule</th><th>Action</th></tr></thead>
-  <tbody>
+{# Each group is its own tbody so header sorting reorders Jobs within their group. #}
+<table class="jobs-table" data-sortable>
+  <thead><tr><th></th><th>Job</th><th data-sort="asc">Status</th><th>Schedule</th><th>Action</th></tr></thead>
   {% for group in job_groups %}
+  <tbody>
     <tr class="jobs-group"><th scope="rowgroup" colspan="5">{{ group.label }}<span class="jobs-group-count">{{ group.jobs|length }} Job{{ group.jobs|length|pluralize }}</span></th></tr>
     {% for job in group.jobs %}
     <tr>
       <td>{% if job.active_run %}<input form="job-bulk-action" type="checkbox" name="run_id" value="{{ job.active_run.id }}" aria-label="Select {{ job.name }}">{% endif %}</td>
       <td>{% if job.is_source %}<a class="jobs-name" href="{{ job.detail_url }}">{{ job.name }}</a>{% else %}<a class="jobs-name" href="{% url 'admin_job_detail' job_id=job.id %}">{{ job.name }}</a>{% endif %}<span class="jobs-description">{{ job.description }}</span></td>
-      <td>
+      <td data-sort-value="{{ job.status_rank }}">
         <span class="jobs-state {{ job.state }}">Status: {{ job.status_label }}{% if job.needs_attention %} — needs attention{% endif %}</span>
         {% if job.capacity_blockers %}<span class="jobs-detail">Waiting for {{ job.capacity_label }}: {% for blocker in job.capacity_blockers %}<a href="{% url 'admin_job_detail' job_id=blocker.id %}">{{ blocker.name }}</a>{% if not forloop.last %}, {% endif %}{% endfor %}.</span>{% elif job.resource_blockers %}<span class="jobs-detail">Waiting for {% for blocker in job.resource_blockers %}<a href="{% url 'admin_job_detail' job_id=blocker.id %}">{{ blocker.name }}</a>{% if not forloop.last %}, {% endif %}{% endfor %} to finish.</span>{% elif job.status_detail %}<span class="jobs-detail">{{ job.status_detail }}</span>{% endif %}
         {% if job.progress %}<span class="job-progress">{% if job.progress.total %}<progress max="{{ job.progress.total }}" value="{{ job.progress.done }}" aria-label="Progress of {{ job.name }}">{{ job.progress.percent }}%</progress>{% endif %}<span>{{ job.progress.label }}</span></span>{% endif %}
@@ -136,8 +137,8 @@
       </td>
     </tr>
     {% endfor %}
-  {% endfor %}
   </tbody>
+  {% endfor %}
 </table>
 {% else %}<p class="muted">No Jobs match these filters.</p>{% endif %}
 

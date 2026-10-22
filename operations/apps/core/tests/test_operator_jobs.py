@@ -50,7 +50,7 @@ def test_jobs_present_one_list_detail_and_configuration_surface():
     assert "def admin_job_status" in views
     assert 'return redirect("admin_jobs")' in views
     assert "admin_job_detail" in urls
-    assert "<th>Status</th>" in jobs_template
+    assert "<th data-sort=\"asc\">Status</th>" in jobs_template
     assert "Status: {{ job.status_label }}" in jobs_template
     assert '{{ job.latest_at_label }} {{ job.latest_at|date:"M j, Y, g:i A" }}' in jobs_template
     assert "resource_blockers" in jobs_template

@@ -56,3 +56,13 @@ def test_pages_with_their_own_table_scripts_opt_out():
 def test_changed_templates_compile():
     for name in [*PAGINATED_TABLES, "base.html", "home.html", "org_index.html"]:
         get_template(name)
+
+
+def test_jobs_table_sorts_within_groups_and_shows_default_order():
+    jobs = (TEMPLATES / "admin_jobs.html").read_text(encoding="utf-8")
+    assert '<table class="jobs-table" data-sortable>' in jobs
+    assert '<th data-sort="asc">Status</th>' in jobs
+    assert 'data-sort-value="{{ job.status_rank }}"' in jobs
+    # One tbody per group keeps sorted rows under their group heading.
+    assert jobs.index("{% for group in job_groups %}") < jobs.index("<tbody>")
+    get_template("admin_jobs.html")
