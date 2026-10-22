@@ -33,6 +33,7 @@ KNOWN: dict[str, str] = {
     "ACTIVE_FINDING_STATUSES": "BASELINE 2026-08-05 - not individually reviewed",
     "LISTING_COLUMNS": "EXEMPT column order of the software inventory COPY staging table (schema, not a domain mapping; ingest/inventory/software.py)",
     "_LISTING_TYPES": "EXEMPT Postgres types of the software inventory COPY staging table (schema, not a domain mapping; ingest/inventory/software.py)",
+    "COPIED_FIELDS": "EXEMPT requirement row columns copied when a new profile starts from a baseline (schema, not a domain mapping; operations/apps/core/requirement_baselines.py)",
     "ACTIVE_STATUSES": "EXEMPT finding lifecycle states the software reconcile refreshes (a state machine, not a domain mapping; ingest/software_reconcile.py)",
     "AV_EXEMPT_VALUES": "EXEMPT UI/dashboard definition",
     "COMMAND_CARDS": "BASELINE 2026-08-05 - not individually reviewed",
