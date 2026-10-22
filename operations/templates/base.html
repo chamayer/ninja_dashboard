@@ -77,10 +77,12 @@
         table thead th { background: #f8f9fb; font-size: 0.82rem; font-weight: 600;
             color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
         table tbody tr:hover { background: #f4f7fb; }
-        table[data-sortable] thead th { cursor: pointer; user-select: none; }
-        table[data-sortable] thead th:hover { color: var(--accent); }
-        table[data-sortable] thead th[data-sort="asc"]::after  { content: ' ↑'; }
-        table[data-sortable] thead th[data-sort="desc"]::after { content: ' ↓'; }
+        table.is-sortable thead tr:first-child th { cursor: pointer; user-select: none; }
+        table.is-sortable thead tr:first-child th:hover { color: var(--accent); }
+        table.is-sortable thead th[data-sort="asc"]::after  { content: ' ↑'; }
+        table.is-sortable thead th[data-sort="desc"]::after { content: ' ↓'; }
+        tr.table-filter-row td { padding: 0.2rem 0.3rem 0.35rem; }
+        tr.table-filter-row input { width: 100%; min-width: 3.5rem; box-sizing: border-box; font: inherit; font-size: 0.78rem; font-weight: normal; padding: 0.15rem 0.3rem; border: 1px solid var(--border); border-radius: 3px; }
         a.csv-download {
             display: inline-block; padding: 0.3rem 0.7rem; font-size: 0.78rem;
             font-weight: 600; color: var(--muted); text-decoration: none;
@@ -254,28 +256,113 @@
     </style>
     <script>
     (function() {
+      // Every table sorts from its header and filters from a row beneath it.
+      // Opt out with data-no-sort. Paginated tables (data-server-table) get
+      // no browser-side filter, since it would only see one page; they keep
+      // page sorting only where they already opted in with data-sortable.
+      // Tables whose rows are grouped (rowspan, interleaved colspan rows) or
+      // nested inside another table are left alone unless data-sortable.
+      var ISO_DATE = /^\d{4}-\d{2}-\d{2}/, LEADING_NUMBER = /^-?\d[\d,]*(\.\d+)?/;
+      function headerRow(table) {
+        return table.tHead && table.tHead.rows.length ? table.tHead.rows[0] : null;
+      }
+      function dataRows(table) {
+        var rows = [];
+        Array.from(table.tBodies).forEach(function(tbody) {
+          Array.from(tbody.rows).forEach(function(row) {
+            // A lone spanning cell is an empty-state message, not data.
+            if (!(row.cells.length === 1 && row.cells[0].colSpan > 1)) rows.push(row);
+          });
+        });
+        return rows;
+      }
+      function sortValue(row, col) {
+        var cell = row.cells[col];
+        if (!cell) return '';
+        if (cell.hasAttribute('data-sort-value')) return cell.getAttribute('data-sort-value');
+        return (cell.innerText || cell.textContent).trim().split('\n')[0].trim();
+      }
+      function isBlank(value) {
+        return value === '' || value === '—' || value === '-';
+      }
+      function compareValues(a, b) {
+        if (ISO_DATE.test(a) && ISO_DATE.test(b)) return a < b ? -1 : (a > b ? 1 : 0);
+        var an = a.match(LEADING_NUMBER), bn = b.match(LEADING_NUMBER);
+        if (an && bn) return parseFloat(an[0].replace(/,/g, '')) - parseFloat(bn[0].replace(/,/g, ''));
+        if (an || bn) return an ? -1 : 1;
+        return a.localeCompare(b, undefined, {numeric: true, sensitivity: 'base'});
+      }
       function sortTable(th) {
         var table = th.closest('table');
-        var tbody = table.querySelector('tbody');
-        if (!tbody) return;
         var col = Array.from(th.parentNode.children).indexOf(th);
         var asc = th.getAttribute('data-sort') !== 'asc';
         th.parentNode.querySelectorAll('th').forEach(function(t) { t.removeAttribute('data-sort'); });
         th.setAttribute('data-sort', asc ? 'asc' : 'desc');
-        var rows = Array.from(tbody.querySelectorAll('tr'));
+        var rows = dataRows(table);
         rows.sort(function(a, b) {
-          var av = (a.children[col] ? a.children[col].textContent.trim() : '');
-          var bv = (b.children[col] ? b.children[col].textContent.trim() : '');
-          var an = parseFloat(av.replace(/[^0-9.\-]/g, '')), bn = parseFloat(bv.replace(/[^0-9.\-]/g, ''));
-          var r = (!isNaN(an) && !isNaN(bn)) ? (an - bn) : av.localeCompare(bv, undefined, {numeric: true});
+          var av = sortValue(a, col), bv = sortValue(b, col);
+          // Blanks stay last in either direction.
+          if (isBlank(av) || isBlank(bv)) return isBlank(av) === isBlank(bv) ? 0 : (isBlank(av) ? 1 : -1);
+          var r = compareValues(av, bv);
           return asc ? r : -r;
         });
-        rows.forEach(function(r) { tbody.appendChild(r); });
+        rows.forEach(function(r) { r.parentNode.appendChild(r); });
+      }
+      function filterTable(table, filterRow) {
+        var terms = Array.from(filterRow.querySelectorAll('input')).map(function(input) {
+          return {col: Number(input.getAttribute('data-col')), term: input.value.trim().toLowerCase()};
+        }).filter(function(item) { return item.term; });
+        dataRows(table).forEach(function(row) {
+          row.hidden = !terms.every(function(item) {
+            var cell = row.cells[item.col];
+            return cell && cell.textContent.replace(/\s+/g, ' ').toLowerCase().indexOf(item.term) !== -1;
+          });
+        });
+      }
+      function isGrouped(table, header) {
+        if (table.parentNode.closest('table')) return true;
+        if (table.tHead.rows.length > 1) return true;
+        if (Array.from(header.cells).some(function(th) { return th.colSpan > 1; })) return true;
+        if (table.querySelector('tbody td[rowspan], tbody th[rowspan]')) return true;
+        var rows = Array.from(table.tBodies).reduce(function(all, tbody) { return all.concat(Array.from(tbody.rows)); }, []);
+        return rows.length > 1 && rows.some(function(row) {
+          return Array.from(row.cells).some(function(cell) { return cell.colSpan > 1; });
+        });
+      }
+      function enhanceTable(table) {
+        var header = headerRow(table);
+        if (!header || !table.tBodies.length || table.hasAttribute('data-no-sort')) return;
+        var optedIn = table.hasAttribute('data-sortable');
+        var server = table.hasAttribute('data-server-table');
+        if (!optedIn && (server || isGrouped(table, header))) return;
+        table.classList.add('is-sortable');
+        Array.from(header.cells).forEach(function(th) {
+          th.addEventListener('click', function(event) {
+            if (event.target.closest('a, button, input, select, label, summary, details')) return;
+            sortTable(th);
+          });
+        });
+        if (server || dataRows(table).length < 2) return;
+        var filterRow = document.createElement('tr');
+        filterRow.className = 'table-filter-row';
+        Array.from(header.cells).forEach(function(th, col) {
+          var td = document.createElement('td');
+          var label = th.textContent.trim();
+          if (label) {
+            var input = document.createElement('input');
+            input.type = 'search';
+            input.placeholder = 'Filter';
+            input.setAttribute('aria-label', 'Filter ' + label);
+            input.setAttribute('data-col', String(col));
+            input.addEventListener('input', function() { filterTable(table, filterRow); });
+            td.appendChild(input);
+          }
+          filterRow.appendChild(td);
+        });
+        header.parentNode.insertBefore(filterRow, header.nextSibling);
       }
       document.addEventListener('DOMContentLoaded', function() {
-        document.querySelectorAll('table[data-sortable] thead th').forEach(function(th) {
-          th.addEventListener('click', function() { sortTable(this); });
-        });
+        document.querySelectorAll('table').forEach(enhanceTable);
           document.querySelectorAll('[data-nav-toggle]').forEach(function(button) {
             button.addEventListener('click', function() {
               var target = document.getElementById(button.getAttribute('aria-controls'));

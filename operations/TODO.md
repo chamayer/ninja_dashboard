@@ -16,6 +16,16 @@ module-specific; root `../TODO.md` keeps cross-repo items and pointers.
       by the user; an alternative design (e.g. the decision itself naming
       the variant names it covers) still needs agreement.
 
+- [ ] **Server-side header sort/filter for paginated tables** (2026-10-22).
+      Browser-side sort/filter now covers every unpaginated table
+      (`base.html`). Paginated tables are marked `data-server-table` and get
+      no browser filter: Issues, Computers (`coverage.html`, already has
+      server header filters), org Computers and Software, Patching items,
+      Software review (flat and publishers), Software products, entity
+      admin list and candidates, Job runs. Each needs view-level sort and
+      column filter parameters carried through pagination, following the
+      `coverage.html` header-filter pattern. Several still sort only the
+      visible page via `data-sortable`.
 - [ ] **Client candidates: remaining follow-ups to ADR-0038** (2026-10-22).
       (a) Candidates whose groups simply stop reporting are never closed; they
       are marked "No longer reported" on Client mappings only — needs a

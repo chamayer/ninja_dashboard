@@ -98,7 +98,7 @@ Result: {{ selected_run.result }}</pre></details>
 <section class="job-section">
   <h2>Run history</h2>
   <p class="muted">{{ run_total }} Run{{ run_total|pluralize }} · page {{ page }}.</p>
-  {% if runs %}<table class="job-table"><thead><tr><th>Status</th><th>Requested</th><th>Started</th><th>Finished</th><th>Result</th><th></th></tr></thead><tbody>
+  {% if runs %}<table class="job-table" data-server-table><thead><tr><th>Status</th><th>Requested</th><th>Started</th><th>Finished</th><th>Result</th><th></th></tr></thead><tbody>
   {% for run in runs %}<tr>
     <td><span class="job-state {{ run.status_class }}">{{ run.status_label }}{% if run.needs_attention %} — needs attention{% endif %}</span></td>
     <td>{{ run.requested_at|date:"Y-m-d H:i:s" }}</td>

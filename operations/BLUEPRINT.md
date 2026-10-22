@@ -26,6 +26,30 @@ production: index scan, 14 ms for 2 titles. Not validated: the ORM decision
 lookup and full page render against PostgreSQL. Committed and pushed with user
 approval (deploys; no migrations). Next action: check the deployed review page.
 
+## Sortable and filterable tables
+
+Complete (browser check pending). Goal: every table sorts and filters from its column headers.
+Scope: shared script/CSS in `templates/base.html` applies to every table with
+a header row unless marked `data-no-sort`; paginated tables are marked
+`data-server-table` and skipped (browser-side work would only see one page);
+tables with rowspans or interleaved group rows are skipped automatically;
+pages with their own sort scripts (`home.html`, `org_index.html`) opt out.
+Existing `data-sortable` remains a forced opt-in. Decisions: sort uses
+`data-sort-value` when present, else the cell's first line; ISO dates compare
+as text, numbers numerically, blanks last (fixes dates collapsing to their
+year). Filters are case-insensitive substring per column. Deferred: server-side
+header sort/filter for paginated lists (`TODO.md`).
+
+Checkpoint: implemented locally. Validation: Node syntax check of the
+script; comparison logic tested in Node (ISO dates, thousands separators,
+"5 open", blanks last, natural text); every template compiles;
+`test_table_controls.py` plus related tests, 110 pass. Not validated: DOM
+behaviour in a browser (npm registry blocked by TLS inspection, so no jsdom).
+`software_decisions.html` also carries another agent's uncommitted edits;
+only the two `data-server-table` lines were committed there. Committed
+and pushed with user approval. Next action: check client-mappings in a
+browser after deploy, then move this section out.
+
 ## Client mappings — unattached evidence columns
 
 Complete (deployment check pending). Goal: replace the misleading "Records" column (`seen_count`, which

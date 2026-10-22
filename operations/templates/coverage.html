@@ -178,7 +178,7 @@
 
     {% if device_rows %}
     <div style="overflow-x:auto;">
-        <table class="ops-table" data-sortable>
+        <table class="ops-table" data-sortable data-server-table>
             <thead><tr>
                 <th><details class="coverage-column-filter"><summary>Client</summary><div class="coverage-column-filter-options"><input class="coverage-filter-search" type="search" placeholder="Search clients" aria-label="Search clients">{% for client in filter_clients %}<label><input type="checkbox" name="client" value="{{ client.slug }}"{% if client.slug in client_filters %} checked{% endif %}>{{ client.name }}</label>{% endfor %}<button type="submit">Apply</button></div></details></th>
                 <th><details class="coverage-column-filter"><summary>Device</summary><div class="coverage-column-filter-options"><input type="search" name="device" value="{{ device_query }}" placeholder="Device name" aria-label="Device name"><button type="submit">Apply</button></div></details></th>
