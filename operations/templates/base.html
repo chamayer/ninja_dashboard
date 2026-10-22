@@ -325,8 +325,15 @@
                 <a class="nav-link {% if active_section == 'software' %}active{% endif %}"
                    href="{% url 'software_page' %}">Software</a>
 
-                <a class="nav-link {% if active_section == 'inventory' %}active{% endif %}"
-                   href="{% url 'inventory_clients' %}">Inventory</a>
+                <details class="nav-more" {% if active_section == 'inventory' %}open{% endif %}>
+                    <summary class="nav-link {% if active_section == 'inventory' %}active{% endif %}">
+                        Inventory
+                    </summary>
+                    <div class="nav-more-menu">
+                        <a href="{% url 'inventory_clients' %}">Clients</a>
+                        <a href="{% url 'inventory_computers' %}">Computers</a>
+                    </div>
+                </details>
 
                 <div class="nav-fill"></div>
                 <a class="nav-link {% if admin_group %}active{% endif %}"

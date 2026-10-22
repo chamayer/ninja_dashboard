@@ -148,4 +148,7 @@ def test_admin_navigation_folds_services_into_jobs():
     assert "Inspect sources" in data_template
     assert "Review Issues" in data_template
     assert "def admin_data" in views
+    assert '<summary class="nav-link {% if active_section == \'inventory\' %}active{% endif %}">' in base_template
+    assert 'href="{% url \'inventory_clients\' %}">Clients</a>' in base_template
+    assert 'href="{% url \'inventory_computers\' %}">Computers</a>' in base_template
     get_template("admin_settings.html")
