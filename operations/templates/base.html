@@ -281,6 +281,17 @@
               var expanded = button.getAttribute('aria-expanded') === 'true';
               target.hidden = expanded;
               button.setAttribute('aria-expanded', String(!expanded));
+              // Swap with the page's own context row instead of stacking under it.
+              document.querySelectorAll('.nav-context-row').forEach(function(row) {
+                if (row === target) return;
+                if (!expanded && !row.hidden) {
+                  row.hidden = true;
+                  row.setAttribute('data-nav-swapped', '');
+                } else if (expanded && row.hasAttribute('data-nav-swapped')) {
+                  row.hidden = false;
+                  row.removeAttribute('data-nav-swapped');
+                }
+              });
             });
           });
       });
