@@ -136,6 +136,8 @@ class _Cursor:
             ],
             # operations.agents with an agent.* entity type.
             [("Ninja",), ("SentinelOne",), ("R-U-ON",)],
+            # Full source-record population, including records not linked to a Computer.
+            [("Ninja", 4), ("SentinelOne", 1), ("Hudu", 3)],
         ]
 
     def __enter__(self):
@@ -249,6 +251,7 @@ def test_coverage_uses_effective_requirements_and_source_specific_filters(monkey
         "No record": 0,
         "Total": 2,
     }
+    assert cards["Ninja"]["records"] == 4
     assert cards["Ninja"]["requirement_total"] == 2
     assert {item["name"]: item["count"] for item in cards["Ninja"]["requirement_exceptions"]} == {
         "Missing": 1,

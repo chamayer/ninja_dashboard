@@ -15113,6 +15113,19 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
                 "SELECT name FROM operations.agents WHERE entity_type LIKE 'agent.%%'"
             )
             agent_platforms = {row[0] for row in cur.fetchall()}
+            cur.execute(
+                """
+                SELECT source.name, COUNT(*)::int
+                  FROM operations.v_entity_observation_admin_metadata observation
+                  JOIN operations.source_instances instance
+                    ON instance.tenant_id = observation.tenant_id
+                   AND instance.id = observation.source_instance_id
+                  JOIN operations.sources source ON source.id = instance.source_id
+                 WHERE observation.tenant_id = 1
+                 GROUP BY source.name
+                """
+            )
+            source_record_counts = {name: count for name, count in cur.fetchall()}
 
     devices_by_id = {
         row[0]: {
@@ -15677,6 +15690,7 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
         platform_cards.append(
             {
                 "platform": platform,
+                "records": source_record_counts.get(platform, 0),
                 "counts": [
                     {
                         "name": status,
@@ -15743,6 +15757,7 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
     # requirement counts from the stored verdicts (ADR-0035).
     hudu_card = {
         "platform": "Hudu",
+        "records": source_record_counts.get("Hudu", 0),
         "counts": [
             {"name": name, "count": count, "url": hudu_urls[name]}
             for name, count in hudu_counts.items()
