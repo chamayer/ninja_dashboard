@@ -2902,44 +2902,7 @@ def device_detail(request: HttpRequest, org_slug: str, device_id: str) -> HttpRe
     with transaction.atomic():
         with connection.cursor() as cur:
             cur.execute("SET LOCAL operations.tenant_id = 1")
-            cur.execute(
-                """
-            SELECT evidence.observation_id, evidence.source_name, evidence.entity_type, evidence.external_id,
-                   CASE
-                       WHEN evidence.source_name = 'Ninja'
-                       THEN 'https://amrose.rmmservice.com/#/deviceDashboard/'
-                            || evidence.external_id || '/overview'
-                       ELSE hudu.source_url
-                   END AS source_url,
-                   evidence.observation_active, evidence.observation_last_seen_at,
-                   presence.reported_online, presence.last_contact_at,
-                   lifecycle.record_lifecycle
-              FROM operations.v_device_observation_current evidence
-              LEFT JOIN operations.v_device_source_record_lifecycle_current lifecycle
-                ON lifecycle.tenant_id = evidence.tenant_id
-               AND lifecycle.observation_id = evidence.observation_id
-              LEFT JOIN LATERAL (
-                  SELECT presence.reported_online, presence.last_contact_at
-                    FROM operations.device_agent_presence_current presence
-                   WHERE presence.tenant_id = evidence.tenant_id
-                     AND presence.device_id = evidence.device_id
-                     AND presence.platform = evidence.source_name
-                     AND presence.entity_type = evidence.entity_type
-                   ORDER BY COALESCE(presence.last_contact_at, presence.last_observed_at)
-                       DESC NULLS LAST
-                   LIMIT 1
-              ) presence ON TRUE
-              LEFT JOIN operations.v_cmdb_inventory_evidence_current hudu
-                ON hudu.tenant_id = evidence.tenant_id
-               AND hudu.observation_id = evidence.observation_id
-               AND hudu.source_name = 'Hudu'
-             WHERE evidence.tenant_id = %s AND evidence.device_id = %s
-             ORDER BY evidence.source_name, evidence.entity_type,
-                      evidence.observation_last_seen_at DESC
-                """,
-                [1, str(device.id)],
-            )
-            observations = cur.fetchall()
+            observations = _device_source_records(cur, [device.id]).get(str(device.id), [])
 
             cur.execute(
                 """
@@ -17293,6 +17256,75 @@ def _record_history_events(cur, computer_ids, before) -> list[dict]:
     ]
 
 
+# ── Per-source record status (device detail and merge review) ───────────────
+
+
+def _device_source_records(cur, device_ids) -> dict[str, list[tuple]]:
+    """Return each Computer's source records with status and last contact.
+
+    Rows are ``(observation_id, source, entity_type, external_id, source_url,
+    active, last_seen, reported_online, last_contact, record_lifecycle)``,
+    keyed by device id. The caller sets the tenant on ``cur``.
+    """
+    cur.execute(
+        """
+        SELECT evidence.device_id::text,
+               evidence.observation_id, evidence.source_name, evidence.entity_type, evidence.external_id,
+               CASE
+                   WHEN evidence.source_name = 'Ninja'
+                   THEN 'https://amrose.rmmservice.com/#/deviceDashboard/'
+                        || evidence.external_id || '/overview'
+                   ELSE hudu.source_url
+               END AS source_url,
+               evidence.observation_active, evidence.observation_last_seen_at,
+               presence.reported_online, presence.last_contact_at,
+               lifecycle.record_lifecycle
+          FROM operations.v_device_observation_current evidence
+          LEFT JOIN operations.v_device_source_record_lifecycle_current lifecycle
+            ON lifecycle.tenant_id = evidence.tenant_id
+           AND lifecycle.observation_id = evidence.observation_id
+          LEFT JOIN LATERAL (
+              SELECT presence.reported_online, presence.last_contact_at
+                FROM operations.device_agent_presence_current presence
+               WHERE presence.tenant_id = evidence.tenant_id
+                 AND presence.device_id = evidence.device_id
+                 AND presence.platform = evidence.source_name
+                 AND presence.entity_type = evidence.entity_type
+               ORDER BY COALESCE(presence.last_contact_at, presence.last_observed_at)
+                   DESC NULLS LAST
+               LIMIT 1
+          ) presence ON TRUE
+          LEFT JOIN operations.v_cmdb_inventory_evidence_current hudu
+            ON hudu.tenant_id = evidence.tenant_id
+           AND hudu.observation_id = evidence.observation_id
+           AND hudu.source_name = 'Hudu'
+         WHERE evidence.tenant_id = %s AND evidence.device_id = ANY(%s::uuid[])
+         ORDER BY evidence.source_name, evidence.entity_type,
+                  evidence.observation_last_seen_at DESC
+        """,
+        [1, [str(device_id) for device_id in device_ids]],
+    )
+    records: dict[str, list[tuple]] = {}
+    for device_id, *row in cur.fetchall():
+        records.setdefault(device_id, []).append(tuple(row))
+    return records
+
+
+def _attach_merge_review_evidence(devices) -> None:
+    """Give each merge-review Computer its source records and a summary."""
+    with transaction.atomic(), connection.cursor() as cur:
+        cur.execute("SET LOCAL operations.tenant_id = 1")
+        records = _device_source_records(cur, [device.id for device in devices])
+    retired = {"archived", "retired", "decommissioned"}
+    for device in devices:
+        device.source_status_rows = records.get(str(device.id), [])
+        live = [row for row in device.source_status_rows if row[5] and row[9] not in retired]
+        device.is_online_any = any(row[7] is True for row in live)
+        device.has_presence = any(row[7] is not None for row in live)
+        device.last_contact_any = max((row[8] for row in live if row[8]), default=None)
+        device.last_updated_any = max((row[6] for row in live if row[6]), default=None)
+
+
 # ── Device merge helper (called by device_merge view) ───────────────────
 
 
@@ -17400,6 +17432,7 @@ def merge_candidate_group_review(request: HttpRequest, candidate_id) -> HttpResp
         )
         return redirect("device_detail", org_slug=survivor.client.slug, device_id=survivor.id)
 
+    _attach_merge_review_evidence(devices)
     for device in devices:
         device.source_records = []
         for link in device.source_links.all():
@@ -17513,6 +17546,7 @@ def device_merge(
             device_id=survivor.id,
         )
 
+    _attach_merge_review_evidence([device_a, device_b])
     return render(
         request,
         "device_merge.html",

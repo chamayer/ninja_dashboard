@@ -64,6 +64,9 @@
                 <div class="dm-attr"><span class="lbl">Type</span><span class="val">{{ dev.get_device_type_display }}</span></div>
                 <div class="dm-attr"><span class="lbl">Role</span><span class="val">{{ dev.device_role }}</span></div>
                 <div class="dm-attr"><span class="lbl">OS</span><span class="val">{{ dev.os_name|default:"—" }}</span></div>
+                <div class="dm-attr"><span class="lbl">Status</span><span class="val">{% if dev.is_online_any %}<span class="badge badge-low">Online</span>{% elif dev.has_presence %}<span class="badge badge-high">Offline</span>{% else %}<span class="badge" style="background:#f3f4f6; color:#6b7280;">Not reported</span>{% endif %}</span></div>
+                <div class="dm-attr"><span class="lbl">Last contact</span><span class="val">{{ dev.last_contact_any|date:"Y-m-d H:i"|default:"—" }}</span></div>
+                <div class="dm-attr"><span class="lbl">Last updated</span><span class="val">{{ dev.last_updated_any|date:"Y-m-d H:i"|default:"—" }}</span></div>
                 <div class="dm-attr"><span class="lbl">Lifecycle</span><span class="val">{{ dev.get_lifecycle_status_display }}</span></div>
                 <div class="dm-attr"><span class="lbl">Created</span><span class="val">{{ dev.created_at|date:"Y-m-d H:i" }}</span></div>
                 <div class="dm-attr"><span class="lbl">Sources</span><span class="val dm-src-badges">
@@ -76,6 +79,8 @@
             </div>
             {% endfor %}
         </div>
+
+        {% for device in devices %}{% include "_merge_source_records.html" %}{% endfor %}
 
         <div class="dm-warn">
             <strong>What happens next</strong> — the older Operations record is

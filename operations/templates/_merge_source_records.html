@@ -1,0 +1,30 @@
+{% load human_labels %}
+{% comment %}
+Per-source evidence for one Computer on a merge review page. Expects
+``device`` with ``source_status_rows`` from ``_attach_merge_review_evidence``.
+Status cells match the Source records table on the Computer page.
+{% endcomment %}
+<h3 style="margin:1rem 0 0.3rem; font-size:0.95rem;">
+    <a href="{% url 'device_detail' org_slug=device.client.slug device_id=device.id %}"><code>{{ device.canonical_hostname }}</code></a>
+    <span class="muted" style="font-weight:400;">· source records</span>
+</h3>
+{% if device.source_status_rows %}
+<table data-sortable style="width:100%; border-collapse:collapse; font-size:0.85rem;">
+    <thead><tr style="text-align:left; border-bottom:1px solid var(--border);"><th>Source</th><th>What it reports</th><th>Record state</th><th>Status</th><th>Record ID</th><th class="num">Last updated</th><th class="num">Last contact</th></tr></thead>
+    <tbody>
+    {% for observation_id, source, entity_type, external_id, source_url, active, last_seen, reported_online, last_contact, record_lifecycle in device.source_status_rows %}
+    <tr style="border-bottom:1px solid var(--border);">
+        <td style="font-weight:600;">{{ source }}{% if source_url %} <a href="{{ source_url }}" target="_blank" rel="noopener" style="font-weight:400; margin-left:.35rem;">Open →</a>{% endif %}</td>
+        <td>{{ entity_type|humanize_label }}</td>
+        <td>{% if active %}<span class="badge badge-low">Current</span>{% else %}<span class="badge badge-high">Withdrawn</span>{% endif %}</td>
+        <td>{% if record_lifecycle == "archived" %}<span class="badge" style="background:#f3f4f6; color:#6b7280;">Archived</span>{% elif record_lifecycle == "retired" %}<span class="badge" style="background:#f3f4f6; color:#6b7280;">Retired</span>{% elif record_lifecycle == "decommissioned" %}<span class="badge" style="background:#f3f4f6; color:#6b7280;">Decommissioned</span>{% elif reported_online is True %}<span class="badge badge-low">Online</span>{% elif reported_online is False %}<span class="badge badge-high">Offline</span>{% else %}<span class="badge" style="background:#f3f4f6; color:#6b7280;">Not reported</span>{% endif %}</td>
+        <td><code>{{ external_id|default:"—" }}</code></td>
+        <td class="muted num">{{ last_seen|date:"Y-m-d H:i"|default:"—" }}</td>
+        <td class="muted num">{{ last_contact|date:"Y-m-d H:i"|default:"—" }}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<p class="muted">No source records are available for this Computer.</p>
+{% endif %}

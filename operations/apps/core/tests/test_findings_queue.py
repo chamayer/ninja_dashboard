@@ -397,9 +397,10 @@ def test_device_source_records_are_unique_and_review_copy_is_truthful():
     template = Path("templates/device_detail.html").read_text(encoding="utf-8")
 
     assert "FROM operations.v_device_observation_current evidence" in source
-    assert "LEFT JOIN LATERAL (\n                  SELECT presence.reported_online" in source
-    assert "LIMIT 1\n              ) presence ON TRUE" in source
-    assert "[1, str(device.id)]," in source
+    assert "LEFT JOIN LATERAL (\n              SELECT presence.reported_online" in source
+    assert "LIMIT 1\n          ) presence ON TRUE" in source
+    assert "evidence.device_id = ANY(%s::uuid[])" in source
+    assert "_device_source_records(cur, [device.id]).get(str(device.id), [])" in source
     assert "[str(device.id), 1, str(device.id)]," not in source
     assert "this Computer is outside normal inventory" in template
     assert "no current source record reports this Computer" not in template
