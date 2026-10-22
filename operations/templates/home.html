@@ -220,7 +220,7 @@
 <section class="card client-card" id="clients">
   <div class="client-card-head">
     <div class="client-card-title">
-      <h2>Client portfolio{% if open_client_candidates %} <a class="badge badge-high client-new-link" href="{% url 'client_mappings' %}?state=unattached" title="Source clients not yet set up in Operations: accept as a new client, map to an existing one, or exclude">{{ open_client_candidates }} new</a>{% endif %}</h2>
+      <h2>Client portfolio{% if open_client_candidates %} <a class="badge badge-high client-new-link" href="{% url 'inventory_clients' %}#new-clients" title="Source clients not yet set up in Operations: accept as a new client, map to an existing one, or exclude">{{ open_client_candidates }} new</a>{% endif %}</h2>
       <span>Clients needing attention appear first · click a heading to sort</span>
     </div>
     <div class="client-controls">

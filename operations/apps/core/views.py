@@ -5802,6 +5802,12 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
                     "client_candidate_detail", kwargs={"candidate_id": candidate.id}
                 )
                 resolution_label = "Review match"
+            elif matching_reference and client is not None:
+                # The mapping decision for a known client is made on its page.
+                resolution_url = (
+                    f"{reverse('org_index', kwargs={'org_slug': client.slug})}#source-references"
+                )
+                resolution_label = "Decide on the client page"
             elif matching_reference:
                 resolution_url = (
                     f"{reverse('client_mappings')}?"
@@ -12955,6 +12961,9 @@ def client_mappings(request: HttpRequest) -> HttpResponse:
     )
 
 
+NEW_CLIENTS_SHOWN = 15
+
+
 @login_required
 def inventory_clients(request: HttpRequest) -> HttpResponse:
     """Client inventory: computers and how fully each source covers them.
@@ -13053,9 +13062,18 @@ def inventory_clients(request: HttpRequest) -> HttpResponse:
             for source in sorted(set(row["groups"]) | set(row["covered"]))
         ]
 
-    open_candidates = ClientCandidate.objects.filter(
-        tenant_id=1, status=ClientCandidate.Status.OPEN
-    ).count()
+    # New / discovered clients: a view of the same open records Issues lists
+    # as unattached client source groups (one Issue per group), so the counts
+    # here are the Issues' counts.
+    source_names = {source.id: source.name for source in Source.objects.all()}
+    new_clients = [
+        {"candidate": candidate, "refs": candidate.source_refs or []}
+        for candidate in ClientCandidate.objects.filter(
+            tenant_id=1, status=ClientCandidate.Status.OPEN
+        ).order_by("-last_seen_at", "display_name")
+    ]
+    _add_candidate_evidence(new_clients, source_names)
+    new_group_count = sum(len(row["refs"]) for row in new_clients)
     return render(
         request,
         "inventory_clients.html",
@@ -13063,7 +13081,20 @@ def inventory_clients(request: HttpRequest) -> HttpResponse:
             "active_section": "inventory",
             "rows": list(rows_by_client.values()),
             "query": query,
-            "open_candidates": open_candidates,
+            "open_candidates": len(new_clients),
+            "new_clients": new_clients[:NEW_CLIENTS_SHOWN],
+            "new_client_count": len(new_clients),
+            "new_group_count": new_group_count,
+            "new_clients_issues_url": (
+                f"{reverse('findings_queue')}?"
+                + urlencode(
+                    {
+                        "category": "inventory",
+                        "type": "client_mapping",
+                        "issue": "client_unattached_group",
+                    }
+                )
+            ),
         },
     )
 

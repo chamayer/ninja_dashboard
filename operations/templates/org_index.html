@@ -127,14 +127,15 @@
   <h2>Source references</h2>
   <p class="muted">Source client records mapped to this client. Reported names are source evidence; they do not rename the client.</p>
   <table class="ops-table">
-    <thead><tr><th>Source</th><th>Reported name</th><th>State</th><th>Details</th></tr></thead>
+    <thead><tr><th>Source</th><th>Reported name</th><th>Mapping decision</th><th>Details</th></tr></thead>
     <tbody>
     {% for reference in source_references %}
       <tr>
         <td>{{ reference.source_name }}</td>
         <td>{% if reference.observed_name %}<strong>{{ reference.observed_name }}</strong>{% if reference.name_differs %}<br><a class="badge badge-high" href="{{ reference.name_difference_url }}">Name differs</a>{% endif %}{% else %}<span class="muted">Not currently reported</span>{% endif %}</td>
-        <td>{% if reference.missing_since %}<span class="badge badge-high">Missing</span>{% else %}<span class="badge badge-low">{{ reference.mapping_state }}</span>{% endif %}</td>
-        <td><a href="{% url 'client_source_reference_detail' source_link_id=reference.source_link_id %}">Source record</a><br><a href="{% url 'client_mappings' %}?source_link_id={{ reference.source_link_id }}">Mapping decision</a></td>
+        <td>{% if reference.missing_since %}<span class="badge badge-high">Missing</span> {% endif %}<span class="badge {% if reference.mapping_state == 'review' %}badge-medium{% else %}badge-low{% endif %}">{% if reference.mapping_state == 'review' %}Not yet confirmed{% elif reference.mapping_state == 'explicit' %}Confirmed{% elif reference.mapping_state == 'ignored' %}Ignored{% elif reference.mapping_state == 'automatic' %}Automatic{% else %}{{ reference.mapping_state }}{% endif %}</span>
+          {% if user.is_superuser or perms.operations.manage_catalog %}<form method="post" action="{% url 'client_mapping_decide' reference.source_link_id %}" class="mapping-decide" style="margin-top:.35rem; display:flex; gap:.3rem; flex-wrap:wrap;">{% csrf_token %}<input type="hidden" name="next" value="{{ request.path }}#source-references"><select name="state" aria-label="Mapping decision for {{ reference.source_name }}"><option value="explicit"{% if reference.mapping_state == "explicit" %} selected{% endif %}>Confirmed</option><option value="automatic"{% if reference.mapping_state == "automatic" %} selected{% endif %}>Automatic</option><option value="ignored"{% if reference.mapping_state == "ignored" %} selected{% endif %}>Ignored</option><option value="review"{% if reference.mapping_state == "review" %} selected{% endif %}>Not yet confirmed</option></select><input name="reason" maxlength="500" required placeholder="Reason" aria-label="Reason for the {{ reference.source_name }} decision"><button type="submit">Save</button></form>{% endif %}</td>
+        <td><a href="{% url 'client_source_reference_detail' source_link_id=reference.source_link_id %}">Source record and history</a></td>
       </tr>
     {% empty %}
       <tr><td colspan="4" class="muted">No source references are mapped to this client.</td></tr>
@@ -149,7 +150,7 @@
   <p class="muted">These source records belong to this client but need a decision before Operations can attach them to the right record.</p>
   <ul class="compact-list">
   {% for candidate in pending_record_matches %}
-    <li><span>{{ candidate.source_instance.source.name }} · {{ candidate.proposed_entity_class.display_name }} · <code>{{ candidate.external_id }}</code></span><a href="{% url 'findings_queue' %}?client={{ current_client.slug }}&amp;type=computer_identity_matching">Review in Issues →</a></li>
+    <li><span>{{ candidate.source_instance.source.name }} · {{ candidate.proposed_entity_class.display_name }} · <code>{{ candidate.external_id }}</code></span><a href="{% url 'findings_queue' %}?client={{ current_client.slug }}&amp;type=computer_identity">Review in Issues →</a></li>
   {% endfor %}
   </ul>
 </section>

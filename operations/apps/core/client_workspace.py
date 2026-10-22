@@ -388,7 +388,7 @@ def client_source_references(*, client_id=None, source_name: str = "") -> list[d
                 "source_url": f"{reverse('sources_status')}?{urlencode({'source': source_name_value})}",
                 "name_difference_url": (
                     f"{reverse('findings_queue')}?"
-                    f"{urlencode({'category': 'inventory', 'type': 'client_name_differences', 'issue': 'client_name_conflict', 'client': client_slug})}"
+                    f"{urlencode({'category': 'inventory', 'type': 'client_mapping', 'issue': 'client_name_conflict', 'client': client_slug})}"
                 ),
             }
         )

@@ -13,10 +13,32 @@
   <p class="muted">Operations clients, their computers, and how fully each source covers them. Client status remains on the separate Clients overview.</p>
   <form method="get"><label>Search clients <input name="q" value="{{ query }}"></label> <button type="submit">Search</button>{% if query %} <a class="clear" href="{% url 'inventory_clients' %}">Clear</a>{% endif %}</form>
   <div class="ic-links">
-    {% if open_candidates %}<a class="badge badge-high" href="{% url 'client_mappings' %}?state=unattached" title="Source clients not yet set up in Operations: accept as a new client, map to an existing one, or exclude">{{ open_candidates }} new</a>{% endif %}
+    {% if open_candidates %}<a class="badge badge-high" href="#new-clients" title="Source clients not yet set up in Operations: accept as a new client, map to an existing one, or exclude">{{ open_candidates }} new</a>{% endif %}
     <a href="{% url 'client_mappings' %}">Client mappings →</a>
   </div>
 </div>
+{% if new_clients %}
+<section class="card" id="new-clients">
+  <h2>New / discovered clients <span class="muted" style="font-size:.85rem; font-weight:400;">{{ new_client_count }} name{{ new_client_count|pluralize }} · {{ new_group_count }} source group{{ new_group_count|pluralize }}</span></h2>
+  <p class="muted">Reported by a source but not set up in Operations. Review each one to accept it as a new client, map it to an existing client, or exclude it. These are the same records Issues lists as unattached client source groups.</p>
+  <table class="ops-table">
+    <thead><tr><th>Reported name</th><th>Sources</th><th class="num">Source records</th><th class="num">First / last seen</th><th></th></tr></thead>
+    <tbody>
+    {% for row in new_clients %}
+    <tr>
+      <td><a href="{% url 'client_candidate_detail' candidate_id=row.candidate.id %}?next={{ request.path|urlencode }}%23new-clients">{{ row.candidate.display_name|default:row.candidate.normalized_name }}</a></td>
+      <td>{% for group in row.groups %}<span class="badge {% if group.reported %}badge-info{% else %}badge-suppressed{% endif %}" title="{{ group.external_name }}">{{ group.source }}{% if group.state == 'renamed' %} → {{ group.renamed_to }}{% elif group.state == 'attached' %} (attached){% elif group.state == 'gone' %} (not reported){% endif %}</span> {% endfor %}</td>
+      <td class="num">{% if row.reported_count %}{{ row.record_count }}{% if row.computer_count %}<br><span class="muted">{{ row.computer_count }} linked</span>{% endif %}{% else %}<span class="muted">—</span>{% endif %}</td>
+      <td class="num muted">{{ row.candidate.first_seen_at|date:"Y-m-d" }}<br>{{ row.candidate.last_seen_at|date:"Y-m-d" }}</td>
+      <td><a href="{% url 'client_candidate_detail' candidate_id=row.candidate.id %}?next={{ request.path|urlencode }}%23new-clients">Review →</a></td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  <p style="margin:.6rem 0 0;">{% if new_client_count > new_clients|length %}Showing {{ new_clients|length }} of {{ new_client_count }}. {% endif %}<a href="{{ new_clients_issues_url }}">All {{ new_group_count }} in Issues →</a></p>
+</section>
+{% endif %}
+
 <div class="card">
   <p class="muted ic-legend"><strong>Coverage</strong> — for each source: computers with a current record from that source / the client's active computers (retired excluded). Green = every computer, amber = some missing, red = none. <strong>First / last seen</strong> = earliest and latest time any source reported this client. Hover a source for details.</p>
   <table class="ops-table" data-sortable>
@@ -29,7 +51,7 @@
       <td><div class="ic-cov">{% for item in row.coverage %}<span class="badge {% if item.complete %}badge-low{% elif item.covered %}badge-medium{% elif row.computer_count %}badge-high{% else %}badge-info{% endif %}" title="{{ item.covered }} of {{ row.computer_count }} active computer{{ row.computer_count|pluralize }} {{ item.covered|pluralize:'has,have' }} a current {{ item.source }} record · {% if item.groups %}{{ item.groups }} {{ item.source }} group{{ item.groups|pluralize }} mapped to this client{% else %}no {{ item.source }} group mapped to this client{% endif %}{% if item.last_seen %} · last seen {{ item.last_seen|date:"Y-m-d H:i" }}{% endif %}">{{ item.source }} {{ item.covered }}/{{ row.computer_count }}{% if item.groups > 1 %} <small>· {{ item.groups }} groups</small>{% endif %}</span>{% empty %}<span class="muted">No attached source record</span>{% endfor %}</div></td>
       <td class="num muted">{{ row.first_seen|date:"Y-m-d"|default:"—" }}</td>
       <td class="num muted">{{ row.last_seen|date:"Y-m-d H:i"|default:"—" }}</td>
-      <td class="num">{% if row.name_difference_count %}<a class="badge badge-high" href="{% url 'findings_queue' %}?category=inventory&amp;type=client_name_differences&amp;issue=client_name_conflict&amp;client={{ row.client.slug }}">{{ row.name_difference_count }} open</a>{% else %}<span class="muted">0</span>{% endif %}</td>
+      <td class="num">{% if row.name_difference_count %}<a class="badge badge-high" href="{% url 'findings_queue' %}?category=inventory&amp;type=client_mapping&amp;issue=client_name_conflict&amp;client={{ row.client.slug }}">{{ row.name_difference_count }} open</a>{% else %}<span class="muted">0</span>{% endif %}</td>
       <td><a href="{% url 'client_mappings' %}?client_id={{ row.client.id }}">Source records</a></td>
     </tr>
     {% empty %}<tr><td colspan="7">No clients match this search.</td></tr>{% endfor %}

@@ -1,3 +1,35 @@
+## Client mapping workflow — finish the single-inbox move
+
+Steps 1-5 complete (browser check pending); retirement deferred (user approved 2026-10-22). Goal: finish the 2026-10-07 "Issues is the
+single inbox" change for client mapping. Issues is the queue; Inventory ›
+Clients shows a "New / discovered clients" view of the same open items; a
+client's page decides its source mappings in place. Client mappings stays (not
+retired) until Source records can hold the full list; Source records changes
+are deferred until the rest is complete.
+Steps: (1) fix links to non-existent Issues types (`type=client_mapping` from
+the candidate page and `/clients/candidates/`; `type=computer_identity` from
+`/admin/entity-candidates/`); (2) mapping decision inline on the client page
+with return-to; (3) Issues links for a known client open the client page
+decision; (4) New/discovered section on Inventory › Clients, counts matching
+Issues; (5) "needs review" measured: 339 of 376 mappings are review (the
+unconfirmed default), actionable name differences are already
+`client_name_conflict` Issues, so no new Issues — the client page shows the
+state. Production 2026-10-22: 28 open candidates = 30 source groups = 30 open
+`client_unattached_group` admin findings. No schema change.
+
+Correction: production Issue groups come from `finding_types.issue_group`
+("Client mapping" -> `client_mapping`, "Computer identity" ->
+`computer_identity`), so those links were valid; the broken ones were
+`client_name_differences` (Inventory › Clients, client workspace) and
+`computer_identity_matching` (client page).
+Checkpoint: steps 1-5 implemented locally. Validation: Django check,
+templates compile, Operations suite passes except the 4 failures also on
+clean HEAD; new `test_client_mapping_workflow.py`; table-controls guard now
+lists `software_tech_checklist.html` (paginated, no table, from 0629674).
+Lint/format unchanged per file. Not validated in a browser. Next action:
+retire Client mappings after Source records holds the full list (steps 1-5
+committed and pushed with user approval).
+
 ## R-U-ON process monitors shown on their computers
 
 Active (user approved 2026-10-22, including a deploying migration; the user
