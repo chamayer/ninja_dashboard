@@ -77,7 +77,7 @@
         table thead th { background: #f8f9fb; font-size: 0.82rem; font-weight: 600;
             color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
         table tbody tr:hover { background: #f4f7fb; }
-        table.is-sortable thead tr:first-child th { cursor: pointer; user-select: none; }
+        table.is-sortable thead tr:first-child th { cursor: pointer; }
         table.is-sortable thead tr:first-child th:hover { color: var(--accent); }
         table.is-sortable thead th[data-sort="asc"]::after  { content: ' ↑'; }
         table.is-sortable thead th[data-sort="desc"]::after { content: ' ↓'; }
@@ -339,6 +339,8 @@
         Array.from(header.cells).forEach(function(th) {
           th.addEventListener('click', function(event) {
             if (event.target.closest('a, button, input, select, label, summary, details')) return;
+            // Selecting header text is not a request to sort.
+            if (String(window.getSelection ? window.getSelection() : '').trim()) return;
             sortTable(th);
           });
         });

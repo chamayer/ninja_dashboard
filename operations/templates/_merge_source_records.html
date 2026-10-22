@@ -4,10 +4,13 @@ Per-source evidence for one Computer on a merge review page. Expects
 ``device`` with ``source_status_rows`` from ``_attach_merge_review_evidence``.
 Status cells match the Source records table on the Computer page.
 {% endcomment %}
-<h3 style="margin:1rem 0 0.3rem; font-size:0.95rem;">
+<section style="margin:1.25rem 0 0; border:1px solid var(--border); border-left:4px solid var(--accent); border-radius:4px; overflow:hidden;">
+<h3 style="margin:0; padding:0.5rem 0.75rem; font-size:0.95rem; background:#f1f5f9; border-bottom:1px solid var(--border);">
+    {% if forloop %}<span class="muted" style="font-weight:600; margin-right:0.4rem;">Computer {{ forloop.counter }} of {{ devices|length }}</span>{% endif %}
     <a href="{% url 'device_detail' org_slug=device.client.slug device_id=device.id %}"><code>{{ device.canonical_hostname }}</code></a>
     <span class="muted" style="font-weight:400;">· source records</span>
 </h3>
+<div style="padding:0.25rem 0.75rem 0.5rem;">
 {% if device.source_status_rows %}
 <table data-sortable style="width:100%; border-collapse:collapse; font-size:0.85rem;">
     <thead><tr style="text-align:left; border-bottom:1px solid var(--border);"><th>Source</th><th>What it reports</th><th>Record state</th><th>Status</th><th>Record ID</th><th class="num">Last updated</th><th class="num">Last contact</th></tr></thead>
@@ -28,3 +31,5 @@ Status cells match the Source records table on the Computer page.
 {% else %}
 <p class="muted">No source records are available for this Computer.</p>
 {% endif %}
+</div>
+</section>

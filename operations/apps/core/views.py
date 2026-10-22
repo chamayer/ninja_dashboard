@@ -12505,17 +12505,47 @@ def _source_group_state(key, normalized_name, newest_name, reported) -> tuple[st
     return ("attached" if reported[key] else "reported"), ""
 
 
+def _candidate_client_overlap(candidate) -> tuple[list[dict], int]:
+    """Existing clients that already own Computers in this candidate's live groups.
+
+    Counts every active record in the groups the source still reports under
+    this name (not a sample), so the strongest map-to-existing signal is
+    complete. Returns the owning clients, largest first, and how many
+    Computers in the groups are linked at all.
+    """
+    refs = candidate.source_refs or []
+    pairs = {
+        (ref.get("source_id"), str(ref.get("external_id")))
+        for ref in refs
+        if ref.get("source_id") and ref.get("external_id")
+    }
+    newest_name = _newest_candidate_name_by_group()
+    reported, records_by_group = _live_source_group_evidence(pairs)
+    devices: dict[str, tuple | None] = {}
+    for key in pairs:
+        state, _renamed_to = _source_group_state(
+            key, candidate.normalized_name, newest_name, reported
+        )
+        if state == "reported":
+            for device_id, owner in records_by_group.get(key, {}).values():
+                if device_id:
+                    devices[device_id] = owner
+    owners = Counter(owner for owner in devices.values() if owner)
+    overlap = [
+        {"client_id": client_id, "display_name": name, "device_count": count}
+        for (client_id, name), count in owners.most_common()
+    ]
+    return overlap, len(devices)
+
+
 def _add_candidate_evidence(candidates: list[dict], source_names: dict) -> None:
     """Annotate client candidates with live evidence for the list view.
 
     ``source_refs`` keeps every source group ever seen under the name, so each
     group is checked against current observations: whether the source still
-    reports it under this name, the source records currently in it, and
-    which existing client already owns the Computers those records link to.  Historical groups stay
+    reports it under this name and the source records currently in it.  Historical groups stay
     listed but marked and contribute no live evidence.
     """
-    from difflib import get_close_matches
-
     pairs = {
         (ref.get("source_id"), str(ref.get("external_id")))
         for row in candidates
@@ -12524,12 +12554,6 @@ def _add_candidate_evidence(candidates: list[dict], source_names: dict) -> None:
     }
     newest_name = _newest_candidate_name_by_group()
     reported, records_by_group = _live_source_group_evidence(pairs)
-    known_names = {
-        client.display_name: (str(client.id), client.display_name)
-        for client in Client.objects.filter(tenant_id=1, deleted_at__isnull=True)
-    }
-    for alias in ClientNameAlias.objects.filter(tenant_id=1, enabled=True).select_related("client"):
-        known_names[alias.alias] = (str(alias.client_id), alias.client.display_name)
 
     for row in candidates:
         groups = []
@@ -12554,22 +12578,10 @@ def _add_candidate_evidence(candidates: list[dict], source_names: dict) -> None:
         row["reported_count"] = sum(1 for group in groups if group["reported"])
         row["renamed_to"] = sorted({group["renamed_to"] for group in groups if group["renamed_to"]})
         row["attached_count"] = sum(1 for group in groups if group["state"] == "attached")
-        devices = {device_id: owner for device_id, owner in records.values() if device_id}
         row["record_count"] = len(records)
-        row["computer_count"] = len(devices)
-        owners = Counter(owner for owner in devices.values() if owner)
-        row["likely_client"] = None
-        row["similar_client"] = None
-        if owners:
-            (client_id, client_name), count = owners.most_common(1)[0]
-            row["likely_client"] = {"id": client_id, "name": client_name, "count": count}
-        elif row["candidate"].display_name:
-            matches = get_close_matches(
-                row["candidate"].display_name, list(known_names), n=1, cutoff=0.6
-            )
-            if matches:
-                client_id, client_name = known_names[matches[0]]
-                row["similar_client"] = {"id": client_id, "name": client_name}
+        row["computer_count"] = len(
+            {device_id for device_id, _owner in records.values() if device_id}
+        )
 
 
 @login_required
@@ -16272,7 +16284,6 @@ def client_candidate_detail(request: HttpRequest, candidate_id) -> HttpResponse:
     external_ids = [r.get("external_id") for r in refs if r.get("external_id")]
 
     per_source = []
-    device_overlap: dict[str, dict] = {}
     sample_devices: list[dict] = []
 
     with transaction.atomic():
@@ -16363,16 +16374,8 @@ def client_candidate_detail(request: HttpRequest, candidate_id) -> HttpResponse:
                             "resolved_client_name": cname or "",
                         }
                     )
-                    if cid and cname:
-                        overlap = device_overlap.setdefault(
-                            str(cid),
-                            {
-                                "client_id": str(cid),
-                                "display_name": cname,
-                                "device_count": 0,
-                            },
-                        )
-                        overlap["device_count"] += 1
+
+    device_overlap, linked_total = _candidate_client_overlap(candidate)
 
     # Fuzzy suggestions against known client display names + aliases.
     known_names: dict[str, tuple] = {}
@@ -16412,7 +16415,9 @@ def client_candidate_detail(request: HttpRequest, candidate_id) -> HttpResponse:
             "candidate": candidate,
             "per_source": per_source,
             "sample_devices": sample_devices,
-            "device_overlap": sorted(device_overlap.values(), key=lambda x: -x["device_count"]),
+            "device_overlap": device_overlap,
+            "likely_client": device_overlap[0] if device_overlap else None,
+            "linked_total": linked_total,
             "fuzzy": fuzzy,
             "all_clients": all_clients,
             "profiles": profiles,

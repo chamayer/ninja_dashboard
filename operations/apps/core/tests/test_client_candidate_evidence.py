@@ -29,21 +29,21 @@ class _Cursor:
         return self._rows
 
 
-def _annotate(candidates, cursor_results, clients=(), aliases=(), all_candidates=None):
-    client_qs = mock.Mock(filter=mock.Mock(return_value=list(clients)))
-    alias_qs = mock.Mock()
-    alias_qs.filter.return_value.select_related.return_value = list(aliases)
+def _patched(cursor_results, all_candidates):
     candidate_qs = mock.Mock()
-    candidate_qs.filter.return_value.only.return_value = [
-        row["candidate"] for row in (all_candidates or candidates)
-    ]
-    with (
+    candidate_qs.filter.return_value.only.return_value = list(all_candidates)
+    return (
         mock.patch.object(views.transaction, "atomic", return_value=nullcontext()),
         mock.patch.object(views.connection, "cursor", return_value=_Cursor(cursor_results)),
-        mock.patch.object(views.Client, "objects", client_qs),
-        mock.patch.object(views.ClientNameAlias, "objects", alias_qs),
         mock.patch.object(views.ClientCandidate, "objects", candidate_qs),
-    ):
+    )
+
+
+def _annotate(candidates, cursor_results, all_candidates=None):
+    atomic, cursor, candidate_qs = _patched(
+        cursor_results, [row["candidate"] for row in (all_candidates or candidates)]
+    )
+    with atomic, cursor, candidate_qs:
         views._add_candidate_evidence(candidates, {1: "R-U-ON", 2: "Hudu"})
     return candidates
 
@@ -57,7 +57,7 @@ def _row(name, refs):
     return {"candidate": candidate, "refs": refs}
 
 
-def test_live_computers_and_owning_client_come_from_current_groups_only():
+def test_live_records_come_from_current_groups_only():
     row = _row(
         "Rize NYC",
         [
@@ -81,19 +81,29 @@ def test_live_computers_and_owning_client_come_from_current_groups_only():
     ]
     assert row["record_count"] == 4
     assert row["computer_count"] == 3
-    assert row["likely_client"] == {"id": "c1", "name": "Rize", "count": 2}
-    assert row["similar_client"] is None
 
 
-def test_similar_name_is_only_offered_without_computer_evidence():
-    row = _row("Abest", [{"source_id": 1, "external_id": "g9", "external_name": "Abest"}])
-    client = SimpleNamespace(id="c9", display_name="Abest Inc")
-    _annotate([row], [[], []], clients=[client])
+def test_candidate_page_counts_every_owned_computer_in_live_groups():
+    row = _row(
+        "GF Supplies",
+        [
+            {"source_id": 2, "external_id": "h1", "external_name": "GF Supplies"},
+            {"source_id": 1, "external_id": "gone", "external_name": "GF Supplies"},
+        ],
+    )
+    reported = [(2, "h1", False)]
+    records = [(2, "h1", f"a{i}", f"d{i}", "c1", "GF Supplies / Sigo Signs") for i in range(30)]
+    records += [(2, "h1", "b1", "x1", "c2", "Domes"), (2, "h1", "b2", None, None, None)]
+    atomic, cursor, candidate_qs = _patched([reported, records], [row["candidate"]])
+    with atomic, cursor, candidate_qs:
+        overlap, linked = views._candidate_client_overlap(row["candidate"])
 
-    assert row["reported_count"] == 0
-    assert row["record_count"] == 0
-    assert row["likely_client"] is None
-    assert row["similar_client"] == {"id": "c9", "name": "Abest Inc"}
+    # Not capped at a sample: all 30 owned computers count.
+    assert overlap == [
+        {"client_id": "c1", "display_name": "GF Supplies / Sigo Signs", "device_count": 30},
+        {"client_id": "c2", "display_name": "Domes", "device_count": 1},
+    ]
+    assert linked == 31
 
 
 def test_group_renamed_at_the_source_belongs_to_the_newest_name():
@@ -136,5 +146,6 @@ def test_unattached_table_replaces_resolver_pass_count():
     detail = (root / "templates/client_candidate_detail.html").read_text(encoding="utf-8")
     assert "row.candidate.seen_count" not in mapping
     assert "candidate.seen_count" not in detail
-    assert "Likely client" in mapping
+    assert "Likely client" not in mapping
+    assert "Likely client" in detail
     assert "No longer reported" in mapping
