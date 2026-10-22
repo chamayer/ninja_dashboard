@@ -2102,7 +2102,7 @@ def org_index(request: HttpRequest, org_slug: str) -> HttpResponse:
             # that made an otherwise ten-row panel proportional to the whole
             # client's inventory many times over.
             cur.execute(
-                """
+                f"""
                 WITH offline_devices AS MATERIALIZED (
                     SELECT v.device_id, v.canonical_hostname, v.device_role,
                            v.os_group, v.last_contact_at

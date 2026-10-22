@@ -30,6 +30,16 @@ def test_inventory_consumers_use_the_shared_current_computer_selector():
         assert "current_computer" in section
 
 
+def test_client_overview_interpolates_its_shared_current_computer_selector():
+    views = Path(__file__).parents[1].joinpath("views.py").read_text(encoding="utf-8")
+    start = views.index("def org_index(")
+    end = views.find("\n\n@login_required\ndef ", start)
+    section = views[start : end if end >= 0 else len(views)]
+
+    assert 'f"""\n                WITH offline_devices AS MATERIALIZED (' in section
+    assert 'AND {current_computer_sql("v")}' in section
+
+
 def test_software_count_destinations_are_not_silently_capped():
     views = Path(__file__).parents[1].joinpath("views.py").read_text(encoding="utf-8")
     for consumer, limit in (
