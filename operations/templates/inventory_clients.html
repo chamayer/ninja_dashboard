@@ -4,7 +4,8 @@
 <style>
   .ic-links { display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap; margin-top: 0.6rem; }
   .ic-legend { font-size: 0.82rem; margin: 0 0 0.6rem; }
-  .ic-cov { display: flex; flex-wrap: wrap; gap: 0.3rem; }
+  .ic-cov { display: grid; gap: 0.3rem; }
+  .ic-cov-line { display: flex; align-items:baseline; gap: 0.35rem; flex-wrap: wrap; }
   .ic-cov .badge { white-space: nowrap; }
   .ic-cov .badge small { opacity: 0.75; }
   /* New / discovered clients: a fixed window that scrolls, header kept in view. */
@@ -47,7 +48,7 @@
 {% endif %}
 
 <div class="card">
-  <p class="muted ic-legend"><strong>Coverage</strong> — for each source: computers with a current record from that source / the client's active computers (retired excluded). Green = every computer, amber = some missing, red = none. <strong>First / last seen</strong> = earliest and latest time any source reported this client. Hover a source for details.</p>
+  <p class="muted ic-legend"><strong>Coverage</strong> — one line per source: computers with a current record from that source / the client's active computers (retired excluded), followed by the current name(s) that source reports for the client. Green = every computer, amber = some missing, red = none. <strong>First / last seen</strong> = earliest and latest time any source reported this client.</p>
   <table class="ops-table" data-sortable>
     <thead><tr><th>Client</th><th class="num">Computers</th><th>Coverage by source</th><th class="num">First seen</th><th class="num">Last seen</th><th class="num">Name differences</th><th></th></tr></thead>
     <tbody>
@@ -55,7 +56,7 @@
     <tr>
       <td><a href="{% url 'org_index' org_slug=row.client.slug %}">{{ row.client.display_name }}</a></td>
       <td class="num"><a href="{% url 'org_devices' org_slug=row.client.slug %}">{{ row.computer_count }}</a></td>
-      <td><div class="ic-cov">{% for item in row.coverage %}<span class="badge {% if item.complete %}badge-low{% elif item.covered %}badge-medium{% elif row.computer_count %}badge-high{% else %}badge-info{% endif %}" title="{{ item.covered }} of {{ row.computer_count }} active computer{{ row.computer_count|pluralize }} {{ item.covered|pluralize:'has,have' }} a current {{ item.source }} record · {% if item.groups %}{{ item.groups }} {{ item.source }} group{{ item.groups|pluralize }} mapped to this client{% else %}no {{ item.source }} group mapped to this client{% endif %}{% if item.last_seen %} · last seen {{ item.last_seen|date:"Y-m-d H:i" }}{% endif %}">{{ item.source }} {{ item.covered }}/{{ row.computer_count }}{% if item.groups > 1 %} <small>· {{ item.groups }} groups</small>{% endif %}</span>{% empty %}<span class="muted">No attached source record</span>{% endfor %}</div></td>
+      <td><div class="ic-cov">{% for item in row.coverage %}<div class="ic-cov-line"><span class="badge {% if item.complete %}badge-low{% elif item.covered %}badge-medium{% elif row.computer_count %}badge-high{% else %}badge-info{% endif %}" title="{{ item.covered }} of {{ row.computer_count }} active computer{{ row.computer_count|pluralize }} {{ item.covered|pluralize:'has,have' }} a current {{ item.source }} record · {% if item.groups %}{{ item.groups }} {{ item.source }} group{{ item.groups|pluralize }} mapped to this client{% else %}no {{ item.source }} group mapped to this client{% endif %}{% if item.last_seen %} · last seen {{ item.last_seen|date:"Y-m-d H:i" }}{% endif %}">{{ item.source }} {{ item.covered }}/{{ row.computer_count }}</span><span class="muted">({% if item.reported_names %}{{ item.reported_names|join:", " }}{% else %}no current source name{% endif %})</span></div>{% empty %}<span class="muted">No attached source record</span>{% endfor %}</div></td>
       <td class="num muted">{{ row.first_seen|date:"Y-m-d"|default:"—" }}</td>
       <td class="num muted">{{ row.last_seen|date:"Y-m-d H:i"|default:"—" }}</td>
       <td class="num">{% if row.name_difference_count %}<a class="badge badge-high" href="{% url 'findings_queue' %}?category=inventory&amp;type=client_mapping&amp;issue=client_name_conflict&amp;client={{ row.client.slug }}">{{ row.name_difference_count }} open</a>{% else %}<span class="muted">0</span>{% endif %}</td>

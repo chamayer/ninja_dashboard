@@ -1,5 +1,7 @@
 from pathlib import Path
 
+from django.template.loader import get_template
+
 from apps.core.computer_reads import current_computer_sql
 
 
@@ -73,6 +75,24 @@ def test_source_records_is_a_generic_observation_reader_with_explicit_relationsh
     assert "current record" in sources_template
     assert "Record type" in source_records_template
     assert "No resolved relationship" in source_records_template
+
+
+def test_global_search_keeps_source_records_as_a_separate_result_population():
+    views = Path(__file__).parents[1].joinpath("views.py").read_text(encoding="utf-8")
+    get_template("search_results.html")
+    template = Path(__file__).parents[3].joinpath("templates", "search_results.html").read_text(
+        encoding="utf-8"
+    )
+
+    assert "def _search_source_records(" in views
+    start = views.index("def _search_source_records(")
+    end = views.find("\n\n@login_required", start)
+    section = views[start : end if end >= 0 else len(views)]
+    assert "operations.v_entity_observation_admin_metadata observation" in section
+    assert "operations.entity_observation_current observation" not in section
+    assert "source_records = _search_source_records(q)" in views
+    assert "Source records (" in template
+    assert "inventory_source_records" in template
 
 
 def test_computer_inventory_does_not_render_unlinked_source_records_as_computers():

@@ -3945,7 +3945,7 @@ def client_switch(request: HttpRequest) -> HttpResponse:
 
 @login_required
 def search(request: HttpRequest) -> HttpResponse:
-    """Fleet-wide search — Computer identity data, client name / slug.
+    """Fleet-wide search — Computers, source records, and client name / slug.
 
     A Computer matches on its name or serial, or on the name, serial or VM
     UUID any of its records reports now or reported before (a withdrawn or
@@ -3953,13 +3953,21 @@ def search(request: HttpRequest) -> HttpResponse:
     is listed once with what matched; retired Computers are included, labeled,
     after the others (ADR-0032).
 
-    - Unique device match → redirect straight to device_detail.
+    Source records remain evidence, so they are returned as a separate result
+    population rather than converted into Computers by search presentation.
+
+    - Unique device match → redirect straight to device_detail when no source
+      record or client also matches.
     - Unique client match → redirect to client's org_index page.
     - Ambiguous or empty → render a results page.
     """
     q = (request.GET.get("q") or "").strip()
     if not q:
-        return render(request, "search_results.html", {"q": "", "devices": [], "clients": []})
+        return render(
+            request,
+            "search_results.html",
+            {"q": "", "devices": [], "clients": [], "source_records": []},
+        )
 
     matched = _search_computer_identity(q)
     devices = list(
@@ -3983,19 +3991,20 @@ def search(request: HttpRequest) -> HttpResponse:
         .filter(Q(display_name__icontains=q) | Q(slug__icontains=q))
         .order_by("display_name")[:100]
     )
+    source_records = _search_source_records(q)
 
     # Unambiguous matches → redirect straight there.
-    if len(devices) == 1 and not clients:
+    if len(devices) == 1 and not clients and not source_records:
         d = devices[0]
         if d.client:
             return redirect("device_detail", org_slug=d.client.slug, device_id=d.id)
-    if len(clients) == 1 and not devices:
+    if len(clients) == 1 and not devices and not source_records:
         return redirect("org_index", org_slug=clients[0].slug)
 
     return render(
         request,
         "search_results.html",
-        {"q": q, "devices": devices, "clients": clients},
+        {"q": q, "devices": devices, "clients": clients, "source_records": source_records},
     )
 
 
@@ -4064,6 +4073,71 @@ def _search_computer_identity(q: str) -> dict[uuid.UUID, str]:
             {"p": pattern, "limit": _SEARCH_LIMIT * 3},
         )
         return dict(cur.fetchall())
+
+
+def _search_source_records(q: str) -> list[dict[str, object]]:
+    """Source-record evidence matching a global-search term.
+
+    This uses the runtime-readable observation projection and intentionally
+    includes records without a Computer attachment. A result links to the
+    generic source-record reader scoped to the source instance and term.
+    """
+    pattern = "%" + q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+    with transaction.atomic(), connection.cursor() as cur:
+        cur.execute("SET LOCAL operations.tenant_id = 1")
+        cur.execute(
+            """
+            SELECT observation.source_instance_id, source.name, observation.entity_type,
+                   observation.external_id, observation.parent_external_id,
+                   observation.reported_name, observation.canonical_hostname,
+                   observation.canonical_serial, observation.vm_uuid,
+                   observation.active, observation.device_id, device.canonical_hostname,
+                   client.slug, client.display_name,
+                   CASE
+                     WHEN observation.external_id ILIKE %(p)s THEN 'source record ID'
+                     WHEN observation.parent_external_id ILIKE %(p)s THEN 'parent record ID'
+                     WHEN observation.canonical_hostname ILIKE %(p)s THEN 'hostname'
+                     WHEN observation.reported_name ILIKE %(p)s THEN 'name at source'
+                     WHEN observation.canonical_serial ILIKE %(p)s THEN 'serial number'
+                     ELSE 'VM UUID'
+                   END
+              FROM operations.v_entity_observation_admin_metadata observation
+              JOIN operations.source_instances instance
+                ON instance.tenant_id = observation.tenant_id
+               AND instance.id = observation.source_instance_id
+              JOIN operations.sources source ON source.id = instance.source_id
+              LEFT JOIN operations.devices device
+                ON device.tenant_id = observation.tenant_id
+               AND device.id = observation.device_id
+               AND device.deleted_at IS NULL
+              LEFT JOIN operations.clients client
+                ON client.tenant_id = observation.tenant_id
+               AND client.id = observation.client_id
+               AND client.deleted_at IS NULL
+             WHERE observation.tenant_id = 1
+               AND (observation.external_id ILIKE %(p)s
+                    OR observation.parent_external_id ILIKE %(p)s
+                    OR observation.canonical_hostname ILIKE %(p)s
+                    OR observation.reported_name ILIKE %(p)s
+                    OR observation.canonical_serial ILIKE %(p)s
+                    OR observation.vm_uuid ILIKE %(p)s)
+             ORDER BY observation.active DESC, observation.last_seen_at DESC NULLS LAST,
+                      observation.observation_id
+             LIMIT %(limit)s
+            """,
+            {"p": pattern, "limit": _SEARCH_LIMIT},
+        )
+        return [
+            {
+                "source_instance_id": row[0], "source_name": row[1], "entity_type": row[2],
+                "external_id": row[3], "parent_external_id": row[4],
+                "reported_name": row[5], "canonical_hostname": row[6],
+                "canonical_serial": row[7], "vm_uuid": row[8], "active": row[9],
+                "device_id": row[10], "computer_hostname": row[11],
+                "client_slug": row[12], "client_name": row[13], "matched": row[14],
+            }
+            for row in cur.fetchall()
+        ]
 
 
 @login_required
@@ -13209,6 +13283,14 @@ def inventory_clients(request: HttpRequest) -> HttpResponse:
                 "source": source,
                 "covered": row["covered"].get(source, 0),
                 "groups": row["groups"].get(source, 0),
+                "reported_names": sorted(
+                    {
+                        reference["observed_name"]
+                        for reference in references
+                        if reference["source_name"] == source and reference["observed_name"]
+                    },
+                    key=str.casefold,
+                ),
                 "last_seen": max(
                     (
                         r["last_seen_at"]

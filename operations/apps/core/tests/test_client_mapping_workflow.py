@@ -48,3 +48,12 @@ def test_inventory_clients_lists_new_clients_from_the_same_records_as_issues():
     home = _template("home.html")
     assert "{% url 'inventory_clients' %}#new-clients" in home
     assert "{% url 'client_mappings' %}?state=unattached" not in home
+
+
+def test_inventory_client_coverage_shows_each_source_name_as_evidence():
+    page = _template("inventory_clients.html")
+
+    assert "ic-cov-line" in page
+    assert "item.reported_names|join" in page
+    assert "no current source name" in page
+    assert '"reported_names": sorted(' in _VIEWS

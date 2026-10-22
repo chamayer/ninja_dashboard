@@ -6,16 +6,37 @@
 <div class="card">
     <h1>Search</h1>
     {% if q %}
-        <p class="muted">Results for <code>{{ q }}</code>. Names, serial numbers and VM UUIDs from every record a Computer has had are searched; retired Computers are listed last.</p>
+        <p class="muted">Results for <code>{{ q }}</code>. Computers and source records are shown separately. Names, serial numbers and VM UUIDs from every record a Computer has had are searched; retired Computers are listed last.</p>
     {% else %}
-        <p class="muted">Enter a name, serial number, VM UUID, client name, or slug in the search box above.</p>
+        <p class="muted">Enter a name, serial number, VM UUID, source record ID, client name, or slug in the search box above.</p>
     {% endif %}
 </div>
 
 {% if q %}
-    {% if not devices and not clients %}
+    {% if not devices and not clients and not source_records %}
     <div class="card">
         <p class="muted">No matches found.</p>
+    </div>
+    {% endif %}
+
+    {% if source_records %}
+    <div class="card">
+        <h2>Source records ({{ source_records|length }}{% if source_records|length >= 100 %}+{% endif %})</h2>
+        <p class="muted">Source evidence may be attached to a Computer, attributed only to a client, or unlinked.</p>
+        <table data-sortable class="ops-table">
+            <thead><tr><th>Source</th><th>Record type</th><th>Source record</th><th>Reported name</th><th>Computer</th><th>Client</th><th>Matched on</th></tr></thead>
+            <tbody>{% for record in source_records %}
+                <tr>
+                    <td>{{ record.source_name }}</td>
+                    <td><code>{{ record.entity_type }}</code></td>
+                    <td><a href="{% url 'inventory_source_records' %}?source={{ record.source_instance_id }}&amp;q={{ q|urlencode }}"><code>{{ record.external_id }}</code></a>{% if not record.active %}<br><span class="badge">Withdrawn</span>{% endif %}</td>
+                    <td>{% if record.reported_name %}{{ record.reported_name }}{% elif record.canonical_hostname %}{{ record.canonical_hostname }}{% else %}<span class="muted">—</span>{% endif %}</td>
+                    <td>{% if record.computer_hostname and record.client_slug %}<a href="{% url 'device_detail' org_slug=record.client_slug device_id=record.device_id %}"><code>{{ record.computer_hostname }}</code></a>{% elif record.computer_hostname %}<code>{{ record.computer_hostname }}</code>{% else %}<span class="muted">Unlinked</span>{% endif %}</td>
+                    <td>{% if record.client_slug %}<a href="{% url 'org_index' org_slug=record.client_slug %}">{{ record.client_name }}</a>{% else %}<span class="muted">—</span>{% endif %}</td>
+                    <td class="muted">{{ record.matched }}</td>
+                </tr>
+            {% endfor %}</tbody>
+        </table>
     </div>
     {% endif %}
 
