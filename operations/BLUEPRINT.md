@@ -1,3 +1,26 @@
+## Client setup visibility and Inventory › Clients coverage
+
+Complete (deployment check pending). Goal: make unmapped source clients (open client candidates) and
+per-client source coverage visible, and return operators to where they started
+after resolving a candidate or mapping decision.
+
+Scope: `inventory_clients` view/template (Computers, coverage by source, fixed
+name-difference count from `findings`, sortable, "N new" and Client mappings
+links); dashboard Clients card "N new" link; candidate detail and actions plus
+`client_mapping_decide` honour a same-host `next` (Referer fallback). No schema
+or resolver changes. Decisions: undecided ("review") mappings are not counted
+anywhere (ADR-0025: a decision only changes name-difference reporting); the
+proposed "Mapping issues" column is omitted (0 open). Production facts
+(2026-10-22, read-only): 33 open candidates, 124 open `client_name_conflict`
+in `findings`, 0 in `admin_findings`.
+
+Checkpoint: implemented locally. Validation: Ruff unchanged (84 existing),
+format clean, `manage.py check` clean, templates compile, 91 targeted tests
+pass (new `test_return_to.py`). Not validated: page rendering against a
+database (no local Docker). Reused the existing `_safe_next` rather than a new
+redirect helper. Next action: check the deployed pages; then move this
+section out of the active blueprint.
+
 # PLAN-004 corrective repair — restricted observation reads
 
 ## Goal and scope

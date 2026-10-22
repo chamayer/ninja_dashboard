@@ -1,6 +1,38 @@
 {% extends "base.html" %}
 {% block title %}Client inventory{% endblock %}
 {% block content %}
-<div class="card"><h1>Client inventory</h1><p class="muted">Canonical Operations clients and the source client records currently attached to them. Client status remains on the separate Clients overview.</p><form method="get"><label>Search clients <input name="q" value="{{ query }}"></label> <button type="submit">Search</button>{% if query %} <a class="clear" href="{% url 'inventory_clients' %}">Clear</a>{% endif %}</form>{% if open_candidates %}<p><a class="badge badge-high" href="{% url 'client_mappings' %}?state=unattached">{{ open_candidates }} unattached source client record{{ open_candidates|pluralize }} need{{ open_candidates|pluralize:"s," }} review</a></p>{% endif %}</div>
-<div class="card"><table class="ops-table"><thead><tr><th>Client</th><th>Source client records</th><th>Sources</th><th>Name differences</th><th>Needs mapping review</th><th>Details</th></tr></thead><tbody>{% for row in rows %}<tr><td><a href="{% url 'org_index' org_slug=row.client.slug %}">{{ row.client.display_name }}</a></td><td>{{ row.source_count }}</td><td>{% for source in row.sources %}<span class="badge badge-info">{{ source }}</span> {% empty %}<span class="muted">No attached source record</span>{% endfor %}</td><td>{% if row.name_difference_count %}<a class="badge badge-high" href="{% url 'findings_queue' %}?type=client_name_differences">{{ row.name_difference_count }} open</a>{% else %}<span class="muted">None open</span>{% endif %}</td><td>{% if row.review_count %}<a class="badge badge-medium" href="{% url 'client_mappings' %}?client_id={{ row.client.id }}&amp;state=review">{{ row.review_count }}</a>{% else %}<span class="muted">None</span>{% endif %}</td><td><a href="{% url 'client_mappings' %}?client_id={{ row.client.id }}">Source records</a></td></tr>{% empty %}<tr><td colspan="6">No clients match this search.</td></tr>{% endfor %}</tbody></table></div>
+<style>
+  .ic-links { display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap; margin-top: 0.6rem; }
+  .ic-legend { font-size: 0.82rem; margin: 0 0 0.6rem; }
+  .ic-cov { display: flex; flex-wrap: wrap; gap: 0.3rem; }
+  .ic-cov .badge { white-space: nowrap; }
+  .ic-cov .badge small { opacity: 0.75; }
+</style>
+<div class="card">
+  <h1>Client inventory</h1>
+  <p class="muted">Operations clients, their computers, and how fully each source covers them. Client status remains on the separate Clients overview.</p>
+  <form method="get"><label>Search clients <input name="q" value="{{ query }}"></label> <button type="submit">Search</button>{% if query %} <a class="clear" href="{% url 'inventory_clients' %}">Clear</a>{% endif %}</form>
+  <div class="ic-links">
+    {% if open_candidates %}<a class="badge badge-high" href="{% url 'client_mappings' %}?state=unattached" title="Source clients not yet set up in Operations: accept as a new client, map to an existing one, or exclude">{{ open_candidates }} new</a>{% endif %}
+    <a href="{% url 'client_mappings' %}">Client mappings →</a>
+  </div>
+</div>
+<div class="card">
+  <p class="muted ic-legend"><strong>Coverage</strong> — for each source: computers with a current record from that source / the client's active computers (retired excluded). Green = every computer, amber = some missing, red = none. <strong>Gaps</strong> = sources that do not cover every computer. Hover a source for details.</p>
+  <table class="ops-table" data-sortable>
+    <thead><tr><th>Client</th><th class="num">Computers</th><th>Coverage by source</th><th class="num">Gaps</th><th class="num">Name differences</th><th></th></tr></thead>
+    <tbody>
+    {% for row in rows %}
+    <tr>
+      <td><a href="{% url 'org_index' org_slug=row.client.slug %}">{{ row.client.display_name }}</a></td>
+      <td class="num"><a href="{% url 'org_devices' org_slug=row.client.slug %}">{{ row.computer_count }}</a></td>
+      <td><div class="ic-cov">{% for item in row.coverage %}<span class="badge {% if item.complete %}badge-low{% elif item.covered %}badge-medium{% elif row.computer_count %}badge-high{% else %}badge-info{% endif %}" title="{{ item.covered }} of {{ row.computer_count }} active computer{{ row.computer_count|pluralize }} {{ item.covered|pluralize:'has,have' }} a current {{ item.source }} record · {% if item.groups %}{{ item.groups }} {{ item.source }} group{{ item.groups|pluralize }} mapped to this client{% else %}no {{ item.source }} group mapped to this client{% endif %}">{{ item.source }} {{ item.covered }}/{{ row.computer_count }}{% if item.groups > 1 %} <small>· {{ item.groups }} groups</small>{% endif %}</span>{% empty %}<span class="muted">No attached source record</span>{% endfor %}</div></td>
+      <td class="num">{% if row.gap_count %}{{ row.gap_count }}{% else %}<span class="muted">0</span>{% endif %}</td>
+      <td class="num">{% if row.name_difference_count %}<a class="badge badge-high" href="{% url 'findings_queue' %}?category=inventory&amp;type=client_name_differences&amp;issue=client_name_conflict&amp;client={{ row.client.slug }}">{{ row.name_difference_count }} open</a>{% else %}<span class="muted">0</span>{% endif %}</td>
+      <td><a href="{% url 'client_mappings' %}?client_id={{ row.client.id }}">Source records</a></td>
+    </tr>
+    {% empty %}<tr><td colspan="6">No clients match this search.</td></tr>{% endfor %}
+    </tbody>
+  </table>
+</div>
 {% endblock %}

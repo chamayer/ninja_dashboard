@@ -5,7 +5,7 @@
 {% block content %}
 <div class="card">
     <p style="margin: 0 0 0.5rem 0; font-size: 0.85rem;">
-        <a href="{% url 'findings_queue' %}?type=client_mapping">← Issues</a>
+        {% if return_to %}<a href="{{ return_to }}">← Back</a>{% else %}<a href="{% url 'findings_queue' %}?type=client_mapping">← Issues</a>{% endif %}
     </p>
     <h1 style="margin: 0;">{{ candidate.display_name|default:candidate.normalized_name }}</h1>
     <p class="muted">
@@ -134,7 +134,7 @@
     <details style="margin-bottom: 0.5rem;">
         <summary style="cursor: pointer; padding: 0.5rem 0;"><strong>Accept</strong> — create a new client from this candidate</summary>
         <form method="post" action="{% url 'client_candidate_accept' candidate_id=candidate.id %}" style="padding: 0.5rem 0;">
-            {% csrf_token %}
+            {% csrf_token %}{% if return_to %}<input type="hidden" name="next" value="{{ return_to }}">{% endif %}
             <label style="display: block; margin: 0.4rem 0;">Display name
                 <input name="display_name" value="{{ candidate.display_name }}" style="width: 100%; padding: 0.3rem;">
             </label>
@@ -152,7 +152,7 @@
     <details style="margin-bottom: 0.5rem;">
         <summary style="cursor: pointer; padding: 0.5rem 0;"><strong>Map to existing</strong> — attach these groups to an existing client</summary>
         <form method="post" action="{% url 'client_candidate_map' candidate_id=candidate.id %}" style="padding: 0.5rem 0;">
-            {% csrf_token %}
+            {% csrf_token %}{% if return_to %}<input type="hidden" name="next" value="{{ return_to }}">{% endif %}
             <label style="display: block; margin: 0.4rem 0;">Existing client
                 <select name="client_id" style="width: 100%; padding: 0.3rem;">
                     <option value="">— pick one —</option>
@@ -168,7 +168,7 @@
     <details style="margin-bottom: 0.5rem;">
         <summary style="cursor: pointer; padding: 0.5rem 0;"><strong>Exclude</strong> — this name will never be a candidate again</summary>
         <form method="post" action="{% url 'client_candidate_exclude' candidate_id=candidate.id %}" style="padding: 0.5rem 0;">
-            {% csrf_token %}
+            {% csrf_token %}{% if return_to %}<input type="hidden" name="next" value="{{ return_to }}">{% endif %}
             <label style="display: block; margin: 0.4rem 0;">Reason
                 <input name="reason" placeholder="e.g. placeholder site, ex-employee lab" style="width: 100%; padding: 0.3rem;">
             </label>
@@ -179,7 +179,7 @@
     <details>
         <summary style="cursor: pointer; padding: 0.5rem 0;"><strong>Fix at source</strong> — record a note; candidate re-resolves when source data changes</summary>
         <form method="post" action="{% url 'client_candidate_fix' candidate_id=candidate.id %}" style="padding: 0.5rem 0;">
-            {% csrf_token %}
+            {% csrf_token %}{% if return_to %}<input type="hidden" name="next" value="{{ return_to }}">{% endif %}
             <label style="display: block; margin: 0.4rem 0;">Note
                 <input name="note" placeholder="e.g. rename group in LMI console" style="width: 100%; padding: 0.3rem;">
             </label>

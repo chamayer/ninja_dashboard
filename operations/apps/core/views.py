@@ -1770,6 +1770,9 @@ def home(request: HttpRequest) -> HttpResponse:  # noqa: PLR0912, PLR0915
             "retired_devices": retired_devices,
             "device_mix": device_mix,
             "total_clients": total_clients,
+            "open_client_candidates": ClientCandidate.objects.filter(
+                tenant_id=1, status=ClientCandidate.Status.OPEN
+            ).count(),
             "clients_connected": clients_connected,
             "kpis": kpis,
             "attention_items": attention_items[:6],
@@ -12333,7 +12336,7 @@ def client_mapping_decide(request: HttpRequest, source_link_id: str) -> HttpResp
     reason = (request.POST.get("reason") or "").strip()
     if state not in {"explicit", "automatic", "ignored", "review"} or not reason:
         messages.error(request, "A valid decision and reason are required.")
-        return redirect("client_mappings")
+        return redirect(_safe_next(request, "client_mappings"))
     with transaction.atomic(), connection.cursor() as cur:
         cur.execute("SET LOCAL operations.tenant_id = 1")
         cur.execute(
@@ -12341,7 +12344,7 @@ def client_mapping_decide(request: HttpRequest, source_link_id: str) -> HttpResp
             [source_link_id, state, reason, request.user.pk],
         )
     messages.success(request, "Client mapping decision recorded.")
-    return redirect("client_mappings")
+    return redirect(_safe_next(request, "client_mappings"))
 
 
 @login_required
@@ -12627,7 +12630,12 @@ def client_mappings(request: HttpRequest) -> HttpResponse:
 
 @login_required
 def inventory_clients(request: HttpRequest) -> HttpResponse:
-    """Compact client inventory; source identity detail remains in Admin."""
+    """Client inventory: computers and how fully each source covers them.
+
+    Coverage for a source is the number of the client's active (not retired)
+    Computers with a current record from that source, out of all its active
+    Computers. Source identity detail remains in Admin.
+    """
     query = (request.GET.get("q") or "").strip()
     clients = Client.objects.filter(tenant_id=1, deleted_at__isnull=True).order_by("display_name")
     if query:
@@ -12636,29 +12644,70 @@ def inventory_clients(request: HttpRequest) -> HttpResponse:
     rows_by_client: dict[str, dict] = {
         str(client.id): {
             "client": client,
-            "source_count": 0,
-            "sources": [],
-            "review_count": 0,
+            "computer_count": 0,
+            "groups": {},
+            "covered": {},
             "name_difference_count": 0,
         }
         for client in clients
     }
     for reference in client_source_references():
         row = rows_by_client.get(str(reference["client_id"]))
-        if row is None:
-            continue
-        row["source_count"] += 1
-        row["sources"].append(reference["source_name"])
-        if reference["mapping_state"] == "review":
-            row["review_count"] += 1
+        if row is not None:
+            source = reference["source_name"]
+            row["groups"][source] = row["groups"].get(source, 0) + 1
 
-    differences = AdminFinding.objects.filter(
-        tenant_id=1, status__in=("open", "acknowledged"), finding_type__name="client_name_conflict"
-    ).values_list("subject_ref", flat=True)
-    for subject in differences:
-        client_id = str((subject or {}).get("client_id") or "")
-        if client_id in rows_by_client:
-            rows_by_client[client_id]["name_difference_count"] += 1
+    active_computers = Device.objects.filter(tenant_id=1, deleted_at__isnull=True).exclude(
+        lifecycle_status=Device.LifecycleStatus.RETIRED
+    )
+    for item in active_computers.values("client_id").annotate(n=Count("id")):
+        row = rows_by_client.get(str(item["client_id"]))
+        if row is not None:
+            row["computer_count"] = item["n"]
+
+    with transaction.atomic(), connection.cursor() as cur:
+        cur.execute("SET LOCAL operations.tenant_id = 1")
+        cur.execute(
+            """
+            SELECT device.client_id::text, evidence.source_name, count(DISTINCT device.id)
+              FROM operations.v_device_observation_current evidence
+              JOIN operations.devices device ON device.id = evidence.device_id
+             WHERE evidence.tenant_id = 1 AND evidence.observation_active
+               AND device.deleted_at IS NULL AND device.lifecycle_status <> %s
+             GROUP BY 1, 2
+            """,
+            [Device.LifecycleStatus.RETIRED],
+        )
+        for client_id, source, covered in cur.fetchall():
+            row = rows_by_client.get(client_id)
+            if row is not None:
+                row["covered"][source] = covered
+
+    for item in (
+        Finding.objects.filter(
+            tenant_id=1,
+            status__in=_FINDING_ACTIVE_STATUSES,
+            finding_type__name="client_name_conflict",
+        )
+        .values("client_id")
+        .annotate(n=Count("id"))
+    ):
+        row = rows_by_client.get(str(item["client_id"]))
+        if row is not None:
+            row["name_difference_count"] = item["n"]
+
+    for row in rows_by_client.values():
+        total = row["computer_count"]
+        row["coverage"] = [
+            {
+                "source": source,
+                "covered": row["covered"].get(source, 0),
+                "groups": row["groups"].get(source, 0),
+                "complete": total > 0 and row["covered"].get(source, 0) >= total,
+            }
+            for source in sorted(set(row["groups"]) | set(row["covered"]))
+        ]
+        row["gap_count"] = sum(1 for item in row["coverage"] if total and not item["complete"])
 
     open_candidates = ClientCandidate.objects.filter(
         tenant_id=1, status=ClientCandidate.Status.OPEN
@@ -16174,12 +16223,20 @@ def client_candidate_detail(request: HttpRequest, candidate_id) -> HttpResponse:
     profiles = list(RequirementProfile.objects.filter(tenant_id=1).order_by("name"))
     default_profile = next((p for p in profiles if p.is_tenant_default), None)
 
+    # Return to the page the operator opened this candidate from: an explicit
+    # ``next`` first, else the referring page unless it is this candidate.
+    detail_path = reverse("client_candidate_detail", kwargs={"candidate_id": candidate.id})
+    return_to = _local_path(request.GET.get("next"))
+    referer = urlsplit(request.META.get("HTTP_REFERER") or "")
+    if not return_to and referer.netloc == request.get_host() and referer.path != detail_path:
+        return_to = referer.path + (f"?{referer.query}" if referer.query else "")
     return render(
         request,
         "client_candidate_detail.html",
         {
             "admin_group": "review",
             "admin_tab": "clients",
+            "return_to": return_to,
             "candidate": candidate,
             "per_source": per_source,
             "sample_devices": sample_devices,
@@ -16343,6 +16400,19 @@ def _resolve_finding_for_group(cur, source_binding_id, external_id: str) -> None
     )
 
 
+def _candidate_detail_redirect(request: HttpRequest, candidate) -> HttpResponse:
+    """Return to the candidate page, keeping where the operator came from."""
+    url = reverse("client_candidate_detail", kwargs={"candidate_id": candidate.id})
+    back = _local_path(request.POST.get("next"))
+    return redirect(f"{url}?{urlencode({'next': back})}" if back else url)
+
+
+def _local_path(value: str | None) -> str:
+    """``value`` when it is a path on this site (the rule ``_safe_next`` uses)."""
+    value = value or ""
+    return value if value.startswith("/") and not value.startswith("//") else ""
+
+
 @login_required
 @require_POST
 @transaction.atomic
@@ -16359,7 +16429,7 @@ def client_candidate_accept(request, candidate_id) -> HttpResponse:
     display_name = (request.POST.get("display_name") or candidate.display_name or "").strip()
     if not display_name:
         messages.error(request, "Display name required.")
-        return redirect("client_candidate_detail", candidate_id=candidate.id)
+        return _candidate_detail_redirect(request, candidate)
     profile_id = request.POST.get("profile_id") or None
     profile = None
     if profile_id:
@@ -16431,7 +16501,7 @@ def client_candidate_accept(request, candidate_id) -> HttpResponse:
         },
     )
     messages.success(request, f"Accepted — created client “{display_name}”.")
-    return redirect("client_candidates_queue")
+    return redirect(_safe_next(request, "client_candidates_queue"))
 
 
 @login_required
@@ -16448,7 +16518,7 @@ def client_candidate_map(request, candidate_id) -> HttpResponse:
     target_id = request.POST.get("client_id")
     if not target_id:
         messages.error(request, "Choose a client to map into.")
-        return redirect("client_candidate_detail", candidate_id=candidate.id)
+        return _candidate_detail_redirect(request, candidate)
     target = get_object_or_404(Client, id=target_id, tenant_id=1, deleted_at__isnull=True)
 
     ClientNameAlias.objects.update_or_create(
@@ -16488,7 +16558,7 @@ def client_candidate_map(request, candidate_id) -> HttpResponse:
         {"status": "mapped", "client_id": str(target.id)},
     )
     messages.success(request, f"Mapped candidate to “{target.display_name}”.")
-    return redirect("client_candidates_queue")
+    return redirect(_safe_next(request, "client_candidates_queue"))
 
 
 @login_required
@@ -16526,7 +16596,7 @@ def client_candidate_exclude(request, candidate_id) -> HttpResponse:
         {"status": "excluded", "reason": reason},
     )
     messages.success(request, "Candidate excluded.")
-    return redirect("client_candidates_queue")
+    return redirect(_safe_next(request, "client_candidates_queue"))
 
 
 @login_required
@@ -16543,7 +16613,7 @@ def client_candidate_fix(request, candidate_id) -> HttpResponse:
     note = (request.POST.get("note") or "").strip()
     if not note:
         messages.error(request, "A note is required for fix-at-source.")
-        return redirect("client_candidate_detail", candidate_id=candidate.id)
+        return _candidate_detail_redirect(request, candidate)
     _audit(
         request,
         "client_candidate.fix_at_source",
@@ -16552,7 +16622,7 @@ def client_candidate_fix(request, candidate_id) -> HttpResponse:
         {"status": "open", "note": note},
     )
     messages.success(request, "Note recorded — candidate remains open.")
-    return redirect("client_candidate_detail", candidate_id=candidate.id)
+    return _candidate_detail_redirect(request, candidate)
 
 
 # ── Software findings review (Track 3.3) ────────────────────────────────

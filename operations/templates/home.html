@@ -75,6 +75,7 @@
   .client-card-head { padding: 1rem 1rem 0.75rem; background: var(--surface); border-bottom: 1px solid var(--border); border-radius: 6px 6px 0 0; }
   .client-card-title { display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; }
   .client-card-title h2 { margin: 0; }
+  .client-card-title .client-new-link { font-size: 0.72rem; vertical-align: middle; text-decoration: none; }
   .client-card-title span { color: var(--muted); font-size: 0.72rem; }
   .client-controls { display: flex; align-items: center; gap: 0.45rem; margin-top: 0.75rem; flex-wrap: wrap; }
   .client-chips { display: flex; flex: 1; gap: 0.3rem; flex-wrap: wrap; }
@@ -219,7 +220,7 @@
 <section class="card client-card" id="clients">
   <div class="client-card-head">
     <div class="client-card-title">
-      <h2>Client portfolio</h2>
+      <h2>Client portfolio{% if open_client_candidates %} <a class="badge badge-high client-new-link" href="{% url 'client_mappings' %}?state=unattached" title="Source clients not yet set up in Operations: accept as a new client, map to an existing one, or exclude">{{ open_client_candidates }} new</a>{% endif %}</h2>
       <span>Clients needing attention appear first · click a heading to sort</span>
     </div>
     <div class="client-controls">
