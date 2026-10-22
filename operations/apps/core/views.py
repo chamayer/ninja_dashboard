@@ -16430,8 +16430,8 @@ def source_records(
     if query:
         clauses.append(
             "(observation.external_id ILIKE %s OR observation.parent_external_id ILIKE %s "
-            "OR COALESCE(observation.canonical_data->>'hostname', '') ILIKE %s "
-            "OR COALESCE(observation.canonical_data->>'name', '') ILIKE %s)"
+            "OR COALESCE(observation.canonical_hostname, '') ILIKE %s "
+            "OR COALESCE(observation.reported_name, '') ILIKE %s)"
         )
         params.extend([f"%{query}%"] * 4)
     where_sql = " AND ".join(clauses)
@@ -16463,14 +16463,14 @@ def source_records(
             raise Http404("Source instance not found")
 
         cur.execute(
-            f"SELECT COUNT(*)::int FROM operations.entity_observation_current observation WHERE {where_sql}",
+            f"SELECT COUNT(*)::int FROM operations.v_entity_observation_admin_metadata observation WHERE {where_sql}",
             params,
         )
         total = cur.fetchone()[0]
         cur.execute(
             """
             SELECT DISTINCT entity_type
-              FROM operations.entity_observation_current
+              FROM operations.v_entity_observation_admin_metadata
              WHERE tenant_id = %s
              ORDER BY entity_type
             """,
@@ -16503,7 +16503,7 @@ def source_records(
                    CASE WHEN observation.device_id IS NOT NULL THEN TRUE ELSE FALSE END,
                    CASE WHEN observation.client_id IS NOT NULL THEN TRUE ELSE FALSE END,
                    CASE WHEN NULLIF(observation.parent_external_id, '') IS NOT NULL THEN TRUE ELSE FALSE END
-              FROM operations.entity_observation_current observation
+              FROM operations.v_entity_observation_admin_metadata observation
               JOIN operations.source_instances instance
                 ON instance.tenant_id = observation.tenant_id AND instance.id = observation.source_instance_id
               JOIN operations.sources source ON source.id = instance.source_id

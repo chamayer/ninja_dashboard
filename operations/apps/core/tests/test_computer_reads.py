@@ -58,7 +58,11 @@ def test_source_records_is_a_generic_observation_reader_with_explicit_relationsh
     urls = Path(__file__).parents[3].joinpath("config", "urls.py").read_text(encoding="utf-8")
 
     assert "def source_records(" in views
-    assert "operations.entity_observation_current observation" in views
+    start = views.index("def source_records(")
+    next_view = views.find("\n@login_required\ndef ", start + 1)
+    section = views[start : next_view if next_view >= 0 else len(views)]
+    assert "operations.v_entity_observation_admin_metadata observation" in section
+    assert "operations.entity_observation_current observation" not in section
     assert "source_instance_id: uuid.UUID | None = None" in views
     assert "observation.device_id IS NOT NULL" in views
     assert "observation.client_id IS NOT NULL" in views
