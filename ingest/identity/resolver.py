@@ -1808,106 +1808,6 @@ def _upsert_shared_serial_findings(cur, finding_type_id: int) -> int:
     return len(rows)
 
 
-def _upsert_cross_client_serial_findings(cur, finding_type_id: int) -> int:
-    """Emit one review finding per device for usable cross-client serials.
-
-    A serial exact match is only automatic identity evidence within a client.
-    Seeing the same usable value under different clients is an ownership or
-    source-attribution conflict, never authority to merge the devices. Each
-    device receives its own finding so both client views expose the conflict.
-    """
-    cur.execute(
-        """
-        WITH source_serials AS (
-            SELECT
-                DISTINCT d.id,
-                d.tenant_id,
-                d.client_id,
-                d.canonical_hostname,
-                BTRIM(value.serial) AS serial,
-                LOWER(BTRIM(value.serial)) AS serial_key
-            FROM operations.devices d
-            JOIN operations.entity_observation_current observation
-              ON observation.tenant_id = d.tenant_id
-             AND observation.device_id = d.id
-             AND observation.active
-            CROSS JOIN LATERAL (
-                VALUES
-                    (observation.canonical_data ->> 'serial_number'),
-                    (observation.canonical_data ->> 'service_tag')
-            ) AS value(serial)
-            WHERE d.tenant_id = %s
-              AND d.deleted_at IS NULL
-              AND d.client_id IS NOT NULL
-              AND COALESCE(value.serial, '') <> ''
-        ),
-        eligible AS (
-            SELECT *
-            FROM source_serials
-            WHERE LENGTH(serial) >= 4
-              AND LENGTH(REPLACE(
-                    serial, LEFT(serial, 1), ''
-                  )) > 0
-              AND NOT EXISTS (
-                  SELECT 1
-                  FROM operations.identity_value_rejections rejected
-                  WHERE rejected.value_kind = 'serial'
-                    AND rejected.enabled
-                    AND rejected.normalized_value = serial_key
-              )
-        ),
-        collisions AS (
-            SELECT
-                tenant_id,
-                serial_key,
-                COUNT(DISTINCT id) AS device_count,
-                COUNT(DISTINCT client_id) AS client_count,
-                ARRAY_AGG(DISTINCT client_id::text ORDER BY client_id::text) AS client_ids,
-                ARRAY_AGG(DISTINCT id::text ORDER BY id::text) AS device_ids
-            FROM eligible
-            GROUP BY tenant_id, serial_key
-            HAVING COUNT(DISTINCT client_id) > 1
-        )
-        INSERT INTO operations.findings (
-            id, version, tenant_id, finding_type_id, client_id,
-            subject_type, subject_id, subject_layer,
-            subject_layer_entity_id, finding_details, condition_key,
-            severity, confidence, status, first_seen_at, last_seen_at,
-            last_detected_at
-        )
-        SELECT
-            gen_random_uuid(), 1, e.tenant_id, %s, e.client_id,
-            'device', e.id, '', NULL,
-            jsonb_build_object(
-                'serial', e.serial,
-                'device_count', c.device_count,
-                'client_count', c.client_count,
-                'client_ids', c.client_ids,
-                'device_ids', c.device_ids
-            ),
-            'cross_client_serial:' || e.id || ':' || md5(e.serial_key),
-            'high', 'confirmed', 'open',
-            NOW(), NOW(), NOW()
-        FROM eligible e
-        JOIN collisions c
-          ON c.tenant_id = e.tenant_id
-         AND c.serial_key = e.serial_key
-        ON CONFLICT (tenant_id, condition_key)
-        WHERE condition_key > '' AND status IN ('open', 'acknowledged', 'investigating', 'suppressed')
-        DO UPDATE SET
-            client_id = EXCLUDED.client_id,
-            subject_id = EXCLUDED.subject_id,
-            last_seen_at = NOW(),
-            last_detected_at = NOW(),
-            finding_details = EXCLUDED.finding_details,
-            severity = EXCLUDED.severity,
-            confidence = EXCLUDED.confidence
-        """,
-        (TENANT_ID, finding_type_id),
-    )
-    return cur.rowcount
-
-
 def _sync_device_attributes(cur) -> None:
     """Propagate the projector-owned device cache into the layer entities.
 
@@ -2084,7 +1984,6 @@ def _sync_device_attributes(cur) -> None:
 
     ft_placeholder = _load_finding_type_id(cur, "placeholder_serial")
     ft_shared = _load_finding_type_id(cur, "shared_serial")
-    ft_cross_client_serial = _load_finding_type_id(cur, "cross_client_serial")
     ft_unmatched = _load_finding_type_id(cur, "unmatched_source_group")
     ft_placeholder_mac = _load_finding_type_id(cur, "placeholder_mac")
 
@@ -2159,15 +2058,8 @@ def _sync_device_attributes(cur) -> None:
                 shared_serial_count,
             )
 
-    if ft_cross_client_serial is not None:
-        cross_client_serial_count = _upsert_cross_client_serial_findings(
-            cur, ft_cross_client_serial
-        )
-        if cross_client_serial_count:
-            log.info(
-                "resolver: identity review upserted %d cross_client_serial findings",
-                cross_client_serial_count,
-            )
+    # cross_client_serial is replaced by computer_client_conflict
+    # (ingest.identity.findings, ADR-0040).
 
     # unmatched_source_group — one finding per pending row in
     # operations.unmatched_source_groups. finding_class is 'admin'

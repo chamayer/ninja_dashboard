@@ -17,6 +17,9 @@ report now, with the Computer as subject:
 Both write a measured assessment each run, so a finding clears on the first
 run after its condition ends (a merge, a split, a source correction, or an
 operator's "confirmed separate").
+
+The same pass raises ``computer_client_conflict`` (ADR-0040): a Computer whose
+records or serial number name another client, one finding per Computer.
 """
 
 from __future__ import annotations
@@ -47,6 +50,7 @@ TWO_MACHINES = "two_machines_on_one_computer"
 DUPLICATE_COMPUTERS = "duplicate_device_records"
 NAME_COLLISION = "computer_name_collision"
 LABEL_DRIFT = "computer_name_differs_in_source"
+CLIENT_CONFLICT = "computer_client_conflict"
 _SAME_NAME_WINDOW = timedelta(days=1)
 _RECENT = timedelta(days=30)
 
@@ -63,7 +67,9 @@ SELECT d.id, d.client_id, d.canonical_hostname, d.created_at,
        CASE WHEN rr.external_id IS NULL
             THEN lower(nullif(trim(eo.canonical_data ->> 'vm_uuid'), '')) END,
        coalesce((eo.canonical_data ->> 'is_online')::boolean, false),
-       eo.last_seen_at
+       eo.last_seen_at,
+       -- The client of the record's source group (ADR-0040).
+       eo.client_id, eo.canonical_data ->> 'platform_group_id', rr.external_id IS NOT NULL
   FROM operations.devices d
   JOIN operations.entity_observation_current eo
     ON eo.tenant_id = d.tenant_id AND eo.device_id = d.id
@@ -82,6 +88,12 @@ _SEPARATED = """
 SELECT device_id, k.value
   FROM operations.device_operator_decisions, jsonb_array_elements_text(value) k
  WHERE tenant_id = %s AND dimension = 'identity_separate'
+"""
+
+_ACCEPTED = """
+SELECT device_id, k.value
+  FROM operations.device_operator_decisions, jsonb_array_elements_text(value) k
+ WHERE tenant_id = %s AND dimension = 'client_conflict_accepted'
 """
 
 
@@ -188,7 +200,120 @@ def evaluate(cur: Any, tenant_id: int, now: datetime) -> int:
             keys.append(key)
             written += _upsert(cur, tenant_id, ft_drift, client_id, device_id, key, "low", now, details)
         resolve_absent(cur, tenant_id, ft_drift, keys, now)
+    # A Computer linked to more than one client (ADR-0040): one per Computer.
+    ft_clients = _finding_type_id(cur, CLIENT_CONFLICT)
+    if ft_clients is not None:
+        keys = []
+        for computer, details in client_conflicts(
+            computers, _accepted(cur, tenant_id), _client_names(cur, tenant_id)
+        ):
+            key = _key(tenant_id, CLIENT_CONFLICT, computer.id)
+            keys.append(key)
+            written += _upsert(
+                cur, tenant_id, ft_clients, computer.client_id, computer.id, key, "high", now,
+                details,
+            )
+        resolve_absent(cur, tenant_id, ft_clients, keys, now)
     return written
+
+
+def client_conflicts(
+    computers: dict[uuid.UUID, _Computer],
+    accepted: dict[str, set[str]],
+    client_names: dict[str, str],
+) -> list[tuple[_Computer, dict[str, Any]]]:
+    """Computers whose evidence names another client, with that evidence.
+
+    A record from another client's source group, or a usable serial a live
+    Computer of another client reports, raises it. The same name in another
+    client is shown beside it but never raises it: on its own it was a
+    coincidence every time (the retired ``cross_client_conflict``). Evidence an
+    operator kept as it is stays out; new evidence raises the finding again.
+    """
+    by_serial: dict[str, list[_Computer]] = {}
+    by_name: dict[str, list[_Computer]] = {}
+    for computer in computers.values():
+        for serial in computer.serials:
+            by_serial.setdefault(serial, []).append(computer)
+        if loose_name(computer.name):
+            by_name.setdefault(loose_name(computer.name), []).append(computer)
+
+    def client(client_id: Any) -> dict[str, str]:
+        return {"client_id": str(client_id), "client": client_names.get(str(client_id), "")}
+
+    found = []
+    for computer in computers.values():
+        evidence: dict[str, dict[str, Any]] = {}
+        for record in computer.records:
+            other = record.get("client_id")
+            if other is None or other == computer.client_id or record.get("roaming"):
+                continue
+            key = f"record:{record['platform']}|{record['entity_key']}"
+            evidence[key] = {
+                "key": key,
+                "kind": "record",
+                **client(other),
+                "platform": record["platform"],
+                "entity_type": record["entity_type"],
+                "hostname": record["hostname"],
+                "group_id": record.get("group_id"),
+                "observation_id": str(record["observation_id"]),
+                "last_seen_at": record["last_seen_at"].isoformat()
+                if record["last_seen_at"]
+                else None,
+            }
+        for serial in sorted(computer.serials):
+            for twin in by_serial[serial]:
+                if twin.client_id == computer.client_id:
+                    continue
+                key = f"serial:{twin.id}"
+                evidence[key] = {
+                    "key": key,
+                    "kind": "serial",
+                    **client(twin.client_id),
+                    "serial": serial,
+                    "device_id": str(twin.id),
+                    "hostname": twin.name,
+                }
+        kept = accepted.get(str(computer.id), set())
+        rows = [row for key, row in sorted(evidence.items()) if key not in kept]
+        if not rows:
+            continue
+        others = sorted({row["client_id"] for row in rows})
+        found.append(
+            (
+                computer,
+                {
+                    "hostname": computer.name,
+                    **client(computer.client_id),
+                    "other_client_ids": others,
+                    # The Move action needs one destination.
+                    "move_to_client_id": others[0] if len(others) == 1 else None,
+                    "evidence": rows,
+                    "same_name_elsewhere": [
+                        {"device_id": str(twin.id), "hostname": twin.name, **client(twin.client_id)}
+                        for twin in by_name.get(loose_name(computer.name), [])
+                        if twin.client_id != computer.client_id
+                    ][:10],
+                },
+            )
+        )
+    return found
+
+
+def _accepted(cur: Any, tenant_id: int) -> dict[str, set[str]]:
+    cur.execute(_ACCEPTED, (tenant_id,))
+    accepted: dict[str, set[str]] = {}
+    for device_id, key in cur.fetchall():
+        accepted.setdefault(str(device_id), set()).add(key)
+    return accepted
+
+
+def _client_names(cur: Any, tenant_id: int) -> dict[str, str]:
+    cur.execute(
+        "SELECT id::text, display_name FROM operations.clients WHERE tenant_id = %s", (tenant_id,)
+    )
+    return dict(cur.fetchall())
 
 
 # Current labels whose name key differs from a Computer name an OS rule
@@ -330,7 +455,8 @@ def _load(cur: Any, tenant_id: int) -> dict[uuid.UUID, _Computer]:
     computers: dict[uuid.UUID, _Computer] = {}
     for (
         device_id, client_id, name, created_at, observation_id, platform, entity_type,
-        entity_key, host, serial, vm_uuid, online, last_seen_at,
+        entity_key, host, serial, vm_uuid, online, last_seen_at, record_client_id, group_id,
+        roaming,
     ) in cur.fetchall():
         computer = computers.get(device_id)
         if computer is None:
@@ -347,6 +473,9 @@ def _load(cur: Any, tenant_id: int) -> dict[uuid.UUID, _Computer]:
                 "vm_uuid": vm_uuid,
                 "online": online,
                 "last_seen_at": last_seen_at,
+                "client_id": record_client_id,
+                "group_id": group_id,
+                "roaming": roaming,
             }
         )
     return computers

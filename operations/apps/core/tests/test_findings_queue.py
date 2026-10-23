@@ -13,9 +13,12 @@ from apps.core.conditions.operator import operator_state
 from apps.core.finding_actions import (
     ARCHIVE_HUDU_ASSETS,
     BULK_RETIRE_COMPUTERS,
+    COMPUTER_CLIENT_SOURCE_WRONG,
     CONFIRM_COMPUTERS_IN_USE,
     CONFIRM_COMPUTERS_SEPARATE,
+    KEEP_COMPUTER_CLIENT,
     MERGE_COMPUTERS,
+    MOVE_COMPUTER_CLIENT,
     SPLIT_COMPUTER_RECORDS,
     available_finding_actions,
 )
@@ -381,6 +384,9 @@ def test_registered_retirement_action_requires_lifecycle_permission():
         CONFIRM_COMPUTERS_SEPARATE,
         SPLIT_COMPUTER_RECORDS,
         CONFIRM_COMPUTERS_IN_USE,
+        MOVE_COMPUTER_CLIENT,
+        KEEP_COMPUTER_CLIENT,
+        COMPUTER_CLIENT_SOURCE_WRONG,
     )
 
 
@@ -667,6 +673,7 @@ def test_database_queue_projection_covers_merged_context_and_subject_overrides()
         "identity_conflict",
         "cmdb_asset_stale",
         "cross_client_serial",
+        "computer_client_conflict",
         "windows_servicing_%",
         "vulnerable_software",
         "known_malicious_hint",

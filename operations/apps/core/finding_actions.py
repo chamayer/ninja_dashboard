@@ -220,12 +220,56 @@ CONFIRM_COMPUTERS_IN_USE = FindingAction(
     eligibility_hint="Clears itself when the machine reports again.",
 )
 
+# A Computer linked to more than one client (ADR-0040).
+MOVE_COMPUTER_CLIENT = FindingAction(
+    key="move_computer_client",
+    label="Move to the other client",
+    permission=LIFECYCLE_PERMISSION,
+    finding_types=frozenset({"computer_client_conflict"}),
+    requires_reason=True,
+    confirmation=(
+        "Move each selected Computer, with its issues and software, to the client its "
+        "evidence names? Records still filed under the old client are listed again."
+    ),
+    eligibility_hint="Available when an issue's evidence names exactly one other client.",
+)
+
+KEEP_COMPUTER_CLIENT = FindingAction(
+    key="keep_computer_client",
+    label="Keep as is",
+    permission=LIFECYCLE_PERMISSION,
+    finding_types=frozenset({"computer_client_conflict"}),
+    requires_reason=True,
+    confirmation=(
+        "Keep each selected Computer where it is? Use this when the other client is "
+        "intended, or the matching serial belongs to a different machine. New evidence "
+        "raises the issue again."
+    ),
+    eligibility_hint="Records the decision for the evidence shown now.",
+)
+
+COMPUTER_CLIENT_SOURCE_WRONG = FindingAction(
+    key="computer_client_source_wrong",
+    label="Source is wrong",
+    permission=LIFECYCLE_PERMISSION,
+    finding_types=frozenset({"computer_client_conflict"}),
+    requires_reason=True,
+    confirmation=(
+        "Mark each selected issue as a source filing error? It stays acknowledged until the "
+        "source is corrected, then clears."
+    ),
+    eligibility_hint="Correct the client in the source; the issue clears on the next run.",
+)
+
 IDENTITY_ACTIONS = frozenset(
     {
         MERGE_COMPUTERS.key,
         CONFIRM_COMPUTERS_SEPARATE.key,
         SPLIT_COMPUTER_RECORDS.key,
         CONFIRM_COMPUTERS_IN_USE.key,
+        MOVE_COMPUTER_CLIENT.key,
+        KEEP_COMPUTER_CLIENT.key,
+        COMPUTER_CLIENT_SOURCE_WRONG.key,
     }
 )
 
@@ -235,6 +279,9 @@ FINDING_ACTIONS = {
     CONFIRM_COMPUTERS_SEPARATE.key: CONFIRM_COMPUTERS_SEPARATE,
     SPLIT_COMPUTER_RECORDS.key: SPLIT_COMPUTER_RECORDS,
     CONFIRM_COMPUTERS_IN_USE.key: CONFIRM_COMPUTERS_IN_USE,
+    MOVE_COMPUTER_CLIENT.key: MOVE_COMPUTER_CLIENT,
+    KEEP_COMPUTER_CLIENT.key: KEEP_COMPUTER_CLIENT,
+    COMPUTER_CLIENT_SOURCE_WRONG.key: COMPUTER_CLIENT_SOURCE_WRONG,
     ARCHIVE_HUDU_ASSETS.key: ARCHIVE_HUDU_ASSETS,
     APPROVE_REMOTE_ACCESS_ALL.key: APPROVE_REMOTE_ACCESS_ALL,
     APPROVE_REMOTE_ACCESS_CLIENT.key: APPROVE_REMOTE_ACCESS_CLIENT,

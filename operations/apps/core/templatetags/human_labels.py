@@ -322,6 +322,8 @@ def finding_detail_text(finding):
         if devices and clients and serial:
             return f"{devices} devices across {clients} clients share serial {serial}"
         return "cross-client serial"
+    if name == "computer_client_conflict":
+        return client_conflict_summary(d)
     if name == "placeholder_mac":
         macs = d.get("junk_macs") or []
         return ", ".join(macs) if macs else "junk MAC"

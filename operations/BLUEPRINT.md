@@ -1,3 +1,78 @@
+## Client mappings — recorded and movable (ADR-0040)
+
+Status: ADR-0040 accepted 2026-10-23; step A ("Computer under the wrong
+client?") implemented; decisions 1, 2 and 4 (record automatic mappings, move
+a source group, bulk decide) not started.
+Goal: every automatic client mapping is a recorded decision and any mapped
+source group can be moved to another or a new client, one/several/all at once
+(user requirement). Order agreed: (1) this; (2) one name-difference finding
+per client with a row per source, critical while unconfirmed; (3) automatic
+client promotion (ADR-0041).
+Audit (code read): resolver name-match attach writes no decision (reason
+discarded); both attach paths fill only `client_id IS NULL`, so no move
+exists; link rows keep their id when the client changes, so a move must
+supersede the decision. Computer side: merges recorded and reversible in SQL
+(`split_computer_merge`) but no UI; hostname-variant collapsing unrecorded —
+backlog. Production: 177 open `client_name_conflict` findings across ~40
+clients (one per source link).
+User decisions 2026-10-23: a Computer's findings belong to the Computer and
+the client inherits them (stored `client_id` copies move with the Computer);
+name differences are critical (amend ADR-0025's "low"); automatic promotion
+is not a source authority — it creates a provisional client so operations can
+start, verified by an operator later (Track C stands).
+Inventory (production, read-only, 2026-10-23): no RLS policy uses
+`client_id` (tenant only). Live copies of a Computer's client: `entities`
+(device), `findings` (subject_type device), `software_installations_current`,
+`software_decisions`, `device_windows_servicing_current`,
+`operating_system_installations`, `computer_name_collisions`; history tables
+keep what was written. All copies match their Computer (only 8 closed
+findings differ). Requirement state stores no client. Inconsistent
+relationships: 23 live Computers hold active records from another client
+(30 records; e.g. 10 Hudu "Landau Realty" records on Vedorium Computers);
+only 9 are covered by `cross_client_conflict`/`cross_client_serial`
+findings. 22 LogMeIn device records sit in groups with no active org record.
+Legacy `ninja_agent_compliance` has its own client ids; out of scope.
+
+### Step A — one finding: "Computer under the wrong client?" (approved 2026-10-23)
+
+Replaces `cross_client_serial` (and the retired `cross_client_conflict`) with
+`computer_client_conflict`, one per Computer, subject the Computer. Evidence:
+active records whose client differs from the Computer's (raises), a usable
+serial shared with a live Computer of another client (raises), same name in
+another client (supporting only). Actions on one/several/all selected issues:
+move the Computer to the one other client its evidence names; keep as is
+(intended or different machines, recorded per evidence key in decision
+dimension `client_conflict_accepted`; new evidence raises it again); source
+is wrong (acknowledged, clears when the source is fixed).
+Move (`operations.move_computer_to_client`) updates the Computer and every
+live copy: device entity, its os_installation entities and
+`operating_system_installations` (trigger requires matching client), device
+findings, `software_installations_current`, `software_decisions`,
+`device_windows_servicing_current`, `computer_name_collisions`. Records keep
+their group's client, so records of the old client become evidence.
+Files: migration 0340, `ingest/identity/findings.py`,
+`ingest/identity/resolver.py` (drop cross_client_serial emitter),
+`finding_actions.py`, `identity_actions.py`, `human_labels.py`, `views.py`
+summary SQL, tests.
+Overlap measurement (2026-10-23, read-only): source-group findings — 28 of 38
+open `unmatched_source_group` are for groups already linked to a client
+(stale) and 7 duplicate `client_unattached_group`; identity — 190 Computers
+carry identity findings, 23 carry two or more types (mostly
+`duplicate_device_records` with `identity_conflict`, `computer_name_collision`
+or `duplicate_platform_record`). Recorded in TODO as follow-ups.
+Checkpoint: step A implemented locally, not committed. Validation: Django
+check clean; Operations suite 4 failures and ingest suite 5, all also on
+clean HEAD; new `test_computer_client_conflict.py` and five producer tests
+in `test_identity_findings.py`; lint/format unchanged per file. Migration
+0340 rehearsed on production in a rolled-back transaction (Vedorium →
+Landau Realty: Computer, entity, OS installation, 180 software rows, Windows
+servicing, 77 findings moved; records kept their client; commit-time checks
+passed). The producer query flags the 23 Computers the audit found. Not
+browser-checked. Hotfix 8f521af (pushed) added `client_conflict_summary`
+after b30f259 shipped the views hunks early.
+Next action: user approves commit, then push with migration 0340; then
+decisions 1, 2 and 4 (record automatic mappings, move a source group).
+
 ## Client mapping workflow — finish the single-inbox move
 
 Steps 1-5 complete (browser check pending); retirement deferred (user approved 2026-10-22). Goal: finish the 2026-10-07 "Issues is the

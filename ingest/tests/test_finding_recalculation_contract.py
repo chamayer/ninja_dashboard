@@ -41,4 +41,5 @@ def test_cmdb_patch_and_identity_producers_refresh_current_evaluation_fields():
         assert "confidence       = EXCLUDED.confidence" in source
     assert "'unmatched_source_group:'" in resolver
     assert "'critical', 'confirmed', 'open'" in resolver
-    assert resolver.count("severity = EXCLUDED.severity") >= 7
+    # cross_client_serial moved to identity/findings.py as computer_client_conflict (ADR-0040).
+    assert resolver.count("severity = EXCLUDED.severity") >= 6

@@ -15,6 +15,11 @@
 * Still in use (``device_missing_from_source``): records ``in_use_confirmed``
   with ``operations.confirm_computers_in_use``; the Computer returns to the
   coverage check and is not retired automatically until it reports again.
+* ``computer_client_conflict`` (ADR-0040): Move to the other client runs
+  ``operations.move_computer_to_client``; Keep as is records the evidence with
+  ``operations.accept_computer_client_conflict`` (for a shared serial, on both
+  Computers); Source is wrong acknowledges the issue, which clears once the
+  source is corrected.
 
 Each database function opens its own recorded change action. The issue is
 closed with the resolution; the producer raises it again if the condition is
@@ -34,9 +39,12 @@ from django.utils import timezone
 
 from .computer_naming import name_now
 from .finding_actions import (
+    COMPUTER_CLIENT_SOURCE_WRONG,
     CONFIRM_COMPUTERS_IN_USE,
     CONFIRM_COMPUTERS_SEPARATE,
+    KEEP_COMPUTER_CLIENT,
     MERGE_COMPUTERS,
+    MOVE_COMPUTER_CLIENT,
     SPLIT_COMPUTER_RECORDS,
     FindingAction,
 )
@@ -49,6 +57,14 @@ UPDATE operations.findings
    SET status = 'resolved',
        closed_at = COALESCE(closed_at, now()),
        last_seen_at = now(),
+       finding_details = finding_details || %(resolution)s::jsonb
+ WHERE tenant_id = 1 AND id = %(id)s AND status IN ('open', 'acknowledged', 'investigating')
+"""
+
+# Fixed at the source: the issue stays visible, acknowledged, until it clears.
+_ACKNOWLEDGE_SQL = """
+UPDATE operations.findings
+   SET status = 'acknowledged',
        finding_details = finding_details || %(resolution)s::jsonb
  WHERE tenant_id = 1 AND id = %(id)s AND status IN ('open', 'acknowledged', 'investigating')
 """
@@ -91,6 +107,18 @@ def _refusal(findings: list[Finding], ids: list[str], action: FindingAction, rea
             "A selected issue names Computers proven to be different machines; "
             "confirm them separate or merge from the Computer page instead."
         )
+    return _destination_refusal(findings, action)
+
+
+def _destination_refusal(findings: list[Finding], action: FindingAction) -> str:
+    """A Computer moves only to the one other client its evidence names."""
+    if action.key == MOVE_COMPUTER_CLIENT.key and any(
+        not (f.finding_details or {}).get("move_to_client_id") for f in findings
+    ):
+        return (
+            "A selected issue's evidence names more than one other client, so it has no "
+            "single destination; decide it on its own."
+        )
     return ""
 
 
@@ -128,6 +156,41 @@ def _apply(cur, finding: Finding, action: FindingAction, reason: str, actor) -> 
             ([finding.subject_id], reason, actor),
         )
         return "Confirmed in use; missing agents are reported."
+    return _apply_client_conflict(cur, finding, action, reason, actor)
+
+
+def _apply_client_conflict(cur, finding: Finding, action: FindingAction, reason: str, actor) -> str:
+    """Move, keep or mark as a source error a Computer linked to another client."""
+    details = finding.finding_details or {}
+    if action.key == MOVE_COMPUTER_CLIENT.key:
+        cur.execute(
+            "SELECT operations.move_computer_to_client(%s::uuid, %s::uuid, %s::text, %s::bigint)",
+            (finding.subject_id, details["move_to_client_id"], reason, actor),
+        )
+        target = next(
+            (
+                e.get("client")
+                for e in details.get("evidence") or []
+                if e.get("client_id") == details["move_to_client_id"]
+            ),
+            "",
+        )
+        return f"Moved to {target or 'the other client'}."
+    if action.key == KEEP_COMPUTER_CLIENT.key:
+        evidence = details.get("evidence") or []
+        cur.execute(
+            "SELECT operations.accept_computer_client_conflict(%s::uuid, %s::text[], %s::text, %s::bigint)",
+            (finding.subject_id, [e["key"] for e in evidence], reason, actor),
+        )
+        # A shared serial is one decision for both Computers.
+        for twin in {e["device_id"] for e in evidence if e.get("kind") == "serial"}:
+            cur.execute(
+                "SELECT operations.accept_computer_client_conflict(%s::uuid, %s::text[], %s::text, %s::bigint)",
+                (twin, [f"serial:{finding.subject_id}"], reason, actor),
+            )
+        return "Kept as is."
+    if action.key == COMPUTER_CLIENT_SOURCE_WRONG.key:
+        return "Marked as a source filing error; clears when the source is corrected."
     raise ValueError("That action is not available.")
 
 
@@ -152,7 +215,9 @@ def run_identity_action(request: HttpRequest, ids: list[str], action: FindingAct
             for finding in findings:
                 outcome = _apply(cur, finding, action, reason, request.user.id)
                 cur.execute(
-                    _RESOLVE_SQL,
+                    _ACKNOWLEDGE_SQL
+                    if action.key == COMPUTER_CLIENT_SOURCE_WRONG.key
+                    else _RESOLVE_SQL,
                     {
                         "id": finding.id,
                         "resolution": json.dumps(

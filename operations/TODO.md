@@ -88,6 +88,27 @@ module-specific; root `../TODO.md` keeps cross-repo items and pointers.
       `test_conditions.py` (2), `test_conditions_command.py` (1), and
       `test_e5_generic_admin.py` (1) — the conditions profile now has 61
       definitions against the expected 54.
+- [ ] **Overlapping source-group findings** (measured 2026-10-23,
+      read-only): of 38 open `unmatched_source_group` findings, 28 are for
+      groups already linked to a client (nothing resolves them) and 7 repeat an
+      open `client_unattached_group`. Close stale rows, then decide whether one
+      type should own "source group with no client".
+- [ ] **Overlapping identity findings** (measured 2026-10-23): 190 Computers
+      carry identity findings; 23 carry two or more types, mostly
+      `duplicate_device_records` with `identity_conflict`,
+      `computer_name_collision` or `duplicate_platform_record`, across two
+      Issue groups. Candidate for one "one machine or two?" finding, as
+      ADR-0040 did for client ownership. Also measure the offline/missing,
+      required-agent, and software-decision groups for overlap.
+- [ ] **Computer identity undo gaps** (ADR-0040 audit): no page calls
+      `operations.split_computer_merge` (merges can be undone only in SQL);
+      Mac and truncated hostname variants are combined at Computer creation
+      without a record; a record can be split off only where an issue
+      proposes it.
+- [ ] **Pre-existing ingest test failures (seen 2026-10-23 on HEAD b30f259):**
+      `test_identity_findings.py::test_name_only_computers_form_one_group...`,
+      `test_device_status_settings.py::test_no_consumer_uses_a_literal...`,
+      `test_software_classify_schedule.py::test_scheduler_registers...`.
 - [ ] **Computers Sources column: link each line to its source record** (user
       deferred 2026-10-21). Only Hudu stores a record URL (`hudu_url`); the
       agent sources store `external_id` only. Plan: Hudu line linked from the

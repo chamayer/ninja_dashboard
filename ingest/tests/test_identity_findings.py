@@ -33,6 +33,9 @@ def _computer(name, *records, client=uuid.UUID(int=1), created=0):
                 "vm_uuid": record.get("vm_uuid"),
                 "online": record.get("online", False),
                 "last_seen_at": NOW - timedelta(hours=record.get("hours_ago", 1)),
+                "client_id": record.get("client", client),
+                "group_id": record.get("group_id"),
+                "roaming": record.get("roaming", False),
             }
         )
     return computer
@@ -118,3 +121,75 @@ def test_other_clients_never_group():
     a = _computer("pc-9", {"platform": "LogMeIn", "entity_type": "agent.remote_access"})
     b = _computer("pc-9", {}, client=uuid.UUID(int=2))
     assert findings.duplicate_groups({a.id: a, b.id: b}, set()) == []
+
+
+OWN, OTHER, THIRD = uuid.UUID(int=1), uuid.UUID(int=2), uuid.UUID(int=3)
+NAMES = {str(OWN): "Vedorium", str(OTHER): "Landau Realty", str(THIRD): "City Painting"}
+
+
+def _conflicts(*computers, accepted=None):
+    return findings.client_conflicts({c.id: c for c in computers}, accepted or {}, NAMES)
+
+
+def test_a_record_filed_under_another_client_raises_one_finding_with_a_destination():
+    computer = _computer(
+        "ved-01",
+        {"serial": "abc123"},
+        {"platform": "Hudu", "entity_type": "cmdb.asset", "client": OTHER, "group_id": "42"},
+    )
+    [(subject, details)] = _conflicts(computer)
+    assert subject is computer
+    assert details["client"] == "Vedorium"
+    assert details["move_to_client_id"] == str(OTHER)
+    [row] = details["evidence"]
+    assert row["kind"] == "record" and row["platform"] == "Hudu"
+    assert row["client"] == "Landau Realty" and row["group_id"] == "42"
+    assert row["key"].startswith("record:Hudu|")
+
+
+def test_a_serial_shared_with_another_clients_computer_raises_on_both():
+    mine = _computer("pc-1", {"serial": "abc123"})
+    theirs = _computer("pc-7", {"serial": "abc123"}, client=OTHER)
+    found = {subject.id: details for subject, details in _conflicts(mine, theirs)}
+    assert set(found) == {mine.id, theirs.id}
+    assert found[mine.id]["evidence"][0]["key"] == f"serial:{theirs.id}"
+    assert found[theirs.id]["evidence"][0]["client"] == "Vedorium"
+
+
+def test_the_same_name_in_another_client_alone_never_raises_it():
+    mine = _computer("dc1", {"serial": "abc123"})
+    theirs = _computer("dc1", {"serial": "zzz999"}, client=OTHER)
+    assert _conflicts(mine, theirs) == []
+    # Beside real evidence it is shown as supporting context.
+    filed = _computer(
+        "dc1", {"platform": "Hudu", "entity_type": "cmdb.asset", "client": THIRD}
+    )
+    [(_, details)] = _conflicts(filed, theirs)
+    assert [m["client"] for m in details["same_name_elsewhere"]] == ["Landau Realty"]
+
+
+def test_kept_evidence_stays_out_and_new_evidence_raises_it_again():
+    computer = _computer(
+        "ved-01", {"platform": "Hudu", "entity_type": "cmdb.asset", "client": OTHER}
+    )
+    key = findings.client_conflicts({computer.id: computer}, {}, NAMES)[0][1]["evidence"][0]["key"]
+    accepted = {str(computer.id): {key}}
+    assert _conflicts(computer, accepted=accepted) == []
+    computer.records.append({**computer.records[0], "entity_key": "new", "client_id": THIRD})
+    [(_, details)] = _conflicts(computer, accepted=accepted)
+    assert [row["client"] for row in details["evidence"]] == ["City Painting"]
+
+
+def test_two_other_clients_have_no_single_destination_and_unmapped_or_roaming_records_are_ignored():
+    computer = _computer(
+        "pc-2",
+        {"platform": "Hudu", "entity_type": "cmdb.asset", "client": OTHER},
+        {"platform": "LogMeIn", "entity_type": "agent.remote_access", "client": THIRD},
+        {"platform": "SentinelOne", "entity_type": "agent.edr", "client": None},
+        {"platform": "ScreenConnect", "entity_type": "agent.remote_access", "client": OTHER,
+         "roaming": True},
+    )
+    [(_, details)] = _conflicts(computer)
+    assert details["move_to_client_id"] is None
+    assert sorted(row["platform"] for row in details["evidence"]) == ["Hudu", "LogMeIn"]
+
