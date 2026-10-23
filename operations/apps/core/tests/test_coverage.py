@@ -252,6 +252,12 @@ def test_coverage_uses_effective_requirements_and_source_specific_filters(monkey
         "Total": 2,
     }
     assert cards["Ninja"]["records"] == 4
+    source_record_query = next(
+        statement for statement, _ in cursor.queries
+        if "COUNT(*)::int" in statement and "v_entity_observation_admin_metadata" in statement
+    )
+    assert "observation.entity_type LIKE 'agent.%%'" in source_record_query
+    assert "observation.entity_type = 'cmdb.asset'" in source_record_query
     assert cards["Ninja"]["requirement_total"] == 2
     assert {item["name"]: item["count"] for item in cards["Ninja"]["requirement_exceptions"]} == {
         "Missing": 1,

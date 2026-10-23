@@ -15122,6 +15122,11 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
                    AND instance.id = observation.source_instance_id
                   JOIN operations.sources source ON source.id = instance.source_id
                  WHERE observation.tenant_id = 1
+                   AND (
+                       observation.entity_type LIKE 'agent.%%'
+                       OR observation.entity_type = 'vm.guest'
+                       OR observation.entity_type = 'cmdb.asset'
+                   )
                  GROUP BY source.name
                 """
             )
