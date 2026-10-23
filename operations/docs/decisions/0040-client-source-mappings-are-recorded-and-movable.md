@@ -1,6 +1,6 @@
 # 0040 — Client source mappings are recorded and movable
 
-Status: Accepted (1, 3, 5 implemented; 2 to an existing client only; 4 on the client page, Issues side pending)
+Status: Accepted (1, 3, 5, 6 implemented; 2 to an existing client only; 4 on the client page)
 Date: 2026-10-23
 
 ## Context
@@ -90,6 +90,16 @@ see why each mapping exists and change it.
 
    Production 2026-10-23: 23 Computers hold records from another client;
    before this finding only those that also shared a serial were reported.
+6. **One name-difference finding per client** (`client_name_conflict`).
+   It was one per source link, raised for every link of a client whose
+   sources disagreed, including links that agreed with the client (Prompt:
+   four findings for one "MDA" group; 177 across about 40 clients). Now one
+   finding per client with a row per source group: a name equal to the
+   client's under the resolver's comparison (case, spaces, dashes, dots)
+   *matches*; a confirmed or ignored mapping is settled; any other row
+   *differs*. Critical while any row differs, because everything from that
+   group is filed under this client (amends ADR-0025's "low"). The rows are
+   decided together on the client page (decision 4).
 
 ## Rationale
 

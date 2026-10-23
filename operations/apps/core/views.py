@@ -5312,7 +5312,24 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
             subject_label = f.client.display_name if f.client else "(unnamed client)"
             if f.client:
                 subject_url = reverse("org_index", kwargs={"org_slug": f.client.slug})
-            if f.finding_type.name == "client_name_conflict":
+            if f.finding_type.name == "client_name_conflict" and "rows" in details:
+                # One finding per client (ADR-0040): the sources that differ,
+                # then how many already agree or are decided.
+                rows = details["rows"]
+                differing = [r for r in rows if r.get("status") == "differs"]
+                context_parts.append(
+                    ", ".join(f"{r['source']} reports “{r['observed_name']}”" for r in differing)
+                )
+                settled = len(rows) - len(differing)
+                if settled:
+                    context_parts.append(
+                        f"{settled} other source{'s' if settled != 1 else ''} settled"
+                    )
+                if details.get("no_source_matches"):
+                    context_parts.append("no source uses the client name")
+                if f.client:
+                    subject_url += "#source-references"
+            elif f.finding_type.name == "client_name_conflict":
                 source_name = source_names_by_id.get(details.get("source_id"), "Source")
                 observed_name = details.get("observed_name") or "(unnamed group)"
                 # Each finding is one source group; name it first, then the
@@ -13370,18 +13387,18 @@ def inventory_clients(request: HttpRequest) -> HttpResponse:
             if row is not None:
                 row["covered"][source] = covered
 
-    for item in (
-        Finding.objects.filter(
-            tenant_id=1,
-            status__in=_FINDING_ACTIVE_STATUSES,
-            finding_type__name="client_name_conflict",
-        )
-        .values("client_id")
-        .annotate(n=Count("id"))
-    ):
-        row = rows_by_client.get(str(item["client_id"]))
+    # Sources whose name differs and is undecided; one finding per client
+    # carries them (ADR-0040), an older per-source finding counts as one.
+    for client_id, details in Finding.objects.filter(
+        tenant_id=1,
+        status__in=_FINDING_ACTIVE_STATUSES,
+        finding_type__name="client_name_conflict",
+    ).values_list("client_id", "finding_details"):
+        row = rows_by_client.get(str(client_id))
         if row is not None:
-            row["name_difference_count"] = item["n"]
+            row["name_difference_count"] = row.get("name_difference_count", 0) + int(
+                (details or {}).get("differing_count") or 1
+            )
 
     for row in rows_by_client.values():
         total = row["computer_count"]

@@ -18,7 +18,9 @@ provenance and are not a second live authority.
 ## Finding rules
 
 - Explicit or ignored mappings: no active mismatch finding.
-- Automatic mappings whose peer source names differ: low-severity review.
+- Automatic mappings whose name differs from the client: one critical
+  finding per client, a row per source (amended by ADR-0040, 2026-10-23;
+  formerly low-severity review per source).
 - Missing mapping: actionable unmapped-source-group finding.
 - Multiple possible clients or incompatible decisions: actionable ambiguity.
 - Duplicate source groups with the same normalized name are review findings;

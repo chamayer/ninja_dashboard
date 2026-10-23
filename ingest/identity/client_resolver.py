@@ -491,8 +491,10 @@ def _cond_group(binding_id: uuid.UUID, entity_key: str) -> str:
     return hashlib.sha256(raw.encode()).hexdigest()[:64]
 
 
-def _cond_link(link_id: uuid.UUID) -> str:
-    raw = f"client_name_drift:{link_id}"
+def _cond_client(client_id: uuid.UUID) -> str:
+    # One name-difference finding per client (ADR-0040); the per-link keys
+    # ("client_name_drift:<link>") it replaced resolve as unseen.
+    raw = f"client_name_drift:client:{client_id}"
     return hashlib.sha256(raw.encode()).hexdigest()[:64]
 
 
@@ -754,11 +756,14 @@ def _resolve_entity_finding(cur, type_name: str, condition_key: str) -> None:
 
 
 def _check_name_drift(cur) -> None:
-    """Emit a client finding when a mapped source group uses another name.
+    """One client finding when a mapped source group reports another name (ADR-0040).
 
-    Mapping and naming are distinct operator decisions. The source reference
-    remains attached to the canonical client; the finding is reviewable and
-    suppressible when the difference is intentional.
+    Mapping and naming are distinct operator decisions; the source reference
+    stays attached. The finding is the client's, with one row per source group:
+    a group whose name matches the client (as the resolver compares names)
+    "matches"; a differing group needs a decision until it is confirmed or
+    ignored. Critical while any differing group is undecided, because every
+    fact from that group is filed under this client.
     """
     cur.execute(
         """
@@ -766,7 +771,6 @@ def _check_name_drift(cur) -> None:
             SELECT DISTINCT ON (source_binding_id, entity_key)
                    source_binding_id, entity_key,
                    canonical_data ->> 'name' AS observed_name,
-                   canonical_data ->> 'normalized_name' AS observed_norm,
                    COALESCE((canonical_data ->> 'is_placeholder')::boolean, FALSE) AS is_placeholder
               FROM operations.entity_observation_current
              WHERE tenant_id = %s
@@ -774,11 +778,13 @@ def _check_name_drift(cur) -> None:
                AND client_id IS NOT NULL
                AND active = TRUE
              ORDER BY source_binding_id, entity_key, observed_at DESC
-        ), observed AS (
-            SELECT link.source_link_id, link.client_id, link.source_id, link.external_id,
-                   binding.id AS source_binding_id, latest.observed_name, latest.observed_norm,
-                   link.mapping_state
+        )
+        SELECT DISTINCT ON (link.source_link_id)
+               link.source_link_id, link.client_id, client.display_name, link.source_id,
+               source.name, link.external_id, latest.observed_name, link.mapping_state
           FROM operations.v_client_source_mapping_effective link
+          JOIN operations.clients client ON client.id = link.client_id
+          JOIN operations.sources source ON source.id = link.source_id
           JOIN operations.source_bindings binding ON binding.enabled
           JOIN operations.source_instances instance
             ON instance.id = binding.source_instance_id
@@ -788,44 +794,41 @@ def _check_name_drift(cur) -> None:
            AND latest.entity_key = link.external_id
          WHERE link.tenant_id = %s
            AND NOT latest.is_placeholder
-        ), peers AS (
-            SELECT client_id,
-                   count(DISTINCT observed_name) AS distinct_name_count,
-                   array_agg(DISTINCT observed_name ORDER BY observed_name) AS peer_names
-              FROM observed
-             WHERE observed_name <> ''
-             GROUP BY client_id
-        )
-        SELECT observed.source_link_id, observed.client_id, observed.source_id, observed.external_id,
-               observed.source_binding_id, observed.observed_name, observed.observed_norm,
-               observed.mapping_state, peers.distinct_name_count, peers.peer_names
-          FROM observed
-          JOIN peers ON peers.client_id = observed.client_id
+           AND COALESCE(latest.observed_name, '') <> ''
+         ORDER BY link.source_link_id
         """,
         (_TENANT_ID, _TENANT_ID),
     )
+    clients: dict[uuid.UUID, dict[str, Any]] = {}
+    for (link_id, client_id, client_name, source_id, source_name, external_id, observed_name,
+         mapping_state) in cur.fetchall():
+        entry = clients.setdefault(client_id, {"client_name": client_name, "rows": []})
+        if _norm(observed_name) == _norm(client_name):
+            status = "matches"
+        elif mapping_state == "explicit":
+            status = "confirmed"
+        elif mapping_state == "ignored":
+            status = "ignored"
+        else:
+            status = "differs"
+        entry["rows"].append(
+            {
+                "source_link_id": str(link_id),
+                "source_id": source_id,
+                "source": source_name,
+                "external_id": external_id,
+                "observed_name": observed_name,
+                "mapping_state": mapping_state,
+                "status": status,
+            }
+        )
     active_conditions: set[str] = set()
-    for (
-        link_id,
-        client_id,
-        source_id,
-        external_id,
-        source_binding_id,
-        observed_name,
-        observed_norm,
-        mapping_state,
-        distinct_name_count,
-        peer_names,
-    ) in cur.fetchall():
-        if not observed_name:
+    for client_id, entry in clients.items():
+        rows = sorted(entry["rows"], key=lambda r: (r["status"] != "differs", r["source"]))
+        undecided = [r for r in rows if r["status"] == "differs"]
+        if not undecided:
             continue
-        condition_key = _cond_link(link_id)
-        if mapping_state in {"explicit", "ignored"}:
-            _resolve_entity_finding(cur, "client_name_conflict", condition_key)
-            continue
-        if distinct_name_count < 2:
-            _resolve_entity_finding(cur, "client_name_conflict", condition_key)
-            continue
+        condition_key = _cond_client(client_id)
         active_conditions.add(condition_key)
         _emit_finding(
             cur,
@@ -833,12 +836,12 @@ def _check_name_drift(cur) -> None:
             condition_key=condition_key,
             subject_ref={},
             details={
-                "source_binding_id": str(source_binding_id),
-                "source_link_id": str(link_id),
-                "source_id": source_id,
-                "external_id": external_id,
-                "observed_name": observed_name,
-                "peer_source_names": peer_names,
+                "client_name": entry["client_name"],
+                "differing_count": len(undecided),
+                "source_count": len(rows),
+                # No source uses the client's own name: the client may need renaming.
+                "no_source_matches": not any(r["status"] == "matches" for r in rows),
+                "rows": rows,
             },
             severity="critical",
             admin=False,

@@ -88,8 +88,23 @@ commit-time checks passed. Not browser-checked.
 Not in scope yet: moving to a new client from this form (use a candidate
 Accept), Issues-side bulk for name differences (ADR A, one finding per
 client).
-Next action: user approves commit, then push with migration 0341 (fast: no
-policy change). First resolver run records about 376 automatic decisions.
+Shipped in d121f4d (migration 0341, deployed 15:12 UTC); 358 links await
+their automatic decision on the next resolver run.
+
+### Step C — one name-difference finding per client (2026-10-23)
+
+`client_name_conflict` is one finding per client (ADR-0040 decision 6,
+amends ADR-0025): a row per source group, "matches" when the name equals the
+client's under `_norm`, settled when confirmed or ignored, otherwise
+"differs"; critical while any row differs. Per-link findings resolve as
+unseen. Issues text lists the differing sources and links to the client
+page's source references; Inventory › Clients counts differing groups.
+Production preview (read-only): 177 open findings become 28 (43 differing
+groups). No migration.
+Validation: Django check clean; Operations 4 and ingest 5 failures, all
+pre-existing; `test_client_name_drift_contract.py` rewritten for the
+per-client contract. Not browser-checked.
+Next action: user approves commit and push.
 
 ## Client mapping workflow — finish the single-inbox move
 
