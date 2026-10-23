@@ -473,6 +473,10 @@ def test_computers_csv_has_the_current_table_platform_columns(monkeypatch):
 def test_coverage_template_has_clear_statuses_hudu_and_multiselect_filters():
     template = (Path(__file__).parents[3] / "templates/coverage.html").read_text(encoding="utf-8")
 
+    assert ".coverage-record-total {" in template
+    assert "border-bottom:1px solid var(--border)" in template
+    assert ".coverage-computer-label {" in template
+
     for label in (
         "Integration links in Hudu",
         "Sources",
