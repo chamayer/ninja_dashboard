@@ -960,16 +960,18 @@ def home(request: HttpRequest) -> HttpResponse:  # noqa: PLR0912, PLR0915
     device_mix = {"workstations": 0, "servers": 0, "virtual": 0, "other": 0}
     retired_devices = 0
     review_devices = 0
+    retired_devices = Device.objects.filter(
+        tenant_id=1,
+        deleted_at__isnull=True,
+        lifecycle_status=Device.LifecycleStatus.RETIRED,
+    ).count()
     device_rollup = (
-        Device.objects.filter(tenant_id=1, deleted_at__isnull=True)
+        current_computers(Device.objects.filter(tenant_id=1, deleted_at__isnull=True))
         .values("client_id", "lifecycle_status", "device_role", "device_type")
         .annotate(n=Count("id"))
     )
     for row in device_rollup:
         count = row["n"]
-        if row["lifecycle_status"] == Device.LifecycleStatus.RETIRED:
-            retired_devices += count
-            continue
         if row["lifecycle_status"] == Device.LifecycleStatus.PENDING_CLEANUP:
             review_devices += count
         client_id = row["client_id"]
@@ -993,7 +995,7 @@ def home(request: HttpRequest) -> HttpResponse:  # noqa: PLR0912, PLR0915
                    )::int
             FROM operations.v_device
             WHERE tenant_id = 1
-              AND lifecycle_status <> 'retired'
+              AND {current_computer_sql()}
             """
         )
         total_devices, active_devices = cur.fetchone()
@@ -1149,7 +1151,7 @@ def home(request: HttpRequest) -> HttpResponse:  # noqa: PLR0912, PLR0915
                        WHERE effective_patching_scope = 'Included'
                    )::int
             FROM operations.v_device
-            WHERE tenant_id = 1 AND lifecycle_status != 'retired'
+            WHERE tenant_id = 1 AND {current_computer_sql()}
             GROUP BY client_id
             """
         )
@@ -2071,7 +2073,7 @@ def org_index(request: HttpRequest, org_slug: str) -> HttpResponse:
                    COUNT(*) FILTER (WHERE device_role = 'server') AS servers,
                    COUNT(*) FILTER (WHERE device_role = 'workstation') AS workstations,
                    COUNT(*) FILTER (WHERE effective_patching_scope = 'Included') AS in_patch_scope,
-                   COUNT(*) FILTER (WHERE lifecycle_status <> 'retired'
+                   COUNT(*) FILTER (WHERE {current_computer_sql()}
                                      AND last_contact_at >= NOW() - INTERVAL '{active_device_days} days') AS active,
                    COUNT(*) FILTER (WHERE last_contact_at IS NULL
                                         OR last_contact_at < NOW() - INTERVAL '{active_device_days} days') AS stale
@@ -11543,7 +11545,7 @@ def devices_page(request: HttpRequest) -> HttpResponse:
                    COUNT(*) FILTER (WHERE last_contact_at IS NULL
                                     OR last_contact_at < NOW() - INTERVAL '{active_device_days} days') AS stale
             FROM operations.v_device
-            WHERE tenant_id = 1 AND lifecycle_status <> 'retired'
+            WHERE tenant_id = 1 AND {current_computer_sql()}
             """
         )
         row = cur.fetchone()
@@ -11598,7 +11600,7 @@ def devices_page(request: HttpRequest) -> HttpResponse:
             "v.tenant_id = 1",
             "v.lifecycle_status = 'retired'"
             if lifecycle_filter == "retired"
-            else "v.lifecycle_status <> 'retired'",
+            else current_computer_sql("v"),
         ]
         if lifecycle_filter == "pending_cleanup":
             where.append("v.lifecycle_status = 'pending_cleanup'")
@@ -11618,7 +11620,7 @@ def devices_page(request: HttpRequest) -> HttpResponse:
             where.append("NOT v.is_online_any")
         if state_filter == "active":
             where.append(
-                f"v.lifecycle_status <> 'retired' AND v.last_contact_at >= NOW() - INTERVAL '{active_device_days} days'"
+                f"v.last_contact_at >= NOW() - INTERVAL '{active_device_days} days'"
             )
         elif state_filter == "not-reporting":
             where.append(
@@ -15101,13 +15103,18 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
             )
             rows = cur.fetchall()
             cur.execute(
-                """
+                f"""
                 SELECT hudu.observation_id, hudu.device_id, hudu.client_id,
                        hudu.hostname,
                        lifecycle.record_lifecycle = 'archived' AS is_archived,
                        BOOL_OR(hudu.card_source IS NOT NULL AND hudu.card_id IS NOT NULL)
                            AS has_links
                 FROM operations.v_hudu_computer_inventory_evidence_current hudu
+                JOIN operations.devices device
+                  ON device.tenant_id = hudu.tenant_id
+                 AND device.id = hudu.device_id
+                 AND device.deleted_at IS NULL
+                 AND {current_computer_sql("device")}
                 LEFT JOIN operations.v_device_source_record_lifecycle_current lifecycle
                   ON lifecycle.tenant_id = hudu.tenant_id
                  AND lifecycle.observation_id = hudu.observation_id
@@ -15152,12 +15159,17 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
             )
             client_rows = cur.fetchall()
             cur.execute(
-                """
+                f"""
                 SELECT presence.device_id, presence.platform,
                        BOOL_OR(presence.reported_online) AS online,
                        MAX(COALESCE(presence.last_contact_at, presence.last_observed_at))
                            AS last_contact_at
                 FROM operations.device_agent_presence_current presence
+                JOIN operations.devices device
+                  ON device.tenant_id = presence.tenant_id
+                 AND device.id = presence.device_id
+                 AND device.deleted_at IS NULL
+                 AND {current_computer_sql("device")}
                 WHERE presence.tenant_id = 1
                   AND (presence.entity_type LIKE 'agent.%%' OR presence.entity_type = 'vm.guest')
                 GROUP BY presence.device_id, presence.platform
@@ -15171,12 +15183,17 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
             # time rather than the older last-seen timestamp.
             if compact_source_observations:
                 cur.execute(
-                    """
+                    f"""
                     SELECT evidence.device_id, evidence.source_name,
                            BOOL_OR(evidence.observation_active) AS has_current_record,
                            NULL::timestamptz AS current_seen_at,
                            NULL::timestamptz AS withdrawn_at
                       FROM operations.v_device_observation_current evidence
+                          JOIN operations.devices device
+                            ON device.tenant_id = evidence.tenant_id
+                           AND device.id = evidence.device_id
+                           AND device.deleted_at IS NULL
+                           AND {current_computer_sql("device")}
                      WHERE evidence.tenant_id = 1
                        AND (evidence.entity_type LIKE 'agent.%%'
                             OR evidence.entity_type = 'vm.guest')
@@ -15185,7 +15202,7 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
                 )
             else:
                 cur.execute(
-                    """
+                    f"""
                     SELECT evidence.device_id, evidence.source_name,
                            BOOL_OR(evidence.observation_active) AS has_current_record,
                            MAX(evidence.observation_last_seen_at)
@@ -15193,6 +15210,11 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
                            MAX(COALESCE(link.missing_since, evidence.observation_last_seen_at))
                                FILTER (WHERE NOT evidence.observation_active) AS withdrawn_at
                       FROM operations.v_device_observation_current evidence
+                          JOIN operations.devices device
+                            ON device.tenant_id = evidence.tenant_id
+                           AND device.id = evidence.device_id
+                           AND device.deleted_at IS NULL
+                           AND {current_computer_sql("device")}
                       JOIN operations.source_instances source_instance
                         ON source_instance.tenant_id = evidence.tenant_id
                        AND source_instance.id = evidence.source_instance_id

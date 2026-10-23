@@ -211,11 +211,16 @@ def test_coverage_uses_effective_requirements_and_source_specific_filters(monkey
     hudu_statement, hudu_params = cursor.queries[2]
     assert "v_hudu_computer_inventory_evidence_current" in hudu_statement
     assert "BOOL_OR" in hudu_statement
+    assert "current_computer_sql(\"device\")" not in hudu_statement
+    assert "device.lifecycle_status <> 'retired'" in hudu_statement
     assert "GROUP BY hudu.observation_id" in hudu_statement
     assert hudu_params is None
     computer_statement, _ = cursor.queries[3]
     assert "device_operator_decisions" in computer_statement
     assert "AS s1_exempt" in computer_statement
+
+    source_presence_statement, _ = cursor.queries[5]
+    assert "device.lifecycle_status <> 'retired'" in source_presence_statement
 
     context = captured["context"]
     assert context["client_filters"] == ["acme", "beta"]

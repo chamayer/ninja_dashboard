@@ -14,6 +14,7 @@ def test_inventory_consumers_use_the_shared_current_computer_selector():
     views = Path(__file__).parents[1].joinpath("views.py").read_text(encoding="utf-8")
 
     for consumer in (
+        "home",
         "org_index",
         "org_devices",
         "patching_queue",
@@ -128,6 +129,17 @@ def test_computer_overview_pages_html_and_exports_the_full_filtered_scope():
     assert 'is_csv = wants_csv(request)' in section
     assert 'LIMIT %s OFFSET %s' in section
     assert '"filtered_total": filtered_total' in section
+    assert 'current_computer_sql("v")' in section
+
+
+def test_dashboard_uses_the_shared_current_computer_selector_for_its_counts():
+    views = Path(__file__).parents[1].joinpath("views.py").read_text(encoding="utf-8")
+    start = views.index("def home(")
+    end = views.find("\n\n@login_required\ndef ", start)
+    section = views[start : end if end >= 0 else len(views)]
+
+    assert "current_computers(Device.objects.filter" in section
+    assert "AND {current_computer_sql()}" in section
 
 
 def test_computer_overview_issue_chips_name_their_governed_issue_populations():
