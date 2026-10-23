@@ -9,12 +9,19 @@ from io import StringIO
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
 from django.http import HttpResponse
 from django.test import RequestFactory
 
 from apps.core import views
 
 EVALUATED_AT = datetime(2026, 10, 21, 16, 55, tzinfo=UTC)
+
+
+@pytest.fixture(autouse=True)
+def device_status_policy(monkeypatch):
+    monkeypatch.setattr(views, "get_device_status_policy", lambda: {"active_device_days": 7})
+
 
 class _Cursor:
     def __init__(self):
@@ -106,6 +113,8 @@ class _Cursor:
                     "workstation",
                     "active",
                     False,
+                    True,
+                    EVALUATED_AT,
                 ),
                 (
                     "device-2",
@@ -118,6 +127,8 @@ class _Cursor:
                     "server",
                     "active",
                     True,
+                    True,
+                    EVALUATED_AT,
                 ),
             ],
             [
@@ -125,9 +136,9 @@ class _Cursor:
                 ("client-2", "beta", "Beta"),
             ],
             [
-                ("device-1", "Ninja", True),
-                ("device-1", "SentinelOne", True),
-                ("device-2", "Ninja", True),
+                ("device-1", "Ninja", True, EVALUATED_AT),
+                ("device-1", "SentinelOne", True, EVALUATED_AT),
+                ("device-2", "Ninja", True, EVALUATED_AT),
             ],
             [
                 ("device-1", "Ninja", True, None, None),
@@ -247,10 +258,11 @@ def test_coverage_uses_effective_requirements_and_source_specific_filters(monkey
     assert {item["name"]: item["count"] for item in cards["Ninja"]["counts"]} == {
         "Online": 2,
         "Offline": 0,
+        "Stale": 0,
         "Withdrawn": 0,
         "No record": 0,
-        "Total": 2,
     }
+    assert cards["Ninja"]["computer_total"] == 2
     assert cards["Ninja"]["records"] == 4
     source_record_query = next(
         statement for statement, _ in cursor.queries
@@ -258,25 +270,24 @@ def test_coverage_uses_effective_requirements_and_source_specific_filters(monkey
     )
     assert "observation.entity_type LIKE 'agent.%%'" in source_record_query
     assert "observation.entity_type = 'cmdb.asset'" in source_record_query
-    assert cards["Ninja"]["requirement_total"] == 2
-    assert {item["name"]: item["count"] for item in cards["Ninja"]["requirement_exceptions"]} == {
-        "Missing": 1,
+    assert {item["name"]: item["count"] for item in cards["Ninja"]["missing_counts"]} == {
+        "Online": 1,
+        "Offline": 0,
+        "Stale": 0,
     }
-    assert cards["SentinelOne"]["requirement_total"] == 1
-    assert {item["name"]: item["count"] for item in cards["SentinelOne"]["requirement_exceptions"]} == {
-        "Exempt": 1,
-    }
+    assert cards["Ninja"]["missing_total"] == 1
+    assert cards["SentinelOne"]["missing_total"] == 0
     assert {item["name"]: item["count"] for item in context["hudu_card"]["counts"]} == {
         "Current only": 1,
         "Current + archived": 0,
         "Archived only": 0,
         "No record": 1,
-        "Total": 1,
     }
+    assert context["hudu_card"]["computer_total"] == 1
 
 
-def _render_coverage_context(monkeypatch, query: str) -> dict:
-    cursor = _Cursor()
+def _render_coverage_context(monkeypatch, query: str, cursor: _Cursor | None = None) -> dict:
+    cursor = cursor or _Cursor()
     captured = {}
     monkeypatch.setattr(views, "connection", _Connection(cursor))
     monkeypatch.setattr(views.transaction, "atomic", nullcontext)
@@ -319,8 +330,7 @@ def test_requirements_not_applied_show_n_a_with_the_reason(monkeypatch):
     assert row["device_id"] == "device-1"
     assert row["agent_cells"][0]["rule_label"] == "N/A — OS unknown"
     cards = {card["platform"]: card for card in context["platform_cards"]}
-    assert cards["Ninja"]["requirement_total"] == 1
-    assert cards["Ninja"]["requirement_exceptions"] == []
+    assert cards["Ninja"]["missing_total"] == 0
     for label in ("N/A — OS unknown", "N/A — Offline", "No agents"):
         assert label in context["agent_filter_requirements"]
     assert "Not evaluated" not in context["agent_filter_requirements"]
@@ -657,12 +667,16 @@ def test_hudu_card_carries_requirement_counts_from_stored_verdicts(monkeypatch):
     assert len(hudu_cards) == 1
     hudu = hudu_cards[0]
     assert [item["name"] for item in hudu["counts"]] == [
-        "Current only", "Current + archived", "Archived only", "No record", "Total",
+        "Current only", "Current + archived", "Archived only", "No record",
     ]
-    assert hudu["requirement_total"] == 1
-    assert {item["name"]: item["count"] for item in hudu["requirement_exceptions"]} == {
-        "Missing": 1,
+    assert hudu["computer_total"] == 1
+    assert hudu["has_requirements"] is True
+    assert {item["name"]: item["count"] for item in hudu["missing_counts"]} == {
+        "Online": 1,
+        "Offline": 0,
+        "Stale": 0,
     }
+    assert hudu["missing_total"] == 1
     # The Hudu line in the Agents column comes from the Hudu reader, not agent records.
     row = next(row for row in context["device_rows"] if row["device_id"] == "device-1")
     cell = next(cell for cell in row["agent_cells"] if cell["platform"] == "Hudu")
@@ -673,7 +687,10 @@ def test_hudu_card_carries_requirement_counts_from_stored_verdicts(monkeypatch):
 def test_status_filter_counts_every_catalogued_agent(monkeypatch):
     cursor = _Cursor()
     # device-2 is online only in R-U-ON, which the old fixed list of four ignored.
-    cursor._results[4] = [("device-1", "Ninja", True), ("device-2", "R-U-ON", True)]
+    cursor._results[4] = [
+        ("device-1", "Ninja", True, EVALUATED_AT),
+        ("device-2", "R-U-ON", True, EVALUATED_AT),
+    ]
     cursor._results[5] = [("device-1", "Ninja", True, None, None), ("device-2", "R-U-ON", True, None, None)]
     captured = {}
     monkeypatch.setattr(views, "connection", _Connection(cursor))
@@ -692,9 +709,50 @@ def test_status_filter_counts_every_catalogued_agent(monkeypatch):
     assert {row["device_id"] for row in context["device_rows"]} == {"device-1", "device-2"}
     assert context["computer_scope_filters"] == ["any_online"]
     assert list(context["computer_scope_labels"]) == [
-        "any_online", "any_offline", "missing_required", "stale_required",
+        "any_online", "any_offline", "online_anywhere", "offline_recent", "not_reporting",
+        "missing_required", "stale_required",
         "has_product_record", "no_product_records", "no_current_records",
     ]
+
+
+def test_missing_cards_partition_by_shared_computer_session_state(monkeypatch):
+    cursor = _Cursor()
+    stale_at = datetime(2026, 10, 1, tzinfo=UTC)
+    first, second = cursor._results[2]
+    cursor._results[2] = [
+        (*first[:10], False, EVALUATED_AT),
+        (*second[:10], False, stale_at),
+    ]
+    device_two_ninja = cursor._results[0][2]
+    cursor._results[0][2] = (*device_two_ninja[:8], "Missing", *device_two_ninja[9:])
+    cursor._results[4] = [
+        ("device-1", "Ninja", False, EVALUATED_AT),
+        ("device-1", "SentinelOne", True, EVALUATED_AT),
+        ("device-2", "Ninja", False, stale_at),
+    ]
+
+    context = _render_coverage_context(monkeypatch, "", cursor)
+    cards = {card["platform"]: card for card in context["platform_cards"]}
+    ninja = cards["Ninja"]
+
+    assert {item["name"]: item["count"] for item in ninja["counts"]} == {
+        "Online": 0,
+        "Offline": 1,
+        "Stale": 1,
+        "Withdrawn": 0,
+        "No record": 0,
+    }
+    assert ninja["computer_total"] == 2
+    assert {item["name"]: item["count"] for item in ninja["missing_counts"]} == {
+        "Online": 0,
+        "Offline": 1,
+        "Stale": 1,
+    }
+    assert ninja["missing_total"] == 2
+    assert ninja["missing_counts"][1]["url"] == (
+        "?agent_0=Ninja&agent_requirement_0=Missing&computer_scope=offline_recent"
+        "#filtered-results"
+    )
 
 
 def test_hudu_cell_says_which_link_goes_where_and_hudu_is_always_listed(monkeypatch):

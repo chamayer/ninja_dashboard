@@ -14881,6 +14881,9 @@ _COMPUTER_CARD_ORDER = ("Ninja", "SentinelOne", "LogMeIn", "R-U-ON", "ScreenConn
 _COMPUTER_SCOPE_LABELS = {
     "any_online": "Online in any agent",
     "any_offline": "Offline in any agent",
+    "online_anywhere": "Online anywhere",
+    "offline_recent": "Offline, recently seen",
+    "not_reporting": "Not reporting",
     "missing_required": "Missing a requirement",
     "stale_required": "A requirement is stale",
     "has_product_record": "Current record in any agent",
@@ -14890,7 +14893,12 @@ _COMPUTER_SCOPE_LABELS = {
 
 
 def _inventory_record_status(
-    platform: str, row: dict, source_status: str | None, observation: dict | None
+    platform: str,
+    row: dict,
+    source_status: str | None,
+    observation: dict | None,
+    source_contact_at: datetime | None,
+    active_since: datetime,
 ) -> str:
     """Record fact for one platform on one Computers inventory row."""
     if platform == "Hudu":
@@ -14902,8 +14910,10 @@ def _inventory_record_status(
         not source_status and observation and observation["state"] == "Current"
     ):
         return "No status"
-    if source_status in {"Online", "Offline"}:
+    if source_status == "Online":
         return source_status
+    if source_status == "Offline":
+        return "Offline" if source_contact_at and source_contact_at >= active_since else "Stale"
     if observation and observation["state"] == "Withdrawn":
         return "Withdrawn"
     return "No record"
@@ -14935,6 +14945,8 @@ def _coverage_filter_url(**filters: str) -> str:
 def fleet_coverage(request: HttpRequest) -> HttpResponse:
     """Show every known Computer with its product records and required state."""
     compact_source_observations = not wants_csv(request)
+    active_device_days = get_device_status_policy()["active_device_days"]
+    active_since = timezone.now() - timedelta(days=active_device_days)
     client_filters = list(dict.fromkeys(value for value in request.GET.getlist("client") if value))
     device_query = (request.GET.get("device") or "").strip().lower()
     agents_query = (request.GET.get("agents") or "").strip().lower()
@@ -14967,6 +14979,9 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
                 "no_current_records",
                 "missing_required",
                 "stale_required",
+                "online_anywhere",
+                "offline_recent",
+                "not_reporting",
             }
         )
     )
@@ -15108,13 +15123,18 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
                        COALESCE(d.os_family, ''), d.device_type, d.device_role,
                        d.lifecycle_status,
                        COALESCE(decision.value, '{}'::jsonb) ? 'agent.edr'
-                           AS s1_exempt
+                           AS s1_exempt,
+                       COALESCE(session.is_online_any, FALSE) AS is_online_any,
+                       session.last_contact_at
                 FROM operations.devices d
                 JOIN operations.clients c ON c.id = d.client_id
                 LEFT JOIN operations.device_operator_decisions decision
                   ON decision.tenant_id = d.tenant_id
                  AND decision.device_id = d.id
                  AND decision.dimension = 'exemptions'
+                LEFT JOIN operations.device_session_current session
+                  ON session.tenant_id = d.tenant_id
+                 AND session.device_id = d.id
                 WHERE d.tenant_id = 1
                   AND d.deleted_at IS NULL
                   AND d.lifecycle_status <> 'retired'
@@ -15134,7 +15154,9 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
             cur.execute(
                 """
                 SELECT presence.device_id, presence.platform,
-                       BOOL_OR(presence.reported_online) AS online
+                       BOOL_OR(presence.reported_online) AS online,
+                       MAX(COALESCE(presence.last_contact_at, presence.last_observed_at))
+                           AS last_contact_at
                 FROM operations.device_agent_presence_current presence
                 WHERE presence.tenant_id = 1
                   AND (presence.entity_type LIKE 'agent.%%' OR presence.entity_type = 'vm.guest')
@@ -15221,6 +15243,8 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
             "device_role": row[7],
             "lifecycle_status": row[8],
             "s1_exempt": bool(row[9]),
+            "is_online_any": bool(row[10]),
+            "last_contact_at": row[11],
         }
         for row in computer_rows
     }
@@ -15230,10 +15254,12 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
     }
     clients_by_id = {row[0]: {"slug": row[1], "name": row[2]} for row in client_rows}
     source_states_by_device: dict = {}
-    for device_id, platform, online in source_presence_rows:
+    source_contacts_by_device: dict = {}
+    for device_id, platform, online, last_contact_at in source_presence_rows:
         source_states_by_device.setdefault(device_id, {})[platform] = (
             "Online" if online is True else "Offline" if online is False else "Current"
         )
+        source_contacts_by_device.setdefault(device_id, {})[platform] = last_contact_at
     source_observations_by_device: dict = {}
     for (
         device_id,
@@ -15322,6 +15348,7 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
     allowed_record_statuses = {
         "Online",
         "Offline",
+        "Stale",
         "Withdrawn",
         "No record",
         "No status",
@@ -15346,7 +15373,7 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
         platform, separator, status = value.partition("|")
         if separator and platform in platforms and status in allowed_platform_states:
             platform_status_filters.setdefault(platform, []).append(status)
-            if status in {"Online", "Offline", "Possible match"}:
+            if status in {"Online", "Offline", "Stale", "Possible match"}:
                 record_status_filters.setdefault(platform, []).append(status)
             elif status in {"Missing", "Stale"}:
                 rule_status_filters.setdefault(platform, []).append(status)
@@ -15502,6 +15529,7 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
                 "inventory_key": f"device:{device_id}",
                 "hudu_records": hudu_by_device.get(device_id, []),
                 "source_states": source_states_by_device.get(device_id, {}),
+                "source_contacts": source_contacts_by_device.get(device_id, {}),
                 "source_observations": source_observations_by_device.get(device_id, {}),
                 "platform_states": coverage_states,
                 "possible_match": None,
@@ -15534,11 +15562,14 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
         state: str = "",
         states: tuple[str, ...] = (),
         requirement: str = "",
+        computer_scope: str = "",
     ) -> str:
         params: list[tuple[str, str]] = [("agent_0", agent)]
         params.extend(("agent_state_0", value) for value in states or ((state,) if state else ()))
         if requirement:
             params.append(("agent_requirement_0", requirement))
+        if computer_scope:
+            params.append(("computer_scope", computer_scope))
         return "?" + urlencode(params) + "#filtered-results"
 
     def inventory_platform_cell(
@@ -15548,15 +15579,18 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
         possible_match = row["possible_match"] if platform == "Ninja" else None
         coverage = row["platform_states"].get(platform)
         source_status = row["source_states"].get(platform)
+        source_contact_at = row["source_contacts"].get(platform)
         observation = row["source_observations"].get(platform)
 
-        record_status = _inventory_record_status(platform, row, source_status, observation)
+        record_status = _inventory_record_status(
+            platform, row, source_status, observation, source_contact_at, active_since
+        )
 
         record_age = ""
         if record_status == "Withdrawn" and observation:
             record_age = observation_age_label(observation["withdrawn_at"])
-        elif record_status == "Offline" and observation:
-            record_age = observation_age_label(observation["current_seen_at"])
+        elif record_status in {"Offline", "Stale"}:
+            record_age = observation_age_label(source_contact_at)
 
         if platform == "SentinelOne" and row["s1_exempt"]:
             rule_status = "Exempt"
@@ -15575,6 +15609,10 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
         record_tooltip = {
             "Online": f"{platform} currently reports this Computer online.",
             "Offline": f"{platform} has a current record but reports it offline.",
+            "Stale": (
+                f"{platform} has a current record but has not contacted it within "
+                f"{active_device_days} days."
+            ),
             "Withdrawn": f"{platform} previously reported this Computer but no longer does.",
             "No record": f"No current {platform} record is linked to this Computer.",
             "No status": f"{platform} still lists this Computer but does not say whether it is online.",
@@ -15666,11 +15704,11 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
                 if name in agent_platforms
             }
             has_named_record = any(
-                cell["record_status"] in {"Online", "Offline", "No status"}
+                cell["record_status"] in {"Online", "Offline", "Stale", "No status"}
                 for cell in named_products.values()
             )
             has_current_record = any(
-                cell["record_status"] in {"Online", "Offline", "No status"}
+                cell["record_status"] in {"Online", "Offline", "Stale", "No status"}
                 for cell in row["platform_cells_by_name"].values()
             )
             scope_matches = {
@@ -15680,6 +15718,19 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
                 ),
                 "any_offline": any(
                     cell["record_status"] == "Offline" for cell in named_products.values()
+                ),
+                "online_anywhere": row["is_online_any"],
+                "offline_recent": (
+                    not row["is_online_any"]
+                    and row["last_contact_at"] is not None
+                    and row["last_contact_at"] >= active_since
+                ),
+                "not_reporting": (
+                    not row["is_online_any"]
+                    and (
+                        row["last_contact_at"] is None
+                        or row["last_contact_at"] < active_since
+                    )
                 ),
                 "no_product_records": not has_named_record,
                 "no_current_records": (not has_current_record and row["hudu_current_count"] == 0),
@@ -15748,6 +15799,7 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
     record_status_order = (
         "Online",
         "Offline",
+        "Stale",
         "No status",
         "Withdrawn",
         "No record",
@@ -15758,17 +15810,25 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
     platform_cards = []
     for platform in platforms:
         record_counts = {status: 0 for status in record_status_order}
-        requirement_total = 0
-        requirement_counts = {
-            status: 0 for status in ("Missing", "Stale", "Exempt")
-        }
+        missing_counts = {status: 0 for status in ("Online", "Offline", "Stale")}
+        has_requirements = False
         for inventory_row in inventory_rows:
             cell = inventory_row["platform_cells_by_name"][platform]
             record_counts[cell["record_status"]] += 1
-            if cell["rule_status"] in {"Required", "Missing", "Stale"}:
-                requirement_total += 1
-            if cell["rule_status"] in requirement_counts:
-                requirement_counts[cell["rule_status"]] += 1
+            has_requirements = has_requirements or cell["rule_status"] not in {
+                "N/A", *_NOT_APPLIED_STATES
+            }
+            if cell["rule_status"] == "Missing":
+                missing_counts[
+                    "Online"
+                    if inventory_row["is_online_any"]
+                    else "Offline"
+                    if (
+                        inventory_row["last_contact_at"] is not None
+                        and inventory_row["last_contact_at"] >= active_since
+                    )
+                    else "Stale"
+                ] += 1
         platform_cards.append(
             {
                 "platform": platform,
@@ -15782,25 +15842,26 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
                     for status in record_status_order
                     # "No status" is a fallback no source produces today; show it only when used.
                     if status != "No status" or record_counts[status]
-                ]
-                + [
-                    {
-                        "name": "Total",
-                        "count": sum(record_counts[status] for status in present_record_statuses),
-                        "url": agent_filter_url(platform, states=present_record_statuses),
-                    }
                 ],
-                "requirement_total": requirement_total,
-                "requirement_total_url": agent_filter_url(platform, requirement="Required"),
-                "requirement_exceptions": [
+                "computer_total": sum(record_counts[status] for status in present_record_statuses),
+                "has_requirements": has_requirements,
+                "missing_counts": [
                     {
                         "name": status,
-                        "count": requirement_counts[status],
-                        "url": agent_filter_url(platform, requirement=status),
+                        "count": missing_counts[status],
+                        "url": agent_filter_url(
+                            platform,
+                            requirement="Missing",
+                            computer_scope={
+                                "Online": "online_anywhere",
+                                "Offline": "offline_recent",
+                                "Stale": "not_reporting",
+                            }[status],
+                        ),
                     }
-                    for status in ("Missing", "Stale", "Exempt")
-                    if requirement_counts[status]
+                    for status in ("Online", "Offline", "Stale")
                 ],
+                "missing_total": sum(missing_counts.values()),
             }
         )
 
@@ -15832,7 +15893,6 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
             hudu_record_filter="archived_only",
         ),
         "No record": _coverage_filter_url(hudu="not_in_hudu"),
-        "Total": _coverage_filter_url(hudu="in_hudu"),
     }
 
     # One Hudu card: record counts from the Hudu evidence reader plus the
@@ -15843,21 +15903,15 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
         "counts": [
             {"name": name, "count": count, "url": hudu_urls[name]}
             for name, count in hudu_counts.items()
-        ]
-        + [
-            {
-                "name": "Total",
-                "count": sum(row["hudu_present"] for row in inventory_rows),
-                "url": hudu_urls["Total"],
-            }
         ],
-        "requirement_total": 0,
-        "requirement_total_url": "",
-        "requirement_exceptions": [],
+        "computer_total": sum(row["hudu_present"] for row in inventory_rows),
+        "has_requirements": False,
+        "missing_counts": [],
+        "missing_total": 0,
     }
     for card in platform_cards:
         if card["platform"] == "Hudu":
-            for key in ("requirement_total", "requirement_total_url", "requirement_exceptions"):
+            for key in ("has_requirements", "missing_counts", "missing_total"):
                 hudu_card[key] = card[key]
     platform_cards = [card for card in platform_cards if card["platform"] != "Hudu"]
     platform_cards.append(hudu_card)

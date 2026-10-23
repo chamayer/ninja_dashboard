@@ -33,22 +33,10 @@
 .coverage-card .coverage-count:hover { filter:brightness(0.95); }
 .coverage-card .coverage-count span { flex:1; min-width:0; font-size:0.78rem; color:#374151; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .coverage-card .coverage-count strong { font-size:0.85rem; color:#111827; font-variant-numeric:tabular-nums; white-space:nowrap; }
-.coverage-card .coverage-count.coverage-total { margin-top:0.1rem; }
-.coverage-card .coverage-count.coverage-total::before { visibility:hidden; }
 .coverage-card .coverage-count.is-zero { opacity:0.45; }
-/* Requirements use the same rows as the counts; only Missing and Stale are emphasised. */
+/* Missing coverage is partitioned by the Computer's shared session state. */
 .coverage-requirement-counts { display:flex; flex-direction:column; gap:0.05rem; border-top:1px solid var(--border); margin-top:0.45rem; padding-top:0.4rem; }
 .coverage-requirement-label { margin:0 0 0.15rem 0.3rem; color:var(--muted); font-size:0.7rem; font-weight:600; text-transform:uppercase; letter-spacing:0.04em; }
-.coverage-card .coverage-required { color:#1d4ed8; background:#dbeafe; }
-.coverage-card .coverage-requirement-missing span, .coverage-card .coverage-requirement-missing strong { color:#b91c1c; font-weight:700; }
-.coverage-card .coverage-requirement-stale span, .coverage-card .coverage-requirement-stale strong { color:#c2410c; font-weight:700; }
-.coverage-requirement-total { color:var(--text); text-decoration:none; white-space:nowrap; }
-.coverage-requirement-total strong { margin-right:0.15rem; }
-.coverage-requirement-count { border-radius:999px; padding:0.18rem 0.45rem; text-decoration:none; }
-.coverage-requirement-count strong { margin-left:0.2rem; }
-.coverage-requirement-missing { background:#fee2e2; color:#991b1b; }
-.coverage-requirement-stale { background:#fed7aa; color:#9a3412; }
-.coverage-requirement-exempt { background:#f3f4f6; color:#4b5563; }
 .coverage-status { display:inline-block; border-radius:999px; font-size:0.75rem; font-weight:600; padding:0.18rem 0.5rem; text-decoration:none; }
 .coverage-online { background:#dcfce7; color:#166534; }
 .coverage-offline { background:#fef3c7; color:#92400e; }
@@ -57,7 +45,6 @@
 .coverage-withdrawn { background:#fed7aa; color:#9a3412; }
 .coverage-no-record { background:#fee2e2; color:#991b1b; }
 .coverage-no-status { background:#f3f4f6; color:#4b5563; }
-.coverage-total { background:#e5e7eb; color:#374151; }
 .coverage-current-only { background:#dcfce7; color:#166534; }
 .coverage-current-archived { background:#dbeafe; color:#1d4ed8; }
 .coverage-archived-only { background:#fef3c7; color:#92400e; }
@@ -139,7 +126,7 @@
     <section class="coverage-card">
         <h2>{{ card.platform }}</h2>
         <div class="coverage-record-total">Records {{ card.records }}</div>
-        <div class="coverage-computer-label">Computers</div>
+        <div class="coverage-computer-label">Computers ({{ card.computer_total }})</div>
         <div class="coverage-counts">
             {% for count in card.counts %}
             <a class="coverage-count coverage-{{ count.name|slugify }}{% if not count.count %} is-zero{% endif %}" href="{{ count.url }}">
@@ -147,7 +134,7 @@
             </a>
             {% endfor %}
         </div>
-        {% if card.requirement_total or card.requirement_exceptions %}<div class="coverage-requirement-counts"><div class="coverage-requirement-label">Requirements</div>{% if card.requirement_total %}<a class="coverage-count coverage-required" href="{{ card.requirement_total_url }}"><span>Required</span><strong>{{ card.requirement_total }}</strong></a>{% endif %}{% for count in card.requirement_exceptions %}<a class="coverage-count coverage-requirement-{{ count.name|slugify }}" href="{{ count.url }}"><span>{{ count.name }}</span><strong>{{ count.count }}</strong></a>{% endfor %}</div>{% endif %}
+        {% if card.has_requirements %}<div class="coverage-requirement-counts"><div class="coverage-requirement-label">Missing ({{ card.missing_total }})</div>{% for count in card.missing_counts %}<a class="coverage-count coverage-{{ count.name|slugify }}{% if not count.count %} is-zero{% endif %}" href="{{ count.url }}"><span>{{ count.name }}</span><strong>{{ count.count }}</strong></a>{% endfor %}</div>{% endif %}
     </section>
     {% empty %}
     <section class="coverage-card"><p class="muted" style="margin:0;">No Computer records are available.</p></section>
