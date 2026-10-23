@@ -1,4 +1,4 @@
-"""The Requirements page edits the global requirements and each profile."""
+"""The Requirements page edits the default and override profiles."""
 
 from __future__ import annotations
 
@@ -110,8 +110,9 @@ def test_writes_are_audited_and_guarded():
         assert f'"{action}"' in _VIEWS
     # A profile still assigned to any client cannot be deleted.
     assert "Client.objects.filter(tenant_id=1, requirement_profile=profile).count()" in _VIEWS
-    # Removing a global requirement disables it rather than deleting it.
+    # Legacy Global rows cannot be edited from the profile UI.
     assert "row.enabled = False" in _VIEWS
+    assert "Global requirements are retired" in _VIEWS
     assert "Edit items via" not in _PAGE
     assert '"copy_all", "replace_role"' in _VIEWS
     assert "_copy_all_baseline_to_role" in _VIEWS
@@ -140,3 +141,5 @@ def test_scoped_add_and_collapsed_assignment_controls_render():
     assert "Copy All rules, then add" in _TABLE
     assert 'name="action" value="assign_clients"' in _CLIENTS
     assert 'name="client_id"' in _CLIENTS
+    assert "Use {{ default_profile.name|default:\"Standard\" }} (default)" in _CLIENTS
+    assert "Global requirements" not in _PAGE

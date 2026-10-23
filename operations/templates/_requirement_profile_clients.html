@@ -1,13 +1,13 @@
 <details style="margin:.8rem 0;">
-  <summary style="cursor:pointer;"><strong>Client assignments</strong> · {{ clients|length }} client{{ clients|length|pluralize }}</summary>
+  <summary style="cursor:pointer;"><strong>{{ assignment_heading|default:"Client assignments" }}</strong> · {{ clients|length }} client{{ clients|length|pluralize }}</summary>
   <form method="post" style="margin-top:.6rem;">
     {% csrf_token %}
     <input type="hidden" name="action" value="assign_clients">
     <div style="display:flex; align-items:end; gap:.6rem; flex-wrap:wrap; margin-bottom:.55rem;">
       <label>Assign selected to<br>
         <select name="profile_id">
-          <option value=""{% if current_profile_id is None %} selected{% endif %}>Global fallback</option>
-          {% for profile in profiles %}<option value="{{ profile.id }}"{% if profile.id == current_profile_id %} selected{% endif %}>{{ profile.name }}</option>{% endfor %}
+          <option value=""{% if current_profile_id is None %} selected{% endif %}>Use {{ default_profile.name|default:"Standard" }} (default)</option>
+          {% for profile in profiles %}{% if not profile.is_tenant_default %}<option value="{{ profile.id }}"{% if profile.id == current_profile_id %} selected{% endif %}>{{ profile.name }}</option>{% endif %}{% endfor %}
         </select>
       </label>
       <button type="submit">Assign selected</button>
@@ -19,7 +19,7 @@
       <tbody>{% for client in clients %}<tr>
         <td><input type="checkbox" name="client_id" value="{{ client.id }}" aria-label="Select {{ client.display_name }}"></td>
         <td><a href="{% url 'org_index' org_slug=client.slug %}">{{ client.display_name }}</a></td>
-        <td>{% if client.requirement_profile %}{{ client.requirement_profile.name }}{% else %}Global fallback{% endif %}</td>
+        <td>{% if client.requirement_profile %}{{ client.requirement_profile.name }}{% else %}{{ default_profile.name|default:"Standard" }} (default){% endif %}</td>
       </tr>{% endfor %}</tbody>
     </table>
     {% else %}<p class="muted">No active clients use this baseline.</p>{% endif %}

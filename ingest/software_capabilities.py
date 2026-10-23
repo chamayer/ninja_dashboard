@@ -116,26 +116,17 @@ def load_sanctioned_product_identities(cur, tenant_id: int) -> dict:
     """Per client: capability -> exact catalog product UUIDs allowed by policy."""
     cur.execute(
         """
-        WITH profile_platforms AS (
+        WITH required_platforms AS (
             SELECT c.id AS client_id, rpi.platform
               FROM operations.clients c
+              JOIN operations.requirement_profiles default_profile
+                ON default_profile.tenant_id = c.tenant_id
+               AND default_profile.is_tenant_default
               JOIN operations.requirement_profile_items rpi
                 ON rpi.tenant_id = c.tenant_id
-               AND rpi.profile_id = c.requirement_profile_id
+               AND rpi.profile_id = COALESCE(c.requirement_profile_id, default_profile.id)
              WHERE c.tenant_id = %s AND c.deleted_at IS NULL
                AND rpi.platform <> ''
-        ), fallback_platforms AS (
-            SELECT c.id AS client_id, cr.platform
-              FROM operations.clients c
-              JOIN operations.coverage_requirements cr
-                ON cr.tenant_id = c.tenant_id
-               AND cr.client_id IS NULL AND cr.enabled
-             WHERE c.tenant_id = %s AND c.deleted_at IS NULL
-               AND c.requirement_profile_id IS NULL AND cr.platform <> ''
-        ), required_platforms AS (
-            SELECT * FROM profile_platforms
-            UNION ALL
-            SELECT * FROM fallback_platforms
         )
         SELECT rp.client_id, ppm.capability, ppm.product_uuid
           FROM required_platforms rp
@@ -143,7 +134,7 @@ def load_sanctioned_product_identities(cur, tenant_id: int) -> dict:
           JOIN operations.platform_product_map ppm
             ON ppm.agent_id = a.id AND ppm.enabled
         """,
-        (tenant_id, tenant_id),
+        (tenant_id,),
     )
     out: dict = {}
     for client_id, capability, product_uuid in cur.fetchall():

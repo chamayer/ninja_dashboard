@@ -3,9 +3,9 @@
 `_load_sanctioned_product_identities` permits a product only when the client
 *requires* its platform, and the same rows drive `missing_required_platform`.
 So the only way to authorize software was to mandate it. Measured 2026-08-13:
-ScreenConnect is required by one requirement profile, the global fallback
-requires only LogMeIn / Ninja / SentinelOne, and 70 of 76 clients have no
-profile -- so the MSP's own instance on 3,007 devices read as unauthorized,
+ScreenConnect is required by one requirement profile, while the Standard
+default requires only LogMeIn / Ninja / SentinelOne for clients without an
+explicit override -- so the MSP's own instance on 3,007 devices read as unauthorized,
 and silencing it by making it required would have demanded it from the five
 clients that do not run it.
 

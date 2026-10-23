@@ -10,10 +10,10 @@
     </div>
     <p class="muted">
         These are the baselines clients inherit. A client with no profile uses
-        the global requirements; a client with a profile uses that profile's
-        list instead. Each client can still require or exempt a single service
-        on its Configuration page. The profile marked "default for new clients"
-        is only preselected when a new client is accepted. Changes apply at the
+        the profile marked default; a client with a profile uses that explicit
+        override instead. Each client can still require or exempt a single service
+        on its Configuration page. The profile marked "default" is inherited
+        whenever a client has no explicit override. Changes apply at the
         next requirement evaluation.
     </p>
     <p class="muted">
@@ -23,34 +23,28 @@
     </p>
 </div>
 
-<div class="card" id="global">
-    <h2 style="margin-top: 0;">
-        Global requirements
-        <span class="muted" style="font-size: 0.85rem; font-weight: 400; margin-left: 0.5rem;">
-            used by {{ global_client_count }} client{{ global_client_count|pluralize }} with no profile
-        </span>
-    </h2>
-    {% include "_requirement_profile_clients.html" with clients=global_clients current_profile_id=None %}
-    {% include "_requirement_baseline_table.html" with service_rows=global_service_rows target="global" %}
-</div>
-
 {% for r in rows %}
 <div class="card" id="profile-{{ r.profile.id }}">
     <h2 style="margin-top: 0;">
         {{ r.profile.name }}
-        {% if r.profile.is_tenant_default %}<span class="badge badge-info">default for new clients</span>{% endif %}
+        {% if r.profile.is_tenant_default %}<span class="badge badge-info">default</span>{% endif %}
         <span class="muted" style="font-size: 0.85rem; font-weight: 400; margin-left: 0.5rem;">
             {{ r.client_count }} client{{ r.client_count|pluralize }} · {{ r.items|length }} requirement{{ r.items|length|pluralize }}
         </span>
     </h2>
     {% if r.profile.description %}<p class="muted">{{ r.profile.description }}</p>{% endif %}
+    {% if r.profile.is_tenant_default %}
+    <div id="default-clients">
+        {% include "_requirement_profile_clients.html" with clients=r.default_clients current_profile_id=None default_profile=r.profile assignment_heading="Using this default" %}
+    </div>
+    {% endif %}
     {% include "_requirement_profile_clients.html" with clients=r.clients current_profile_id=r.profile.id %}
     <div style="display:flex; align-items:end; gap:.6rem; flex-wrap:wrap; margin-bottom:.8rem;">
         <form method="post" style="display:flex; align-items:end; gap:.6rem; flex-wrap:wrap;">
             {% csrf_token %}<input type="hidden" name="action" value="update_profile"><input type="hidden" name="profile_id" value="{{ r.profile.id }}">
             <label>Name<br><input name="name" value="{{ r.profile.name }}" maxlength="120" required></label>
             <label>Description<br><input name="description" value="{{ r.profile.description }}" maxlength="240" size="40"></label>
-            <label><input type="checkbox" name="is_tenant_default"{% if r.profile.is_tenant_default %} checked{% endif %}> Default for new clients</label>
+            <label><input type="checkbox" name="is_tenant_default"{% if r.profile.is_tenant_default %} checked{% endif %}> Default profile</label>
             <button type="submit">Save profile</button>
         </form>
         <form method="post" onsubmit="return confirm('Delete the {{ r.profile.name|escapejs }} profile and its requirements?');">
@@ -74,7 +68,6 @@
         <label>Description<br><input name="description" maxlength="240" size="40"></label>
         <label>Start from<br>
             <select name="start_from">
-                <option value="global">Global requirements</option>
                 {% for profile in profiles %}<option value="{{ profile.id }}">{{ profile.name }} profile</option>{% endfor %}
                 <option value="">Empty</option>
             </select>

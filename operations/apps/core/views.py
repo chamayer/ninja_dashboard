@@ -151,7 +151,7 @@ from .models import (
 )
 from .remote_access_approval import approve_remote_access
 from .software_decision_actions import decide_software, decision_for
-from .templatetags.human_labels import humanize_label
+from .templatetags.human_labels import client_conflict_summary, humanize_label
 
 
 def _source_record_type_label(entity_type: str) -> str:
@@ -2618,7 +2618,7 @@ def _raw_value_display(value) -> tuple[str, bool]:
 def _coverage_policy_rows(device: Device, exemptions: dict) -> list[dict]:
     """Return the effective required platform rows for one Computer.
 
-    This intentionally follows the same profile/global/client precedence as
+    This intentionally follows the same explicit-profile/default/client precedence as
     the Computers inventory reader.  Exemptions stay policy decisions; they
     do not remove the requirement from this display.
     """
@@ -2628,38 +2628,26 @@ def _coverage_policy_rows(device: Device, exemptions: dict) -> list[dict]:
             """
             WITH device AS (
                 SELECT d.id, d.tenant_id, d.client_id, d.device_role, d.os_group,
-                       c.requirement_profile_id
+                       COALESCE(c.requirement_profile_id, default_profile.id)
+                           AS effective_profile_id
                   FROM operations.devices d
                   JOIN operations.clients c ON c.id = d.client_id
+                  JOIN operations.requirement_profiles default_profile
+                    ON default_profile.tenant_id = c.tenant_id
+                   AND default_profile.is_tenant_default
                  WHERE d.tenant_id = 1 AND d.id = %s
             ), baseline AS (
                 SELECT item.entity_type, item.platform, item.applicable_os_groups
                   FROM device d
                   JOIN operations.requirement_profile_items item
                     ON item.tenant_id = d.tenant_id
-                   AND item.profile_id = d.requirement_profile_id
-                   AND d.requirement_profile_id IS NOT NULL
+                   AND item.profile_id = d.effective_profile_id
                    AND (item.device_scope = d.device_role OR (
                         item.device_scope = 'all' AND NOT EXISTS (
                             SELECT 1 FROM operations.requirement_profile_items role_item
                              WHERE role_item.tenant_id = d.tenant_id
-                               AND role_item.profile_id = d.requirement_profile_id
+                               AND role_item.profile_id = d.effective_profile_id
                                AND role_item.device_scope = d.device_role)))
-                UNION ALL
-                SELECT requirement.entity_type, requirement.platform,
-                       requirement.applicable_os_groups
-                  FROM device d
-                  JOIN operations.coverage_requirements requirement
-                    ON requirement.tenant_id = d.tenant_id
-                   AND requirement.client_id IS NULL AND requirement.enabled
-                   AND d.requirement_profile_id IS NULL
-                   AND (requirement.device_scope = d.device_role OR (
-                        requirement.device_scope = 'all' AND NOT EXISTS (
-                            SELECT 1 FROM operations.coverage_requirements role_requirement
-                             WHERE role_requirement.tenant_id = d.tenant_id
-                               AND role_requirement.client_id IS NULL
-                               AND role_requirement.enabled
-                               AND role_requirement.device_scope = d.device_role)))
             ), client_override AS (
                 SELECT DISTINCT ON (requirement.entity_type, requirement.platform)
                        requirement.entity_type, requirement.platform,
@@ -4759,6 +4747,18 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
                            || (finding_details->>'client_count') || ' clients share serial '
                            || (finding_details->>'serial')
                       ELSE 'cross-client serial' END
+          WHEN finding_type_id = (SELECT id FROM operations.finding_types WHERE name = 'computer_client_conflict')
+            THEN concat_ws(' · ',
+                    'also linked to ' || COALESCE((
+                        SELECT string_agg(DISTINCT COALESCE(NULLIF(e->>'client', ''), 'another client'), ', '
+                                          ORDER BY COALESCE(NULLIF(e->>'client', ''), 'another client'))
+                          FROM jsonb_array_elements(finding_details->'evidence') e), 'another client'),
+                    'filed there by ' || (
+                        SELECT string_agg(DISTINCT e->>'platform', ', ' ORDER BY e->>'platform')
+                          FROM jsonb_array_elements(finding_details->'evidence') e
+                         WHERE e->>'kind' = 'record'),
+                    CASE WHEN finding_details->'evidence' @> '[{"kind": "serial"}]'
+                         THEN 'same serial number' END)
           WHEN finding_type_id IN (SELECT id FROM operations.finding_types WHERE name LIKE 'windows_servicing_%%')
             THEN concat_ws(' · ',
                     NULLIF(finding_details->>'os_name', ''),
@@ -5120,6 +5120,8 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
             if devices and clients and serial:
                 return f"{devices} devices across {clients} clients share serial {serial}"
             return "cross-client serial"
+        if name == "computer_client_conflict":
+            return client_conflict_summary(d)
         if name.startswith("windows_servicing_"):
             os_name = d.get("os_name")
             build = d.get("os_build_number") or d.get("build_number") or "?"
@@ -17282,11 +17284,8 @@ def client_candidate_accept(request, candidate_id) -> HttpResponse:
     profile = None
     if profile_id:
         profile = get_object_or_404(RequirementProfile, id=profile_id, tenant_id=1)
-    else:
-        profile = RequirementProfile.objects.filter(
-            tenant_id=1,
-            is_tenant_default=True,
-        ).first()
+        if profile.is_tenant_default:
+            profile = None
 
     base_slug = slugify(display_name)[:110] or "client"
     slug = base_slug
@@ -19090,6 +19089,9 @@ def _update_requirement_profile(request: HttpRequest, profile) -> HttpResponse:
     details = _profile_details_form(request, profile)
     if details is None:
         return _requirements_redirect(f"profile-{profile.id}")
+    if profile.is_tenant_default and request.POST.get("is_tenant_default") != "on":
+        messages.error(request, "Choose another default profile before removing this default.")
+        return _requirements_redirect(f"profile-{profile.id}")
     before = _profile_audit_state(profile)
     profile.name, profile.description = details
     profile.save(update_fields=["name", "description"])
@@ -19109,6 +19111,9 @@ def _update_requirement_profile(request: HttpRequest, profile) -> HttpResponse:
 
 
 def _delete_requirement_profile(request: HttpRequest, profile) -> HttpResponse:
+    if profile.is_tenant_default:
+        messages.error(request, "Choose another default profile before deleting this one.")
+        return _requirements_redirect(f"profile-{profile.id}")
     # A deleted client still holds its profile (the reference is protected),
     # so every client counts.
     in_use = Client.objects.filter(tenant_id=1, requirement_profile=profile).count()
@@ -19143,6 +19148,11 @@ def _delete_requirement_profile(request: HttpRequest, profile) -> HttpResponse:
 def _set_baseline_requirement(request: HttpRequest) -> HttpResponse:
     """Require or stop requiring one service in the global or a profile baseline."""
     target = request.POST.get("target") or ""
+    if target == "global":
+        messages.error(
+            request, "Global requirements are retired; edit the Standard profile instead."
+        )
+        return _requirements_redirect()
     mode = request.POST.get("mode")
     profile = (
         None
@@ -19375,7 +19385,7 @@ def _add_baseline_requirement(request: HttpRequest) -> HttpResponse:
 
 
 def _assign_requirement_profile_clients(request: HttpRequest) -> HttpResponse:
-    """Assign selected active clients to a profile or the global fallback."""
+    """Assign selected active clients to an override or the default baseline."""
     target = request.POST.get("profile_id") or ""
     profile = (
         None
@@ -19406,18 +19416,18 @@ def _assign_requirement_profile_clients(request: HttpRequest) -> HttpResponse:
             {"requirement_profile_id": str(profile.id) if profile else None},
         )
         changed += 1
-    destination = profile.name if profile else "Global fallback"
+    destination = profile.name if profile else "the Standard default"
     messages.success(
         request,
         f"Assigned {changed} client{'s' if changed != 1 else ''} to {destination}."
     )
-    return _requirements_redirect(f"profile-{profile.id}" if profile else "global")
+    return _requirements_redirect(f"profile-{profile.id}" if profile else "default-clients")
 
 
 @login_required
 @transaction.atomic
 def requirement_profiles_list(request: HttpRequest) -> HttpResponse:
-    """Edit the global requirements and each requirement profile."""
+    """Edit requirement profiles and their explicit client overrides."""
     if request.method == "POST":
         action = request.POST.get("action")
         baseline_actions = {
@@ -19446,6 +19456,7 @@ def requirement_profiles_list(request: HttpRequest) -> HttpResponse:
         .prefetch_related("items")
         .order_by("-is_tenant_default", "name")
     )
+    default_profile = next((profile for profile in profiles if profile.is_tenant_default), None)
     active_clients = list(
         Client.objects.filter(tenant_id=1, deleted_at__isnull=True)
         .select_related("requirement_profile")
@@ -19457,9 +19468,6 @@ def requirement_profiles_list(request: HttpRequest) -> HttpResponse:
         .annotate(n=Count("id"))
         .values_list("requirement_profile_id", "n")
     )
-    global_required = CoverageRequirement.objects.filter(
-        tenant_id=1, client__isnull=True, enabled=True
-    )
     rows = []
     for p in profiles:
         items = list(p.items.all())
@@ -19470,6 +19478,9 @@ def requirement_profiles_list(request: HttpRequest) -> HttpResponse:
                 "service_rows": requirement_baselines.baseline_rows(agents, items),
                 "client_count": client_counts.get(p.id, 0),
                 "clients": [c for c in active_clients if c.requirement_profile_id == p.id],
+                "default_clients": [
+                    c for c in active_clients if c.requirement_profile_id is None
+                ] if p.is_tenant_default else [],
             }
         )
     if wants_csv(request):
@@ -19498,9 +19509,8 @@ def requirement_profiles_list(request: HttpRequest) -> HttpResponse:
             "admin_tab": "requirements",
             "rows": rows,
             "profiles": profiles,
-            "global_service_rows": requirement_baselines.baseline_rows(agents, global_required),
-            "global_client_count": client_counts.get(None, 0),
-            "global_clients": [c for c in active_clients if c.requirement_profile_id is None],
+            "default_profile": default_profile,
+            "default_client_count": client_counts.get(None, 0),
             "agents": agents,
             "severity_choices": Finding.Severity.choices,
         },
@@ -19531,26 +19541,20 @@ def client_profile_assign(request: HttpRequest, org_slug: str) -> HttpResponse:
             else None
         },
     )
-    messages.success(
-        request,
-        f"Requirement profile for {client.display_name} set to "
-        f"{client.requirement_profile.name if client.requirement_profile else '— global fallback —'}.",
+    baseline_name = (
+        client.requirement_profile.name if client.requirement_profile else "— Standard default —"
     )
+    messages.success(request, f"Requirement profile for {client.display_name} set to {baseline_name}.")
     return redirect("org_index", org_slug=client.slug)
 
 
-def _client_service_requirement_rows(client: Client) -> list[dict]:
-    """Return profile/global baseline services plus sparse client overrides."""
+def _client_service_requirement_rows(client: Client, default_profile) -> list[dict]:
+    """Return explicit/default-profile services plus sparse client overrides."""
     profile_items = list(
         client.requirement_profile.items.select_related("agent").all()
         if client.requirement_profile_id
-        else []
-    )
-    global_rows = list(
-        CoverageRequirement.objects.filter(
-            tenant_id=1, client__isnull=True, enabled=True
-        ).select_related("agent")
-        if not client.requirement_profile_id
+        else default_profile.items.select_related("agent").all()
+        if default_profile
         else []
     )
     overrides = {
@@ -19560,7 +19564,7 @@ def _client_service_requirement_rows(client: Client) -> list[dict]:
         )
     }
     candidates: dict[tuple, dict] = {}
-    for row in [*profile_items, *global_rows]:
+    for row in profile_items:
         if row.agent_id is None:
             continue
         candidates[(row.agent_id, row.device_scope)] = {
@@ -19706,6 +19710,9 @@ def client_requirements_config(request: HttpRequest, org_slug: str) -> HttpRespo
             messages.success(request, f"{agent.name} requirement updated.")
         return redirect("client_requirements_config", org_slug=client.slug)
 
+    default_profile = RequirementProfile.objects.filter(
+        tenant_id=1, is_tenant_default=True
+    ).first()
     return render(
         request,
         "client_requirements_config.html",
@@ -19714,7 +19721,8 @@ def client_requirements_config(request: HttpRequest, org_slug: str) -> HttpRespo
             "profiles": RequirementProfile.objects.filter(tenant_id=1).order_by(
                 "-is_tenant_default", "name"
             ),
-            "service_rows": _client_service_requirement_rows(client),
+            "default_profile": default_profile,
+            "service_rows": _client_service_requirement_rows(client, default_profile),
             "device_policy": get_device_status_policy(),
         },
     )

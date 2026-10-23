@@ -53,6 +53,19 @@ CREATE TABLE operations.requirement_profile_items (
     gap_after_hours integer, confidence_probable integer, confidence_confirmed integer,
     tenant_id bigint
 );
+CREATE TABLE operations.requirement_profiles (
+    id uuid PRIMARY KEY, tenant_id bigint NOT NULL, is_tenant_default boolean NOT NULL
+);
+INSERT INTO operations.requirement_profiles VALUES
+    ('00000000-0000-4000-8000-0000000000d1', 1, true);
+INSERT INTO operations.requirement_profile_items
+    (profile_id, agent_id, entity_type, platform, device_scope, severity,
+     gap_after_hours, confidence_probable, confidence_confirmed, tenant_id)
+VALUES
+    ('00000000-0000-4000-8000-0000000000d1', 1, 'agent.rmm', 'Ninja', 'all',
+     'critical', 720, 1440, 2160, 1),
+    ('00000000-0000-4000-8000-0000000000d1', 3, 'agent.remote_access', 'LogMeIn', 'all',
+     'high', 720, 1440, 2160, 1);
 CREATE TABLE operations.clients (
     id uuid PRIMARY KEY, tenant_id bigint NOT NULL, requirement_profile_id uuid NULL,
     deleted_at timestamptz NULL

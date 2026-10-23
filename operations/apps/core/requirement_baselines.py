@@ -1,8 +1,8 @@
 """Requirement baselines as editable service rows (Requirements page).
 
-A baseline is either the global requirements (client-less
-``coverage_requirements``, used by clients with no profile) or one profile's
-items. The evaluator uses a role-scoped baseline list *instead of* the
+A baseline is a requirement profile's items. A client without an explicit
+profile inherits the tenant-default profile. The evaluator uses a
+role-scoped baseline list *instead of* the
 all-devices list. The view therefore makes an operator choose whether the
 first rule for a role copies the all-devices list or intentionally replaces it.
 """
@@ -58,8 +58,7 @@ def new_item_values(agent: Any) -> dict:
 def baseline_rows(agents: Iterable[Any], required: Iterable[Any]) -> list[dict]:
     """One row per service for all devices, plus every existing scoped item.
 
-    ``required`` holds the baseline's active rows: a profile's items, or the
-    enabled global requirements.
+    ``required`` holds the profile's active items.
     """
     agents = list(agents)
     rows: dict[tuple, dict] = {

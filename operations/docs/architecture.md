@@ -102,7 +102,7 @@ Client/source-group mapping follows an explicit ladder:
 Requirement profiles provide reusable coverage policy. Client-scoped coverage
 requirements are sparse overrides: an enabled row explicitly requires a
 service, a disabled row explicitly exempts it, and no row inherits the
-assigned profile (or the tenant-global fallback when no profile is assigned).
+assigned profile (or the tenant-default profile when no override is assigned).
 
 The evaluator's coverage pass is the only place that decides whether a
 requirement is met. It stores a verdict per Computer and requirement in

@@ -17,13 +17,13 @@
 
 <div class="card">
   <h1>Service requirements</h1>
-  <p class="muted">Choose the inherited baseline, then make exceptions for individual services. Required services are evaluated only for devices in their stated scope.</p>
+  <p class="muted">Use Standard by default, or select a profile as an explicit override. Required services are evaluated only for devices in their stated scope.</p>
   <form method="post" style="display:flex; align-items:end; gap:.6rem; flex-wrap:wrap;">
     {% csrf_token %}<input type="hidden" name="action" value="profile">
     <label>Inherited baseline<br>
       <select name="profile_id">
-        <option value="">Tenant default requirements</option>
-        {% for profile in profiles %}<option value="{{ profile.id }}" {% if client.requirement_profile_id == profile.id %}selected{% endif %}>{{ profile.name }}{% if profile.is_tenant_default %} (tenant default){% endif %}</option>{% endfor %}
+        <option value="">Use {{ default_profile.name|default:"Standard" }} (default)</option>
+        {% for profile in profiles %}{% if not profile.is_tenant_default %}<option value="{{ profile.id }}" {% if client.requirement_profile_id == profile.id %}selected{% endif %}>{{ profile.name }}</option>{% endif %}{% endfor %}
       </select>
     </label>
     <button type="submit">Save baseline</button>

@@ -1572,9 +1572,10 @@ def _evaluate_coverage(
 
     A client-scoped ``coverage_requirements`` row is a sparse override:
     enabled adds/replaces a service requirement and disabled explicitly removes
-    it.  With no override, the client inherits its profile; clients without a
-    profile inherit tenant-global requirements.  This keeps profiles reusable
-    while allowing a client to require or exempt one service independently.
+    it. With no override, the client inherits its explicit profile or the
+    tenant-default profile when no override is assigned. This keeps profiles
+    reusable while allowing a client to require or exempt one service
+    independently.
     """
     # Agent reference: id → (name, entity_type, supported_os_groups)
     cur.execute(
@@ -1586,21 +1587,6 @@ def _evaluate_coverage(
     agents_by_id: dict[int, tuple] = {
         row[0]: (row[1], row[2], row[3] or []) for row in cur.fetchall()
     }
-
-    # Global rows (fallback for clients without a profile). Tuple shape:
-    #   (id, client_id, agent_id, entity_type, platform, scope, applicable_os_groups,
-    #    severity, gap, prob, conf)
-    cur.execute(
-        """
-        SELECT id, client_id, agent_id, entity_type, platform, device_scope,
-               applicable_os_groups,
-               severity, gap_after_hours, confidence_probable, confidence_confirmed
-        FROM operations.coverage_requirements
-        WHERE tenant_id = %s AND enabled = TRUE AND client_id IS NULL
-        """,
-        (tenant_id,),
-    )
-    global_rows = cur.fetchall()
 
     # Client rows deliberately include disabled entries: a disabled row is an
     # explicit "not required" override, not an inactive row to discard.
@@ -1639,37 +1625,33 @@ def _evaluate_coverage(
             (None, None, agent_id, entity_type, platform, scope, aog, *rest)
         )
 
-    global_tiers: dict[str, list[tuple]] = {}
-    for row in global_rows:
-        scope = row[5]
-        global_tiers.setdefault(scope, []).append(row)
-
     client_override_tiers: dict[Any, dict[str, list[tuple]]] = {}
     for row in client_override_rows:
         client_override_tiers.setdefault(row[1], {}).setdefault(row[5], []).append(row)
 
-    # client_id → profile_id
+    # client_id → effective profile_id. A NULL assignment deliberately means
+    # inherit the tenant-default profile, not a separate Global baseline.
     cur.execute(
         """
-        SELECT id, requirement_profile_id
-        FROM operations.clients
-        WHERE tenant_id = %s AND deleted_at IS NULL
+        SELECT c.id, COALESCE(c.requirement_profile_id, default_profile.id)
+          FROM operations.clients c
+          LEFT JOIN operations.requirement_profiles default_profile
+            ON default_profile.tenant_id = c.tenant_id
+           AND default_profile.is_tenant_default
+         WHERE c.tenant_id = %s AND c.deleted_at IS NULL
         """,
         (tenant_id,),
     )
     client_profile: dict[Any, Any] = {row[0]: row[1] for row in cur.fetchall()}
 
-    if not global_rows and not profile_rows and not client_override_rows:
+    if not profile_rows and not client_override_rows:
         _write_requirement_state(cur, tenant_id, device_id, [])
         return 0
 
     def resolve_tier(dev_client_id, dev_role: str) -> list[tuple]:
         profile_id = client_profile.get(dev_client_id)
-        if profile_id is not None:
-            scopes = profile_tiers.get(profile_id, {})
-            baseline = scopes.get(dev_role) or scopes.get("all") or []
-        else:
-            baseline = global_tiers.get(dev_role) or global_tiers.get("all") or []
+        scopes = profile_tiers.get(profile_id, {})
+        baseline = scopes.get(dev_role) or scopes.get("all") or []
 
         # Apply broad overrides before role-specific overrides, so a scoped
         # decision can intentionally refine a client-wide decision.
@@ -2449,7 +2431,7 @@ def _auto_resolve(
     # Resolve coverage findings whose (entity_type, platform) is no longer
     # required. Client-scoped rows are sparse overrides: disabled suppresses
     # the inherited service and enabled adds it. This mirrors the evaluator's
-    # profile → global fallback precedence.
+    # explicit-profile → tenant-default precedence.
     for ft_name in ("missing_required_platform", "stale_required_platform"):
         ft_id = _get_finding_type_id(cur, ft_name)
         if not ft_id:
@@ -2457,17 +2439,27 @@ def _auto_resolve(
         cur.execute(
             f"""
             WITH required_for_device AS (
-                -- Profile-bound clients inherit profile items unless a
-                -- client-specific disabled override removes the same agent.
+                -- A client inherits its explicit profile, or the tenant
+                -- default when no override is assigned.
                 SELECT d.id AS device_id, rpi.entity_type, rpi.platform
                 FROM operations.devices d
                 JOIN operations.clients c ON c.id = d.client_id
+                JOIN operations.requirement_profiles default_profile
+                  ON default_profile.tenant_id = c.tenant_id
+                 AND default_profile.is_tenant_default
                 JOIN operations.requirement_profile_items rpi
                   ON rpi.tenant_id = c.tenant_id
-                 AND rpi.profile_id = c.requirement_profile_id
-                 AND (rpi.device_scope = 'all' OR rpi.device_scope = d.device_role)
+                 AND rpi.profile_id = COALESCE(c.requirement_profile_id, default_profile.id)
+                 AND (rpi.device_scope = d.device_role OR (
+                      rpi.device_scope = 'all' AND NOT EXISTS (
+                          SELECT 1
+                          FROM operations.requirement_profile_items role_item
+                          WHERE role_item.tenant_id = c.tenant_id
+                            AND role_item.profile_id = rpi.profile_id
+                            AND role_item.device_scope = d.device_role
+                      )
+                 ))
                 WHERE d.tenant_id = %s AND d.deleted_at IS NULL
-                  AND c.requirement_profile_id IS NOT NULL
                   AND NOT EXISTS (
                       SELECT 1
                       FROM operations.coverage_requirements o
@@ -2482,35 +2474,6 @@ def _auto_resolve(
                                 AND o.platform = rpi.platform)
                         )
                   )
-
-                UNION
-
-                -- Clients without a profile inherit global rows unless a
-                -- disabled client override removes the same service.
-                SELECT d.id AS device_id, cr.entity_type, cr.platform
-                FROM operations.devices d
-                JOIN operations.clients c ON c.id = d.client_id
-                JOIN operations.coverage_requirements cr
-                  ON cr.tenant_id = c.tenant_id
-                 AND cr.client_id IS NULL AND cr.enabled
-                 AND (cr.device_scope = 'all' OR cr.device_scope = d.device_role)
-                WHERE d.tenant_id = %s AND d.deleted_at IS NULL
-                  AND c.requirement_profile_id IS NULL
-                  AND NOT EXISTS (
-                      SELECT 1
-                      FROM operations.coverage_requirements o
-                      WHERE o.tenant_id = d.tenant_id
-                        AND o.client_id = d.client_id
-                        AND o.enabled = FALSE
-                        AND (o.device_scope = 'all' OR o.device_scope = d.device_role)
-                        AND (
-                            (o.agent_id IS NOT NULL AND o.agent_id = cr.agent_id)
-                            OR (o.agent_id IS NULL
-                                AND o.entity_type = cr.entity_type
-                                AND o.platform = cr.platform)
-                        )
-                  )
-
                 UNION
 
                 -- Explicit required rows add a client-specific service.
@@ -2537,7 +2500,7 @@ def _auto_resolve(
               )
             {clear_assessment}
             """,
-            (tenant_id, tenant_id, tenant_id, now, tenant_id, ft_id, device_id, device_id),
+            (tenant_id, tenant_id, now, tenant_id, ft_id, device_id, device_id),
         )
         count += cur.rowcount or 0
 
