@@ -14853,7 +14853,7 @@ def _safe_external_http_url(value: str | None) -> str:
 
 def _coverage_filter_url(**filters: str) -> str:
     """Build a Coverage URL from non-empty filter values."""
-    return "?" + urlencode({key: value for key, value in filters.items() if value})
+    return "?" + urlencode({key: value for key, value in filters.items() if value}) + "#filtered-results"
 
 
 @login_required
@@ -15464,7 +15464,7 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
         params.extend(("agent_state_0", value) for value in states or ((state,) if state else ()))
         if requirement:
             params.append(("agent_requirement_0", requirement))
-        return "?" + urlencode(params)
+        return "?" + urlencode(params) + "#filtered-results"
 
     def inventory_platform_cell(
         row: dict, platform: str, *, presentation: bool = False

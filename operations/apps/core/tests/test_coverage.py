@@ -241,7 +241,7 @@ def test_coverage_uses_effective_requirements_and_source_specific_filters(monkey
         ("Hudu", "No status", "N/A"),
     ]
     assert row["agent_cells"][0]["record_url"] == (
-        "?agent_0=Ninja&agent_state_0=Online"
+        "?agent_0=Ninja&agent_state_0=Online#filtered-results"
     )
     cards = {card["platform"]: card for card in context["platform_cards"]}
     assert {item["name"]: item["count"] for item in cards["Ninja"]["counts"]} == {
@@ -532,6 +532,11 @@ def test_coverage_template_has_clear_statuses_hudu_and_multiselect_filters():
     assert "agent_filter_states" in template
     assert "agent_filter_requirements" in template
     assert "device_missing_from_source" not in template
+    assert 'id="filtered-results"' in template
+
+
+def test_card_drill_throughs_land_on_filtered_results():
+    assert views._coverage_filter_url(hudu="in_hudu") == "?hudu=in_hudu#filtered-results"
 
 
 def test_inventory_computers_navigation_uses_the_coverage_reader():
