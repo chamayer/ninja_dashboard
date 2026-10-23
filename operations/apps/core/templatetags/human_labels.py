@@ -215,6 +215,19 @@ _MISSING_REASONS = {
 }
 
 
+def client_conflict_summary(d):
+    """``computer_client_conflict``: which clients its evidence names, and how."""
+    evidence = d.get("evidence") or []
+    clients = sorted({e.get("client") or "another client" for e in evidence})
+    sources = sorted({e["platform"] for e in evidence if e.get("kind") == "record"})
+    pieces = [f"also linked to {', '.join(clients)}" if clients else "linked to another client"]
+    if sources:
+        pieces.append(f"filed there by {', '.join(sources)}")
+    if any(e.get("kind") == "serial" for e in evidence):
+        pieces.append("same serial number")
+    return " · ".join(pieces)
+
+
 @register.simple_tag(name="finding_detail_text")
 def finding_detail_text(finding):
     """Compact per-type detail string for a Finding.
