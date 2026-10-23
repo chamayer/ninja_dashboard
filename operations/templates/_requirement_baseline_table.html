@@ -4,7 +4,7 @@
   {% for row in service_rows %}
     <tr>
       <td><strong>{{ row.name }}</strong><br><span class="muted">{{ row.entity_type }}</span></td>
-      <td>{% if row.scope == "all" %}All eligible devices{% elif row.scope == "server" %}Servers only{% else %}{{ row.scope|title }} only{% endif %}</td>
+      <td>{% if row.scope == "all" %}All eligible devices{% elif row.scope == "server" %}Servers only{% elif row.scope == "workstation" %}Workstations only{% else %}{{ row.scope|title }} only{% endif %}</td>
       <td>{% if row.required %}<span class="badge badge-info">Required</span>{% else %}<span class="muted">Not required</span>{% endif %}</td>
       {% if row.item %}
       <td><span class="badge badge-{{ row.item.severity }}">{{ row.item.severity }}</span></td>
@@ -29,3 +29,36 @@
   {% empty %}<tr><td colspan="8" class="muted">No services have been configured yet.</td></tr>{% endfor %}
   </tbody>
 </table>
+<form method="post" style="display:flex; align-items:end; gap:.6rem; flex-wrap:wrap; margin-top:.8rem;">
+  {% csrf_token %}
+  <input type="hidden" name="action" value="add_requirement">
+  <input type="hidden" name="target" value="{{ target }}">
+  <label>Service<br>
+    <select name="agent_id">
+      {% for agent in agents %}<option value="{{ agent.id }}">{{ agent.name }}</option>{% endfor %}
+    </select>
+  </label>
+  <label>Scope<br>
+    <select name="device_scope">
+      <option value="all">All eligible devices</option>
+      <option value="server">Servers</option>
+      <option value="workstation">Workstations</option>
+    </select>
+  </label>
+  <label>Severity<br>
+    <select name="severity">
+      {% for value, label in severity_choices %}<option value="{{ value }}"{% if value == "high" %} selected{% endif %}>{{ label }}</option>{% endfor %}
+    </select>
+  </label>
+  <label>Gap (h)<br><input type="number" name="gap_after_hours" min="0" value="24" required style="width:5rem;"></label>
+  <label>Probable (h)<br><input type="number" name="confidence_probable" min="0" value="48" required style="width:5rem;"></label>
+  <label>Confirmed (h)<br><input type="number" name="confidence_confirmed" min="0" value="168" required style="width:5rem;"></label>
+  <label title="A role-specific baseline replaces the All-device list for that role.">First role rule<br>
+    <select name="role_resolution">
+      <option value="copy_all">Copy All rules, then add</option>
+      <option value="replace_role">Start a role-only list</option>
+    </select>
+  </label>
+  <button type="submit">Add rule</button>
+</form>
+<p class="muted" style="font-size:.8rem; margin:.45rem 0 0;">The first Servers or Workstations rule replaces the All-device list for that role. Copy All rules first to preserve that baseline.</p>

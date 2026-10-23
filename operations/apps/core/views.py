@@ -19214,6 +19214,206 @@ def _set_baseline_requirement(request: HttpRequest) -> HttpResponse:
     return _requirements_redirect(anchor)
 
 
+def _baseline_target(request: HttpRequest):
+    """Return the baseline selected by a Requirements-page form."""
+    target = request.POST.get("target") or ""
+    profile = (
+        None
+        if target == "global"
+        else get_object_or_404(RequirementProfile, id=target, tenant_id=1)
+    )
+    anchor = "global" if profile is None else f"profile-{profile.id}"
+    label = "global requirements" if profile is None else f"{profile.name} profile"
+    return profile, anchor, label
+
+
+def _baseline_active_rows(profile, scope: str):
+    if profile is None:
+        return CoverageRequirement.objects.filter(
+            tenant_id=1,
+            client__isnull=True,
+            enabled=True,
+            device_scope=scope,
+        )
+    return profile.items.filter(device_scope=scope)
+
+
+def _baseline_rule_values(request: HttpRequest, agent, scope: str) -> dict | None:
+    values = requirement_baselines.new_item_values(agent)
+    values["device_scope"] = scope
+    valid_severities = {value for value, _label in Finding.Severity.choices}
+    severity = request.POST.get("severity") or ""
+    if severity not in valid_severities:
+        messages.error(request, "Choose a valid severity.")
+        return None
+    values["severity"] = severity
+    for field in (
+        "gap_after_hours",
+        "confidence_probable",
+        "confidence_confirmed",
+    ):
+        try:
+            value = int(request.POST.get(field, ""))
+        except (TypeError, ValueError):
+            value = -1
+        if value < 0:
+            messages.error(request, "Gap and confidence thresholds must be zero or greater.")
+            return None
+        values[field] = value
+    return values
+
+
+def _copy_all_baseline_to_role(profile, role: str) -> int:
+    """Make a role baseline from the all-devices baseline before adding a rule."""
+    copied = 0
+    model = CoverageRequirement if profile is None else RequirementProfileItem
+    extra = {} if profile is None else {"profile": profile}
+    for item in _baseline_active_rows(profile, requirement_baselines.ALL_SCOPE):
+        values = {
+            field: getattr(item, field)
+            for field in requirement_baselines.COPIED_FIELDS
+        }
+        values["device_scope"] = role
+        if profile is None:
+            values["enabled"] = True
+        model.objects.create(tenant_id=1, **extra, **values)
+        copied += 1
+    return copied
+
+
+def _add_baseline_requirement(request: HttpRequest) -> HttpResponse:
+    """Add or update a scoped baseline rule, preserving role-list semantics."""
+    profile, anchor, label = _baseline_target(request)
+    scope = request.POST.get("device_scope") or ""
+    if scope not in requirement_baselines.VALID_SCOPES:
+        messages.error(request, "Choose All eligible devices, Servers, or Workstations.")
+        return _requirements_redirect(anchor)
+    agent = get_object_or_404(Agent, id=request.POST.get("agent_id"))
+    values = _baseline_rule_values(request, agent, scope)
+    if values is None:
+        return _requirements_redirect(anchor)
+
+    active_rows = list(_baseline_active_rows(profile, scope))
+    existing = next(
+        (row for row in active_rows if requirement_baselines.matches_agent(row, agent)), None
+    )
+    copied = 0
+    resolution = request.POST.get("role_resolution") or "copy_all"
+    if existing is None and scope in requirement_baselines.ROLE_SCOPES and not active_rows:
+        all_rows = _baseline_active_rows(profile, requirement_baselines.ALL_SCOPE)
+        if all_rows.exists():
+            if resolution not in {"copy_all", "replace_role"}:
+                messages.error(request, "Choose how to resolve the role-specific baseline.")
+                return _requirements_redirect(anchor)
+            if resolution == "copy_all":
+                copied = _copy_all_baseline_to_role(profile, scope)
+                active_rows = list(_baseline_active_rows(profile, scope))
+                existing = next(
+                    (row for row in active_rows if requirement_baselines.matches_agent(row, agent)),
+                    None,
+                )
+
+    model = CoverageRequirement if profile is None else RequirementProfileItem
+    extra = {} if profile is None else {"profile": profile}
+    before = None
+    if existing is None:
+        if profile is None:
+            disabled = CoverageRequirement.objects.filter(
+                tenant_id=1,
+                client__isnull=True,
+                enabled=False,
+                device_scope=scope,
+            )
+            existing = next(
+                (row for row in disabled if requirement_baselines.matches_agent(row, agent)), None
+            )
+        if existing is None:
+            row = model.objects.create(tenant_id=1, **extra, **values)
+        else:
+            row = existing
+            before = {"baseline": label, "service": agent.name, "required": False}
+            for field, value in values.items():
+                setattr(row, field, value)
+            row.enabled = True
+            row.save(update_fields=[*values, "enabled"])
+    else:
+        row = existing
+        before = {
+            "baseline": label,
+            "service": agent.name,
+            "scope": row.device_scope,
+            "severity": row.severity,
+        }
+        for field, value in values.items():
+            setattr(row, field, value)
+        row.save(update_fields=list(values))
+
+    _audit(
+        request,
+        "requirement_baseline.add",
+        row.id,
+        before,
+        {
+            "baseline": label,
+            "service": agent.name,
+            "scope": scope,
+            "severity": values["severity"],
+            "role_resolution": resolution if scope in requirement_baselines.ROLE_SCOPES else None,
+            "copied_all_rules": copied,
+        },
+        entity_type="coverage_requirement" if profile is None else "requirement_profile_item",
+    )
+    if copied:
+        messages.success(
+            request,
+            f"Copied {copied} All-device requirement{'s' if copied != 1 else ''} to {scope}s, "
+            f"then saved {agent.name}."
+        )
+    else:
+        messages.success(request, f"{agent.name} saved for {scope} in the {label}.")
+    return _requirements_redirect(anchor)
+
+
+def _assign_requirement_profile_clients(request: HttpRequest) -> HttpResponse:
+    """Assign selected active clients to a profile or the global fallback."""
+    target = request.POST.get("profile_id") or ""
+    profile = (
+        None
+        if target == ""
+        else get_object_or_404(RequirementProfile, id=target, tenant_id=1)
+    )
+    client_ids = set(request.POST.getlist("client_id"))
+    if not client_ids:
+        messages.error(request, "Select at least one client.")
+        return _requirements_redirect()
+    clients = list(
+        Client.objects.filter(tenant_id=1, deleted_at__isnull=True, id__in=client_ids)
+        .select_related("requirement_profile")
+        .order_by("display_name")
+    )
+    changed = 0
+    for client in clients:
+        previous = client.requirement_profile_id
+        if previous == (profile.id if profile else None):
+            continue
+        client.requirement_profile = profile
+        client.save(update_fields=["requirement_profile"])
+        _audit(
+            request,
+            "client.requirement_profile.assign",
+            client.id,
+            {"requirement_profile_id": str(previous) if previous else None},
+            {"requirement_profile_id": str(profile.id) if profile else None},
+        )
+        changed += 1
+    destination = profile.name if profile else "Global fallback"
+    messages.success(
+        request,
+        f"Assigned {changed} client{'s' if changed != 1 else ''} to {destination}."
+    )
+    return _requirements_redirect(f"profile-{profile.id}" if profile else "global")
+
+
 @login_required
 @transaction.atomic
 def requirement_profiles_list(request: HttpRequest) -> HttpResponse:
@@ -19223,6 +19423,8 @@ def requirement_profiles_list(request: HttpRequest) -> HttpResponse:
         baseline_actions = {
             "create_profile": _create_requirement_profile,
             "set_requirement": _set_baseline_requirement,
+            "add_requirement": _add_baseline_requirement,
+            "assign_clients": _assign_requirement_profile_clients,
         }
         profile_actions = {
             "update_profile": _update_requirement_profile,
@@ -19244,6 +19446,11 @@ def requirement_profiles_list(request: HttpRequest) -> HttpResponse:
         .prefetch_related("items")
         .order_by("-is_tenant_default", "name")
     )
+    active_clients = list(
+        Client.objects.filter(tenant_id=1, deleted_at__isnull=True)
+        .select_related("requirement_profile")
+        .order_by("display_name")
+    )
     client_counts = dict(
         Client.objects.filter(tenant_id=1, deleted_at__isnull=True)
         .values("requirement_profile_id")
@@ -19262,6 +19469,7 @@ def requirement_profiles_list(request: HttpRequest) -> HttpResponse:
                 "items": sorted(items, key=lambda i: (i.device_scope, i.entity_type, i.platform)),
                 "service_rows": requirement_baselines.baseline_rows(agents, items),
                 "client_count": client_counts.get(p.id, 0),
+                "clients": [c for c in active_clients if c.requirement_profile_id == p.id],
             }
         )
     if wants_csv(request):
@@ -19292,6 +19500,9 @@ def requirement_profiles_list(request: HttpRequest) -> HttpResponse:
             "profiles": profiles,
             "global_service_rows": requirement_baselines.baseline_rows(agents, global_required),
             "global_client_count": client_counts.get(None, 0),
+            "global_clients": [c for c in active_clients if c.requirement_profile_id is None],
+            "agents": agents,
+            "severity_choices": Finding.Severity.choices,
         },
     )
 

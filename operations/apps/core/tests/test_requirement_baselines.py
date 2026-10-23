@@ -13,6 +13,10 @@ from apps.core import requirement_baselines as rb
 _ROOT = Path(__file__).resolve().parents[3]
 _VIEWS = (_ROOT / "apps" / "core" / "views.py").read_text(encoding="utf-8")
 _PAGE = (_ROOT / "templates" / "requirement_profiles.html").read_text(encoding="utf-8")
+_TABLE = (_ROOT / "templates" / "_requirement_baseline_table.html").read_text(encoding="utf-8")
+_CLIENTS = (_ROOT / "templates" / "_requirement_profile_clients.html").read_text(
+    encoding="utf-8"
+)
 
 NINJA = SimpleNamespace(
     id=1,
@@ -88,6 +92,11 @@ def test_a_new_requirement_takes_the_services_default_thresholds():
     }
 
 
+def test_valid_scopes_keep_role_specific_baselines_explicit():
+    assert rb.VALID_SCOPES == ("all", "server", "workstation")
+    assert rb.ROLE_SCOPES == ("server", "workstation")
+
+
 def test_writes_are_audited_and_guarded():
     for action in (
         "requirement_profile.create",
@@ -95,6 +104,8 @@ def test_writes_are_audited_and_guarded():
         "requirement_profile.delete",
         "requirement_baseline.require",
         "requirement_baseline.remove",
+        "requirement_baseline.add",
+        "client.requirement_profile.assign",
     ):
         assert f'"{action}"' in _VIEWS
     # A profile still assigned to any client cannot be deleted.
@@ -102,6 +113,8 @@ def test_writes_are_audited_and_guarded():
     # Removing a global requirement disables it rather than deleting it.
     assert "row.enabled = False" in _VIEWS
     assert "Edit items via" not in _PAGE
+    assert '"copy_all", "replace_role"' in _VIEWS
+    assert "_copy_all_baseline_to_role" in _VIEWS
 
 
 def test_the_page_and_table_render():
@@ -118,3 +131,12 @@ def test_the_page_and_table_render():
     assert 'name="agent_id" value="2"' in html
     assert "Servers only" in html
     assert ">Remove</button>" in html
+
+
+def test_scoped_add_and_collapsed_assignment_controls_render():
+    get_template("_requirement_profile_clients.html")
+    assert 'name="action" value="add_requirement"' in _TABLE
+    assert 'name="device_scope"' in _TABLE
+    assert "Copy All rules, then add" in _TABLE
+    assert 'name="action" value="assign_clients"' in _CLIENTS
+    assert 'name="client_id"' in _CLIENTS

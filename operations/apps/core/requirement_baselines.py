@@ -2,11 +2,9 @@
 
 A baseline is either the global requirements (client-less
 ``coverage_requirements``, used by clients with no profile) or one profile's
-items. Every service is offered for all eligible devices. Scoped items that
-already exist are shown so they can be removed, but are not offered for
-adding: the evaluator uses a role-scoped baseline list *instead of* the
-all-devices list (``ingest.evaluator._evaluate_coverage.resolve_tier``), so
-one servers-only item would drop every other requirement for servers.
+items. The evaluator uses a role-scoped baseline list *instead of* the
+all-devices list. The view therefore makes an operator choose whether the
+first rule for a role copies the all-devices list or intentionally replaces it.
 """
 
 from __future__ import annotations
@@ -15,6 +13,8 @@ from collections.abc import Iterable
 from typing import Any
 
 ALL_SCOPE = "all"
+ROLE_SCOPES = ("server", "workstation")
+VALID_SCOPES = (ALL_SCOPE, *ROLE_SCOPES)
 
 # Columns copied when a new profile starts from an existing baseline.
 COPIED_FIELDS = (

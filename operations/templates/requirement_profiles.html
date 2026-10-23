@@ -17,10 +17,9 @@
         next requirement evaluation.
     </p>
     <p class="muted">
-        Services are required here for all eligible devices. A servers-only
-        baseline entry would replace the whole list for servers rather than add
-        to it, so it is not offered; any that already exist can be removed.
-        Require a service on servers only from a client's Configuration page.
+        A Servers or Workstations baseline is a complete replacement list for
+        that role. When adding the first rule for a role, choose whether to
+        copy the All-device baseline first or intentionally start a role-only list.
     </p>
 </div>
 
@@ -31,6 +30,7 @@
             used by {{ global_client_count }} client{{ global_client_count|pluralize }} with no profile
         </span>
     </h2>
+    {% include "_requirement_profile_clients.html" with clients=global_clients current_profile_id=None %}
     {% include "_requirement_baseline_table.html" with service_rows=global_service_rows target="global" %}
 </div>
 
@@ -44,6 +44,7 @@
         </span>
     </h2>
     {% if r.profile.description %}<p class="muted">{{ r.profile.description }}</p>{% endif %}
+    {% include "_requirement_profile_clients.html" with clients=r.clients current_profile_id=r.profile.id %}
     <div style="display:flex; align-items:end; gap:.6rem; flex-wrap:wrap; margin-bottom:.8rem;">
         <form method="post" style="display:flex; align-items:end; gap:.6rem; flex-wrap:wrap;">
             {% csrf_token %}<input type="hidden" name="action" value="update_profile"><input type="hidden" name="profile_id" value="{{ r.profile.id }}">
