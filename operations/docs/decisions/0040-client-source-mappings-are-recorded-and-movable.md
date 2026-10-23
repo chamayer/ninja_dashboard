@@ -1,6 +1,6 @@
 # 0040 — Client source mappings are recorded and movable
 
-Status: Accepted (decisions 3 and 5 implemented; 1, 2 and 4 pending)
+Status: Accepted (1, 3, 5 implemented; 2 to an existing client only; 4 on the client page, Issues side pending)
 Date: 2026-10-23
 
 ## Context

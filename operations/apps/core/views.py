@@ -12648,6 +12648,64 @@ def client_mapping_decide(request: HttpRequest, source_link_id: str) -> HttpResp
     return redirect(_safe_next(request, "client_mappings"))
 
 
+_BULK_MAPPING_STATES = {"confirm": "explicit", "ignore": "ignored"}
+
+
+@login_required
+@require_admin
+@require_POST
+def client_mapping_bulk(request: HttpRequest) -> HttpResponse:
+    """Confirm, ignore or move one, several or all selected source groups (ADR-0040).
+
+    All or nothing: one refused row leaves every selected mapping as it was.
+    """
+    link_ids = list(dict.fromkeys(request.POST.getlist("link_ids")))
+    action = (request.POST.get("action") or "").strip()
+    reason = (request.POST.get("reason") or "").strip()
+    target = (request.POST.get("client_id") or "").strip()
+    back = _safe_next(request, "client_mappings")
+    if not link_ids or not reason or action not in {*_BULK_MAPPING_STATES, "move"}:
+        messages.error(request, "Select at least one source reference, an action and a reason.")
+        return redirect(back)
+    if action == "move" and not target:
+        messages.error(request, "Choose the client to move the selected source groups to.")
+        return redirect(back)
+    moved = {"records": 0, "computers_moved": 0, "computers_mixed": 0}
+    try:
+        with transaction.atomic(), connection.cursor() as cur:
+            cur.execute("SET LOCAL operations.tenant_id = 1")
+            for link_id in link_ids:
+                if action == "move":
+                    cur.execute(
+                        "SELECT operations.move_client_source_group_v1(1, %s, %s, %s, %s)",
+                        [link_id, target, reason, request.user.pk],
+                    )
+                    result = cur.fetchone()[0]
+                    for key in moved:
+                        moved[key] += int(result.get(key) or 0)
+                    destination = result.get("to_client", "")
+                else:
+                    cur.execute(
+                        "SELECT operations.decide_client_source_mapping_v1(1, %s, %s, %s, %s)",
+                        [link_id, _BULK_MAPPING_STATES[action], reason, request.user.pk],
+                    )
+    except DatabaseError as exc:
+        messages.error(request, f"Nothing was changed: {str(exc).splitlines()[0]}")
+        return redirect(back)
+    count = f"{len(link_ids)} source group{'s' if len(link_ids) != 1 else ''}"
+    if action != "move":
+        messages.success(request, f"{count} {'confirmed' if action == 'confirm' else 'ignored'}.")
+        return redirect(back)
+    note = f"{count} moved to {destination}; {moved['computers_moved']} Computers moved with them."
+    if moved["computers_mixed"]:
+        note += (
+            f" {moved['computers_mixed']} Computers also have records from another client and "
+            "stay where they are; they are listed as “Computer under the wrong client?”."
+        )
+    messages.success(request, note)
+    return redirect(back)
+
+
 @login_required
 def client_source_reference_detail(request: HttpRequest, source_link_id: str) -> HttpResponse:
     """Evidence and lifecycle history for one client/source attachment."""

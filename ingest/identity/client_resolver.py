@@ -184,6 +184,7 @@ def drain_client_resolution() -> int:
         _check_name_drift(cur)
         _check_mapping_topology(cur)
         _retire_client_name_conflicts(cur)
+        _record_automatic_mappings(cur)
 
     log.info("client_resolver: attached %d groups", attached)
     return attached
@@ -399,6 +400,74 @@ def _release_renamed_group(
                 candidate_id,
             ),
         )
+
+
+def _record_automatic_mappings(cur) -> int:
+    """Record why each undecided source group belongs to its client (ADR-0040).
+
+    The link exists once the link sync has run after the attachment, so this
+    catches up every run. Links with any current decision are left alone; the
+    database function refuses to override one.
+    """
+    # Ingest can run before the deploy's migration (0341) has created it.
+    cur.execute(
+        "SELECT to_regprocedure("
+        "'operations.record_automatic_client_mapping_v1(bigint, uuid, text)') IS NOT NULL"
+    )
+    if not cur.fetchone()[0]:
+        return 0
+    cur.execute(
+        """
+        SELECT link.id, link.entity_id, client.display_name, latest.name
+          FROM operations.entity_source_links link
+          JOIN operations.clients client ON client.id = link.entity_id
+          LEFT JOIN LATERAL (
+               SELECT observation.canonical_data ->> 'name' AS name
+                 FROM operations.entity_observation_current observation
+                WHERE observation.tenant_id = link.tenant_id
+                  AND observation.source_instance_id = link.source_instance_id
+                  AND observation.entity_type = 'org'
+                  AND observation.external_id = link.external_id
+                ORDER BY observation.observed_at DESC
+                LIMIT 1
+          ) latest ON TRUE
+         WHERE link.tenant_id = %s
+           AND link.entity_class_id = 'client'
+           AND NOT EXISTS (
+               SELECT 1 FROM operations.client_source_mapping_decisions decision
+                WHERE decision.tenant_id = link.tenant_id
+                  AND decision.source_link_id = link.id
+                  AND decision.superseded_at IS NULL)
+        """,
+        (_TENANT_ID,),
+    )
+    undecided = cur.fetchall()
+    if not undecided:
+        return 0
+    cur.execute(
+        "SELECT normalized_name, client_id, alias, created_reason"
+        " FROM operations.client_name_aliases WHERE tenant_id = %s AND enabled",
+        (_TENANT_ID,),
+    )
+    aliases = {row[0]: row[1:] for row in cur.fetchall()}
+    recorded = 0
+    for link_id, client_id, client_name, observed in undecided:
+        alias = aliases.get(_norm(observed))
+        if observed and _norm(observed) == _norm(client_name):
+            reason = f'Source name "{observed}" matches the client name.'
+        elif alias and alias[0] == client_id:
+            reason = f'Source name "{observed}" matches the alias "{alias[1]}"'
+            reason += f" ({alias[2]})." if alias[2] else "."
+        else:
+            reason = "Attached before mapping decisions were recorded."
+        cur.execute(
+            "SELECT operations.record_automatic_client_mapping_v1(%s, %s, %s)",
+            (_TENANT_ID, link_id, reason[:500]),
+        )
+        recorded += bool(cur.fetchone()[0])
+    if recorded:
+        log.info("client_resolver: recorded %d automatic mappings", recorded)
+    return recorded
 
 
 def _clear_candidate(cur, normalized: str, client_id: uuid.UUID) -> None:

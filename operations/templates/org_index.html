@@ -136,10 +136,11 @@
   <h2>Source references</h2>
   <p class="muted">Source client records mapped to this client. Reported names are source evidence; they do not rename the client.</p>
   <table class="ops-table">
-    <thead><tr><th>Source</th><th>Reported name</th><th>Mapping decision</th><th>Details</th></tr></thead>
+    <thead><tr>{% if user.is_superuser or perms.operations.manage_catalog %}<th><input type="checkbox" id="mapping-select-all" aria-label="Select all source references"></th>{% endif %}<th>Source</th><th>Reported name</th><th>Mapping decision</th><th>Details</th></tr></thead>
     <tbody>
     {% for reference in source_references %}
       <tr>
+        {% if user.is_superuser or perms.operations.manage_catalog %}<td><input type="checkbox" class="mapping-cb" name="link_ids" value="{{ reference.source_link_id }}" form="mapping-bulk" aria-label="Select {{ reference.source_name }} {{ reference.observed_name }}"></td>{% endif %}
         <td>{{ reference.source_name }}</td>
         <td>{% if reference.observed_name %}<strong>{{ reference.observed_name }}</strong>{% if reference.name_differs %}<br><a class="badge badge-high" href="{{ reference.name_difference_url }}">Name differs</a>{% endif %}{% else %}<span class="muted">Not currently reported</span>{% endif %}</td>
         <td>{% if reference.missing_since %}<span class="badge badge-high">Missing</span> {% endif %}<span class="badge {% if reference.mapping_state == 'review' %}badge-medium{% else %}badge-low{% endif %}">{% if reference.mapping_state == 'review' %}Not yet confirmed{% elif reference.mapping_state == 'explicit' %}Confirmed{% elif reference.mapping_state == 'ignored' %}Ignored{% elif reference.mapping_state == 'automatic' %}Automatic{% else %}{{ reference.mapping_state }}{% endif %}</span>
@@ -147,10 +148,47 @@
         <td><a href="{% url 'client_source_reference_detail' source_link_id=reference.source_link_id %}">Source record and history</a></td>
       </tr>
     {% empty %}
-      <tr><td colspan="4" class="muted">No source references are mapped to this client.</td></tr>
+      <tr><td colspan="5" class="muted">No source references are mapped to this client.</td></tr>
     {% endfor %}
     </tbody>
   </table>
+  {% if source_references %}{% if user.is_superuser or perms.operations.manage_catalog %}
+  <form method="post" action="{% url 'client_mapping_bulk' %}" id="mapping-bulk" class="mapping-bulk" style="margin-top:.6rem; display:flex; gap:.4rem; flex-wrap:wrap; align-items:center;" onsubmit="return confirmMappingBulk(this);">
+    {% csrf_token %}<input type="hidden" name="next" value="{{ request.path }}#source-references">
+    <strong>Selected <span id="mapping-count">0</span>:</strong>
+    <select name="action" aria-label="Action for the selected source references" required>
+      <option value="confirm">Confirm they belong here</option>
+      <option value="move">Move to another client</option>
+      <option value="ignore">Ignore</option>
+    </select>
+    <select name="client_id" aria-label="Client to move to"><option value="">Move to…</option>{% for other in move_clients %}<option value="{{ other.id }}">{{ other.display_name }}</option>{% endfor %}</select>
+    <input name="reason" maxlength="400" required placeholder="Reason" aria-label="Reason for the selected source references">
+    <button type="submit">Apply</button>
+  </form>
+  <p class="muted" style="font-size:.8rem; margin:.3rem 0 0;">Moving a source group moves its records and every Computer whose records all move with it. A Computer that also has records from this client stays here and is listed as “Computer under the wrong client?”.</p>
+  <script>
+    (function () {
+      var cbs = document.querySelectorAll('.mapping-cb');
+      var all = document.getElementById('mapping-select-all');
+      var count = document.getElementById('mapping-count');
+      function refresh() { count.textContent = document.querySelectorAll('.mapping-cb:checked').length; }
+      cbs.forEach(function (cb) { cb.addEventListener('change', refresh); });
+      if (all) all.addEventListener('change', function () {
+        cbs.forEach(function (cb) { cb.checked = all.checked; });
+        refresh();
+      });
+      window.confirmMappingBulk = function (form) {
+        var n = document.querySelectorAll('.mapping-cb:checked').length;
+        if (!n) { alert('Select at least one source reference.'); return false; }
+        if (form.elements['action'].value !== 'move') return true;
+        var dest = form.elements['client_id'];
+        var target = dest.options[dest.selectedIndex];
+        if (!dest.value) { alert('Choose the client to move to.'); return false; }
+        return confirm('Move ' + n + ' source group(s) to ' + target.text + '? Their records and Computers move with them.');
+      };
+    })();
+  </script>
+  {% endif %}{% endif %}
 </section>
 
 {% if pending_record_matches %}

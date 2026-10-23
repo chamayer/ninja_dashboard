@@ -1,8 +1,8 @@
 ## Client mappings — recorded and movable (ADR-0040)
 
-Status: ADR-0040 accepted 2026-10-23; step A ("Computer under the wrong
-client?") implemented; decisions 1, 2 and 4 (record automatic mappings, move
-a source group, bulk decide) not started.
+Status: ADR-0040 accepted 2026-10-23. Step A ("Computer under the wrong
+client?") shipped in a2d0791 (migration 0340, deployed 14:54 UTC). Step B
+(decisions 1, 2, 4 on the client page) implemented locally, not committed.
 Goal: every automatic client mapping is a recorded decision and any mapped
 source group can be moved to another or a new client, one/several/all at once
 (user requirement). Order agreed: (1) this; (2) one name-difference finding
@@ -60,18 +60,36 @@ open `unmatched_source_group` are for groups already linked to a client
 carry identity findings, 23 carry two or more types (mostly
 `duplicate_device_records` with `identity_conflict`, `computer_name_collision`
 or `duplicate_platform_record`). Recorded in TODO as follow-ups.
-Checkpoint: step A implemented locally, not committed. Validation: Django
-check clean; Operations suite 4 failures and ingest suite 5, all also on
-clean HEAD; new `test_computer_client_conflict.py` and five producer tests
-in `test_identity_findings.py`; lint/format unchanged per file. Migration
-0340 rehearsed on production in a rolled-back transaction (Vedorium →
-Landau Realty: Computer, entity, OS installation, 180 software rows, Windows
-servicing, 77 findings moved; records kept their client; commit-time checks
-passed). The producer query flags the 23 Computers the audit found. Not
-browser-checked. Hotfix 8f521af (pushed) added `client_conflict_summary`
-after b30f259 shipped the views hunks early.
-Next action: user approves commit, then push with migration 0340; then
-decisions 1, 2 and 4 (record automatic mappings, move a source group).
+Checkpoint: step A shipped (a2d0791; hotfix 8f521af after b30f259 shipped
+views hunks early). Validated by tests and a rolled-back production
+rehearsal; not browser-checked.
+
+### Step B — record automatic mappings; move source groups (2026-10-23)
+
+Migration 0341: `record_automatic_client_mapping_v1` (resolver writes
+automatic/resolver decisions only where none exists) and
+`move_client_source_group_v1` (moves the link and its history now, because
+collectors read a group's client from the link; the group's org record and
+device records on the old client; an operator decision naming both clients;
+the enabled alias for that name; Computers whose active records all move,
+via `move_computer_to_client`; mixed ones are left for
+`computer_client_conflict`). Resolver step `_record_automatic_mappings`
+(skips until 0341 exists). Client page: select one/several/all source
+references, then confirm, move (to a chosen client) or ignore with a reason
+(`client_mapping_bulk`, all or nothing).
+Validation: Django check clean; Operations 4 and ingest 5 failures, all
+pre-existing; new `test_client_source_group_move.py`,
+`test_client_resolver_automatic_mappings.py`; lint/format unchanged per
+file. Rehearsed on production, rolled back: Prompt's Ninja group "MDA" to
+Starfire moved the link (one open history row), the org record and 15
+device records, wrote "Moved from Prompt to Starfire: …", left 12 mixed
+Computers; the automatic decision wrote once and refused a second time;
+commit-time checks passed. Not browser-checked.
+Not in scope yet: moving to a new client from this form (use a candidate
+Accept), Issues-side bulk for name differences (ADR A, one finding per
+client).
+Next action: user approves commit, then push with migration 0341 (fast: no
+policy change). First resolver run records about 376 automatic decisions.
 
 ## Client mapping workflow — finish the single-inbox move
 
