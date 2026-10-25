@@ -460,6 +460,11 @@ class Client(UUIDTenantScopedModel):
     stale_reason = models.CharField(max_length=120, blank=True, default="")
     deleted_at = models.DateTimeField(null=True, blank=True)
     deleted_reason = models.CharField(max_length=120, blank=True, default="")
+    # Created by the resolver on evidence until an operator verifies it (ADR-0041).
+    provisional_since = models.DateTimeField(null=True, blank=True)
+    provisional_reason = models.CharField(max_length=240, blank=True, default="")
+    verified_at = models.DateTimeField(null=True, blank=True)
+    verified_by = models.CharField(max_length=120, blank=True, default="")
 
     class Meta:
         db_table = "clients"

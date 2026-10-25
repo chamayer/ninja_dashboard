@@ -44,6 +44,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from ingest.conditions import record_assessment
+from shared import client_evidence
 from shared.conditions.contracts import Condition, EvaluationCoverage, Participant, Signal, Readiness
 
 log = logging.getLogger(__name__)
@@ -78,6 +79,9 @@ def drain_client_resolution() -> int:
             " WHERE tenant_id = %s AND enabled",
             (_TENANT_ID,),
         )
+        # Promotion adds aliases, so the name match below attaches the
+        # promoted groups in this same run (ADR-0041).
+        _promote_candidates(cur, excludes, _load_name_index(cur))
         name_index = _load_name_index(cur)
 
         cur.execute(
@@ -400,6 +404,147 @@ def _release_renamed_group(
                 candidate_id,
             ),
         )
+
+
+_PROMOTION_DEFAULTS: dict[str, Any] = {
+    "map_enabled": True,
+    "map_min_names": 2,
+    "create_enabled": True,
+    "create_min_sources": 2,
+    # No default: creation needs the source an operator names in the settings.
+    "create_required_source": "",
+    "min_seen_runs": 2,
+}
+
+
+def _promotion_settings(cur) -> dict[str, Any]:
+    """Admin-managed thresholds (``evaluator_config`` row ``client_promotion``)."""
+    cur.execute(
+        "SELECT config FROM operations.evaluator_config"
+        " WHERE tenant_id = %s AND evaluator_name = 'client_promotion'",
+        (_TENANT_ID,),
+    )
+    row = cur.fetchone()
+    stored = row[0] if row and isinstance(row[0], dict) else {}
+    return {**_PROMOTION_DEFAULTS, **stored}
+
+
+def _promote_candidates(cur, excludes: set[str], name_index: dict[str, list]) -> int:
+    """Map or create a client for a candidate on strong evidence (ADR-0041).
+
+    Map to an existing client when at least ``map_min_names`` of the
+    candidate's computer names belong only to that client, no name points to
+    another client, and no source of the candidate keeps that client as a
+    separate group. Create a provisional client when ``create_min_sources``
+    sources, including ``create_required_source``, report the name and every
+    client its names point to is kept separate. Each promotion is one recorded
+    change; it is listed for an operator to verify and can be moved.
+    """
+    settings = _promotion_settings(cur)
+    if not (settings["map_enabled"] or settings["create_enabled"]):
+        return 0
+    cur.execute(
+        "SELECT to_regprocedure("
+        "'operations.promote_client_candidate_v1(bigint, uuid, uuid, text)') IS NOT NULL"
+    )
+    if not cur.fetchone()[0]:
+        return 0
+    cur.execute(
+        """
+        SELECT id, normalized_name, display_name FROM operations.client_candidates
+         WHERE tenant_id = %s AND status = 'open' AND seen_count >= %s
+         ORDER BY normalized_name
+        """,
+        (_TENANT_ID, int(settings["min_seen_runs"])),
+    )
+    candidates = [
+        row for row in cur.fetchall() if row[1] not in excludes and row[1] not in name_index
+    ]
+    if not candidates:
+        return 0
+    # The unattached groups each source reports under each name now.
+    cur.execute(
+        """
+        SELECT DISTINCT instance.source_id, source.name, observation.external_id,
+               observation.canonical_data ->> 'name'
+          FROM operations.entity_observation_current observation
+          JOIN operations.source_instances instance
+            ON instance.id = observation.source_instance_id
+          JOIN operations.sources source ON source.id = instance.source_id
+         WHERE observation.tenant_id = %s AND observation.entity_type = 'org'
+           AND observation.active AND observation.client_id IS NULL
+        """,
+        (_TENANT_ID,),
+    )
+    groups_by_name: dict[str, list[tuple[int, str, str]]] = {}
+    for source_id, source_name, external_id, name in cur.fetchall():
+        groups_by_name.setdefault(_norm(name), []).append((source_id, source_name, external_id))
+    live_by_row = {
+        row: [(sid, ext) for sid, _name, ext in groups_by_name.get(candidate[1], [])]
+        for row, candidate in enumerate(candidates)
+    }
+    owners = client_evidence.name_owners(cur, live_by_row)
+    separate = client_evidence.client_source_ids(
+        cur, {m["client_id"] for matches, _ in owners.values() for m in matches}
+    )
+    promoted = 0
+    for row, (candidate_id, normalized, display_name) in enumerate(candidates):
+        live = live_by_row[row]
+        if not live:
+            continue
+        sources = sorted({name for _sid, name, _ext in groups_by_name[normalized]})
+        matches, _named = owners[row]
+        decision = _promotion_decision(settings, live, sources, matches, separate)
+        if decision is None:
+            continue
+        client_id, reason = decision
+        cur.execute("SAVEPOINT promote_candidate")
+        try:
+            cur.execute(
+                "SELECT operations.promote_client_candidate_v1(%s, %s, %s, %s)",
+                (_TENANT_ID, candidate_id, client_id, reason),
+            )
+        except Exception:
+            cur.execute("ROLLBACK TO SAVEPOINT promote_candidate")
+            log.exception("client_resolver: could not promote %s", display_name)
+            continue
+        cur.execute("RELEASE SAVEPOINT promote_candidate")
+        promoted += 1
+        log.info("client_resolver: promoted %s (%s)", display_name, reason)
+    return promoted
+
+
+def _promotion_decision(
+    settings: dict[str, Any],
+    live: list[tuple[int, str]],
+    sources: list[str],
+    matches: list[dict],
+    separate: dict[str, set[int]],
+) -> tuple[str | None, str] | None:
+    """``(client_id, reason)`` to map, ``(None, reason)`` to create, or ``None``."""
+    if (
+        settings["map_enabled"]
+        and len(matches) == 1
+        and matches[0]["record_count"] >= int(settings["map_min_names"])
+        and not client_evidence.kept_separate(matches[0]["client_id"], live, separate)
+    ):
+        match = matches[0]
+        return match["client_id"], (
+            f"{match['record_count']} computer names in {', '.join(sources)}"
+            f" belong only to {match['display_name']}"
+        )[:120]
+    required = str(settings["create_required_source"] or "")
+    if (
+        settings["create_enabled"]
+        and required
+        and required in sources
+        and len(sources) >= int(settings["create_min_sources"])
+        and all(client_evidence.kept_separate(m["client_id"], live, separate) for m in matches)
+    ):
+        kept = ", ".join(m["display_name"] for m in matches)
+        reason = f"Reported by {', '.join(sources)}; no existing client"
+        return None, (reason + (f"; kept separate from {kept}" if kept else ""))[:120]
+    return None
 
 
 def _record_automatic_mappings(cur) -> int:

@@ -43,7 +43,7 @@ from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 from django.utils.text import slugify
 from django.views.decorators.http import require_GET, require_POST
-from shared import software_coverage, software_settings
+from shared import client_evidence, software_coverage, software_settings
 from shared.jobs_registry import (
     EXECUTION_POOL_POLICIES,
     capability_state,
@@ -12932,71 +12932,16 @@ def _candidate_client_overlap(live, records_by_group) -> tuple[list[dict], int]:
 
 
 def _name_matches_by_row(live_by_row: dict[int, list[tuple[int, str]]]) -> dict[int, tuple]:
-    """Existing clients whose Computers carry the names of each row's unlinked
-    records, for many candidates in one query.
+    """Existing clients whose Computers carry each row's unlinked computer names.
 
-    Weaker evidence than a linked Computer: a record not yet matched to a
-    Computer still reports a computer name. A name counts only when exactly one
-    client owns a current Computer with it; names many clients use (generic
-    images, default names) say nothing about ownership. Returns, per row, the
-    matching clients largest first and how many unlinked records report a name.
+    Weaker evidence than a linked Computer; the rule is shared with the
+    resolver's automatic promotion (``shared.client_evidence``, ADR-0041).
     """
-    groups = [(row, key[0], key[1]) for row, keys in live_by_row.items() for key in keys]
-    result: dict[int, tuple] = {row: ([], 0) for row in live_by_row}
-    if not groups:
-        return result
+    if not any(live_by_row.values()):
+        return {row: ([], 0) for row in live_by_row}
     with transaction.atomic(), connection.cursor() as cur:
         cur.execute("SET LOCAL operations.tenant_id = 1")
-        cur.execute(
-            """
-            WITH live_groups AS (
-                SELECT * FROM unnest(%s::int[], %s::int[], %s::text[])
-                    AS g(row_index, source_id, external_id)
-            ), unlinked AS (
-                SELECT DISTINCT g.row_index, si.source_id, observation.entity_key,
-                       lower(observation.reported_name) AS name
-                  FROM operations.v_entity_observation_admin_metadata observation
-                  JOIN operations.source_instances si ON si.id = observation.source_instance_id
-                  JOIN live_groups g
-                    ON g.source_id = si.source_id AND g.external_id = observation.platform_group_id
-                 WHERE observation.entity_type <> 'org' AND observation.active
-                   AND observation.device_id IS NULL
-                   AND COALESCE(observation.reported_name, '') <> ''
-            ), single_owner AS (
-                SELECT lower(device.canonical_hostname) AS name, min(device.client_id::text) AS client_id
-                  FROM operations.devices device
-                 WHERE device.tenant_id = 1 AND device.deleted_at IS NULL
-                   AND device.lifecycle_status <> 'retired' AND device.client_id IS NOT NULL
-                   AND COALESCE(device.canonical_hostname, '') <> ''
-                 GROUP BY 1
-                HAVING count(DISTINCT device.client_id) = 1
-            ), named AS (
-                SELECT row_index, count(*)::int AS named FROM unlinked GROUP BY 1
-            )
-            SELECT named.row_index, named.named, client.id::text, client.display_name,
-                   count(unlinked.entity_key)::int AS records
-              FROM named
-              LEFT JOIN unlinked ON unlinked.row_index = named.row_index
-              LEFT JOIN single_owner ON single_owner.name = unlinked.name
-              LEFT JOIN operations.clients client
-                ON client.id::text = single_owner.client_id AND client.deleted_at IS NULL
-             GROUP BY 1, 2, 3, 4
-             ORDER BY 1, 5 DESC, 4
-            """,
-            (
-                [group[0] for group in groups],
-                [group[1] for group in groups],
-                [group[2] for group in groups],
-            ),
-        )
-        for row_index, named, client_id, name, records in cur.fetchall():
-            matches, _ = result[row_index]
-            if client_id:
-                matches.append(
-                    {"client_id": client_id, "display_name": name, "record_count": records}
-                )
-            result[row_index] = (matches, named)
-    return result
+        return client_evidence.name_owners(cur, live_by_row)
 
 
 def _candidate_name_matches(live) -> tuple[list[dict], int]:
@@ -13010,35 +12955,13 @@ def _client_source_ids(client_ids: set[str]) -> dict[str, set[int]]:
         return {}
     with transaction.atomic(), connection.cursor() as cur:
         cur.execute("SET LOCAL operations.tenant_id = 1")
-        cur.execute(
-            """
-            SELECT DISTINCT client_id::text, source_id
-              FROM operations.v_client_source_mapping_effective
-             WHERE tenant_id = 1 AND client_id::text = ANY(%s)
-               AND mapping_state <> 'ignored'
-            """,
-            [sorted(client_ids)],
-        )
-        result: dict[str, set[int]] = {}
-        for client_id, source_id in cur.fetchall():
-            result.setdefault(client_id, set()).add(source_id)
-    return result
+        return client_evidence.client_source_ids(cur, client_ids)
 
 
 def _first_unseparated(options: list[dict], live, separate: dict[str, set[int]]):
-    """The strongest suggested client a source does not already keep separate.
-
-    When a source reports the new client as its own group and the suggested
-    client has its own, different group in that same source, the source says
-    they are separate clients; shared computers then point to a misfiled
-    source group, not to the same client (e.g. NYCD Management vs City
-    Painting in Hudu, Ninja and SentinelOne).
-    """
-    own_sources = {key[0] for key in live}
-    for option in options:
-        if not separate.get(option["client_id"], set()) & own_sources:
-            return option
-    return None
+    """The strongest suggested client a source does not already keep separate
+    (``shared.client_evidence``)."""
+    return client_evidence.first_unseparated(options, live, separate)
 
 
 def _add_candidate_evidence(
@@ -13482,8 +13405,174 @@ def inventory_clients(request: HttpRequest) -> HttpResponse:
                     }
                 )
             ),
+            "promotions": _automatic_promotions(),
+            "promotion_settings": _promotion_settings(),
         },
     )
+
+
+_PROMOTION_SETTING_DEFAULTS = {
+    "map_enabled": True,
+    "map_min_names": 2,
+    "create_enabled": True,
+    "create_min_sources": 2,
+    "create_required_source": "",
+    "min_seen_runs": 2,
+}
+
+
+def _promotion_settings() -> dict:
+    """The resolver's promotion thresholds (``evaluator_config`` ``client_promotion``)."""
+    row = EvaluatorConfig.objects.filter(tenant_id=1, evaluator_name="client_promotion").first()
+    return {**_PROMOTION_SETTING_DEFAULTS, **((row.config or {}) if row else {})}
+
+
+def _automatic_promotions() -> list[dict]:
+    """Candidates the resolver promoted that an operator has not verified (ADR-0041).
+
+    Mapped: verified once every link of its groups is confirmed. Created: once
+    the provisional client is verified and its links are confirmed.
+    """
+    candidates = list(
+        ClientCandidate.objects.filter(
+            tenant_id=1,
+            resolved_by="resolver",
+            status__in=(ClientCandidate.Status.MAPPED, ClientCandidate.Status.ACCEPTED),
+            resolved_client__isnull=False,
+        )
+        .select_related("resolved_client")
+        .order_by("-resolved_at")
+    )
+    if not candidates:
+        return []
+    links = {
+        (reference["source_id"], str(reference["external_id"])): reference
+        for reference in client_source_references()
+    }
+    promotions = []
+    for candidate in candidates:
+        client = candidate.resolved_client
+        created = candidate.status == ClientCandidate.Status.ACCEPTED
+        groups = [
+            links[key]
+            for ref in candidate.source_refs or []
+            if (key := (ref.get("source_id"), str(ref.get("external_id")))) in links
+        ]
+        unconfirmed = [g for g in groups if g["mapping_state"] in ("automatic", "review")]
+        if client.deleted_at or not (unconfirmed or (created and not client.verified_at)):
+            continue
+        promotions.append(
+            {
+                "candidate": candidate,
+                "client": client,
+                "created": created,
+                "groups": groups,
+                "unconfirmed": unconfirmed,
+                # Retire only a created client the operator emptied by moving its groups.
+                "may_retire": created
+                and not groups
+                and not Device.objects.filter(client=client, deleted_at__isnull=True).exists(),
+            }
+        )
+    return promotions
+
+
+@login_required
+@require_admin
+@require_POST
+def client_promotions_decide(request: HttpRequest) -> HttpResponse:
+    """Verify or retire one, several or all automatic promotions (ADR-0041)."""
+    back = _safe_next(request, "inventory_clients")
+    action = request.POST.get("action")
+    reason = (request.POST.get("reason") or "").strip()
+    ids = set(request.POST.getlist("candidate_ids"))
+    selected = [p for p in _automatic_promotions() if str(p["candidate"].id) in ids]
+    if not selected or action not in ("verify", "retire") or not reason:
+        messages.error(request, "Select at least one promotion, an action and a reason.")
+        return redirect(back)
+    if action == "retire" and not all(p["may_retire"] for p in selected):
+        messages.error(
+            request,
+            "Only a client created automatically whose source groups were all moved away "
+            "and that has no Computers can be retired.",
+        )
+        return redirect(back)
+    now = timezone.now()
+    with transaction.atomic(), connection.cursor() as cur:
+        cur.execute("SET LOCAL operations.tenant_id = 1")
+        cur.execute(
+            "SELECT operations.begin_change(%s, %s, %s::jsonb, 'operator', %s,"
+            " 'operations.ui', '', 1, true)",
+            [
+                f"client.promotion_{action}",
+                reason,
+                json.dumps({"candidate_ids": sorted(ids)}),
+                request.user.pk,
+            ],
+        )
+        for promotion in selected:
+            client = promotion["client"]
+            if action == "verify":
+                for group in promotion["unconfirmed"]:
+                    cur.execute(
+                        "SELECT operations.decide_client_source_mapping_v1(1, %s, 'explicit', %s, %s)",
+                        [
+                            group["source_link_id"],
+                            f"Verified automatic promotion: {reason}"[:500],
+                            request.user.pk,
+                        ],
+                    )
+                if promotion["created"]:
+                    client.verified_at = now
+                    client.verified_by = request.user.get_username()
+                    client.save(update_fields=["verified_at", "verified_by", "updated_at"])
+            else:
+                client.deleted_at = now
+                client.deleted_reason = f"retired automatic promotion: {reason}"[:120]
+                client.save(update_fields=["deleted_at", "deleted_reason", "updated_at"])
+                Entity.objects.filter(id=client.entity_id).update(
+                    deleted_at=now, deleted_reason=client.deleted_reason
+                )
+                ClientNameAlias.objects.filter(client=client).update(enabled=False)
+    verb = "verified" if action == "verify" else "retired"
+    count = len(selected)
+    messages.success(request, f"{count} automatic promotion{'s' if count != 1 else ''} {verb}.")
+    return redirect(back)
+
+
+@login_required
+@require_admin
+@require_POST
+def client_promotion_settings(request: HttpRequest) -> HttpResponse:
+    """Save the resolver's promotion thresholds (ADR-0041)."""
+    back = _safe_next(request, "inventory_clients")
+    try:
+        config = {
+            "map_enabled": request.POST.get("map_enabled") == "on",
+            "map_min_names": max(1, int(request.POST.get("map_min_names") or 2)),
+            "create_enabled": request.POST.get("create_enabled") == "on",
+            "create_min_sources": max(2, int(request.POST.get("create_min_sources") or 2)),
+            "create_required_source": (request.POST.get("create_required_source") or "").strip(),
+            "min_seen_runs": max(1, int(request.POST.get("min_seen_runs") or 2)),
+        }
+    except ValueError:
+        messages.error(request, "The thresholds must be whole numbers.")
+        return redirect(back)
+    with transaction.atomic(), connection.cursor() as cur:
+        cur.execute("SET LOCAL operations.tenant_id = 1")
+        cur.execute(
+            "SELECT operations.begin_change('client_promotion.settings', 'Promotion settings',"
+            " '{}'::jsonb, 'operator', %s, 'operations.ui', '', 1, true)",
+            [request.user.pk],
+        )
+        row, _ = EvaluatorConfig.objects.get_or_create(
+            tenant_id=1, evaluator_name="client_promotion", defaults={"config": {}}
+        )
+        row.config = config
+        row.updated_by = request.user
+        row.save(update_fields=["config", "updated_by", "updated_at"])
+    messages.success(request, "Promotion settings saved.")
+    return redirect(back)
 
 
 @login_required

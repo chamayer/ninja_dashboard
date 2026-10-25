@@ -1,10 +1,10 @@
-import inspect
 from contextlib import nullcontext
 from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
 from django.template.loader import get_template
+from shared import client_evidence
 
 from apps.core import views
 
@@ -129,7 +129,8 @@ def test_name_matches_need_live_groups():
 
 
 def test_name_match_sql_ignores_names_several_clients_share():
-    source = inspect.getsource(views._name_matches_by_row)
+    # One rule for the candidate page and the resolver (ADR-0041).
+    source = client_evidence._NAME_OWNERS_SQL
     assert "HAVING count(DISTINCT device.client_id) = 1" in source
     assert "observation.device_id IS NULL" in source
     assert "device.lifecycle_status <> 'retired'" in source

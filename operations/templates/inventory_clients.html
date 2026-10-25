@@ -21,6 +21,60 @@
     <a href="{% url 'client_mappings' %}">Client mappings →</a>
   </div>
 </div>
+{% if promotions %}
+<section class="card" id="promoted-clients">
+  <h2>Promoted automatically — verify <span class="muted" style="font-size:.85rem; font-weight:400;">{{ promotions|length }}</span></h2>
+  <p class="muted">The resolver mapped or created these clients on evidence (ADR-0041). They work like any client already; verify each one, or move its source groups from the client page.</p>
+  <form method="post" action="{% url 'client_promotions_decide' %}" id="promotion-form">{% csrf_token %}
+    <input type="hidden" name="next" value="{{ request.path }}#promoted-clients">
+    <table class="ops-table">
+      <thead><tr>{% if user.is_superuser or perms.operations.manage_catalog %}<th><input type="checkbox" id="promotion-select-all" aria-label="Select all promotions"></th>{% endif %}<th>Source name</th><th>Client</th><th>Evidence</th><th>Source groups</th><th class="num">When</th></tr></thead>
+      <tbody>
+      {% for item in promotions %}
+      <tr>
+        {% if user.is_superuser or perms.operations.manage_catalog %}<td><input type="checkbox" class="promotion-cb" name="candidate_ids" value="{{ item.candidate.id }}" aria-label="Select {{ item.candidate.display_name }}"></td>{% endif %}
+        <td>{{ item.candidate.display_name|default:item.candidate.normalized_name }}</td>
+        <td><a href="{% url 'org_index' org_slug=item.client.slug %}#source-references">{{ item.client.display_name }}</a> {% if item.created %}<span class="badge badge-medium">New, provisional</span>{% else %}<span class="badge badge-info">Mapped</span>{% endif %}</td>
+        <td class="muted">{{ item.candidate.resolved_reason }}</td>
+        <td>{% for group in item.groups %}<span class="badge {% if group.mapping_state == 'explicit' %}badge-low{% else %}badge-info{% endif %}">{{ group.source_name }}</span> {% empty %}<span class="muted">none left</span>{% if item.may_retire %} — can be retired{% endif %}{% endfor %}</td>
+        <td class="num muted">{{ item.candidate.resolved_at|date:"Y-m-d H:i" }}</td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% if user.is_superuser or perms.operations.manage_catalog %}
+    <div style="margin-top:.6rem; display:flex; gap:.4rem; flex-wrap:wrap; align-items:center;">
+      <strong>Selected <span id="promotion-count">0</span>:</strong>
+      <select name="action" aria-label="Action for the selected promotions"><option value="verify">Verify</option><option value="retire">Retire (empty provisional client)</option></select>
+      <input name="reason" maxlength="400" required placeholder="Reason" aria-label="Reason">
+      <button type="submit">Apply</button>
+    </div>
+    {% endif %}
+  </form>
+  <script>
+    (function () {
+      var cbs = document.querySelectorAll('.promotion-cb');
+      var all = document.getElementById('promotion-select-all');
+      var count = document.getElementById('promotion-count');
+      function refresh() { if (count) count.textContent = document.querySelectorAll('.promotion-cb:checked').length; }
+      cbs.forEach(function (cb) { cb.addEventListener('change', refresh); });
+      if (all) all.addEventListener('change', function () { cbs.forEach(function (cb) { cb.checked = all.checked; }); refresh(); });
+    })();
+  </script>
+</section>
+{% endif %}
+{% if user.is_superuser or perms.operations.manage_catalog %}
+<details class="card" id="promotion-settings">
+  <summary><strong>Automatic promotion settings</strong> <span class="muted">— map {% if promotion_settings.map_enabled %}on{% else %}off{% endif %}, create {% if promotion_settings.create_enabled %}on{% else %}off{% endif %}</span></summary>
+  <form method="post" action="{% url 'client_promotion_settings' %}" style="display:grid; gap:.4rem; margin-top:.6rem; max-width:34rem;">{% csrf_token %}
+    <input type="hidden" name="next" value="{{ request.path }}#promotion-settings">
+    <label><input type="checkbox" name="map_enabled"{% if promotion_settings.map_enabled %} checked{% endif %}> Map a new source group to an existing client when at least <input type="number" name="map_min_names" min="1" value="{{ promotion_settings.map_min_names }}" style="width:4rem;"> of its computer names belong only to that client</label>
+    <label><input type="checkbox" name="create_enabled"{% if promotion_settings.create_enabled %} checked{% endif %}> Create a provisional client when at least <input type="number" name="create_min_sources" min="2" value="{{ promotion_settings.create_min_sources }}" style="width:4rem;"> sources report the same new name, including <input name="create_required_source" value="{{ promotion_settings.create_required_source }}" style="width:9rem;" aria-label="Required source"></label>
+    <label>Only names seen at least <input type="number" name="min_seen_runs" min="1" value="{{ promotion_settings.min_seen_runs }}" style="width:4rem;"> times</label>
+    <div><button type="submit">Save</button></div>
+  </form>
+</details>
+{% endif %}
 {% if new_clients %}
 <section class="card" id="new-clients">
   <h2>New / discovered clients <span class="muted" style="font-size:.85rem; font-weight:400;">{{ new_client_count }} name{{ new_client_count|pluralize }} · {{ new_group_count }} source group{{ new_group_count|pluralize }}</span></h2>
