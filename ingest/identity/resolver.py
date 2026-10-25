@@ -2067,6 +2067,37 @@ def _sync_device_attributes(cur) -> None:
     # unmatched group isn't a binding; use 'source_binding' subject
     # with source_id in details).
     if ft_unmatched is not None:
+        # A collection that runs between a group's attachment and the next
+        # link sync still sees no client and records the group again; nothing
+        # else removes that row. A group with a client is not unmatched.
+        cur.execute(
+            """
+            DELETE FROM operations.unmatched_source_groups u
+             WHERE u.tenant_id = %s
+               AND EXISTS (SELECT 1 FROM operations.v_client_source_link link
+                            WHERE link.tenant_id = u.tenant_id
+                              AND link.source_id = u.source_id
+                              AND link.external_id = u.external_id)
+            """,
+            (TENANT_ID,),
+        )
+        if cur.rowcount:
+            log.info("resolver: cleared %d unmatched groups that now have a client", cur.rowcount)
+        # Close the findings whose group is no longer pending.
+        cur.execute(
+            """
+            UPDATE operations.findings f
+               SET status = 'resolved', closed_at = NOW()
+             WHERE f.tenant_id = %s AND f.finding_type_id = %s
+               AND f.status IN ('open', 'acknowledged', 'investigating')
+               AND NOT EXISTS (
+                   SELECT 1 FROM operations.unmatched_source_groups u
+                    WHERE u.tenant_id = f.tenant_id AND u.status = 'pending'
+                      AND f.condition_key =
+                          'unmatched_source_group:' || u.source_id || ':' || u.external_id)
+            """,
+            (TENANT_ID, ft_unmatched),
+        )
         cur.execute(
             """
             INSERT INTO operations.findings (
