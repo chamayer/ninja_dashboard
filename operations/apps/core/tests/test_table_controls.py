@@ -18,6 +18,7 @@ PAGINATED_TABLES = {
     "patching_queue.html": 1,
     "software_decisions.html": 2,
     "software_products.html": 1,
+    "source_records.html": 1,
     # Paginated card list, no table: nothing for browser-side controls to mislead.
     "software_tech_checklist.html": 0,
 }

@@ -19,6 +19,8 @@
       <option value="withdrawn"{% if state == "withdrawn" %} selected{% endif %}>Withdrawn</option>
     </select></label>
     <label>Record type<br><select name="type"><option value="">All types</option>{% for value in entity_types %}<option value="{{ value.value }}"{% if entity_type == value.value %} selected{% endif %}>{{ value.label }}</option>{% endfor %}</select></label>
+    <label>Layout<br><select name="layout"><option value="">All layouts</option>{% for value in layouts %}<option value="{{ value }}"{% if layout == value %} selected{% endif %}>{{ value }}</option>{% endfor %}</select></label>
+    <label>Why unlinked<br><select name="reason"><option value="">Any</option>{% for key, label in reason_choices %}<option value="{{ key }}"{% if reason == key %} selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
     <label>Relationship<br><select name="relationship">
       <option value="all"{% if relationship == "all" %} selected{% endif %}>Any relationship</option>
       <option value="attached_computer"{% if relationship == "attached_computer" %} selected{% endif %}>Attached to a Computer</option>
@@ -34,19 +36,22 @@
 </div>
 
 <div class="card">
-  <table class="ops-table" data-sortable>
-    <thead><tr><th>Source</th><th>Record type</th><th>Source record</th><th>State</th><th>Relationships</th><th>Observed</th><th>Last seen</th></tr></thead>
+  <p class="muted" style="margin:0 0 .4rem; font-size:.85rem;">Column sorting orders this page only; use the filters above to search every record.</p>
+  <table class="ops-table" data-sortable data-server-table>
+    <thead><tr><th>Source</th><th>Record type</th><th>Source record</th><th>State</th><th>Relationships</th><th class="num">Issues</th><th>Observed</th><th>Last seen</th></tr></thead>
     <tbody>{% for record in records %}
       <tr>
         <td>{{ record.source_name }}</td>
-        <td>{{ record.entity_type_label }}</td>
-        <td><code>{{ record.external_id }}</code>{% if record.parent_external_id %}<br><span class="muted">parent <code>{{ record.parent_external_id }}</code></span>{% endif %}</td>
+        <td>{{ record.entity_type_label }}{% if record.layout %}<br><span class="muted">{{ record.layout }}</span>{% endif %}</td>
+        <td>{% if record.reported_name %}<strong>{{ record.reported_name }}</strong><br>{% endif %}<code>{{ record.external_id }}</code>{% if record.parent_external_id %}<br><span class="muted">parent <code>{{ record.parent_external_id }}</code></span>{% endif %}{% if record.group_name or record.group_id %}<br><span class="muted">in {{ record.group_name|default:record.group_id }}</span>{% endif %}
+          <div style="font-size:.8rem;">{% if record.source_url %}<a href="{{ record.source_url }}" target="_blank" rel="noopener">Open in {{ record.source_name }} →</a>{% endif %}{% if may_view_evidence and record.device_entity_id %} <a href="{% url 'entity_admin_detail' record.device_entity_id %}?observation={{ record.observation_id }}#source-identities">View evidence</a>{% endif %}</div></td>
         <td>{% if record.active %}<span class="badge badge-low">Active</span>{% else %}<span class="badge badge-high">Withdrawn</span>{% endif %}</td>
-        <td>{% if record.device_id and record.client_slug %}<div>Computer: <a href="{% url 'device_detail' org_slug=record.client_slug device_id=record.device_id %}">{{ record.hostname|default:"Unnamed Computer" }}</a></div>{% elif record.has_computer %}<div>Computer: {{ record.hostname|default:"attached" }}</div>{% endif %}{% if record.has_client %}<div>Client: {{ record.client_name|default:"attributed" }}</div>{% endif %}{% if record.has_parent %}<div>Parent record: <code>{{ record.parent_external_id }}</code></div>{% endif %}{% if not record.has_computer and not record.has_client and not record.has_parent %}<span class="muted">No resolved relationship</span>{% endif %}</td>
+        <td>{% if record.device_id and record.client_slug %}<div>Computer: <a href="{% url 'device_detail' org_slug=record.client_slug device_id=record.device_id %}">{{ record.hostname|default:"Unnamed Computer" }}</a></div>{% elif record.has_computer %}<div>Computer: {{ record.hostname|default:"attached" }}</div>{% endif %}{% if record.has_client %}<div>Client: {{ record.client_name|default:"attributed" }}</div>{% endif %}{% if record.has_parent %}<div>Parent record: <code>{{ record.parent_external_id }}</code></div>{% endif %}{% if not record.has_computer and not record.has_client and not record.has_parent %}<span class="muted">No resolved relationship</span>{% endif %}{% if record.unlinked_reason %}<div style="font-size:.8rem;"><span class="badge badge-info">{% if record.unlinked_reason.url %}<a href="{{ record.unlinked_reason.url }}">{{ record.unlinked_reason.label }}</a>{% else %}{{ record.unlinked_reason.label }}{% endif %}</span></div>{% endif %}</td>
+        <td class="num">{% if record.issue_count %}<a href="{% url 'findings_queue' %}?subject_id={{ record.device_id }}">{{ record.issue_count }}</a>{% if record.record_issue_count %}<br><span class="muted" style="font-size:.8rem;">{{ record.record_issue_count }} about this record</span>{% endif %}{% elif record.device_id %}<span class="muted">0</span>{% else %}<span class="muted">—</span>{% endif %}</td>
         <td>{{ record.observed_at|date:"Y-m-d H:i"|default:"—" }}</td>
         <td>{{ record.last_seen_at|date:"Y-m-d H:i"|default:"—" }}</td>
       </tr>
-    {% empty %}<tr><td colspan="7" class="muted">No source records match this filter.</td></tr>{% endfor %}</tbody>
+    {% empty %}<tr><td colspan="8" class="muted">No source records match this filter.</td></tr>{% endfor %}</tbody>
   </table>
 </div>
 

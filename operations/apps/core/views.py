@@ -16822,6 +16822,10 @@ def source_records(
             source_filter = uuid.UUID(request.GET["source"])
         except (TypeError, ValueError):
             source_filter = None
+    layout = (request.GET.get("layout") or "").strip()
+    reason = (request.GET.get("reason") or "").strip()
+    if reason not in _UNLINKED_REASON_SQL:
+        reason = ""
     client_filter = (request.GET.get("client") or "").strip()
     try:
         client_filter_id = uuid.UUID(client_filter) if client_filter else None
@@ -16848,6 +16852,11 @@ def source_records(
     if entity_type:
         clauses.append("observation.entity_type = %s")
         params.append(entity_type)
+    if layout:
+        clauses.append("observation.source_layout = %s")
+        params.append(layout)
+    if reason:
+        clauses.append(_UNLINKED_REASON_SQL[reason])
     if relationship == "attached_computer":
         clauses.append("observation.device_id IS NOT NULL")
     elif relationship == "unlinked_computer":
@@ -16921,6 +16930,16 @@ def source_records(
         ]
         cur.execute(
             """
+            SELECT DISTINCT source_layout
+              FROM operations.v_entity_observation_admin_metadata
+             WHERE tenant_id = %s AND source_layout IS NOT NULL
+             ORDER BY source_layout
+            """,
+            (tenant_id,),
+        )
+        layouts = [row[0] for row in cur.fetchall()]
+        cur.execute(
+            """
             SELECT id, slug, display_name
               FROM operations.clients
              WHERE tenant_id = %s AND deleted_at IS NULL
@@ -16941,7 +16960,13 @@ def source_records(
                    client.slug, client.display_name,
                    CASE WHEN observation.device_id IS NOT NULL THEN TRUE ELSE FALSE END,
                    CASE WHEN observation.client_id IS NOT NULL THEN TRUE ELSE FALSE END,
-                   CASE WHEN NULLIF(observation.parent_external_id, '') IS NOT NULL THEN TRUE ELSE FALSE END
+                   CASE WHEN NULLIF(observation.parent_external_id, '') IS NOT NULL THEN TRUE ELSE FALSE END,
+                   observation.reported_name, observation.platform_group_id,
+                   observation.link_verdict, observation.archived,
+                   observation.source_layout, observation.source_url,
+                   device.entity_id, group_mapping.observed_name,
+                   -- Operations proposed this record as something other than a Computer.
+                   {_PROPOSED_OTHER_SQL}
               FROM operations.v_entity_observation_admin_metadata observation
               JOIN operations.source_instances instance
                 ON instance.tenant_id = observation.tenant_id AND instance.id = observation.source_instance_id
@@ -16950,6 +16975,10 @@ def source_records(
                 ON device.tenant_id = observation.tenant_id AND device.id = observation.device_id
               LEFT JOIN operations.clients client
                 ON client.tenant_id = observation.tenant_id AND client.id = observation.client_id
+              LEFT JOIN operations.v_client_source_mapping_effective group_mapping
+                ON group_mapping.tenant_id = observation.tenant_id
+               AND group_mapping.source_id = instance.source_id
+               AND group_mapping.external_id = observation.platform_group_id
              WHERE {where_sql}
              ORDER BY observation.last_seen_at DESC NULLS LAST, observation.observation_id
         """
@@ -16979,9 +17008,25 @@ def source_records(
                 "has_computer": row[13],
                 "has_client": row[14],
                 "has_parent": row[15],
+                "reported_name": row[16] or "",
+                "group_id": row[17] or "",
+                "group_name": row[23] or "",
+                "layout": row[20] or "",
+                "source_url": _source_record_url(row[1], row[2], row[3], row[21]),
+                "device_entity_id": row[22],
+                "unlinked_reason": _unlinked_reason(
+                    entity_type=row[2],
+                    active=row[5],
+                    device_id=row[9],
+                    client_id_known=row[14],
+                    archived=row[19],
+                    link_verdict=row[18] or "",
+                    proposed_other=row[24],
+                ),
             }
             for row in cur.fetchall()
         ]
+        _add_record_issue_counts(cur, records)
 
     if wants_csv(request):
         return csv_response(
@@ -16998,6 +17043,10 @@ def source_records(
                 ("Withdrawn", "withdrawn_at"),
                 ("Linked Computer", "hostname"),
                 ("Client", "client_name"),
+                ("Reported name", "reported_name"),
+                ("Source group", lambda row: row["group_name"] or row["group_id"]),
+                ("Source layout", "layout"),
+                ("Why unlinked", lambda row: (row["unlinked_reason"] or {}).get("label", "")),
             ],
             filename_stem="inventory_source_records",
         )
@@ -17014,9 +17063,15 @@ def source_records(
             "client_choices": client_choices,
             "records": records,
             "total": total,
+            "may_view_evidence": request.user.is_superuser
+            or request.user.has_perm("operations.manage_catalog"),
             "state": state,
             "entity_type": entity_type,
             "entity_types": entity_types,
+            "layout": layout,
+            "layouts": layouts,
+            "reason": reason,
+            "reason_choices": [(key, label) for key, label in _UNLINKED_REASON_LABELS.items()],
             "query": query,
             "relationship": relationship,
             "client_filter": str(client_filter_id) if client_filter_id else "",
@@ -17035,6 +17090,8 @@ def source_records(
                         "client": client_filter,
                         "state": state if state != "all" else "",
                         "type": entity_type,
+                        "layout": layout,
+                        "reason": reason,
                         "relationship": relationship if relationship != "all" else "",
                         "q": query,
                     }.items()
@@ -17043,6 +17100,131 @@ def source_records(
             ),
         },
     )
+
+
+def _source_record_url(
+    source_name: str, entity_type: str, external_id: str, stored: str | None
+) -> str:
+    """Where the record lives in its source: Hudu stores its asset URL; a Ninja
+    device record uses the Computer page's device-dashboard link."""
+    if stored:
+        return stored
+    if source_name == "Ninja" and entity_type != "org" and external_id:
+        return f"https://amrose.rmmservice.com/#/deviceDashboard/{external_id}/overview"
+    return ""
+
+
+# "Why unlinked", in order: the first that applies names the reason. The SQL
+# and ``_unlinked_reason`` state the same rule for the filter and the column.
+_UNLINKED_REASON_LABELS = {
+    "archived": "Archived in Hudu",
+    "stale": "Links to a computer that no longer exists",
+    "group": "Its source group is not mapped to a client",
+    "asset": "Proposed as an asset, not a computer",
+    "no_match": "Not matched to a computer",
+}
+_UNLINKED_BASE_SQL = (
+    "observation.device_id IS NULL AND observation.active AND observation.entity_type <> 'org'"
+)
+_PROPOSED_OTHER_SQL = (
+    "EXISTS (SELECT 1 FROM operations.entity_candidates candidate"
+    " WHERE candidate.tenant_id = observation.tenant_id"
+    " AND candidate.source_instance_id = observation.source_instance_id"
+    " AND candidate.external_id = observation.external_id"
+    " AND candidate.status IN ('observed_only', 'pending')"
+    " AND candidate.proposed_entity_class_id <> 'device')"
+)
+_NOT_STALE_SQL = "COALESCE(observation.link_verdict, '') <> 'stale'"
+_UNLINKED_REASON_SQL = {
+    "archived": f"({_UNLINKED_BASE_SQL} AND observation.archived)",
+    "stale": f"({_UNLINKED_BASE_SQL} AND NOT observation.archived AND NOT {_NOT_STALE_SQL})",
+    "group": (
+        f"({_UNLINKED_BASE_SQL} AND NOT observation.archived AND {_NOT_STALE_SQL}"
+        " AND observation.client_id IS NULL)"
+    ),
+    "asset": (
+        f"({_UNLINKED_BASE_SQL} AND NOT observation.archived AND {_NOT_STALE_SQL}"
+        f" AND observation.client_id IS NOT NULL AND {_PROPOSED_OTHER_SQL})"
+    ),
+    "no_match": (
+        f"({_UNLINKED_BASE_SQL} AND NOT observation.archived AND {_NOT_STALE_SQL}"
+        f" AND observation.client_id IS NOT NULL AND NOT {_PROPOSED_OTHER_SQL})"
+    ),
+}
+
+
+def _unlinked_reason(
+    *,
+    entity_type: str,
+    active: bool,
+    device_id,
+    client_id_known: bool,
+    archived: bool,
+    link_verdict: str,
+    proposed_other: bool,
+) -> dict | None:
+    """Why a current record is not attached to a Computer, and where that is resolved.
+
+    Interim until records are typed by kind (ADR-0044): Operations' own
+    proposal says a record is not a Computer; no layout list lives in code.
+    """
+    # A source group (org) record belongs to a client, never to a Computer.
+    if device_id or not active or entity_type == "org":
+        return None
+    if archived:
+        return {"key": "archived", "label": _UNLINKED_REASON_LABELS["archived"], "url": ""}
+    if link_verdict == "stale":
+        return {
+            "key": "stale",
+            "label": _UNLINKED_REASON_LABELS["stale"],
+            "url": f"{reverse('findings_queue')}?type=cmdb_asset_stale",
+        }
+    if not client_id_known:
+        return {
+            "key": "group",
+            "label": _UNLINKED_REASON_LABELS["group"],
+            "url": f"{reverse('inventory_clients')}#new-clients",
+        }
+    if proposed_other:
+        return {"key": "asset", "label": _UNLINKED_REASON_LABELS["asset"], "url": ""}
+    return {"key": "no_match", "label": _UNLINKED_REASON_LABELS["no_match"], "url": ""}
+
+
+def _add_record_issue_counts(cur, records: list[dict]) -> None:
+    """Open issues of each record's Computer, and how many name this record."""
+    device_ids = sorted({str(r["device_id"]) for r in records if r["device_id"]})
+    for record in records:
+        record["issue_count"] = 0
+        record["record_issue_count"] = 0
+    if not device_ids:
+        return
+    cur.execute(
+        """
+        SELECT finding.subject_id::text, observation.observation_id::text,
+               count(*)::int,
+               count(*) FILTER (
+                   WHERE finding.finding_details::text LIKE '%%' || observation.observation_id::text || '%%'
+               )::int
+          FROM operations.findings finding
+          JOIN unnest(%s::uuid[], %s::uuid[]) AS observation(device_id, observation_id)
+            ON observation.device_id = finding.subject_id
+         WHERE finding.tenant_id = 1 AND finding.subject_type = 'device'
+           AND finding.status IN ('open', 'acknowledged', 'investigating')
+         GROUP BY 1, 2
+        """,
+        (
+            [str(r["device_id"]) for r in records if r["device_id"]],
+            [str(r["observation_id"]) for r in records if r["device_id"]],
+        ),
+    )
+    counts = {
+        (device, observation): (total, named)
+        for device, observation, total, named in cur.fetchall()
+    }
+    for record in records:
+        total, named = counts.get((str(record["device_id"]), str(record["observation_id"])), (0, 0))
+        record["issue_count"] = total
+        record["record_issue_count"] = named
 
 
 def _source_schedule_minutes(value: str) -> int | None:
