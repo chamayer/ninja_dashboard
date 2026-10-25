@@ -10,6 +10,7 @@ from django.db.models import Count, Q
 from django.urls import reverse
 from django.utils import timezone
 
+from . import client_domains
 from .device_status import get_device_status_policy
 from .models import Client, EntityCandidate, Finding, MergeCandidate
 from .templatetags.human_labels import humanize_label
@@ -612,6 +613,8 @@ def build_client_workspace(client, existing: dict, *, device_policy: dict | None
         if source_references
         else [],
         "pending_record_matches": pending_record_matches,
+        # Learned from its computers, edited by operators (ADR-0042).
+        "domain_names": client_domains.domains_for([client]).get(str(client.id), []),
         "workspace_updated_at": latest_update,
         "attention_groups": attention_groups,
         "client_domains": domains,

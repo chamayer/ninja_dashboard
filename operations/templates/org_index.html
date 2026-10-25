@@ -132,6 +132,29 @@
   <div class="context-stat"><div class="context-label">Data connections</div><strong>{{ source_updates|length }}</strong><span>{% for source in source_updates %}{{ source.name }}{% if not forloop.last %} · {% endif %}{% empty %}none configured{% endfor %}</span></div>
 </section>
 
+<section class="card" id="client-domains">
+  <h2>Domains</h2>
+  <p class="muted">Learned from the domains this client's computers report; an operator can add one or remove a learned one.</p>
+  {% if domain_names %}
+  <ul class="compact-list">
+    {% for item in domain_names %}
+    <li>{% if item.removed %}<s class="muted">{{ item.domain }}</s> <span class="muted">removed by an operator</span>{% else %}<strong>{{ item.domain }}</strong>{% endif %}
+      <span class="muted">{% if item.computers %}· {{ item.computers }} computer{{ item.computers|pluralize }}{% endif %}{% if item.added %} · added by an operator{% endif %}</span>
+      {% if perms.operations.write_decisions %}<form method="post" action="{% url 'client_domain_edit' org_slug=current_client.slug %}" style="display:inline-flex; gap:.3rem; margin-left:.4rem;">{% csrf_token %}<input type="hidden" name="domain" value="{{ item.domain }}"><input type="hidden" name="action" value="{% if item.removed or item.added %}restore{% else %}remove{% endif %}"><input name="reason" maxlength="400" required placeholder="Reason" aria-label="Reason for {{ item.domain }}"><button type="submit">{% if item.removed %}Restore{% elif item.added %}Undo add{% else %}Remove{% endif %}</button></form>{% endif %}
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}<p class="muted">No domain learned yet.</p>{% endif %}
+  {% if perms.operations.write_decisions %}
+  <form method="post" action="{% url 'client_domain_edit' org_slug=current_client.slug %}" style="display:flex; gap:.4rem; flex-wrap:wrap; margin-top:.5rem;">{% csrf_token %}
+    <input type="hidden" name="action" value="add">
+    <input name="domain" required maxlength="253" placeholder="example.local" aria-label="Domain to add">
+    <input name="reason" required maxlength="400" placeholder="Reason" aria-label="Reason for adding the domain">
+    <button type="submit">Add domain</button>
+  </form>
+  {% endif %}
+</section>
+
 <section class="card" id="source-references">
   <h2>Source references</h2>
   <p class="muted">Source client records mapped to this client. Reported names are source evidence; they do not rename the client.</p>

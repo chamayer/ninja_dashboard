@@ -16,7 +16,7 @@ from urllib.parse import urlencode, urlsplit
 from django.contrib import messages
 from django.contrib.auth import get_user_model
 from django.contrib.auth.decorators import login_required
-from django.core.exceptions import PermissionDenied
+from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.paginator import Paginator
 from django.db import DatabaseError, IntegrityError, connection, transaction
 from django.db.models import (
@@ -73,6 +73,7 @@ from . import (
     software_review,
 )
 from .capability_review_actions import decide_capability
+from . import client_domains
 from .client_workspace import (
     build_client_directory,
     build_client_workspace,
@@ -12732,6 +12733,33 @@ def client_mapping_bulk(request: HttpRequest) -> HttpResponse:
             "stay where they are; they are listed as “Computer under the wrong client?”."
         )
     messages.success(request, note)
+    return redirect(back)
+
+
+@login_required
+@require_POST
+def client_domain_edit(request: HttpRequest, org_slug: str) -> HttpResponse:
+    """Add a domain to a client, remove a learned one, or restore it (ADR-0042)."""
+    client = get_object_or_404(
+        Client.objects.select_related("entity"), tenant_id=1, slug=org_slug, deleted_at__isnull=True
+    )
+    back = f"{reverse('org_index', kwargs={'org_slug': client.slug})}#client-domains"
+    reason = (request.POST.get("reason") or "").strip()
+    if not reason:
+        messages.error(request, "A reason is required to change a client's domains.")
+        return redirect(back)
+    try:
+        client_domains.edit(
+            actor=request.user,
+            client=client,
+            domain=request.POST.get("domain") or "",
+            action=(request.POST.get("action") or "").strip(),
+            reason=reason,
+        )
+    except (ValueError, ValidationError) as exc:
+        messages.error(request, str(exc.messages[0] if hasattr(exc, "messages") else exc))
+        return redirect(back)
+    messages.success(request, "Client domains updated.")
     return redirect(back)
 
 
