@@ -3758,6 +3758,7 @@ def device_detail(request: HttpRequest, org_slug: str, device_id: str) -> HttpRe
             "same_name_devices": same_name_devices,
             "same_name_device_count": same_name_device_count,
             "merge_candidate": merge_candidate,
+            "open_merges": _open_merges(device.id) if active_tab == "overview" else [],
             "links": links,
             "hudu_records": hudu_records,
             "active_findings": active_findings,
@@ -18329,6 +18330,71 @@ _HISTORY_TABLE_LABELS = {
     "device_operator_decisions": "Decision",
     "computer_merges": "Merge",
 }
+
+
+def _open_merges(device_id) -> list[dict]:
+    """Computers merged into this one and not split since, newest first."""
+    with transaction.atomic(), connection.cursor() as cur:
+        cur.execute("SET LOCAL operations.tenant_id = 1")
+        cur.execute(
+            """
+            SELECT m.id, absorbed.canonical_hostname, m.merged_at, m.reason, action.actor_kind
+              FROM operations.computer_merges m
+              JOIN operations.devices absorbed ON absorbed.id = m.absorbed_id
+              JOIN operations.change_actions action ON action.id = m.action_id
+             WHERE m.tenant_id = 1 AND m.survivor_id = %s AND m.split_at IS NULL
+             ORDER BY m.merged_at DESC
+            """,
+            (device_id,),
+        )
+        return [
+            {
+                "id": merge_id,
+                "absorbed_name": name,
+                "merged_at": merged_at,
+                "reason": reason,
+                "automatic": actor_kind != "operator",
+            }
+            for merge_id, name, merged_at, reason, actor_kind in cur.fetchall()
+        ]
+
+
+@login_required
+@require_POST
+def computer_merge_split(request: HttpRequest, merge_id: str) -> HttpResponse:
+    """Undo one merge: the absorbed Computer and the records it brought return (ADR-0032).
+
+    The automatic merge pass never merges a pair an operator split again.
+    """
+    if not can_manage_lifecycle(request.user):
+        raise PermissionDenied
+    back = _safe_next(request, "home")
+    reason = (request.POST.get("reason") or "").strip()
+    if not reason:
+        messages.error(request, "A reason is required to split a merge.")
+        return redirect(back)
+    try:
+        with transaction.atomic(), connection.cursor() as cur:
+            cur.execute("SET LOCAL operations.tenant_id = 1")
+            cur.execute(
+                "SELECT survivor_id, absorbed_id FROM operations.computer_merges WHERE id = %s",
+                (merge_id,),
+            )
+            row = cur.fetchone()
+            if row is None:
+                raise Http404("Merge not found")
+            cur.execute(
+                "SELECT operations.split_computer_merge(%s::uuid, %s::text, 'operator',"
+                " %s::bigint, 'operations.ui')",
+                (merge_id, reason, request.user.pk),
+            )
+            # Both Computers are named again from their records (ADR-0034 section 6).
+            computer_naming.name_now(cur, list(row))
+    except DatabaseError as exc:
+        messages.error(request, f"Nothing was changed: {str(exc).splitlines()[0]}")
+        return redirect(back)
+    messages.success(request, "Merge split; the other Computer and its records are back.")
+    return redirect(back)
 
 
 def _history_computer_ids(cur, device_id) -> list:

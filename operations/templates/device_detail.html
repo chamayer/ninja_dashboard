@@ -426,6 +426,25 @@
     <a class="btn btn-secondary" href="{% url 'merge_candidate_group_review' merge_candidate.id %}">Review merge candidate →</a>
 </div>
 {% endif %}
+{% if open_merges %}
+<div class="card" id="merged-computers">
+    <h2 style="margin-top:0;">Merged into this Computer</h2>
+    <p class="muted">Each merge is recorded and can be split again; the other Computer and the records it brought return.</p>
+    <table class="ops-table">
+        <thead><tr><th>Computer</th><th>Merged</th><th>Why</th>{% if can_manage_lifecycle %}<th></th>{% endif %}</tr></thead>
+        <tbody>
+        {% for merge in open_merges %}
+        <tr>
+            <td>{{ merge.absorbed_name }}</td>
+            <td class="muted">{{ merge.merged_at|date:"Y-m-d H:i" }}{% if merge.automatic %} <span class="badge badge-info">automatic</span>{% endif %}</td>
+            <td class="muted">{{ merge.reason }}</td>
+            {% if can_manage_lifecycle %}<td><form method="post" action="{% url 'computer_merge_split' merge.id %}" style="display:flex; gap:.3rem;" onsubmit="return confirm('Split {{ merge.absorbed_name|escapejs }} off this Computer again?');">{% csrf_token %}<input type="hidden" name="next" value="{{ request.get_full_path }}#merged-computers"><input name="reason" maxlength="400" required placeholder="Reason" aria-label="Reason for splitting {{ merge.absorbed_name }}"><button type="submit">Split</button></form></td>{% endif %}
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}
 
 {% elif active_tab == 'patching' %}
 <div class="card">
