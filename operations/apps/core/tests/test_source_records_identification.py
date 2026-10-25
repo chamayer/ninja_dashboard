@@ -11,6 +11,7 @@ from django.template.loader import get_template
 from apps.core import views
 
 migration = importlib.import_module("apps.core.migrations.0344_source_record_layout_and_url")
+restriction = importlib.import_module("apps.core.migrations.0345_restricted_source_layouts")
 _ROOT = Path(__file__).resolve().parents[3]
 
 
@@ -93,3 +94,21 @@ def test_the_reason_filter_and_the_column_name_the_same_reasons():
     assert '<select name="layout">' in page and '<select name="reason">' in page
     # Paginated: the browser filter row would only see one page.
     assert "data-sortable data-server-table" in page
+
+
+def test_restricted_layouts_stay_collected_but_show_no_name_serial_or_link():
+    assert restriction.SETTINGS == {"layouts": ["Credit Card"]}
+    sql = " ".join(restriction.FORWARD_SQL.split())
+    for column in (
+        "canonical_hostname",
+        "reported_name",
+        "canonical_serial",
+        "vm_uuid",
+        "source_url",
+    ):
+        end = sql.index(f"AS {column}")
+        assert "NOT restricted.is_restricted" in sql[sql.rindex("CASE WHEN", 0, end) : end], column
+    assert "restriction.evaluator_name = 'restricted_source_layouts'" in sql
+    assert sql.index("AS source_url") < sql.index("AS restricted")
+    page = (_ROOT / "templates" / "source_records.html").read_text(encoding="utf-8")
+    assert "{% if record.restricted %}" in page

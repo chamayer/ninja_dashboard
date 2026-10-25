@@ -63,8 +63,11 @@ registry data, not code.
    `node_class_mappings` and join the same table. Admins edit it; a new
    layout appears as unclassified until mapped.
 3. **Sensitive layouts.** A mapping can mark a layout *excluded* (not
-   collected) or *restricted* (collected, never shown). "Credit Card" (9
-   records) is the first case and is decided before anything else.
+   collected) or *restricted* (collected, never shown). Decided 2026-10-25:
+   "Credit Card" (9 records) is **restricted**. The `evaluator_config` row
+   `restricted_source_layouts` lists such layouts (admin-managed), and the
+   safe metadata view returns no name, serial, VM UUID or link for them
+   (migration 0345).
 4. **Matching per class.** The existing entity-candidate workflow creates and
    attaches anchors of the mapped class, with that class's identity evidence.
    The same printer in Hudu and Auvik becomes one asset.
@@ -81,7 +84,7 @@ registry data, not code.
 | Phase | What | Needs |
 |---|---|---|
 | 0 (done, interim) | Source records shows reported name, source group, layout, source links, issue counts and *why unlinked* (migration 0344) | — |
-| 1 | Decide Credit Card and any other sensitive layouts: exclude or restrict | user decision |
+| 1 (decided) | Credit Card restricted: collected, details never shown (migration 0345) | — |
 | 2 | Mapping table + admin page; seed from today's layouts; unclassified shown | migration, design review of the seed |
 | 3 | Classes `location`, `service` (and `asset.kind`); candidates create anchors by class; measure matches before enabling attachment | migration, rehearsal |
 | 4 | Relationship types and their projection | migration |

@@ -200,7 +200,17 @@ Validation: Django check clean; Operations 4 failures (pre-existing);
 Layout and why-unlinked are server-side filters; the table is marked
 paginated. Committed as a3fb9df. Computers, software title and publisher
 pages have the same per-page filter problem (not changed).
-Next action: ADR-0044 phase 1 (decide the Credit Card layout).
+
+### Step H — Credit Card restricted (ADR-0044 phase 1)
+
+User decision 2026-10-25: keep collecting, never show details. Migration 0345
+seeds `evaluator_config` `restricted_source_layouts` = ["Credit Card"] and
+masks name, hostname, serial, VM UUID and link in the safe metadata view
+(appends `restricted`). Source records says "Details not shown". Rehearsed on
+production and rolled back: 9 restricted rows with 0 names/links; the other
+37,179 rows unchanged. Validation: Django check, makemigrations --check,
+`test_source_records_identification.py`, `test_table_controls.py`.
+Next action: ADR-0044 phase 2 (mapping table).
 
 ## Client mapping workflow — finish the single-inbox move
 

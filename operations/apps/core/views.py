@@ -16966,7 +16966,8 @@ def source_records(
                    observation.source_layout, observation.source_url,
                    device.entity_id, group_mapping.observed_name,
                    -- Operations proposed this record as something other than a Computer.
-                   {_PROPOSED_OTHER_SQL}
+                   {_PROPOSED_OTHER_SQL},
+                   observation.restricted
               FROM operations.v_entity_observation_admin_metadata observation
               JOIN operations.source_instances instance
                 ON instance.tenant_id = observation.tenant_id AND instance.id = observation.source_instance_id
@@ -17012,6 +17013,7 @@ def source_records(
                 "group_id": row[17] or "",
                 "group_name": row[23] or "",
                 "layout": row[20] or "",
+                "restricted": row[25],
                 "source_url": _source_record_url(row[1], row[2], row[3], row[21]),
                 "device_entity_id": row[22],
                 "unlinked_reason": _unlinked_reason(
