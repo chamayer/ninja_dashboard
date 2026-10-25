@@ -180,7 +180,27 @@ Committed 2026-10-25, not pushed: c40e13c stale cleanup, 8a33233 job replay,
 de31c6f move to new client, be55a72 promotion (0342), 00801d2 undo merge,
 49ce467 domains (0343). Local master also carries another session's
 unpushed eb4f7e1; user asked to review it before any push.
-Next action: review eb4f7e1, then push with user approval.
+Pushed 2026-10-25 20:26 UTC as 0c812db (with reviewed eb4f7e1); 0342 and
+0343 applied; Operations healthy 20:27.
+
+### Step G — Source records identifies records (interim for ADR-0044)
+
+Migration 0344 appends `source_layout` and `source_url` to the safe metadata
+view. Source records shows the reported name, the source group (mapped name
+or id), the Hudu layout, Open in Hudu / Ninja (Ninja device dashboard
+pattern, inlined; user: no shared helper for now), View evidence for admins,
+the record's Computer issue count and how many name this record, and why an
+unlinked record is unlinked (archived, stale link, group not mapped,
+proposed as an asset, not matched). Rehearsed read-only/rolled back on
+production: 5,215 unlinked rows, 5,192 with a layout; issue counts per
+record work. ADR-0044 (proposed) documents the taxonomy and phased plan;
+Hudu "Credit Card" (9 records) needs a decision first.
+Validation: Django check clean; Operations 4 failures (pre-existing);
+`test_source_records_identification.py`. Not browser-checked.
+Layout and why-unlinked are server-side filters; the table is marked
+paginated. Committed as a3fb9df. Computers, software title and publisher
+pages have the same per-page filter problem (not changed).
+Next action: ADR-0044 phase 1 (decide the Credit Card layout).
 
 ## Client mapping workflow — finish the single-inbox move
 

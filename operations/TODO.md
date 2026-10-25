@@ -88,6 +88,13 @@ module-specific; root `../TODO.md` keeps cross-repo items and pointers.
       `test_conditions.py` (2), `test_conditions_command.py` (1), and
       `test_e5_generic_admin.py` (1) — the conditions profile now has 61
       definitions against the expected 54.
+- [ ] **Entity kinds beyond computers** (ADR-0044, proposed 2026-10-25).
+      ~5,200 active records have no Computer, mostly Hudu documentation
+      (Auvik 2,863, Locations, Applications, Printing, WAN, ...). Plan:
+      decide sensitive layouts (Hudu "Credit Card", 9 records) first; then a
+      record-type-to-kind mapping table (admin data), classes `location` and
+      `service` plus `asset.kind`, relationships, inventory by kind. Interim:
+      Source records shows why each record is unlinked (0344).
 - [ ] **Overlapping source-group findings** (measured 2026-10-23,
       read-only): of 38 open `unmatched_source_group` findings, 28 are for
       groups already linked to a client (nothing resolves them) and 7 repeat an
