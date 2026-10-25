@@ -161,7 +161,8 @@
       <option value="move">Move to another client</option>
       <option value="ignore">Ignore</option>
     </select>
-    <select name="client_id" aria-label="Client to move to"><option value="">Move to…</option>{% for other in move_clients %}<option value="{{ other.id }}">{{ other.display_name }}</option>{% endfor %}</select>
+    <select name="client_id" aria-label="Client to move to"><option value="">Move to…</option><option value="new">New client…</option>{% for other in move_clients %}<option value="{{ other.id }}">{{ other.display_name }}</option>{% endfor %}</select>
+    <input name="new_client_name" maxlength="240" placeholder="New client name" aria-label="Name of the new client">
     <input name="reason" maxlength="400" required placeholder="Reason" aria-label="Reason for the selected source references">
     <button type="submit">Apply</button>
   </form>
@@ -184,7 +185,13 @@
         var dest = form.elements['client_id'];
         var target = dest.options[dest.selectedIndex];
         if (!dest.value) { alert('Choose the client to move to.'); return false; }
-        return confirm('Move ' + n + ' source group(s) to ' + target.text + '? Their records and Computers move with them.');
+        var label = target.text;
+        if (dest.value === 'new') {
+          label = (form.elements['new_client_name'].value || '').trim();
+          if (!label) { alert('Name the new client.'); return false; }
+          label = 'a new client "' + label + '"';
+        }
+        return confirm('Move ' + n + ' source group(s) to ' + label + '? Their records and Computers move with them.');
       };
     })();
   </script>

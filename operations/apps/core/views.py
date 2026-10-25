@@ -12686,13 +12686,22 @@ def client_mapping_bulk(request: HttpRequest) -> HttpResponse:
     if not link_ids or not reason or action not in {*_BULK_MAPPING_STATES, "move"}:
         messages.error(request, "Select at least one source reference, an action and a reason.")
         return redirect(back)
-    if action == "move" and not target:
+    new_name = (request.POST.get("new_client_name") or "").strip()
+    if action == "move" and (not target or (target == "new" and not new_name)):
         messages.error(request, "Choose the client to move the selected source groups to.")
         return redirect(back)
     moved = {"records": 0, "computers_moved": 0, "computers_mixed": 0}
     try:
         with transaction.atomic(), connection.cursor() as cur:
             cur.execute("SET LOCAL operations.tenant_id = 1")
+            if action == "move" and target == "new":
+                # A client an operator names here is decided, not provisional.
+                cur.execute(
+                    "SELECT operations.begin_change('client.create', %s, '{}'::jsonb,"
+                    " 'operator', %s, 'operations.ui', '', 1, true)",
+                    [reason, request.user.pk],
+                )
+                target = str(_new_client(new_name, "client_mapping.move_to_new").id)
             for link_id in link_ids:
                 if action == "move":
                     cur.execute(
@@ -17414,6 +17423,36 @@ def _local_path(value: str | None) -> str:
     return value if value.startswith("/") and not value.startswith("//") else ""
 
 
+def _new_client(display_name: str, reason: str, profile=None) -> Client:
+    """Create a client with a unique slug, anchored by a tenant entity sharing its id.
+
+    ADR-0012; migration 0120 made the anchor required.
+    """
+    base_slug = slugify(display_name)[:110] or "client"
+    slug = base_slug
+    suffix = 1
+    while Client.objects.filter(tenant_id=1, slug=slug).exists():
+        suffix += 1
+        slug = f"{base_slug}-{suffix}"
+    reason = reason[:120]
+    entity = Entity.objects.create(
+        tenant_id=1,
+        entity_class_id="client",
+        scope_kind=Entity.ScopeKind.TENANT,
+        created_reason=reason,
+        updated_reason=reason,
+    )
+    return Client.objects.create(
+        id=entity.id,
+        entity=entity,
+        tenant_id=1,
+        slug=slug,
+        display_name=display_name,
+        requirement_profile=profile,
+        created_reason=reason,
+    )
+
+
 @login_required
 @require_POST
 @transaction.atomic
@@ -17438,32 +17477,7 @@ def client_candidate_accept(request, candidate_id) -> HttpResponse:
         if profile.is_tenant_default:
             profile = None
 
-    base_slug = slugify(display_name)[:110] or "client"
-    slug = base_slug
-    suffix = 1
-    while Client.objects.filter(tenant_id=1, slug=slug).exists():
-        suffix += 1
-        slug = f"{base_slug}-{suffix}"
-
-    # A client is anchored by a tenant-scoped entity that shares its id
-    # (ADR-0012; migration 0120 made the anchor required).
-    reason = f"candidate.accept:{candidate.id}"[:120]
-    entity = Entity.objects.create(
-        tenant_id=1,
-        entity_class_id="client",
-        scope_kind=Entity.ScopeKind.TENANT,
-        created_reason=reason,
-        updated_reason=reason,
-    )
-    client = Client.objects.create(
-        id=entity.id,
-        entity=entity,
-        tenant_id=1,
-        slug=slug,
-        display_name=display_name,
-        requirement_profile=profile,
-        created_reason=reason,
-    )
+    client = _new_client(display_name, f"candidate.accept:{candidate.id}", profile)
 
     ClientNameAlias.objects.update_or_create(
         tenant_id=1,

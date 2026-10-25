@@ -115,3 +115,39 @@ def test_the_client_page_selects_one_several_or_all_source_references():
     assert "{% url 'client_mapping_bulk' %}" in page
     for value in ("confirm", "move", "ignore"):
         assert f'<option value="{value}">' in page
+
+
+def test_bulk_move_to_a_new_client_creates_it_then_moves_every_selected_group():
+    created = SimpleNamespace(id=uuid.UUID(int=42))
+    cursor = mock.MagicMock()
+    cursor.fetchone.return_value = (
+        {"records": 3, "computers_moved": 1, "computers_mixed": 0, "to_client": "Rize NYC"},
+    )
+    ids = [str(uuid.uuid4()), str(uuid.uuid4())]
+    with mock.patch.object(views, "_new_client", return_value=created) as new_client:
+        _, cursor, messages = _bulk(
+            {
+                "link_ids": ids,
+                "action": "move",
+                "client_id": "new",
+                "new_client_name": "Rize NYC",
+                "reason": "renamed client",
+            },
+            cursor,
+        )
+    new_client.assert_called_once_with("Rize NYC", "client_mapping.move_to_new")
+    moves = [
+        c.args[1]
+        for c in cursor.execute.call_args_list
+        if "move_client_source_group_v1" in c.args[0]
+    ]
+    assert moves == [[i, str(created.id), "renamed client", 7] for i in ids]
+    messages.success.assert_called_once()
+
+
+def test_a_new_client_needs_a_name():
+    _, cursor, messages = _bulk(
+        {"link_ids": [str(uuid.uuid4())], "action": "move", "client_id": "new", "reason": "x"}
+    )
+    cursor.execute.assert_not_called()
+    messages.error.assert_called_once()
