@@ -194,6 +194,7 @@ def run() -> int:
     operator_job_queue.register_definition_snapshots()
     operator_job_queue.register_recovery_policies()
     operator_job_queue.reconcile_replay_safe_containment()
+    operator_job_queue.replay_interrupted_runs()
     worker_incarnation = uuid.uuid4()
     children: dict[uuid.UUID, _Child] = {}
     _READY_PATH.touch()
@@ -209,6 +210,7 @@ def run() -> int:
                 # recovery API cannot strand reviewed work until another deploy.
                 operator_job_queue.register_recovery_policies()
                 operator_job_queue.reconcile_replay_safe_containment()
+                operator_job_queue.replay_interrupted_runs()
                 operator_job_queue.record_runtime_heartbeat(
                     "worker",
                     worker_incarnation,

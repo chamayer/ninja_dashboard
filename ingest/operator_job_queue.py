@@ -21,6 +21,7 @@ from ingest import db
 from ingest.config import settings
 from shared.jobs_registry import (
     REPLAY_SAFE_RECOVERY_EVIDENCE,
+    RegistryValidationError,
     definition,
     definition_keys,
     definitions,
@@ -168,6 +169,94 @@ def reconcile_replay_safe_containment() -> int:
     if released:
         log.warning("Jobs reconciled %d replay-safe contained run(s)", released)
     return released
+
+
+_REPLAY_WINDOW_HOURS = 6
+
+_INTERRUPTED_REPLAY_SAFE_SQL = """
+SELECT run.id, run.job_key, run.scope_identity, run.request_payload
+  FROM operations.operator_job_runs run
+  JOIN operations.job_recovery_assessments assessment
+    ON assessment.tenant_id = run.tenant_id AND assessment.run_id = run.id
+   AND assessment.recovery_mode = 'replay_safe'
+ WHERE run.tenant_id = %s
+   AND run.status = 'stalled' AND run.terminal_reason = 'worker_interrupted'
+   AND run.completed_at > now() - %s * interval '1 hour'
+   -- Once only: a replay that is interrupted again waits for an administrator.
+   AND run.trigger_kind <> 'recovery'
+   AND NOT EXISTS (SELECT 1 FROM operations.operator_job_runs retry
+                    WHERE retry.tenant_id = run.tenant_id AND retry.retry_of_run_id = run.id)
+   -- A later run of the same work (the next schedule) already covers it.
+   AND NOT EXISTS (SELECT 1 FROM operations.operator_job_runs later
+                    WHERE later.tenant_id = run.tenant_id AND later.job_key = run.job_key
+                      AND later.scope_identity = run.scope_identity
+                      AND later.requested_at > run.requested_at
+                      AND later.status IN ('queued', 'running', 'completed'))
+ ORDER BY run.requested_at
+"""
+
+
+def replay_interrupted_runs() -> int:
+    """Request again the replay-safe runs a worker restart interrupted.
+
+    ``reconcile_replay_safe_containment`` releases their claims; without a new
+    request the work and everything it would admit (a source refresh admits
+    the resolver and evaluators) waits for the next schedule. Only reviewed
+    replay-safe definitions qualify (``REPLAY_SAFE_RECOVERY_EVIDENCE``,
+    ADR-0024), each run is replayed at most once, and the request identity is
+    derived from the interrupted run so a repeated call is idempotent.
+    """
+    replayed = 0
+    try:
+        with db.transaction() as cur:
+            cur.execute("SET LOCAL operations.tenant_id = 1")
+            cur.execute(_INTERRUPTED_REPLAY_SAFE_SQL, (1, _REPLAY_WINDOW_HOURS))
+            for run_id, job_key, scope_identity, payload in cur.fetchall():
+                try:
+                    job = definition(job_key)
+                except RegistryValidationError:
+                    continue
+                cur.execute("SAVEPOINT replay_run")
+                request_api = (
+                    "operations.jobs_request_software_v1"
+                    if job.supersession_family == "software-classifier"
+                    else "operations.jobs_request"
+                )
+                try:
+                    cur.execute(
+                        f"SELECT {request_api}(%s, %s, %s, %s, %s, %s, NULL, %s::jsonb,"
+                        " %s::jsonb, NULL)",
+                        (
+                            1,
+                            job.key,
+                            job.snapshot_digest(),
+                            scope_identity,
+                            hashlib.sha256(f"recovery:{run_id}".encode()).hexdigest(),
+                            "recovery",
+                            json.dumps(payload or {}),
+                            "{}",
+                        ),
+                    )
+                    new_run_id = cur.fetchone()[0]
+                    cur.execute(
+                        "SELECT operations.jobs_link_retry_v1(%s, %s, %s)",
+                        (1, new_run_id, run_id),
+                    )
+                    _admit_workflow(cur, job.key, new_run_id, scope_identity)
+                except RaiseException:
+                    # Refused by the Jobs API (e.g. an equivalent run is queued).
+                    cur.execute("ROLLBACK TO SAVEPOINT replay_run")
+                    continue
+                cur.execute("RELEASE SAVEPOINT replay_run")
+                replayed += 1
+    except UndefinedFunction:
+        return 0
+    except Exception:
+        log.exception("Jobs replay of interrupted runs failed")
+        return 0
+    if replayed:
+        log.warning("Jobs requested %d interrupted replay-safe run(s) again", replayed)
+    return replayed
 
 
 def _schedule_cadence(schedule: Any) -> dict[str, int | str]:
