@@ -104,7 +104,83 @@ groups). No migration.
 Validation: Django check clean; Operations 4 and ingest 5 failures, all
 pre-existing; `test_client_name_drift_contract.py` rewritten for the
 per-client contract. Not browser-checked.
-Next action: user approves commit and push.
+Shipped in a9efa19 (no migration, deployed 15:28 UTC).
+
+### Step D — automatic client promotion (ADR-0041, accepted 2026-10-23)
+
+User decisions: map on 2+ computer names owned only by one client; creation
+built and switched on; build approved. Migration 0342: provisional marker on
+clients (`provisional_since/_reason`, `verified_at/_by`),
+`promote_client_candidate_v1` (one recorded change: provisional client as
+Accept creates it, or an existing client; source-tier alias; candidate closed
+by the resolver), `evaluator_config` row `client_promotion` (thresholds,
+required source "Ninja"). `shared/client_evidence.py` holds the
+computer-name and kept-separate rules for the candidate page and the
+resolver. Resolver step `_promote_candidates` runs before name matching so
+the alias attaches the groups in the same run. Inventory › Clients:
+"Promoted automatically — verify" (verify, retire an emptied provisional
+client) and the settings form.
+Validation: Django check clean; makemigrations clean; Operations 4 and
+ingest 5 failures, all pre-existing; new `test_client_promotion.py`,
+`test_client_promotion_views.py`; lint/format unchanged per file except
+other sessions' hunks. Production rehearsal (rolled back) prepared but not
+run: SSH to the host timed out at about 16:35 UTC. Not browser-checked.
+Production 2026-10-23 (read-only): would map "MDA" (R-U-ON) to Prompt
+(3 names); creates nothing (no open candidate is reported by 2+ sources).
+Resolver had still not run after the 15:35 collection (collection still
+running at 16:03); Jobs re-queue gap is in TODO.
+Next action: run the rehearsal when SSH is back, then user approves commit
+and push (migration 0342 adds columns to clients; quick).
+
+### Step E — follow-ups built while SSH was down (2026-10-23)
+
+User chose: build stale-finding cleanup, move to a new client, undo-merge
+button, re-run interrupted jobs; domains learned + editable (ADR-0042
+proposed); "One machine or two?" design first (ADR-0043 proposed); name
+matching after checking real data.
+- Stale `unmatched_source_group`: the resolver deletes rows whose group now
+  has a client link and closes findings whose row is gone (race: a
+  collection before the next link sync re-recorded attached groups).
+- Move to a new client: "New client…" in the client page move; the client is
+  created as Accept creates it (`_new_client`, shared with Accept), then the
+  ADR-0040 move runs. No migration.
+- Undo merge: "Merged into this Computer" on the Computer overview, Split
+  with a reason (`computer_merge_split` → `split_computer_merge`), both
+  Computers named again.
+- Interrupted jobs: `replay_interrupted_runs` requests again each
+  replay-safe run a worker restart interrupted (trigger `recovery`, linked as
+  a retry, deterministic request identity, once only, skipped when a later
+  run covers it); called beside `reconcile_replay_safe_containment`.
+Validation: Django check clean; Operations 4 and ingest 5 failures, all
+pre-existing; new tests for each. None rehearsed on production yet (SSH
+down). Not browser-checked.
+Next action: when SSH is back, rehearse 0342 and 0343, check the stale rows
+and a source-refresh scope on production, then commit each change
+separately with user approval.
+
+### Step F — client domains (ADR-0042, accepted 2026-10-23)
+
+Open point settled: claims are one source record's assertion (observation
+and source field mapping are required), so learned domains are computed when
+read (`apps/core/client_domains.py`) and nothing stores them; operator edits
+are `client.domains` set decisions through `set_attribute_decision`
+(add/remove members; restore drops the edit). Migration 0343 registers the
+definition and `evaluator_config` row `client_domains` (min 2 computers;
+ignored workgroup/local/...). Client page "Domains": learned (with computer
+count), added, removed, with Add/Remove/Restore and a reason (permission
+`write_decisions`). Context key is `domain_names` (`client_domains` is taken
+by the status panels). Not yet on Inventory › Clients.
+Validation: Django check clean; Operations 4 failures (pre-existing);
+`test_client_domains.py`. Not rehearsed (SSH down); not browser-checked.
+ADR-0043 accepted; build waits for production measurements.
+Rehearsed 2026-10-25 (rolled back): 0342 mapped MDA to Prompt and created a
+provisional client; 0343 registered the definition; checks passed. Preview:
+62 clients, 127 learned domains (NetBIOS short names appear beside DNS ones).
+Committed 2026-10-25, not pushed: c40e13c stale cleanup, 8a33233 job replay,
+de31c6f move to new client, be55a72 promotion (0342), 00801d2 undo merge,
+49ce467 domains (0343). Local master also carries another session's
+unpushed eb4f7e1; user asked to review it before any push.
+Next action: review eb4f7e1, then push with user approval.
 
 ## Client mapping workflow — finish the single-inbox move
 
