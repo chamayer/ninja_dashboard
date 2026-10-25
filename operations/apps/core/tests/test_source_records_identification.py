@@ -12,6 +12,7 @@ from apps.core import views
 
 migration = importlib.import_module("apps.core.migrations.0344_source_record_layout_and_url")
 restriction = importlib.import_module("apps.core.migrations.0345_restricted_source_layouts")
+join_once = importlib.import_module("apps.core.migrations.0346_restricted_layouts_join_once")
 _ROOT = Path(__file__).resolve().parents[3]
 
 
@@ -112,3 +113,22 @@ def test_restricted_layouts_stay_collected_but_show_no_name_serial_or_link():
     assert sql.index("AS source_url") < sql.index("AS restricted")
     page = (_ROOT / "templates" / "source_records.html").read_text(encoding="utf-8")
     assert "{% if record.restricted %}" in page
+
+
+def test_restricted_layouts_are_read_once_per_query():
+    sql = " ".join(join_once.FORWARD_SQL.split())
+    assert "LEFT JOIN operations.evaluator_config restriction" in sql
+    assert "EXISTS (SELECT 1 FROM operations.evaluator_config" not in sql
+    assert (
+        "REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON operations.v_entity_observation_admin_metadata"
+        in sql
+    )
+    for column in (
+        "canonical_hostname",
+        "reported_name",
+        "canonical_serial",
+        "vm_uuid",
+        "source_url",
+    ):
+        end = sql.index(f"AS {column}")
+        assert "NOT restricted.is_restricted" in sql[sql.rindex("CASE WHEN", 0, end) : end], column
