@@ -97,7 +97,7 @@ def fetch(source: SourceConfig, observed_at: datetime) -> list[dict]:
             else _ci_get(host, "online")
         )
         raw_data = dict(host)
-        raw_data["_agent_compliance"] = {
+        raw_data["_collector"] = {
             "lmi_group_id": str(group_id or ""),
             "lmi_group_name_resolved": bool(group_name),
             "lmi_group_map_size": len(group_map),

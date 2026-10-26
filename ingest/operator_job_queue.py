@@ -25,7 +25,6 @@ from shared.jobs_registry import (
     definition,
     definition_keys,
     definitions,
-    legacy_job_definition_keys,
     registry_digest,
     schedule_definitions,
     validate_registry,
@@ -289,8 +288,6 @@ _PENDING_WORK_QUERIES = {
 def _schedule_enabled(job_key: str) -> tuple[bool, str]:
     """Apply the existing capability gates before automatic admission."""
     job = definition(job_key)
-    if job_key in legacy_job_definition_keys():
-        return False, "Disabled — retired legacy bridge."
     if job.capability == "pending_work":
         # The schedule runs only while the Job has pending work.
         with db.transaction() as cur:
@@ -915,10 +912,6 @@ def _execute(job_key: str, progress: V1JobProgress) -> int | JobExecutionResult 
             "Evaluating CMDB conditions",
             lambda: sum(cmdb_findings.evaluate(dry_run=False).values()),
         ),
-        "parity-check": (
-            "Checking operational parity",
-            lambda: main.parity_check_run(tenant_id=1),
-        ),
         "software-classify-only": (
             "Reconciling software findings",
             lambda: _software_reconcile(progress),
@@ -946,18 +939,6 @@ def _execute(job_key: str, progress: V1JobProgress) -> int | JobExecutionResult 
         "documentation-observations": (
             "Collecting Hudu records",
             lambda: main.run_documentation_observations_once(),
-        ),
-        "agent-compliance": (
-            "Refreshing agent compliance",
-            lambda: main.run_agent_compliance_once(),
-        ),
-        "agent-compliance-evaluate": (
-            "Reviewing agent compliance",
-            lambda: main.run_agent_compliance_evaluate_once(),
-        ),
-        "agent-compliance-review-digest": (
-            "Preparing agent compliance review digest",
-            lambda: main.run_review_digest_once(),
         ),
         "retention-history": (
             "Cleaning closed history",

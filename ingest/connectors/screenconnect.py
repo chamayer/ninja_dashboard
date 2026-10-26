@@ -67,7 +67,7 @@ def fetch(source: SourceConfig, observed_at: datetime) -> list[dict]:
         raw = dict(session)
         count = session_counts.get(norm, 1)
         raw["IsDup"] = count > 1
-        raw["_agent_compliance"] = {
+        raw["_collector"] = {
             "sc_session_count": count,
             "sc_is_dup": count > 1,
         }

@@ -1,7 +1,7 @@
 """Daily review digest (Track 2.3).
 
-Aggregates findings with confidence < confirmed (the review class,
-per legacy review_digest.py:27-60) into totals + by_client + by_type,
+Aggregates findings with confidence < confirmed (the review class)
+into totals + by_client + by_type,
 sends to any notification_route with mode='digest'.
 """
 

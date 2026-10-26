@@ -102,7 +102,6 @@ class JobDefinition:
     owner: str
     capability: str = "always"
     run_all: bool = True
-    legacy_bridge: bool = False
     schedule_ids: tuple[str, ...] = ()
     capacity_keys: tuple[str, ...] = ()
     resource_keys: tuple[str, ...] = ()
@@ -133,8 +132,6 @@ class JobDefinition:
         }
         if not self.run_all:
             entry["run_all"] = False
-        if self.legacy_bridge:
-            entry["legacy_bridge"] = True
         return entry
 
     def snapshot_metadata(self) -> dict[str, object]:
@@ -311,61 +308,6 @@ _RAW_DEFINITIONS = (
         "run_log",
         "ingest.identity.resolver.drain_resolution",
         schedule_ids=("identity_resolver_cycle",),
-    ),
-    JobDefinition(
-        "parity-check",
-        "Parity check",
-        "Find gaps between collected data and Operations.",
-        "evaluators",
-        "evaluation",
-        "run/parity-check",
-        "parity_check",
-        "run_log",
-        "ingest.parity_check.run",
-    ),
-    JobDefinition(
-        "agent-compliance",
-        "Agent compliance",
-        "Refresh the legacy agent-compliance bridge when it is enabled.",
-        "evaluators",
-        "evaluation",
-        "run/agent-compliance",
-        "agent_compliance",
-        "run_log",
-        "ingest.agent_compliance.ingest.run",
-        capability="legacy_agent_compliance",
-        run_all=False,
-        legacy_bridge=True,
-        schedule_ids=("agent_compliance_ingest_cycle",),
-    ),
-    JobDefinition(
-        "agent-compliance-evaluate",
-        "Agent compliance review",
-        "Reassess the legacy agent-compliance bridge when it is enabled.",
-        "evaluators",
-        "evaluation",
-        "run/agent-compliance/evaluate",
-        "agent_compliance.evaluate",
-        "run_log",
-        "ingest.agent_compliance.ingest.evaluate",
-        capability="legacy_agent_compliance",
-        run_all=False,
-        legacy_bridge=True,
-        schedule_ids=("agent_compliance_evaluate_cycle",),
-    ),
-    JobDefinition(
-        "agent-compliance-review-digest",
-        "Agent compliance review digest",
-        "Send the enabled legacy agent-compliance review summary.",
-        "notifications",
-        "service",
-        "run/agent-compliance-review-digest",
-        "agent_compliance.review_digest",
-        "run_log",
-        "ingest.main.run_review_digest_once",
-        capability="legacy_agent_compliance",
-        run_all=False,
-        legacy_bridge=True,
     ),
     JobDefinition(
         "intel-kev",
@@ -773,10 +715,6 @@ REPLAY_SAFE_RECOVERY_EVIDENCE = MappingProxyType(
             "Diagnostic recovery only closes stale local run-log rows. A later replay "
             "finds nothing further to close and has no external mutation."
         ),
-        "parity-check": (
-            "The parity check reads local state and rewrites local parity and run-log "
-            "records. A later replay converges and has no external mutation."
-        ),
         "intel-winget": (
             "The Windows package refresh only reads public package metadata and "
             "performs transaction-scoped upserts of local safety signals. A later "
@@ -877,16 +815,6 @@ _SCHEDULE_DEFINITIONS = (
         "OBSERVATION_HISTORY_RETENTION_HOUR",
         "cron-hour",
     ),
-    ScheduleDefinition(
-        "agent_compliance_ingest_cycle",
-        "agent-compliance",
-        "AGENT_COMPLIANCE_SCHEDULE_HOURS",
-    ),
-    ScheduleDefinition(
-        "agent_compliance_evaluate_cycle",
-        "agent-compliance-evaluate",
-        "AGENT_COMPLIANCE_SCHEDULE_HOURS",
-    ),
     ScheduleDefinition("intel_nvd_cycle", "intel-nvd", "INTEL_NVD_SCHEDULE_HOURS"),
     ScheduleDefinition(
         "intel_cpe_dict_cycle", "intel-cpe-dict", "INTEL_CATALOG_SCHEDULE_HOURS"
@@ -970,13 +898,6 @@ _RESOURCE_KEYS_BY_DEFINITION: dict[str, tuple[str, ...]] = {
     "platform-evaluate": ("tenant:{tenant_id}:platform-findings",),
     "cmdb-evaluate": ("tenant:{tenant_id}:cmdb-findings",),
     "resolver": ("tenant:{tenant_id}:identity-state",),
-    "parity-check": ("tenant:{tenant_id}:parity-state",),
-    "agent-compliance": ("tenant:{tenant_id}:legacy-agent-compliance",),
-    "agent-compliance-evaluate": ("tenant:{tenant_id}:legacy-agent-compliance",),
-    "agent-compliance-review-digest": (
-        "tenant:{tenant_id}:legacy-agent-compliance",
-        "tenant:{tenant_id}:notification-delivery",
-    ),
     "intel-kev": (),
     "intel-nvd": (),
     "intel-cpe-dict": (),
@@ -1031,10 +952,6 @@ _CAPACITY_KEYS_BY_DEFINITION: dict[str, tuple[str, ...]] = {
     "platform-evaluate": ("capacity:processing",),
     "cmdb-evaluate": ("capacity:processing",),
     "resolver": ("capacity:processing",),
-    "parity-check": ("capacity:processing",),
-    "agent-compliance": ("capacity:processing",),
-    "agent-compliance-evaluate": ("capacity:processing",),
-    "agent-compliance-review-digest": ("capacity:control",),
     "intel-kev": (),
     "intel-nvd": (),
     "intel-cpe-dict": (),
@@ -1125,9 +1042,6 @@ _WORKFLOW_SUCCESSORS = MappingProxyType(
             DependencyDefinition(
                 "software-classify-only", "software.inventory-fleet", "material_change"
             ),
-        ),
-        "agent-compliance": (
-            DependencyDefinition("resolver", "agent-compliance.observations"),
         ),
         "intel-nvd": (
             DependencyDefinition("intel-matcher", "intel.cves", "material_change"),
@@ -1290,13 +1204,6 @@ _SOURCE_OWNED_DEFINITION_KEYS = frozenset(
         "intel-endoflife",
     }
 )
-_LEGACY_JOB_KEYS = frozenset(
-    {
-        "agent-compliance",
-        "agent-compliance-evaluate",
-        "agent-compliance-review-digest",
-    }
-)
 _JOB_MODE_PARENT = MappingProxyType(
     {
         "software-classify": "software-classify-only",
@@ -1343,10 +1250,6 @@ _JOB_PRESENTATION = MappingProxyType(
         "resolver": (
             "Match records",
             "Match source records to the correct client and computer.",
-        ),
-        "parity-check": (
-            "Check data consistency",
-            "Check that collected data is represented in Operations.",
         ),
         "intel-kev": (
             "Update known exploited vulnerabilities",
@@ -1448,7 +1351,6 @@ _OPERATOR_JOB_GROUP_BY_KEY = MappingProxyType(
         "patch-classify": "analysis",
         "platform-evaluate": "analysis",
         "cmdb-evaluate": "analysis",
-        "parity-check": "maintenance",
         "retention-history": "maintenance",
         "notifications-dispatch": "notifications",
         "notifications-digest": "notifications",
@@ -1462,10 +1364,10 @@ def operator_job_group_definitions() -> tuple[tuple[str, str], ...]:
 
 
 def operator_job_definitions() -> tuple[OperatorJobDefinition, ...]:
-    """Return the Jobs catalog; System services and legacy bridges stay out."""
+    """Return the Jobs catalog; System services stay out."""
     members: dict[str, list[str]] = {}
     for item in _DEFINITIONS:
-        if item.key in _SYSTEM_SERVICE_KEYS or item.key in _LEGACY_JOB_KEYS:
+        if item.key in _SYSTEM_SERVICE_KEYS:
             continue
         catalog_key = _JOB_MODE_PARENT.get(item.key, item.key)
         members.setdefault(catalog_key, []).append(item.key)
@@ -1510,17 +1412,13 @@ def operator_job_definition(key: str) -> OperatorJobDefinition:
 
 def operator_job_key_for_execution(key: str) -> str | None:
     """Return the visible Job owning an execution key, or None for services."""
-    if key not in _INDEX or key in _SYSTEM_SERVICE_KEYS or key in _LEGACY_JOB_KEYS:
+    if key not in _INDEX or key in _SYSTEM_SERVICE_KEYS:
         return None
     return _JOB_MODE_PARENT.get(key, key)
 
 
 def system_service_definition_keys() -> frozenset[str]:
     return _SYSTEM_SERVICE_KEYS
-
-
-def legacy_job_definition_keys() -> frozenset[str]:
-    return _LEGACY_JOB_KEYS
 
 
 def workflow_edges(
@@ -1664,9 +1562,7 @@ def capability_state(
     job = definition(definition_key)
     if enabled_capabilities.get(job.capability, job.capability == "always"):
         return True, "Available"
-    capability_label = {
-        "legacy_agent_compliance": "legacy bridge",
-    }.get(job.capability, job.capability.replace("_", " "))
+    capability_label = job.capability.replace("_", " ")
     return False, f"Disabled — {capability_label} is not enabled."
 
 

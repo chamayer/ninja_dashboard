@@ -1,9 +1,8 @@
 """Platform-health findings: ingest and durable Jobs control-plane health.
 
 Two conditions were registered as `finding_class='admin'` finding types but
-nothing ever emitted them. Meanwhile `activities` failed 20 times in 7 days,
-`agent_compliance` 11 times, and `software.activity` sat at 4x its configured
-`max_depth` — all silent. This module closes that gap.
+nothing ever emitted them. Meanwhile `activities` failed 20 times in 7 days
+and `software.activity` sat at 4x its configured `max_depth` — all silent. This module closes that gap.
 
   - `source_failure`         — a configured source binding whose latest
                                collection failed or became overdue.

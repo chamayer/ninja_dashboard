@@ -16,7 +16,6 @@ from shared.jobs_registry import (
     definition,
     definition_keys,
     definitions,
-    legacy_job_definition_keys,
     operator_job_definitions,
     operator_job_group_definitions,
     operator_job_key_for_execution,
@@ -33,7 +32,7 @@ ROOT = Path(__file__).resolve().parents[4]
 def test_registry_has_one_catalog_and_schedule_owner_per_definition():
     keys = definition_keys()
 
-    assert len(keys) == 37
+    assert len(keys) == 33
     assert {entry["id"] for entry in catalog_entries()} == keys
     assert scheduled_definition_keys() < keys
     assert definition("patches").lane == "collection"
@@ -95,11 +94,8 @@ def test_operator_jobs_have_one_visible_boundary_and_services_stay_outside():
         == "After Hudu refresh"
     )
     assert set(system_service_definition_keys()).isdisjoint(visible_execution_keys)
-    assert set(legacy_job_definition_keys()).isdisjoint(visible_execution_keys)
     assert (
-        visible_execution_keys
-        | set(system_service_definition_keys())
-        | set(legacy_job_definition_keys())
+        visible_execution_keys | set(system_service_definition_keys())
         == definition_keys()
     )
     group_keys = {key for key, _label in operator_job_group_definitions()}
@@ -140,10 +136,6 @@ def test_initial_workflow_edges_are_registered_and_acyclic():
             "software.inventory-fleet",
             "material_change",
         ),
-    )
-    assert shape("agent-compliance") == (
-        ("agent-compliance", "resolver", "agent-compliance.observations", "always"),
-        ("resolver", "platform-evaluate", "identity.current", "always"),
     )
     assert shape("intel-nvd") == ()
     assert shape("intel-nvd", frozenset({"material_change"})) == (
@@ -229,20 +221,10 @@ def test_registered_http_jobs_use_governed_admission_before_legacy_routes():
     assert "bootstrap_metabase" not in main
 
 
-def test_capability_labels_do_not_make_unreviewed_execution_safe():
-    enabled, label = capability_state("agent-compliance", {"legacy_agent_compliance": False})
+def test_capability_labels_name_the_missing_capability():
+    enabled, label = capability_state("intel-kev", {"intel": False})
     assert not enabled
-    assert label == "Disabled — legacy bridge is not enabled."
-    assert definition("agent-compliance").retry_policy == "manual_only_unreviewed"
-    assert not definition("agent-compliance").kill_safe
-
-
-def test_legacy_definitions_cannot_be_automatically_scheduled():
-    queue = (ROOT / "ingest" / "operator_job_queue.py").read_text(encoding="utf-8")
-
-    assert "if job_key in legacy_job_definition_keys():" in queue
-    assert 'return False, "Disabled — retired legacy bridge."' in queue
-    assert "settings.AGENT_COMPLIANCE_ENABLED" not in queue
+    assert label == "Disabled — intel is not enabled."
 
 
 def test_registry_exposes_the_approved_pool_and_resource_policy():

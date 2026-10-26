@@ -82,7 +82,7 @@ def fetch(source: SourceConfig, observed_at: datetime) -> list[dict]:
         # raw_data["rolePolicy"] / raw_data["rolePolicyName"], none of
         # which exist on /v2/devices-detailed — Ninja only returns the
         # policy IDs there. Resolve through ninja_core.policies instead.
-        raw_data["_agent_compliance"] = {
+        raw_data["_collector"] = {
             "no_av_exempt": (
                 _contains_no_av(raw_data.get("tags"))
                 or _contains_no_av(row.get("policy_name"))

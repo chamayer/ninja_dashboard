@@ -52,7 +52,6 @@ from shared.jobs_registry import (
     definition,
     definition_keys,
     definitions,
-    legacy_job_definition_keys,
     operator_job_definition,
     operator_job_definitions,
     operator_job_group_definitions,
@@ -10048,7 +10047,6 @@ def admin_jobs_control_plane(request: HttpRequest) -> HttpResponse:
             for execution_key in job.execution_keys
         }
         service_keys = system_service_definition_keys()
-        legacy_keys = legacy_job_definition_keys()
         all_rows = []
         for item in definitions():
             visible_job = visible_jobs.get(item.key)
@@ -10057,8 +10055,6 @@ def admin_jobs_control_plane(request: HttpRequest) -> HttpResponse:
                 if visible_job
                 else "System service"
                 if item.key in service_keys
-                else "Legacy entry"
-                if item.key in legacy_keys
                 else "Unclassified"
             )
             all_rows.append(
@@ -10165,10 +10161,6 @@ def admin_jobs(request: HttpRequest) -> HttpResponse:
         refresh_setting = "30"
     enabled_capabilities = {
         "always": True,
-        "legacy_agent_compliance": os.environ.get("AGENT_COMPLIANCE_ENABLED", "false")
-        .strip()
-        .lower()
-        in {"1", "true", "yes", "on"},
         "intel": os.environ.get("INTEL_ENABLED", "false").strip().lower()
         in {"1", "true", "yes", "on"},
         "notifications": os.environ.get("NOTIFY_ENABLED", "false").strip().lower()

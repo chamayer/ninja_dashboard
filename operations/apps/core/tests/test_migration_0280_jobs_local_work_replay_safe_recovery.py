@@ -7,9 +7,6 @@ EXTERNAL_EFFECT_JOBS = {
     "notifications-dispatch",
     "notifications-digest",
     "source-actions",
-    "agent-compliance",
-    "agent-compliance-evaluate",
-    "agent-compliance-review-digest",
     "retention-history",
 }
 
@@ -32,8 +29,10 @@ def test_each_approved_job_matches_its_registry_evidence():
     # Migration 0285 restates the two inventory Jobs' evidence after the
     # inventory rebuild; its own test checks those against the registry.
     restated = {"software-queue-drain", "software-enqueue-orgs"}
+    # Parity check was retired with agent compliance (PLAN-022).
+    retired = {"parity-check"}
     for key, evidence in approved.items():
-        if key not in restated:
+        if key not in restated | retired:
             assert REPLAY_SAFE_RECOVERY_EVIDENCE[key] == evidence
 
 

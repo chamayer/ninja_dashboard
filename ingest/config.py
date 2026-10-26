@@ -43,8 +43,6 @@ class Settings(BaseSettings):
     # ── Ingest behavior ──────────────────────────────────────────────
     INGEST_SCHEDULE_HOURS: int = Field(default=1, ge=1, le=24)
     PATCH_INGEST_SCHEDULE_HOURS: int | None = Field(default=None, ge=1, le=24)
-    AGENT_COMPLIANCE_ENABLED: bool = False
-    AGENT_COMPLIANCE_SCHEDULE_HOURS: int = Field(default=4, ge=1, le=24)
     # Documentation sources (Hudu) collect independently from agent telemetry.
     # The scheduler caps the effective interval at four hours so inventory
     # evidence does not remain stale across normal deployment activity.
@@ -63,7 +61,6 @@ class Settings(BaseSettings):
     SOFTWARE_QUEUE_ENABLED: bool = False
     SOFTWARE_QUEUE_POLL_MINUTES: int = Field(default=5, ge=1, le=60)
     SOFTWARE_QUEUE_WORKER_BATCH: int = Field(default=3, ge=1, le=20)
-    AGENT_COMPLIANCE_EVALUATE_SCHEDULE_MINUTES: int = Field(default=30, ge=5, le=1440)
     INGEST_LOG_LEVEL: str = "INFO"
     INGEST_HTTP_PORT: int = 8090
 
@@ -88,106 +85,23 @@ class Settings(BaseSettings):
     # currently installing drivers.
     DASHBOARD_PATCH_CATEGORIES_EXCLUDE: str = "DRIVER_UPDATES"
 
-    AGENT_COMPLIANCE_ACTION_BASE_URL: str = "http://10.61.50.28:8090"
-
-    # ── Agent compliance alerts ──────────────────────────────────────
-    AGENT_COMPLIANCE_ALERTS_ENABLED: bool = False
-    AGENT_COMPLIANCE_ALERT_WEBHOOK_URL_REF: str = "AGENT_COMPLIANCE_ALERT_WEBHOOK_URL"
-    AGENT_COMPLIANCE_REVIEW_DIGEST_ENABLED: bool = False
-    AGENT_COMPLIANCE_REVIEW_DIGEST_HOUR: int = Field(default=8, ge=0, le=23)
-    AGENT_COMPLIANCE_REVIEW_DIGEST_WEBHOOK_URL_REF: str = "AGENT_COMPLIANCE_REVIEW_DIGEST_WEBHOOK_URL"
-    AGENT_COMPLIANCE_ALERT_EMAIL_FROM: str = ""
-    AGENT_COMPLIANCE_ALERT_EMAIL_TO: str = ""
-    AGENT_COMPLIANCE_SMTP_HOST: str = ""
-    AGENT_COMPLIANCE_SMTP_PORT: int = 587
-    AGENT_COMPLIANCE_SMTP_USERNAME: str = ""
-    AGENT_COMPLIANCE_SMTP_PASSWORD: SecretStr = SecretStr("")
-    AGENT_COMPLIANCE_SMTP_STARTTLS: bool = True
-    AGENT_COMPLIANCE_ZENDESK_URL: str = ""
-    AGENT_COMPLIANCE_ZENDESK_REQUESTER_EMAIL: str = ""
-    AGENT_COMPLIANCE_ZENDESK_REQUESTER_NAME: str = "Agent Compliance"
-    AGENT_COMPLIANCE_ZENDESK_AUTH_USERNAME: str = ""
-    AGENT_COMPLIANCE_ZENDESK_AUTH_TOKEN: SecretStr = SecretStr("")
-
-    # ── Notifications (Track 2 dispatcher) ───────────────────────────
-    # v1 falls back to the AGENT_COMPLIANCE_* values already set on the
-    # server; the old names are removed at Track 6 cutover.
+    # ── Notifications ────────────────────────────────────────────────
     NOTIFY_ENABLED: bool = False
     NOTIFY_DISPATCH_SCHEDULE_MINUTES: int = Field(default=60, ge=5, le=1440)
     NOTIFY_DIGEST_ENABLED: bool = False
     NOTIFY_DIGEST_HOUR: int = Field(default=8, ge=0, le=23)
     NOTIFY_SMTP_HOST: str = ""
-    NOTIFY_SMTP_PORT: int = 0
+    NOTIFY_SMTP_PORT: int = 587
     NOTIFY_SMTP_USERNAME: str = ""
     NOTIFY_SMTP_PASSWORD: SecretStr = SecretStr("")
+    NOTIFY_SMTP_STARTTLS: bool = True
     NOTIFY_EMAIL_FROM: str = ""
     NOTIFY_EMAIL_TO: str = ""
     NOTIFY_ZENDESK_URL: str = ""
     NOTIFY_ZENDESK_REQUESTER_EMAIL: str = ""
-    NOTIFY_ZENDESK_REQUESTER_NAME: str = ""
+    NOTIFY_ZENDESK_REQUESTER_NAME: str = "Operations"
     NOTIFY_ZENDESK_AUTH_USERNAME: str = ""
     NOTIFY_ZENDESK_AUTH_TOKEN: SecretStr = SecretStr("")
-
-    @property
-    def notify_smtp_host(self) -> str:
-        return self.NOTIFY_SMTP_HOST or self.AGENT_COMPLIANCE_SMTP_HOST
-
-    @property
-    def notify_smtp_port(self) -> int:
-        return self.NOTIFY_SMTP_PORT or self.AGENT_COMPLIANCE_SMTP_PORT
-
-    @property
-    def notify_smtp_username(self) -> str:
-        return self.NOTIFY_SMTP_USERNAME or self.AGENT_COMPLIANCE_SMTP_USERNAME
-
-    @property
-    def notify_smtp_password(self) -> SecretStr:
-        if self.NOTIFY_SMTP_PASSWORD.get_secret_value():
-            return self.NOTIFY_SMTP_PASSWORD
-        return self.AGENT_COMPLIANCE_SMTP_PASSWORD
-
-    @property
-    def notify_smtp_starttls(self) -> bool:
-        return self.AGENT_COMPLIANCE_SMTP_STARTTLS
-
-    @property
-    def notify_email_from(self) -> str:
-        return self.NOTIFY_EMAIL_FROM or self.AGENT_COMPLIANCE_ALERT_EMAIL_FROM
-
-    @property
-    def notify_email_to(self) -> str:
-        return self.NOTIFY_EMAIL_TO or self.AGENT_COMPLIANCE_ALERT_EMAIL_TO
-
-    @property
-    def notify_zendesk_url(self) -> str:
-        return self.NOTIFY_ZENDESK_URL or self.AGENT_COMPLIANCE_ZENDESK_URL
-
-    @property
-    def notify_zendesk_requester_email(self) -> str:
-        return (
-            self.NOTIFY_ZENDESK_REQUESTER_EMAIL
-            or self.AGENT_COMPLIANCE_ZENDESK_REQUESTER_EMAIL
-        )
-
-    @property
-    def notify_zendesk_requester_name(self) -> str:
-        return (
-            self.NOTIFY_ZENDESK_REQUESTER_NAME
-            or self.AGENT_COMPLIANCE_ZENDESK_REQUESTER_NAME
-        )
-
-    @property
-    def notify_zendesk_auth_username(self) -> str:
-        return (
-            self.NOTIFY_ZENDESK_AUTH_USERNAME
-            or self.AGENT_COMPLIANCE_ZENDESK_AUTH_USERNAME
-        )
-
-    @property
-    def notify_zendesk_auth_token(self) -> SecretStr:
-        if self.NOTIFY_ZENDESK_AUTH_TOKEN.get_secret_value():
-            return self.NOTIFY_ZENDESK_AUTH_TOKEN
-        return self.AGENT_COMPLIANCE_ZENDESK_AUTH_TOKEN
 
     @property
     def activity_sources(self) -> list[str]:

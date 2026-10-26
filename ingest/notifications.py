@@ -5,9 +5,6 @@ Reads open findings + admin findings, matches them against enabled
 and per-rule cooldown via `notification_state`, sends via the rule's
 `notification_route` (webhook / email / zendesk), records every attempt
 in `notification_events`.
-
-Legacy reference: ingest/agent_compliance/alerts.py — same routing
-semantics, ported to the operations schema.
 """
 
 from __future__ import annotations
@@ -522,22 +519,22 @@ def _send_webhook(route: dict, payload: dict) -> tuple[str, int | None, str | No
 
 
 def _send_email(route: dict, payload: dict) -> tuple[str, int | None, str | None]:
-    host = settings.notify_smtp_host
-    to_addr = route.get("target") or settings.notify_email_to
+    host = settings.NOTIFY_SMTP_HOST
+    to_addr = route.get("target") or settings.NOTIFY_EMAIL_TO
     if not host or not to_addr:
         return "skipped_no_route", None, None
     msg = EmailMessage()
-    msg["From"] = settings.notify_email_from or settings.notify_smtp_username
+    msg["From"] = settings.NOTIFY_EMAIL_FROM or settings.NOTIFY_SMTP_USERNAME
     msg["To"] = to_addr
     msg["Subject"] = f"[{payload['severity'].upper()}] {payload['title']}"
     msg.set_content(_text_body(payload))
     try:
-        with smtplib.SMTP(host, settings.notify_smtp_port, timeout=20) as smtp:
-            if settings.notify_smtp_starttls:
+        with smtplib.SMTP(host, settings.NOTIFY_SMTP_PORT, timeout=20) as smtp:
+            if settings.NOTIFY_SMTP_STARTTLS:
                 smtp.starttls()
-            pw = settings.notify_smtp_password.get_secret_value()
-            if settings.notify_smtp_username and pw:
-                smtp.login(settings.notify_smtp_username, pw)
+            pw = settings.NOTIFY_SMTP_PASSWORD.get_secret_value()
+            if settings.NOTIFY_SMTP_USERNAME and pw:
+                smtp.login(settings.NOTIFY_SMTP_USERNAME, pw)
             smtp.send_message(msg)
         return "sent", None, "email sent"
     except Exception as exc:
@@ -545,8 +542,8 @@ def _send_email(route: dict, payload: dict) -> tuple[str, int | None, str | None
 
 
 def _send_zendesk(payload: dict) -> tuple[str, int | None, str | None]:
-    url = settings.notify_zendesk_url
-    requester = settings.notify_zendesk_requester_email
+    url = settings.NOTIFY_ZENDESK_URL
+    requester = settings.NOTIFY_ZENDESK_REQUESTER_EMAIL
     if not url or not requester:
         return "skipped_no_route", None, None
     if not url.endswith("/api/v2/requests"):
@@ -555,16 +552,16 @@ def _send_zendesk(payload: dict) -> tuple[str, int | None, str | None]:
         "request": {
             "requester": {
                 "email": requester,
-                "name": settings.notify_zendesk_requester_name or "Operations",
+                "name": settings.NOTIFY_ZENDESK_REQUESTER_NAME,
             },
             "subject": f"[{payload['severity'].upper()}] {payload['title']}",
             "comment": {"body": _text_body(payload)},
         }
     }
     auth = None
-    token = settings.notify_zendesk_auth_token.get_secret_value()
-    if settings.notify_zendesk_auth_username and token:
-        auth = (settings.notify_zendesk_auth_username, token)
+    token = settings.NOTIFY_ZENDESK_AUTH_TOKEN.get_secret_value()
+    if settings.NOTIFY_ZENDESK_AUTH_USERNAME and token:
+        auth = (settings.NOTIFY_ZENDESK_AUTH_USERNAME, token)
     try:
         resp = httpx.post(url, json=body, auth=auth, timeout=20)
         preview = (resp.text or "")[:500]

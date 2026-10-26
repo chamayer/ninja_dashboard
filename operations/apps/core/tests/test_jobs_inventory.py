@@ -175,7 +175,6 @@ class Discovery(ast.NodeVisitor):
             "enqueue_and_run",
             "enqueue_automatic",
             "refresh_after_collection",
-            "schedule_agent_compliance_evaluate",
         }:
             self.record("admission_and_followup_calls", expression=_expr(node))
         self.generic_visit(node)

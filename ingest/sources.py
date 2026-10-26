@@ -1,8 +1,7 @@
 """Operations-native source configuration.
 
 Loads SourceConfig rows from operations.sources / source_instances /
-source_bindings. Replaces the legacy ninja_agent_compliance.platform_sources
-loader — this module must never touch the ninja_agent_compliance schema.
+source_bindings.
 
 source_instances.config JSONB carries the connection details:
   platform, source_key, is_shared, base_url, token_url, and secret env-var
