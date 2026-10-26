@@ -1,6 +1,6 @@
 # 0040 — Client source mappings are recorded and movable
 
-Status: Accepted (1, 3, 5, 6 implemented; 2 to an existing client only; 4 on the client page)
+Status: Accepted (1, 3, 5, 6, 7 implemented; 2 to an existing client only; 4 on the client page)
 Date: 2026-10-23
 
 ## Context
@@ -100,6 +100,19 @@ see why each mapping exists and change it.
    *differs*. Critical while any row differs, because everything from that
    group is filed under this client (amends ADR-0025's "low"). The rows are
    decided together on the client page (decision 4).
+7. **A client renamed at its sources is renamed** (added 2026-10-26, user
+   rule). A source group id that once reported the client's name and now
+   reports another was renamed at its source. When every mapped group (not
+   ignored) reports that one new name, the resolver renames the client:
+   `rename_client_v1` records a `client.rename` change, keeps the old name
+   as an alias and leaves the slug. The client page shows it with Undo,
+   which renames back and confirms the differing groups so it is not
+   redone. When groups disagree, the decision-6 finding names the sources
+   still on another name ("complete the rename there"), and an operator can
+   rename the client from the client page. Only undecided mappings count;
+   a confirmed difference stays. Evidence is the group's name history
+   (`entity_observation_history`). Supersedes the Track C rule "name drift
+   is never a rename" for this case (migration 0347).
 
 ## Rationale
 

@@ -5331,6 +5331,15 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
                     )
                 if details.get("no_source_matches"):
                     context_parts.append("no source uses the client name")
+                rename = details.get("rename") or {}
+                if rename.get("pending"):
+                    still = ", ".join(
+                        f"“{r['observed_name']}” in {r['source']}" for r in rename["pending"]
+                    )
+                    context_parts.append(
+                        f"renamed in {', '.join(rename['renamed'])}; still {still}"
+                        " — complete the rename there or rename the client"
+                    )
                 if f.client:
                     subject_url += "#source-references"
             elif f.finding_type.name == "client_name_conflict":
@@ -12667,6 +12676,53 @@ def client_mapping_decide(request: HttpRequest, source_link_id: str) -> HttpResp
         )
     messages.success(request, "Client mapping decision recorded.")
     return redirect(_safe_next(request, "client_mappings"))
+
+
+@login_required
+@require_admin
+@require_POST
+def client_rename(request: HttpRequest, org_slug: str) -> HttpResponse:
+    """Rename a client; the old name stays an alias and the URL is unchanged.
+
+    Undo of an automatic rename also confirms the groups that report the other
+    name, so the resolver does not rename it again.
+    """
+    client = get_object_or_404(Client, tenant_id=1, slug=org_slug, deleted_at__isnull=True)
+    name = (request.POST.get("name") or "").strip()
+    reason = (request.POST.get("reason") or "").strip()
+    undo = request.POST.get("undo") == "1"
+    back = f"{reverse('org_index', kwargs={'org_slug': client.slug})}#source-references"
+    if not name or not reason:
+        messages.error(request, "A name and a reason are required.")
+        return redirect(back)
+    try:
+        with transaction.atomic(), connection.cursor() as cur:
+            cur.execute("SET LOCAL operations.tenant_id = 1")
+            cur.execute(
+                "SELECT operations.rename_client_v1(1, %s, %s, %s, %s)",
+                [client.id, name, reason, request.user.pk],
+            )
+            previous = cur.fetchone()[0]
+            if undo:
+                for reference in client_source_references(client_id=client.id):
+                    if reference["name_differs"] and reference["mapping_state"] in {
+                        "automatic",
+                        "review",
+                    }:
+                        cur.execute(
+                            "SELECT operations.decide_client_source_mapping_v1("
+                            "1, %s, 'explicit', %s, %s)",
+                            [
+                                reference["source_link_id"],
+                                f"Not a rename: kept the name {name}.",
+                                request.user.pk,
+                            ],
+                        )
+    except DatabaseError as exc:
+        messages.error(request, f"Not renamed: {str(exc).splitlines()[0]}")
+        return redirect(back)
+    messages.success(request, f"Renamed {previous} to {name}. The URL is unchanged.")
+    return redirect(back)
 
 
 _BULK_MAPPING_STATES = {"confirm": "explicit", "ignore": "ignored"}

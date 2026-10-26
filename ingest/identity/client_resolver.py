@@ -8,7 +8,9 @@ from BLUEPRINT Track C.3:
              (source, external_id) the observation already carries the
              client_id from source_observations._load_client_links. The
              source-reported group name remains visible as mapping evidence;
-             it does not re-match or rename the canonical client.
+             it does not re-match. A group id that reported the client's
+             name and now reports another is a rename at its source: when
+             every group agrees, the client is renamed (_check_name_drift).
 
     Rung 2 — exact normalized-name match against Client.display_name
              or an enabled ClientNameAlias row. On a single match the
@@ -182,9 +184,9 @@ def drain_client_resolution() -> int:
                 admin=True,
             )
 
-        # A mapped name difference is a client-level finding. It is not a
-        # rematch or forced rename: operators can suppress it when the source
-        # label is intentionally different.
+        # A mapped name difference is a client-level finding, or a rename
+        # when every group was renamed at its source. Never a rematch;
+        # operators confirm a difference when the label is intentional.
         _check_name_drift(cur)
         _check_mapping_topology(cur)
         _retire_client_name_conflicts(cur)
@@ -926,7 +928,8 @@ def _check_name_drift(cur) -> None:
         )
         SELECT DISTINCT ON (link.source_link_id)
                link.source_link_id, link.client_id, client.display_name, link.source_id,
-               source.name, link.external_id, latest.observed_name, link.mapping_state
+               source.name, link.external_id, latest.observed_name, link.mapping_state,
+               binding.id
           FROM operations.v_client_source_mapping_effective link
           JOIN operations.clients client ON client.id = link.client_id
           JOIN operations.sources source ON source.id = link.source_id
@@ -946,7 +949,7 @@ def _check_name_drift(cur) -> None:
     )
     clients: dict[uuid.UUID, dict[str, Any]] = {}
     for (link_id, client_id, client_name, source_id, source_name, external_id, observed_name,
-         mapping_state) in cur.fetchall():
+         mapping_state, binding_id) in cur.fetchall():
         entry = clients.setdefault(client_id, {"client_name": client_name, "rows": []})
         if _norm(observed_name) == _norm(client_name):
             status = "matches"
@@ -965,10 +968,19 @@ def _check_name_drift(cur) -> None:
                 "observed_name": observed_name,
                 "mapping_state": mapping_state,
                 "status": status,
+                "_group": (binding_id, external_id),
             }
         )
+    previous = _previous_group_names(
+        cur, [r["_group"] for e in clients.values() for r in e["rows"] if r["status"] == "differs"]
+    )
     active_conditions: set[str] = set()
     for client_id, entry in clients.items():
+        rename = _rename_signal(entry["client_name"], entry["rows"], previous)
+        if rename and rename["complete"] and _rename_client(cur, client_id, entry["client_name"], rename):
+            continue
+        for row in entry["rows"]:
+            row.pop("_group", None)
         rows = sorted(entry["rows"], key=lambda r: (r["status"] != "differs", r["source"]))
         undecided = [r for r in rows if r["status"] == "differs"]
         if not undecided:
@@ -987,12 +999,99 @@ def _check_name_drift(cur) -> None:
                 # No source uses the client's own name: the client may need renaming.
                 "no_source_matches": not any(r["status"] == "matches" for r in rows),
                 "rows": rows,
+                # Renamed at some sources but not all: which still use another name.
+                "rename": (
+                    {k: rename[k] for k in ("to", "renamed", "pending")} if rename else None
+                ),
             },
             severity="critical",
             admin=False,
             client_id=client_id,
         )
     _resolve_unseen_client_name_conflicts(cur, active_conditions)
+
+
+def _previous_group_names(cur, groups: list[tuple]) -> dict[tuple, set[str]]:
+    """Every name each source group id has reported, normalized, from its history."""
+    if not groups:
+        return {}
+    cur.execute(
+        """
+        SELECT DISTINCT source_binding_id, entity_key, material_data ->> 'name'
+          FROM operations.entity_observation_history
+         WHERE tenant_id = %s
+           AND entity_type = 'org'
+           AND (source_binding_id, entity_key) IN (
+                   SELECT * FROM unnest(%s::uuid[], %s::text[]))
+        """,
+        (_TENANT_ID, [str(g[0]) for g in groups], [g[1] for g in groups]),
+    )
+    names: dict[tuple, set[str]] = {}
+    for binding_id, entity_key, name in cur.fetchall():
+        if name:
+            names.setdefault((binding_id, entity_key), set()).add(_norm(name))
+    return names
+
+
+def _rename_signal(
+    client_name: str, rows: list[dict], previous: dict[tuple, set[str]]
+) -> dict | None:
+    """A source group id that once reported the client's name and now reports
+    another was renamed at its source (user rule, 2026-10-26). Complete when
+    every other mapped group already uses the new name; otherwise the groups
+    still on another name are where the rename is pending. Only undecided
+    mappings count, so a confirmed difference (or an undone rename) stays.
+    """
+    old = _norm(client_name)
+    renamed = [
+        r for r in rows
+        if r["status"] == "differs" and old in previous.get(r["_group"], set())
+    ]
+    if not renamed:
+        return None
+    new_names = {_norm(r["observed_name"]) for r in renamed}
+    pending = [
+        r for r in rows
+        if r["status"] != "ignored" and _norm(r["observed_name"]) not in new_names
+    ]
+    # The new name as the sources spell it, Ninja's spelling if Ninja renamed it.
+    spelling = next((r for r in renamed if r["source"] == "Ninja"), renamed[0])
+    return {
+        "complete": len(new_names) == 1 and not pending,
+        "to": (
+            spelling["observed_name"].strip()
+            if len(new_names) == 1
+            else sorted({r["observed_name"].strip() for r in renamed})
+        ),
+        "renamed": sorted({r["source"] for r in renamed}),
+        "pending": [
+            {"source": r["source"], "observed_name": r["observed_name"]}
+            for r in sorted(pending, key=lambda r: r["source"])
+        ],
+    }
+
+
+def _rename_client(cur, client_id: uuid.UUID, client_name: str, rename: dict) -> bool:
+    """Rename the client to the name every source now reports; recorded, undoable
+    on the client page. False (and the name finding stays) if refused, e.g. when
+    another client already uses that name."""
+    reason = (
+        f'Renamed at every source: {", ".join(rename["renamed"])} report '
+        f'"{rename["to"]}" for groups that reported "{client_name}".'
+    )[:400]
+    cur.execute("SAVEPOINT client_rename")
+    try:
+        cur.execute(
+            "SELECT operations.rename_client_v1(%s, %s, %s, %s, NULL)",
+            (_TENANT_ID, client_id, rename["to"], reason),
+        )
+    except Exception as exc:  # a refused rename leaves the name finding
+        cur.execute("ROLLBACK TO SAVEPOINT client_rename")
+        log.warning("client_resolver: rename of %s refused: %s", client_id, exc)
+        return False
+    cur.execute("RELEASE SAVEPOINT client_rename")
+    log.info("client_resolver: renamed client %s to %s", client_id, rename["to"])
+    return True
 
 
 def _resolve_unseen_client_name_conflicts(cur, active_conditions: set[str]) -> None:

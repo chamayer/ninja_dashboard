@@ -61,6 +61,7 @@ from apps.core.views import (
     client_policy_edit,
     client_policy_new,
     client_profile_assign,
+    client_rename,
     client_requirements_config,
     client_source_reference_detail,
     client_switch,
@@ -147,6 +148,11 @@ urlpatterns = [
         "admin/integrations/client-mappings/bulk/",
         client_mapping_bulk,
         name="client_mapping_bulk",
+    ),
+    path(
+        "clients/<slug:org_slug>/rename/",
+        client_rename,
+        name="client_rename",
     ),
     path(
         "inventory/clients/promotions/decide/",

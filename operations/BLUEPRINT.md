@@ -215,6 +215,27 @@ Shipped `fcb488a`. Its per-row check triggered ~0.9 s of JIT per query;
 unchanged.
 Next action: ADR-0044 phase 2 (mapping table).
 
+### Step I — Client renamed at its sources
+
+User rule 2026-10-26 (Prompt → MDA): a source group id that reports a new
+name is a rename. All of a client's mapped groups agree on the new name →
+the resolver renames the client (recorded, undoable, old name kept as an
+alias, slug unchanged). Groups disagree → the client's name finding says
+which sources were renamed and which still use the old name, with "Rename
+client" on the client page. Evidence: `entity_observation_history` org names
+per id (Prompt: Ninja 10-12, Hudu 10-23, SentinelOne/LogMeIn 10-25).
+Scope: migration 0347 `rename_client_v1`; resolver `_check_name_drift`;
+client page rename form and undo; finding context. Only automatic/review
+mappings count, so Undo (rename back + confirm those mappings) sticks.
+Built: migration 0347, resolver, client page Rename/Undo, finding text,
+ADR-0040 decision 7. Rehearsed on production (rolled back): rename works
+(alias "Prompt" kept, slug unchanged, change recorded). Preview: auto-rename
+Prompt → MDA and "Park Bookeeping" → "Park Bookkeeping"; County partial
+(LogMeIn "County\CNY"). Validation: Django check, makemigrations --check,
+Operations 4 / ingest 5 known failures only, new tests pass. Not
+browser-checked.
+Next action: user approves commit and push (0347 adds a function).
+
 ## Client mapping workflow — finish the single-inbox move
 
 Steps 1-5 complete (browser check pending); retirement deferred (user approved 2026-10-22). Goal: finish the 2026-10-07 "Issues is the

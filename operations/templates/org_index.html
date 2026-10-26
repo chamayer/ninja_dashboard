@@ -157,7 +157,17 @@
 
 <section class="card" id="source-references">
   <h2>Source references</h2>
-  <p class="muted">Source client records mapped to this client. Reported names are source evidence; they do not rename the client.</p>
+  <p class="muted">Source client records mapped to this client. When every source renames its group, the client is renamed with it; until then a different name is listed here.</p>
+  {% if last_rename and last_rename.automatic %}<div class="flash flash-info" style="margin-bottom:.6rem;">Renamed automatically from “{{ last_rename.from }}” on {{ last_rename.at|date:"Y-m-d H:i" }}: {{ last_rename.reason }}{% if user.is_superuser or perms.operations.manage_catalog %}
+    <form method="post" action="{% url 'client_rename' org_slug=current_client.slug %}" style="display:inline-flex; gap:.3rem; margin-left:.4rem;">{% csrf_token %}<input type="hidden" name="name" value="{{ last_rename.from }}"><input type="hidden" name="undo" value="1"><input name="reason" maxlength="400" required placeholder="Why it is not a rename" aria-label="Reason to undo the rename"><button type="submit">Undo: keep “{{ last_rename.from }}”</button></form>{% endif %}</div>{% endif %}
+  {% if rename_names %}{% if user.is_superuser or perms.operations.manage_catalog %}
+  <form method="post" action="{% url 'client_rename' org_slug=current_client.slug %}" style="margin-bottom:.6rem; display:flex; gap:.4rem; flex-wrap:wrap; align-items:center;">{% csrf_token %}
+    <strong>Rename client to</strong>
+    <select name="name" aria-label="New client name">{% for name in rename_names %}<option value="{{ name }}">{{ name }}</option>{% endfor %}</select>
+    <input name="reason" maxlength="400" required placeholder="Reason" aria-label="Reason for the rename">
+    <button type="submit">Rename</button>
+    <span class="muted" style="font-size:.8rem;">“{{ current_client.display_name }}” stays an alias; the URL is unchanged.</span>
+  </form>{% endif %}{% endif %}
   <table class="ops-table">
     <thead><tr>{% if user.is_superuser or perms.operations.manage_catalog %}<th><input type="checkbox" id="mapping-select-all" aria-label="Select all source references"></th>{% endif %}<th>Source</th><th>Reported name</th><th>Mapping decision</th><th>Details</th></tr></thead>
     <tbody>

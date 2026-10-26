@@ -396,6 +396,33 @@ def client_source_references(*, client_id=None, source_name: str = "") -> list[d
     return references
 
 
+def _last_rename(client) -> dict | None:
+    """The client's latest rename while it still holds; automatic ones offer Undo."""
+    with connection.cursor() as cur:
+        cur.execute(
+            """
+            SELECT occurred_at, actor_kind, reason, evidence ->> 'from', evidence ->> 'to'
+              FROM operations.change_actions
+             WHERE tenant_id = 1 AND action = 'client.rename'
+               AND evidence ->> 'client_id' = %s
+             ORDER BY occurred_at DESC
+             LIMIT 1
+            """,
+            [str(client.id)],
+        )
+        row = cur.fetchone()
+    if not row or row[4] != client.display_name:
+        return None
+    occurred_at, actor_kind, reason, old, new = row
+    return {
+        "at": occurred_at,
+        "automatic": actor_kind == "process",
+        "reason": reason,
+        "from": old,
+        "to": new,
+    }
+
+
 def build_client_workspace(client, existing: dict, *, device_policy: dict | None = None) -> dict:
     """Build a cross-domain, client-scoped overview context."""
     locations, users, health = _shared_context()
@@ -612,6 +639,11 @@ def build_client_workspace(client, existing: dict, *, device_policy: dict | None
         )
         if source_references
         else [],
+        # Names its sources report instead of the client's, to rename it to.
+        "rename_names": sorted(
+            {r["observed_name"] for r in source_references if r["name_differs"]}, key=str.casefold
+        ),
+        "last_rename": _last_rename(client),
         "pending_record_matches": pending_record_matches,
         # Learned from its computers, edited by operators (ADR-0042).
         "domain_names": client_domains.domains_for([client]).get(str(client.id), []),
