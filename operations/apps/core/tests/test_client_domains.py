@@ -114,3 +114,15 @@ def test_the_definition_and_settings_are_data_and_the_page_edits_them():
     page = (_ROOT / "templates" / "org_index.html").read_text(encoding="utf-8")
     assert 'id="client-domains"' in page and "{% for item in domain_names %}" in page
     assert "{% url 'client_domain_edit' org_slug=current_client.slug %}" in page
+
+
+def test_client_domains_read_the_safe_view_the_application_may_read():
+    domain_view = importlib.import_module("apps.core.migrations.0348_observation_domain")
+    assert "entity_observation_current" not in client_domains._LEARNED_SQL
+    assert "v_entity_observation_admin_metadata" in client_domains._LEARNED_SQL
+    sql = " ".join(domain_view.FORWARD_SQL.split())
+    assert sql.index("AS restricted,") < sql.index("AS canonical_domain")
+    assert (
+        "REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON operations.v_entity_observation_admin_metadata"
+        in sql
+    )

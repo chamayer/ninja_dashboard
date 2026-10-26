@@ -34,13 +34,13 @@ _DOMAIN = re.compile(
 )
 
 _LEARNED_SQL = """
-SELECT d.client_id::text, lower(trim(trailing '.' FROM btrim(eo.canonical_data ->> 'domain'))),
+SELECT d.client_id::text, lower(trim(trailing '.' FROM eo.canonical_domain)),
        count(DISTINCT d.id)::int
-  FROM operations.entity_observation_current eo
+  FROM operations.v_entity_observation_admin_metadata eo
   JOIN operations.devices d ON d.id = eo.device_id AND d.deleted_at IS NULL
    AND d.lifecycle_status <> 'retired'
- WHERE eo.tenant_id = 1 AND eo.active
-   AND COALESCE(btrim(eo.canonical_data ->> 'domain'), '') <> ''
+ WHERE eo.active
+   AND eo.canonical_domain IS NOT NULL
    AND d.client_id::text = ANY(%s)
  GROUP BY 1, 2
 """
