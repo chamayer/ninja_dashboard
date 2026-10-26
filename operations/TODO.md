@@ -7,6 +7,14 @@ module-specific; root `../TODO.md` keeps cross-repo items and pointers.
 
 ## Inbox
 
+- [ ] **Retire the per-client "computers with this program" page** (2026-10-26).
+      `org_software_devices` duplicates Software > Installations filtered by
+      client and program; its links now open Installations. Remove the view and
+      template once saved links are gone, and update `test_computer_reads.py`.
+- [ ] **Installations decision filter is slow** (about 7.7 s on 2026-10-26):
+      measure and tune the shared decision lookups before considering stored
+      per-installation decisions (PLAN-012/PLAN-017 need the numbers).
+
 - [ ] **Public IP as a client-attribution hint** (user backlogged 2026-10-22).
       When several Computers already attached to a client report the same
       public IP, show that as supporting evidence beside the existing

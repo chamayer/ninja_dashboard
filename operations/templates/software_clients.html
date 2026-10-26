@@ -34,11 +34,12 @@
                 <td class="primary-cell">{{ c.display_name }}</td>
                 <td class="num">
                     {% if active_software %}
-                    <a href="{% url 'org_software_devices' org_slug=c.slug %}?name={{ active_software|urlencode }}{% if active_software_publisher %}&publisher={{ active_software_publisher|urlencode }}{% endif %}">
+                    <a href="{% url 'software_installations' %}?client={{ c.slug|urlencode }}&amp;product={{ active_software|urlencode }}{% if active_software_publisher %}&amp;publisher={{ active_software_publisher|urlencode }}{% endif %}">
                         {{ c.device_count }}
                     </a>
+                    {% elif active_software_publisher %}
+                    <a href="{% url 'software_installations' %}?client={{ c.slug|urlencode }}&amp;publisher={{ active_software_publisher|urlencode }}">{{ c.device_count }}</a>
                     {% else %}
-                    {# Publisher-only, no single title -- org_software_devices needs one #}
                     <a href="{% url 'org_devices' org_slug=c.slug %}">{{ c.device_count }}</a>
                     {% endif %}
                 </td>

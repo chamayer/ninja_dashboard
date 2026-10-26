@@ -29,8 +29,9 @@ user-risk.
 <div class="sw-subnav">
   <span class="lead">Software</span>
   <a class="{% if software_tab == 'overview'   %}active{% endif %}" href="{% url 'software_page' %}">Overview</a>
-  <a class="{% if software_tab == 'products'   %}active{% endif %}" href="{% url 'software_products' %}">Products</a>
   <a class="{% if software_tab == 'publishers' %}active{% endif %}" href="{% url 'software_publishers' %}">Publishers</a>
+  <a class="{% if software_tab == 'products'   %}active{% endif %}" href="{% url 'software_products' %}">Products</a>
+  <a href="{% url 'software_installations' %}">Installations</a>
   <a class="{% if software_tab == 'checklist'  %}active{% endif %}" href="{% url 'software_tech_checklist' %}" title="Fleet grouped by device — one row per device, cleanup items underneath">Cleanup</a>
   <a class="{% if software_tab == 'user-risk'  %}active{% endif %}" href="{% url 'software_user_risk' %}" title="Fleet grouped by last-logged-in user — see who is exposed to risky software">User exposure</a>
   <a class="{% if software_tab == 'log'        %}active{% endif %}" href="{% url 'software_decision_log' %}">Activity</a>

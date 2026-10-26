@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+
+{% block title %}Installations — Software{% endblock %}
+
+{% block content %}
+{% include "_sw_style.html" %}
+<div class="sw-page-header">
+  <div>
+    <h1>Installations</h1>
+    <div class="sub">{{ total }} installation{{ total|pluralize }} of a program on a current Computer. The decision shown is the one that applies to that installation.</div>
+  </div>
+  <a class="csv-download" href="?{{ csv_query }}" title="Download every installation matching the filters">⤓ CSV</a>
+</div>
+
+<div class="card">
+  <form method="get" style="display:flex; gap:.7rem; align-items:end; flex-wrap:wrap;">
+    <label>Client<br><select name="client"><option value="">All clients</option>{% for c in clients %}<option value="{{ c.slug }}"{% if filters.client == c.slug %} selected{% endif %}>{{ c.display_name }}</option>{% endfor %}</select></label>
+    <label>Search<br><input name="q" value="{{ filters.q }}" placeholder="Program or computer name"></label>
+    <label>Decision<br><select name="decision"><option value="">Any</option>{% for value, label in decision_choices %}<option value="{{ value }}"{% if filters.decision == value %} selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
+    {% if filters.product %}<input type="hidden" name="product" value="{{ filters.product }}">{% endif %}
+    {% if filters.publisher %}<input type="hidden" name="publisher" value="{{ filters.publisher }}">{% endif %}
+    <button type="submit">Filter</button>
+    {% if page_query %}<a href="{% url 'software_installations' %}">Clear</a>{% endif %}
+  </form>
+  {% if filters.product or filters.publisher %}<p class="muted" style="margin:.5rem 0 0;">{% if filters.product %}Program: <strong>{{ filters.product }}</strong>{% endif %}{% if filters.publisher %}{% if filters.product %} · {% endif %}Publisher: <strong>{{ filters.publisher }}</strong>{% endif %}</p>{% endif %}
+</div>
+
+<div class="card">
+  <p class="muted" style="margin:0 0 .4rem; font-size:.85rem;">Column sorting orders this page only; use the filters above to search every installation. The CSV has every matching installation.</p>
+  <table class="ops-table" data-sortable data-server-table>
+    <thead><tr><th>Client</th><th>Computer</th><th>Program</th><th>Publisher</th><th>Version</th><th>Installed</th><th>Last seen</th><th>Decision</th></tr></thead>
+    <tbody>
+    {% for row in rows %}
+      <tr>
+        <td><a href="?{% if filters.q %}q={{ filters.q|urlencode }}&amp;{% endif %}client={{ row.client_slug }}">{{ row.client_name }}</a></td>
+        <td><a href="{% url 'device_detail' org_slug=row.client_slug device_id=row.device_id %}">{{ row.hostname|default:"Unnamed Computer" }}</a></td>
+        <td><a href="{% url 'software_detail' name=row.product %}">{{ row.product }}</a></td>
+        <td>{{ row.publisher }}</td>
+        <td>{{ row.version }}</td>
+        <td>{{ row.install_date|default:"" }}</td>
+        <td>{{ row.last_seen|date:"Y-m-d H:i" }}</td>
+        <td>{% if row.decision %}{{ row.decision }}{% else %}<span class="muted">No decision</span>{% endif %}</td>
+      </tr>
+    {% empty %}
+      <tr><td colspan="8" class="muted">No installations match these filters.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  <p class="muted" style="margin:.5rem 0 0;">Page {{ page }} of {{ num_pages }}
+    {% if page > 1 %} · <a href="?{% if page_query %}{{ page_query }}&amp;{% endif %}page=1">First</a> · <a href="?{% if page_query %}{{ page_query }}&amp;{% endif %}page={{ page|add:-1 }}">Previous</a>{% endif %}
+    {% if page < num_pages %} · <a href="?{% if page_query %}{{ page_query }}&amp;{% endif %}page={{ page|add:1 }}">Next</a> · <a href="?{% if page_query %}{{ page_query }}&amp;{% endif %}page={{ num_pages }}">Last</a>{% endif %}
+  </p>
+</div>
+{% endblock %}

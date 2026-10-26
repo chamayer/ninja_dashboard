@@ -488,10 +488,12 @@
                 <span class="nav-client-crumb">Software ›</span>
                 <a class="nav-link nav-context {% if request.resolver_match.url_name == 'software_page' %}active{% endif %}"
                    href="{% url 'software_page' %}">Overview</a>
-                <a class="nav-link nav-context {% if request.resolver_match.url_name == 'software_products' %}active{% endif %}"
-                   href="{% url 'software_products' %}">Products</a>
                 <a class="nav-link nav-context {% if request.resolver_match.url_name == 'software_publishers' %}active{% endif %}"
                    href="{% url 'software_publishers' %}">Publishers</a>
+                <a class="nav-link nav-context {% if request.resolver_match.url_name == 'software_products' %}active{% endif %}"
+                   href="{% url 'software_products' %}">Products</a>
+                <a class="nav-link nav-context {% if request.resolver_match.url_name == 'software_installations' %}active{% endif %}"
+                   href="{% url 'software_installations' %}">Installations</a>
                 <a class="nav-link nav-context {% if request.resolver_match.url_name == 'software_tech_checklist' %}active{% endif %}"
                    href="{% url 'software_tech_checklist' %}">Cleanup</a>
                 <a class="nav-link nav-context {% if request.resolver_match.url_name == 'software_user_risk' %}active{% endif %}"

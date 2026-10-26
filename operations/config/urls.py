@@ -117,6 +117,7 @@ from apps.core.views import (
     software_detail,
     software_page,
     software_product_authorize,
+    software_installations,
     software_products,
     software_publisher_detail,
     software_publishers,
@@ -243,6 +244,7 @@ urlpatterns = [
     path("patching/activity/", patch_activity_search_page, name="patch_activity_search_page"),
     path("software/", software_page, name="software_page"),
     path("software/products/", software_products, name="software_products"),
+    path("software/installations/", software_installations, name="software_installations"),
     # Path converter so canonical names containing slashes still resolve.
     path("software/title/<path:name>/", software_detail, name="software_detail"),
     path("software/publishers/", software_publishers, name="software_publishers"),

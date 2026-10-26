@@ -145,7 +145,7 @@
             <td><a href="{% url 'software_detail' name=name %}">{{ name }}</a></td>
             <td class="muted">{{ publisher|default:"—" }}</td>
             <td style="text-align: right;">
-                <a href="{% url 'org_software_devices' org_slug=client.slug %}?name={{ name|urlencode }}&publisher={{ publisher|default:''|urlencode }}">{{ device_count }}</a>
+                <a href="{% url 'software_installations' %}?client={{ client.slug|urlencode }}&amp;product={{ name|urlencode }}{% if publisher %}&amp;publisher={{ publisher|urlencode }}{% endif %}">{{ device_count }}</a>
             </td>
             <td class="version-list">{{ versions|default:"—" }}</td>
             <td class="muted" style="white-space: nowrap; font-size: 0.8rem;">{{ first_installed|date:"Y-m-d"|default:"—" }}</td>

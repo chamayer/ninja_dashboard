@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import csv
 import hashlib
 import json
 import logging
@@ -9,6 +10,7 @@ import uuid
 from collections import Counter
 from datetime import datetime, timedelta
 from datetime import timezone as dt_timezone
+from io import StringIO
 from urllib import request as _urllib_request
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode, urlsplit
@@ -36,7 +38,7 @@ from django.db.models import (
 from django.db.models.expressions import RawSQL
 from django.db.models.fields.json import KeyTextTransform
 from django.db.models.functions import Cast, Coalesce, Concat
-from django.http import Http404, HttpRequest, HttpResponse, JsonResponse
+from django.http import Http404, HttpRequest, HttpResponse, JsonResponse, StreamingHttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
@@ -7912,6 +7914,201 @@ def software_page(request: HttpRequest) -> HttpResponse:
         )
     ctx["software_tab"] = "overview"
     return render(request, "software_page.html", ctx)
+
+
+_INSTALLATION_DECISION = (
+    f"COALESCE({software_coverage.TITLE_DECISION}, {software_coverage.PUBLISHER_DECISION})"
+)
+_INSTALLATION_PAGE_SIZE = 100
+
+
+def _installation_filters(request: HttpRequest) -> tuple[dict, list[str], list]:
+    """Software > Installations filters: SQL clauses over ``i`` (installation),
+    ``d`` (``v_device``) and ``c`` (client), and their parameters."""
+    filters = {
+        key: (request.GET.get(key) or "").strip()
+        for key in ("client", "product", "publisher", "q", "decision")
+    }
+    if filters["decision"] not in {*SoftwareDecision.Decision.values, "none"}:
+        filters["decision"] = ""
+    clauses = [
+        "i.tenant_id = 1",
+        "i.deleted_at IS NULL",
+        "i.stale_since IS NULL",
+        current_computer_sql("d"),
+    ]
+    params: list = []
+    if filters["client"]:
+        clauses.append("c.slug = %s")
+        params.append(filters["client"])
+    if filters["product"]:
+        clauses.append("i.canonical_name = %s")
+        params.append(filters["product"])
+    if filters["publisher"]:
+        clauses.append("i.publisher = %s")
+        params.append(filters["publisher"])
+    if filters["q"]:
+        clauses.append("(i.canonical_name ILIKE %s OR d.canonical_hostname ILIKE %s)")
+        params += [f"%{filters['q']}%"] * 2
+    if filters["decision"] == "none":
+        clauses.append(f"{_INSTALLATION_DECISION} IS NULL")
+    elif filters["decision"]:
+        clauses.append(f"{_INSTALLATION_DECISION} = %s")
+        params.append(filters["decision"])
+    return filters, clauses, params
+
+
+_INSTALLATION_FROM = """
+  FROM operations.software_installations_current i
+  JOIN operations.v_device d ON d.tenant_id = i.tenant_id AND d.device_id = i.device_id
+  JOIN operations.clients c ON c.id = i.client_id
+"""
+
+
+def _installation_decision_label(title_decision, publisher_decision) -> str:
+    labels = dict(SoftwareDecision.Decision.choices)
+    if title_decision:
+        return labels.get(title_decision, title_decision)
+    if publisher_decision:
+        return f"{labels.get(publisher_decision, publisher_decision)} (publisher)"
+    return ""
+
+
+def _installation_csv(clauses: list[str], params: list) -> StreamingHttpResponse:
+    """Every matching installation, streamed: decisions first, then names and order."""
+    decision_joins = software_coverage.EFFECTIVE_DECISION_JOINS
+    sql = f"""
+        WITH matching AS MATERIALIZED (
+            SELECT i.client_id, i.device_id, i.canonical_name, i.publisher, i.version,
+                   i.install_date, i.install_location, i.last_observed_at,
+                   {software_coverage.TITLE_DECISION} AS title_decision,
+                   {software_coverage.PUBLISHER_DECISION} AS publisher_decision
+            {_INSTALLATION_FROM}
+            {decision_joins}
+             WHERE {" AND ".join(clauses)}
+        )
+        SELECT c.display_name, d.canonical_hostname, d.canonical_serial, m.canonical_name,
+               m.publisher, m.version, m.install_date, m.install_location, m.last_observed_at,
+               m.title_decision, m.publisher_decision, d.device_id
+          FROM matching m
+          JOIN operations.v_device d ON d.tenant_id = 1 AND d.device_id = m.device_id
+          JOIN operations.clients c ON c.id = m.client_id
+         ORDER BY c.display_name, d.canonical_hostname, m.canonical_name
+    """
+    columns = [
+        "Client", "Computer", "Serial", "Product", "Publisher", "Version",
+        "Install date", "Install path", "Last seen", "Decision", "Computer ID",
+    ]
+
+    def rows():
+        buffer = StringIO()
+        writer = csv.writer(buffer, lineterminator="\n")
+        buffer.write("\ufeff")  # BOM for Excel UTF-8 detection.
+        writer.writerow(columns)
+        with transaction.atomic(), connection.cursor() as cur:
+            cur.execute("SET LOCAL operations.tenant_id = 1")
+            with connection.chunked_cursor() as stream:
+                stream.execute(sql, params)
+                while batch := stream.fetchmany(2000):
+                    for r in batch:
+                        writer.writerow(
+                            [
+                                r[0], r[1] or "", r[2] or "", r[3], r[4] or "", r[5] or "",
+                                r[6] or "", r[7] or "", r[8] or "",
+                                _installation_decision_label(r[9], r[10]), r[11],
+                            ]
+                        )
+                    yield buffer.getvalue()
+                    buffer.seek(0)
+                    buffer.truncate()
+        if buffer.tell():
+            yield buffer.getvalue()
+
+    stamp = timezone.now().strftime("%Y%m%d_%H%M%S")
+    response = StreamingHttpResponse(rows(), content_type="text/csv; charset=utf-8")
+    response["Content-Disposition"] = f'attachment; filename="software_installations_{stamp}.csv"'
+    return response
+
+
+@login_required
+def software_installations(request: HttpRequest) -> HttpResponse:
+    """Software > Installations: one row per program on a current Computer.
+
+    An installation is the Computer-to-product relationship with its own
+    version, path and date (ADR-0012). The decision shown is the one that
+    applies to that installation (``shared.software_coverage``, ADR-0039).
+    Count, page and CSV share the same filters and grain.
+    """
+    filters, clauses, params = _installation_filters(request)
+    where_sql = " AND ".join(clauses)
+    # The decision lookups are only needed to filter by decision.
+    filter_joins = software_coverage.EFFECTIVE_DECISION_JOINS if filters["decision"] else ""
+    if wants_csv(request):
+        return _installation_csv(clauses, params)
+    try:
+        page = max(1, int(request.GET.get("page") or 1))
+    except ValueError:
+        page = 1
+    with transaction.atomic(), connection.cursor() as cur:
+        cur.execute("SET LOCAL operations.tenant_id = 1")
+        cur.execute(f"SELECT count(*) {_INSTALLATION_FROM} {filter_joins} WHERE {where_sql}", params)
+        total = cur.fetchone()[0]
+        num_pages = max(1, -(-total // _INSTALLATION_PAGE_SIZE))
+        page = min(page, num_pages)
+        # The page's rows first; decisions only for those rows.
+        cur.execute(
+            f"""
+            WITH page AS (
+                SELECT i.tenant_id, i.client_id, i.device_id, i.canonical_name, i.publisher,
+                       i.version, i.install_date, i.last_observed_at,
+                       c.display_name, c.slug, d.canonical_hostname
+                {_INSTALLATION_FROM}
+                {filter_joins}
+                 WHERE {where_sql}
+                 ORDER BY c.display_name, d.canonical_hostname, i.canonical_name
+                 LIMIT %s OFFSET %s
+            )
+            SELECT i.display_name, i.slug, i.device_id, i.canonical_hostname, i.canonical_name,
+                   i.publisher, i.version, i.install_date, i.last_observed_at,
+                   {software_coverage.TITLE_DECISION}, {software_coverage.PUBLISHER_DECISION}
+              FROM page i
+              {software_coverage.EFFECTIVE_DECISION_JOINS}
+             ORDER BY i.display_name, i.canonical_hostname, i.canonical_name
+            """,
+            [*params, _INSTALLATION_PAGE_SIZE, (page - 1) * _INSTALLATION_PAGE_SIZE],
+        )
+        rows = [
+            {
+                "client_name": r[0],
+                "client_slug": r[1],
+                "device_id": r[2],
+                "hostname": r[3] or "",
+                "product": r[4],
+                "publisher": r[5] or "",
+                "version": r[6] or "",
+                "install_date": r[7],
+                "last_seen": r[8],
+                "decision": _installation_decision_label(r[9], r[10]),
+            }
+            for r in cur.fetchall()
+        ]
+    clients = Client.objects.filter(tenant_id=1, deleted_at__isnull=True).order_by("display_name")
+    query = {key: value for key, value in filters.items() if value}
+    return render(
+        request,
+        "software_installations.html",
+        {
+            "rows": rows,
+            "total": total,
+            "filters": filters,
+            "clients": clients,
+            "decision_choices": [*SoftwareDecision.Decision.choices, ("none", "No decision")],
+            "page": page,
+            "num_pages": num_pages,
+            "page_query": urlencode(query),
+            "csv_query": urlencode({**query, "format": "csv"}),
+        },
+    )
 
 
 @login_required

@@ -236,6 +236,19 @@ Operations 4 / ingest 5 known failures only, new tests pass. Not
 browser-checked.
 Next action: user approves commit and push (0347 adds a function).
 
+### Step J — Software › Installations (PLAN-012 reader)
+
+One row per installation on a current Computer (`v_device` + shared
+selector), with the decision that applies (`shared.software_coverage`,
+ADR-0039). Server-side filters: client, search, decision, product,
+publisher; count, page and CSV share them. CSV streams. Product links on
+client Software and Software › Clients open it filtered. Not stored
+per-installation decisions: PLAN-012/017 need measurements before any
+projection. Production timings (app role, read-only): page 2-2.5 s,
+decision filter about 7.7 s, CSV one client 3.3 s, all 19 s.
+Next action: user approves commit and push; later retire
+`org_software_devices` (TODO).
+
 ## Client mapping workflow — finish the single-inbox move
 
 Steps 1-5 complete (browser check pending); retirement deferred (user approved 2026-10-22). Goal: finish the 2026-10-07 "Issues is the
