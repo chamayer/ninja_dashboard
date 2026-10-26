@@ -17742,13 +17742,33 @@ def client_candidate_detail(request: HttpRequest, candidate_id) -> HttpResponse:
                     SELECT DISTINCT ON (eo.entity_key, eo.platform)
                         eo.platform,
                         eo.canonical_hostname AS hostname,
-                        eo.device_id,
+                        COALESCE(eo.device_id, named_device.id) AS device_id,
                         d.client_id,
                         c.display_name,
                         c.slug
                     FROM operations.v_entity_observation_admin_metadata eo
+                    LEFT JOIN LATERAL (
+                        SELECT candidate.id
+                        FROM operations.devices candidate
+                        WHERE eo.device_id IS NULL
+                          AND candidate.tenant_id = eo.tenant_id
+                          AND candidate.deleted_at IS NULL
+                          AND LOWER(candidate.canonical_hostname)
+                              = LOWER(eo.canonical_hostname)
+                          AND NOT EXISTS (
+                              SELECT 1
+                              FROM operations.devices duplicate
+                              WHERE duplicate.tenant_id = eo.tenant_id
+                                AND duplicate.deleted_at IS NULL
+                                AND LOWER(duplicate.canonical_hostname)
+                                    = LOWER(eo.canonical_hostname)
+                                AND duplicate.id <> candidate.id
+                          )
+                    ) named_device ON TRUE
                     LEFT JOIN operations.devices d
-                        ON d.id = eo.device_id AND d.deleted_at IS NULL
+                        ON d.id = COALESCE(eo.device_id, named_device.id)
+                       AND d.tenant_id = eo.tenant_id
+                       AND d.deleted_at IS NULL
                     LEFT JOIN operations.clients c
                         ON c.id = d.client_id
                     WHERE eo.tenant_id = 1
