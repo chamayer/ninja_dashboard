@@ -1,8 +1,6 @@
 # PLAN-017 — Consolidated data architecture review
 
-**Status:** Active. PLAN-018 is absorbed with provenance retained. No design or remediation is adopted. Phase 1 accepted (Point 39; assessment `983872ba…f94f` at `054dcfb`, amended `d2d7a465…4cdf`); evidence in [assessment](docs/records/PLAN-017-phase-1-assessment.md), [gate ledger](docs/records/PLAN-017-phase-1-gate.md), [review](docs/plans/review-plan-017-018.md).
-
-**Phases 2–4** (user-approved, executed by Claude): [Phase 2](docs/records/PLAN-017-phase-2-results.md) reproduced F01/F02/F03/F08, U04 and F07 locally (accepted, Codex round 21); [Phase 3](docs/records/PLAN-017-phase-3-results.md) production incidence: U04 common, F02 plausible in outages, F03 rare, F01 not observed, F08 decided on mechanism; [Phase 4](docs/records/PLAN-017-phase-4-verification.md): U04 generation fence and F08 separate sites scope proven locally, candidates compared. No source, schema or production changes. M6 showed F02 not observed. [Phase 5 draft](docs/records/PLAN-017-phase-5-triage.md) is Point 42. **Next:** Codex consensus on Point 42, then user Q1–Q2.
+**Completed 2026-10-26.** See the [registry](docs/records/PLAN_REGISTRY.md) and [Phase 5 triage](docs/records/PLAN-017-phase-5-triage.md). Follow-up: [PLAN-019](docs/plans/PLAN-019-data-pipeline-correctness-and-retention.md), `ready`; execution needs separate user approval. No PLAN-017 work remains open here.
 
 # PLAN-012 — Computers inventory read model
 

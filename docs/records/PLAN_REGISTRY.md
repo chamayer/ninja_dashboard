@@ -194,16 +194,16 @@ do not open competing blueprints for the same work.
 ## PLAN-017 — Consolidated data architecture review and target design
 
 - Scope: Adopted consolidated architecture, lifecycle, retention, recovery, efficiency, index/view, and A1–A10 review from acquisition through operator results and expiry; assessment and proposed design only, no remediation
-- Status: active
+- Status: completed
 - Defined: 2026-10-23
 - Started: 2026-10-25
-- Completed: —
-- Blueprint: BLUEPRINT.md
+- Completed: 2026-10-26
+- Blueprint: —
 - Source: docs/plans/PLAN-017-consolidated-data-architecture-review-draft.md
 - Section: PLAN-017 — Consolidated data architecture review and target design
 - Original source: operations/docs/plans/PLAN-017-data-architecture-review.md
-- Resume gate: Phase 1 accepted (Point 39). Phase 2 local checks accepted as local evidence (Point 41, Codex round 21). Phase 3 incidence executed under user approval (2026-10-26): docs/records/PLAN-017-phase-3-results.md. Next: Phase 4 targeted verification; any further production read needs separate approval. F04 stays with PLAN-012 item 4. PLAN-018 remains absorbed. PLAN-012/014/004/015/002/005/007 retain implementation ownership.
-- Last checked: 2026-10-26 (Phase 3 read-only aggregates as operations_migrate, all rolled back, about 25 s of database time: U04 producer-inside-findings-run overlap about 45/day; one 6.5-day activity outage with event types up to 51,651/day, so F02 is plausible during outages; 3 failed activity runs in 30 days (F03 rare); F08 not measured, decided on mechanism; F01 not observed in Phase 1 D5.2. Container logs do not survive deploys. PLAN-017 remains open).
+- Resume gate: None; completed. Phases 1–5 executed with user approvals and two-reviewer agreement (review Points 39–42). Follow-up work is PLAN-019 (ready); F04 stays with PLAN-012 item 4; the retention decision is operations ADR 0045. Writer/refresh/capacity and ordinary-user reader parity were out of scope throughout.
+- Last checked: 2026-10-26 (Phase 5 triage agreed as proposals by Codex rounds 23–24; user answered Q1 yes, with a significant-change trail, and Q2 yes. Records: phase-2/3/4 results, phase-5 triage, commits 73cefab, 3f067da, 384b0d2 and the closing commit).
 
 ## PLAN-018 — Independent end-to-end data and ingest architecture review
 
@@ -218,6 +218,19 @@ do not open competing blueprints for the same work.
 - Consolidated charter: docs/plans/PLAN-017-consolidated-data-architecture-review-draft.md
 - Resume gate: Superseded by PLAN-017 on 2026-10-25 through explicit user adoption of the consolidated charter. Preserve this original source for provenance; resume only through PLAN-017 and its current authorization gates.
 - Last checked: 2026-10-25 (absorbed into PLAN-017; source text unchanged. PLAN-018 never independently entered execution, so Started and Completed remain —).
+
+## PLAN-019 — Data pipeline correctness and source-record retention (PLAN-017 follow-up)
+
+- Scope: Fix PLAN-017's confirmed acquisition, publication and retention defects in order: F07 contract, F01 receipt, F02 cap detection and bounded continuation, F03 enqueue order, F09 all-source daily presence (assess first), U04 generation fence with F06 stage map, F08 separate sites scope, and the ADR 0045 first-observed anchor and significant-change trail
+- Status: ready
+- Defined: 2026-10-26
+- Started: —
+- Completed: —
+- Blueprint: —
+- Source: docs/plans/PLAN-019-data-pipeline-correctness-and-retention.md
+- Section: PLAN-019 — Data pipeline correctness and source-record retention (PLAN-017 follow-up)
+- Resume gate: Executing this plan or any step requires separate explicit user approval. Coordinates with PLAN-002/005/007, which keep their own statuses and gates; F04 stays with PLAN-012.
+- Last checked: 2026-10-26 (registered at the user's approval from PLAN-017 Phase 5; no implementation started).
 
 ## PLAN-020 — Operations entity links in tables
 

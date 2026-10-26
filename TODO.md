@@ -7,13 +7,13 @@ Read Inbox at the start of every session.
 
 ## Inbox
 
-- [ ] **PLAN-017 — Phase 4 targeted verification, then Phase 5 design:**
-      Phase 3 incidence is recorded (docs/records/PLAN-017-phase-3-results.md):
-      U04 overlap common, F02 plausible during collection outages, F03 rare,
-      F01 not observed, F08 decided on mechanism. Phase 4 resolves F02 and
-      compares candidate fixes; any further production read needs separate
-      approval. F04 remains owned by PLAN-012 item 4. Writer/refresh/capacity
-      and ordinary-user parity measures still need separately justified scope.
+- [ ] **PLAN-019 — Data pipeline correctness and source-record retention:**
+      `ready` (docs/plans/PLAN-019-data-pipeline-correctness-and-retention.md);
+      executing it or any step needs separate user approval. PLAN-017 is
+      completed. F04 stays with PLAN-012 item 4.
+- [ ] **F05 purge measurement (from PLAN-017):** measure observation and
+      software history purge duration and lock waits before choosing
+      batching or a job bound; R08, under PLAN-006's gate.
 - [ ] **Collection log retention (from PLAN-017 Phase 3, 2026-10-26):** the
       `ninja-jobs-worker` and `operations-ingest` container logs are lost on
       every deploy, so warnings such as the activity page cap and the

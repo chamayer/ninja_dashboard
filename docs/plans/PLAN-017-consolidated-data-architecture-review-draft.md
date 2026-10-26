@@ -2,6 +2,13 @@
 
 ## Status, authority, and purpose
 
+**Completed 2026-10-26.** Phases 1–5 ran under user approvals with two-reviewer
+agreement (review Points 39–42); outcome in the
+[Phase 5 triage](../records/PLAN-017-phase-5-triage.md). Follow-up work is
+[PLAN-019](PLAN-019-data-pipeline-correctness-and-retention.md) (`ready`);
+the retention decision is operations ADR 0045. The text below is the
+charter as adopted.
+
 Charter defined and adopted 2026-10-25. Author: Codex. Independent reviewer:
 Claude. Independent review is complete; all material comments are resolved.
 The user adopted PLAN-017 as the surviving identifier and authorized Phase 1,
