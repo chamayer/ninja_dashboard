@@ -28,7 +28,6 @@ from __future__ import annotations
 import hashlib
 import json
 from collections.abc import Iterable
-from datetime import datetime, timezone
 from typing import Any
 
 from psycopg.types.json import Json
@@ -334,71 +333,6 @@ def _supports_projection_versions(cur: Any) -> bool:
     )
     result = cur.fetchone()
     return bool(result and result[0])
-
-
-def write_daily_presence_rows(
-    cur: Any,
-    rows: Iterable[dict[str, Any]],
-    *,
-    snapshot_run_id: Any,
-    observed_at: datetime,
-) -> int:
-    """Insert one compact source-record presence fact per UTC day.
-
-    The current row owns the complete stable identity. The rollup references
-    its stable observation UUID and duplicates only namespace/date provenance.
-    Repeated collections on the same day conflict to no-op.
-    """
-    identities = [
-        {
-            "tenant_id": row["tenant_id"],
-            "source_instance_id": str(row["source_instance_id"]),
-            "external_namespace": str(row["external_namespace"]),
-            "parent_external_namespace": str(
-                row.get("parent_external_namespace") or ""
-            ),
-            "parent_external_id": str(row.get("parent_external_id") or ""),
-            "external_id": str(row["external_id"]),
-        }
-        for row in rows
-    ]
-    if not identities:
-        return 0
-    cur.execute("SELECT to_regclass('operations.source_record_seen_daily')")
-    if cur.fetchone()[0] is None:
-        return 0
-    rollup_day = observed_at.astimezone(timezone.utc).date()
-    cur.execute(
-        """
-        WITH incoming AS (
-            SELECT *
-              FROM jsonb_to_recordset(%s::jsonb) AS x(
-                   tenant_id bigint,
-                   source_instance_id uuid,
-                   external_namespace text,
-                   parent_external_namespace text,
-                   parent_external_id text,
-                   external_id text
-              )
-        )
-        INSERT INTO operations.source_record_seen_daily
-          (tenant_id, source_record_id, external_namespace, rollup_day,
-           first_snapshot_run_id)
-        SELECT c.tenant_id, c.observation_id, c.external_namespace, %s, %s
-          FROM incoming i
-          JOIN operations.entity_observation_current c
-            ON c.tenant_id = i.tenant_id
-           AND c.source_instance_id = i.source_instance_id
-           AND c.external_namespace = i.external_namespace
-           AND c.parent_external_namespace = i.parent_external_namespace
-           AND c.parent_external_id = i.parent_external_id
-           AND c.external_id = i.external_id
-         WHERE c.active IS TRUE
-        ON CONFLICT (tenant_id, source_record_id, rollup_day) DO NOTHING
-        """,
-        (Json(identities), rollup_day, snapshot_run_id),
-    )
-    return cur.rowcount
 
 
 def _identity_tuple(row: dict[str, Any]) -> tuple:

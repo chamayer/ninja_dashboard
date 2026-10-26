@@ -109,7 +109,7 @@ def test_ninja_devices_publish_the_shared_source_row_contract(monkeypatch) -> No
             rows=rows,
             batch_id=batch_id,
             timestamp=timestamp,
-            callback=kwargs["after_current_write"],
+            kwargs=kwargs,
         )
         return len(rows)
 

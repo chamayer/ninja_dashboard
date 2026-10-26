@@ -30,7 +30,6 @@ import hashlib
 import logging
 import uuid
 from datetime import datetime
-from collections.abc import Callable
 from typing import Any
 
 from psycopg.types.json import Json
@@ -261,16 +260,12 @@ def write_observations(
     rows: list[dict[str, Any]],
     batch_id: uuid.UUID,
     observed_at: datetime,
-    after_current_write: Callable[[Any, list[dict[str, Any]], uuid.UUID], None]
-    | None = None,
 ) -> int:
     """Write normalized source rows through the shared Operations contract.
 
     Connectors supply source-specific facts, stable record identity, and a
     container identity. This writer owns client attachment, Computer identity,
     current/history state, and snapshot reconciliation for every source.
-    ``after_current_write`` is reserved for compact source-history facts that
-    need the canonical current-record UUID after the shared write succeeds.
     """
     if not rows:
         return 0
@@ -611,8 +606,6 @@ def write_observations(
             is_complete_snapshot=is_complete_snapshot,
             identity_rows=current_rows,
         )
-        if after_current_write is not None:
-            after_current_write(cur, current_rows, run_id)
         if is_complete_snapshot:
             reconcile_complete_run(cur, run_id)
             # A group is unmatched only if NO row in the batch resolved it.

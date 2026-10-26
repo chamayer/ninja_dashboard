@@ -11,7 +11,7 @@ import pytest
 
 from ingest.core.device_health import _legacy_health_entity_key
 from ingest.observation_runs import begin_run, complete_run, reconcile_complete_run
-from ingest.observations import write_current_rows, write_daily_presence_rows
+from ingest.observations import write_current_rows
 
 
 @pytest.fixture(scope="module")
@@ -141,22 +141,6 @@ def test_current_history_and_run_dual_write(postgres_connection) -> None:
                    (tenant_id, source_instance_id, external_namespace,
                     parent_external_namespace, parent_external_id, external_id)
                 WHERE effective_to IS NULL;
-            CREATE TABLE operations.source_record_seen_daily (
-                tenant_id bigint NOT NULL,
-                source_record_id uuid NOT NULL,
-                external_namespace text NOT NULL,
-                rollup_day date NOT NULL,
-                first_snapshot_run_id uuid,
-                backfilled_from_legacy boolean NOT NULL DEFAULT FALSE,
-                CONSTRAINT ck_seen_daily_provenance CHECK (
-                    (backfilled_from_legacy IS FALSE
-                     AND first_snapshot_run_id IS NOT NULL)
-                    OR
-                    (backfilled_from_legacy IS TRUE
-                     AND first_snapshot_run_id IS NULL)
-                ),
-                PRIMARY KEY (tenant_id, source_record_id, rollup_day)
-            );
         """)
         cursor.execute(
             "INSERT INTO operations.source_bindings VALUES (%s, 1, %s)",
@@ -209,24 +193,6 @@ def test_current_history_and_run_dual_write(postgres_connection) -> None:
             is_complete_snapshot=True,
             identity_rows=[first_row],
         )
-        assert (
-            write_daily_presence_rows(
-                cursor,
-                [first_row],
-                snapshot_run_id=run_id,
-                observed_at=observed_at,
-            )
-            == 1
-        )
-        assert (
-            write_daily_presence_rows(
-                cursor,
-                [first_row],
-                snapshot_run_id=run_id,
-                observed_at=observed_at,
-            )
-            == 0
-        )
 
         cursor.execute(
             """
@@ -261,8 +227,6 @@ def test_current_history_and_run_dual_write(postgres_connection) -> None:
             3,
             True,
         )
-        cursor.execute("SELECT COUNT(*) FROM operations.source_record_seen_daily")
-        assert cursor.fetchone() == (1,)
 
         health_run_id, _ = begin_run(
             cursor,
