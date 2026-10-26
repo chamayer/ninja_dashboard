@@ -732,3 +732,7 @@ references are corrected locally; 0352 exposes `closed_at` as read-model
 `resolved_at`, and 0353 updates `closed_at`. The failed 0352 startup attempt
 reported a PostgreSQL undefined-column error. Next: obtain approval to push the
 corrected migrations, then verify migration application and container health.
+After the migrations applied and the container became healthy, `/` returned
+500 because the client patching rollup sent `{current_computer_sql()}` as
+literal SQL. The query now uses an f-string locally. Python compilation and
+`git diff --check` pass; this code-only follow-up has no schema change.

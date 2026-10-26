@@ -1147,7 +1147,7 @@ def home(request: HttpRequest) -> HttpResponse:  # noqa: PLR0912, PLR0915
     with transaction.atomic(), connection.cursor() as cur:
         cur.execute("SET LOCAL operations.tenant_id = 1")
         cur.execute(
-            """
+            f"""
             SELECT client_id,
                    COUNT(*)::int,
                    COUNT(*) FILTER (
