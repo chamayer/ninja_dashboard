@@ -3765,3 +3765,303 @@ current 949-file source recheck and routes the new delta to the later-phase
 entry check; the accepted assessment and A/B/C evidence digests still match.
 
 <!-- ROUND_COMPLETE agent=Codex round=19 -->
+
+## Point 40 — Phase 2 local-mechanism entry proposal
+
+> **Superseded by Codex round 20 below.** Restored verbatim on 2026-10-26 at
+> the user's request from Claude's review-session copy, so that Claude round 21
+> keeps the text it reviewed. It is not the current proposal.
+
+**Codex — round 19 (2026-10-26), proposal for independent review:**
+
+Phase 1 remains accepted under Point 39, Claude round 20. The reviewed
+assessment SHA-256 remains `983872ba245d2ac857a38bde483e034dee863a8817cd5da50ed3fbfeae23f94f`;
+the corrected current assessment is `d2d7a465eb94832185a0835c824ee252aeebca13fe9c5d4ba12172b875d74cdf`.
+N1–N4/N6 wording is present in the assessment and N5 in TODO. N1's diagnostics
+row and root checkpoint state possible 0345-era overlap with B2 through
+23:05:40, the D1 index continuation, and D5 attempts; seconds carry a
+mixed-load caveat, while plan/work counters support the regression and
+improvement conclusion. The accepted snapshot and original evidence remain
+unchanged.
+
+### Proposed boundary (superseded)
+
+This is a Phase 2 **entry proposal only**. The charter's Phase 2 is local
+mechanisms using bounded synthetic/disposable checks, with actual results and
+environment limits recorded. Claude should review this proposal in a fresh
+session. Execution starts only after separate explicit user approval. No check,
+test, database experiment, or container experiment was run while drafting this
+proposal.
+
+I inspected the listed fixtures and test helpers. Mock/unit fixtures can run
+without a database. Where transaction ordering matters, the proposed disposable
+environment is a throwaway local PostgreSQL database/schema loaded from the
+existing migrations or a purpose-built minimal schema, with two independent
+connections and synthetic rows only. Current environment availability and
+safe automated teardown are not established; those are verification gaps, not
+assumptions. No production or shared development database is in scope.
+
+| # | Proposed check and existing fixture to reuse | Disposable environment and setup | Pass / fail criteria | Owning plan(s) | Effort |
+| --- | --- | --- | --- | --- | --- |
+| 1 | F01 complete, partial, and empty acquisition/publication. Reuse `ingest/tests/test_software_inventory_apply.py` paging/completeness and removal-guard fixtures; `ingest/tests/test_observation_runs.py` explicit completeness fixture. | Mocked source/page responses for the unit cases; synthetic tenant and disposable PostgreSQL for the publication boundary. Seed prior current rows, then feed complete nonempty, partial, and explicitly complete-empty inputs. | Pass: complete nonempty publishes all returned rows; partial input cannot authorize absence/removal; empty input is distinguished from failure and follows its explicit complete/empty policy; run receipt and current state agree. Fail on silent truncation, removal from partial input, or treating failure as complete empty. | PLAN-017 (cross-cutting); PLAN-002/007 (acquisition owners). | 0.5 d |
+| 2 | F08 complete-agent / partial-sites failure followed by successful retry. Reuse `ingest/tests/test_source_observation_failures.py` collector mocking and `ingest/tests/test_observations.py` row/history helpers. | Synthetic connector responses and disposable PostgreSQL for current/history/run state: prior empty site plus agent evidence; fail only the optional site request; then retry successfully. | Pass: agent rows publish; failed site substream does not authorize site absence; the run/receipt exposes incomplete outcome; successful retry restores the site without an erroneous closed absence interval. Fail if the site is withdrawn on the partial fetch or receipts claim success/complete. | PLAN-017; PLAN-002/007. | 0.5 d |
+| 3 | F02 activity page-cap/frontier behavior under backlog beyond the cap. No activity-ingest test exists; inspect and reuse `ingest/activities/ingest.py::_pull_one` and the `NinjaClient.get` response contract, using the fake-client pattern from `ingest/tests/test_software_inventory_apply.py` only to feed deterministic page sequences. | In-memory fake Ninja client and monkeypatched `_MAX_PAGES_PER_SOURCE` (small value); seed a last ID and enough ordered synthetic pages to cross the cap, then invoke consecutive runs without a vendor call or database. | Pass: hitting the cap leaves an explicit recoverable frontier and repeated runs eventually process every ID above the starting cursor exactly once. Fail if updating the high-water mark after a capped prefix causes older unseen IDs to fall behind the next run's stop boundary, or if the cap is silent. | PLAN-017; PLAN-002/007. | 0.25 d |
+| 4 | F03 durable demand versus activity-cursor advancement. No direct activity-ingest fixture exists; reuse `ingest/tests/test_jobs_material_change.py` for existing durable successor-contract patterns and `ingest/tests/test_software_queue_attempt_numbers.py` for pending-target fixture conventions; inspect `ingest/activities/ingest.py::run` ordering. | Fake Ninja client plus isolated monkeypatched transaction, cursor, event-capture, and enqueue boundaries; inject failure between `_set_last_id` and durable enqueue, then replay the same synthetic activity. Add disposable PostgreSQL only if the chosen recovery guarantee depends on commit ordering. | Pass: cursor advancement cannot permanently outrun a required durable software target, either because target and cursor commit atomically or because replay/recovery recreates the demand. Fail if the injected interruption advances the cursor and leaves no durable target or guaranteed catch-up. | PLAN-017; PLAN-002/005/007. | 0.25 d |
+| 5 | U04 two-connection barrier: inventory producer commits a same-title mutation after consumer capture and before acknowledgment. Reuse `ingest/tests/test_software_inventory_apply.py` title/device fixtures and `ingest/tests/test_software_queue_attempt_numbers.py` cursor/scripted-transaction style; add an explicit barrier fixture if approved. | Disposable local PostgreSQL, two independent connections, isolated tenant/title/target, deterministic barriers at capture, producer commit, and acknowledgment. | Pass: the producer's newer demand remains pending or is deterministically re-observed before completion; after the consumer finishes, a subsequent pass sees the new generation. Fail if acknowledgment clears the only demand for the post-capture mutation. Record whether behavior is guaranteed or only recovered by whole-fleet work. | PLAN-017; PLAN-002/005/007 coordinate job and producer ownership. | 0.5 d |
+| 6 | U04 same two-connection barrier for the intel-matcher target producer. Reuse the U04 fixture from check 5 and intel matcher target construction helpers after inspection at execution entry. | Same disposable database pattern as check 5; independently invoke the intel-matcher producer against the captured pending target. | Same pass/fail rule as check 5, including the producer's `queued_at` conflict behavior. Fail if the matcher mutation is acknowledged without retained/re-observed demand. Do not infer serialization from resource names alone. | PLAN-017; PLAN-002/005/007 coordinate job and producer ownership. | 0.5 d |
+| 7 | First client publication from source evidence. Reuse `ingest/tests/test_client_promotion.py` `_decide` fixtures and `ingest/tests/test_observation_runs.py` identity summary fixture. | Synthetic source observations in a disposable PostgreSQL database; create a candidate, satisfy the existing promotion contract, run the publication path once, then replay idempotently. | Pass: one expected client is created/mapped, source evidence remains attached to the intended identity, and replay creates no duplicate client or divergent link. Fail on premature promotion, duplicate publication, or evidence detachment. | PLAN-017; PLAN-004/015 own identity rules and reconciliation. | 0.25 d |
+| 8 | First Computer publication and canonical attachment. Reuse `ingest/tests/test_observations.py::test_new_identity_opens_first_history_version`, `test_absent_identity_locks_and_rereads_before_insert`, and `ingest/tests/test_devices.py::test_ninja_devices_publish_the_shared_source_row_contract`. | Synthetic new source identity in disposable PostgreSQL; publish once, repeat same identity, then attach/match client using current resolver behavior. | Pass: one canonical Computer/source identity and first history interval are published; replay is idempotent; attachment does not create a second Computer or rewrite source identity. Fail on duplicate canonical identity or missing/duplicate initial history. | PLAN-017; PLAN-004/015 and PLAN-007. | 0.25 d |
+| 9 | Catalog reconstruction after expiry/rebuild. Reuse `ingest/tests/test_software_inventory_apply.py::test_a_version_change_clears_the_catalog_link_for_relinking`, `ingest/tests/test_software_classify_schedule.py::test_full_rebuild_catchup_filters_for_full_runs`, and `ingest/tests/test_software_read_models.py` refresh-order fixture. | Disposable PostgreSQL with synthetic catalog, installation, and source rows; expire/remove a derived catalog link, invoke the supported rebuild/catch-up path, and inspect dependency order. | Pass: rebuild restores only derivable catalog/read-model state, respects expiry and current source authority, and produces the same effective result as the seeded baseline; no duplicate links or stale publication. Fail on unrecoverable required references, stale resurrection, or dependency-order violation. | PLAN-017; PLAN-006 (retention/expiry gate) and PLAN-007 (ingest/rebuild coordination). | 0.5 d |
+| 10 | Expiry and reconstruction with retained references / unavailable history. Reuse the same catalog fixtures as check 9 and `ingest/tests/test_restore_ninja_historical_evidence_postgres.py` disposable PostgreSQL setup pattern. | Disposable PostgreSQL only; synthetic expired, retained-reference, withdrawn, and reappearing rows. Do not delete or mutate real historical evidence. | Pass: expiry removes only eligible data, preserves protected references/anchors, and documented reconstruction restores the supported current state without claiming unavailable history. Fail on dangling required references, loss of protected authorship/identity, or false historical reconstruction. | PLAN-017; PLAN-006, with PLAN-004/007 consulted for identity and source lifecycle. | 0.5 d |
+
+Estimated effort totals **4.0 engineer-days**, within the charter's retained
+Phase 2 range of 2–4 days and excluding environment setup delays. Tests 5–6
+and 9–10 carry the largest integration risk. The current repo inspection did
+not establish a ready disposable PostgreSQL/testcontainer harness for these
+exact paths; transaction-level isolation, teardown, migration setup, and the
+expiry/rebuild route therefore remain explicit verification gaps. If the
+environment is unavailable, record the blocked checks and their limits rather
+than substituting mocks for concurrency/recovery evidence. Do not add a
+dependency or expand into live measurements without separate review and
+approval. Phase 2 does not include remediation, production access, schema
+changes, migrations, deployments, commits, or pushes.
+
+Current source-state caveat: acceptance remains anchored to HEAD `054dcfb`.
+The previous correction checkpoint recorded the concurrent identity/Operations
+delta at `7a0e791`; current HEAD is `7ffd632` and the worktree contains further
+uncommitted identity, Operations view/template, and other changes. These are
+preserved. Reconcile the exact delta and its digests before any approved Phase 2
+execution; do not infer production state from it.
+
+Validation: plan-registry validation passed (18 entries). The shared governance
+workflow checks were evaluated: required headings, VERSION format, changelog
+version match, and registry passed; the existing root blueprint 4,000-byte
+limit fails. Scoped `git diff --check` passed. Point 40 adds no Markdown file
+links; fixture and test names were checked against existing source files.
+Assessment hash remains `d2d7a465eb94832185a0835c824ee252aeebca13fe9c5d4ba12172b875d74cdf`.
+No tests, database/container experiments, production access, or runtime checks
+were run. Next action: Claude reviews this Point 40 in a fresh session; Phase 2
+execution then needs separate explicit user approval. No manual measurements
+are assigned to the user.
+
+Status: `superseded` — replaced by Codex round 20 below.
+
+<!-- ROUND_COMPLETE agent=Codex round=19 -->
+
+**Claude — round 21 (2026-10-26), review of the initial proposal:**
+
+Verdict: the proposal's core is sound, but revise it before Phase 2 approval.
+The accepted assessment and preserved gate snapshot hashes match: original
+`983872ba…f94f`, amended `d2d7a465…4cdf`. Named fixture files/functions exist,
+there is no activity-ingest test, and the F02 cap / shared `max_id` / cursor
+advance before enqueue behavior matches current code. The 4.0-day estimate is
+within the charter's 2–4-day range.
+
+Required corrections: use the existing testcontainers PostgreSQL harness
+(`operations/pyproject.toml`, 12 `ingest/tests/*_postgres.py` modules,
+`RUN_POSTGRES_INTEGRATION_TESTS=1`, `postgres:16-alpine`; Docker 29.6.2 was
+available during review). Its hand-built schemas need constraint/default
+fidelity checks, and U04 needs a second independent connection plus barriers.
+Add explicit undo/reappearance and tenant-scope coverage. Defer F04 only with
+its PLAN-012 item 4 ownership stated. Mark F01/F02/F03/F08 as current-code
+reproductions expected to violate the desired criteria, outside the ordinary
+passing suite or explicitly xfailed. For F02, cap one status filter while a
+second remains uncapped; accept at-least-once work with idempotent effects and
+check source-event capture and software enqueue for duplicates. Give matcher
+producer coverage a real fixture. Include schema-building effort and share the
+U04 fixture. Move the prior Codex round-19 wording correction back under
+Point 39, repair TODO's duplicated phrase, and record blueprint-size debt.
+
+This review requested proposal changes and did not approve Phase 2 execution.
+
+<!-- ROUND_COMPLETE agent=Claude round=21 -->
+
+**Codex — round 20 (2026-10-26), revised proposal after Claude round 21:**
+
+### Boundary and existing disposable environment
+
+This revision supersedes the initial Point 40 proposal. It remains an entry
+proposal, not execution authority. The repository has an existing disposable
+PostgreSQL harness: `testcontainers[postgres]` is declared in
+`operations/pyproject.toml`; 12 `ingest/tests/*_postgres.py` modules use
+`RUN_POSTGRES_INTEGRATION_TESTS=1` and `postgres:16-alpine`. No test, container,
+or database was run for this revision. Harness availability and Docker 29.6.2
+were verified in Claude's read-only review.
+
+The focused tests use testcontainers where transaction/schema behavior matters
+and existing unit fixtures for pure transformations. Several integration
+fixtures build hand-written schemas. Before trusting results, compare every
+used table's constraints, defaults, keys, and relevant RLS policies with the
+current migration/model authority. Reuse one disposable container/schema where
+compatible. The U04 checks share one fixture but each opens a second independent
+connection and uses explicit barriers; the existing single/autocommit
+connection is insufficient for those checks. Do not use production or a shared
+development database.
+
+| # | Check and fixtures inspected for reuse | Disposable environment and setup | Expected result on current code; pass/fail criterion | Owner(s) | Effort |
+| --- | --- | --- | --- | --- | --- |
+| 1 | F01 complete, partial, and empty acquisition. Reuse `ingest/tests/test_observation_runs.py` completeness fixtures and `ingest/tests/test_source_observation_failures.py` mocking. | Fake source responses; testcontainers schema matching `observation_snapshot_runs`, current rows, constraints, and defaults. Seed one active row; send complete nonempty, partial, failed, and explicitly complete-empty inputs. | **Current code expected reproduction/failure:** `write_observations` returns early for empty rows, so the complete-empty case creates no run/reconciliation and leaves the active row. Keep this as an out-of-suite reproduction or explicit xfail. Record controls: complete nonempty publishes; partial/failure do not authorize absence. A future pass requires an explicit empty-complete outcome distinct from failure and matching receipt/current state. | PLAN-017; PLAN-002/007 acquisition owners. | 0.20 d |
+| 2 | F08 partial SentinelOne sites and successful retry. Reuse `ingest/tests/test_source_observation_failures.py` collector mocking and `ingest/tests/test_observations.py` current/history row helpers. | Testcontainers schema matching snapshot/run, current, and history constraints. Seed a previously empty site plus agent evidence; fail only site fetch, then retry successfully. | **Current code expected reproduction/failure:** the run is recorded complete/successful, the omitted empty site is withdrawn, and retry opens a new active episode while the false closed interval remains. Keep as out-of-suite reproduction or xfail. Future pass requires partial-site failure not to authorize absence, a receipt that exposes incompleteness, and retry without false withdrawal history. | PLAN-017; PLAN-002/007. | 0.30 d |
+| 3 | F02 activity cap/frontier under backlog. No activity-ingest test exists. Reuse `ingest/activities/ingest.py::_pull_one`, `NinjaClient.get` response shape, and the fake-client pattern in `ingest/tests/test_software_inventory_apply.py` only for response sequencing. | Fake Ninja client; monkeypatch page size/cap small. Return enough records to cap one status filter, then fully drain a second filter. Preserve the shared `max_id` behavior and call `run` again from the saved cursor. | **Current code expected reproduction/failure:** a cap-hit filter can leave older unseen IDs behind a shared `max_id` that `_set_last_id` advances; next run stops at that high-water mark. Keep as out-of-suite reproduction or xfail. Future pass is at-least-once processing of every eligible ID, not exactly-once fetching. Verify repeated IDs have idempotent stored effects and separately check duplicate effects in `capture_ninja_events` and software enqueue. | PLAN-017; PLAN-002/007. | 0.35 d |
+| 4 | F03 activity cursor before durable software demand. No direct activity-ingest fixture exists. Reuse `ingest/tests/test_jobs_material_change.py` for successor contract patterns and `ingest/tests/test_software_queue_attempt_numbers.py` for queue state conventions; inspect `ingest/activities/ingest.py::run`. | Fake client and patched transaction/enqueue boundaries; inject failure after `_set_last_id` commits and before `_enqueue_software_activities`, then replay the event. Use a disposable schema only if validating real transaction/recovery coupling. | **Current code expected reproduction/failure:** cursor advances before software enqueue; the replay sees the event at or below `last_id` and leaves no durable demand. Keep as out-of-suite reproduction or xfail. Future pass requires atomic demand/cursor state or a replay/catch-up path that restores the demand. | PLAN-017; PLAN-002/005/007. | 0.25 d |
+| 5 | U04 inventory producer races consumer acknowledgment. Reuse `ingest/tests/test_software_inventory_apply.py` title/device cases and transaction patterns from the PostgreSQL harness. | Shared testcontainers fixture with migration-matched pending-target schema; two independent non-autocommit connections and barriers at consumer capture, producer commit, and acknowledgment. | Current outcome is unverified. Pass if post-capture demand remains pending or is deterministically re-observed before completion; fail if acknowledgment clears the only demand for that mutation. Record whether whole-fleet recovery is required. | PLAN-017; PLAN-002/005/007. | 0.40 d |
+| 6 | U04 intel-matcher producer races the same consumer. Reuse `ingest/intel/matcher.py` target upsert (including `queued_at`) and `ingest/tests/test_matcher_uses_cpe_index.py` matcher fixtures; share check 5's container/schema. | Same disposable schema, with a second independent connection and deterministic barriers; invoke inventory and matcher producers in separate parameterized cases. | Current outcome is unverified. Apply check 5's pass/fail rule and assert the matcher conflict path cannot lose the newest demand. Also observe duplicates; do not infer serialization from resource names. | PLAN-017; PLAN-002/005/007. | 0.35 d |
+| 7 | First client publication from source evidence. Reuse `ingest/tests/test_client_promotion.py` decision fixtures and `ingest/tests/test_observation_runs.py` identity summary fixture. | Testcontainers schema checked against source/identity migrations; create synthetic candidate evidence, publish once, then replay. | Characterize current behavior. Pass if the expected mapping/provisional client is published once with evidence attached and replay is idempotent; fail on premature/duplicate promotion or detached evidence. | PLAN-017; PLAN-004/015 identity owners. | 0.45 d |
+| 8 | First Computer publication and canonical attachment. Reuse `ingest/tests/test_observations.py::test_new_identity_opens_first_history_version` and `test_absent_identity_locks_and_rereads_before_insert`, plus `ingest/tests/test_devices.py::test_ninja_devices_publish_the_shared_source_row_contract`. | Testcontainers schema checked against identity/source-observation migrations and defaults. Publish a synthetic new identity, replay it, then attach its source to the client. | Characterize current behavior. Pass if one canonical source identity and initial history interval exist, replay is idempotent, and attachment does not create another Computer or rewrite source identity; fail on duplicate identity or missing/duplicate history. | PLAN-017; PLAN-004/015/007. | 0.45 d |
+| 9 | Catalog reconstruction after expiry. Reuse the catalog-link case in `ingest/tests/test_software_inventory_apply.py`, full-rebuild scheduling in `ingest/tests/test_software_classify_schedule.py`, and refresh ordering in `ingest/tests/test_software_read_models.py`. | Testcontainers schema validated against current catalog/installation migrations; seed synthetic installations and catalog references, expire a derived link, rebuild and compare effective output. | Current outcome is unverified. Pass if rebuild restores derivable current catalog/read state without stale resurrection or duplicate links; fail on missing required references or dependency-order mismatch. | PLAN-017; PLAN-006 retention gate and PLAN-007 ingest coordination. | 0.30 d |
+| 10 | Expiry with retained references and unavailable history. Reuse `ingest/tests/test_restore_ninja_historical_evidence_postgres.py` disposable-schema pattern and `ingest/tests/test_retention_observations.py` policy cases. | Same testcontainers setup pattern; seed synthetic expired, protected-reference, withdrawn, and reappearing records. | Characterize current policy. Pass if expiry preserves protected anchors/references and reconstruction claims only supported current state; fail on dangling required references, loss of protected authorship/identity, or fabricated history. | PLAN-017; PLAN-006, with PLAN-004/007 consulted. | 0.20 d |
+| 11 | Move, undo, and source-record reappearance (R03/D3.2). Reuse `operations/apps/core/tests/test_client_source_group_move.py` move cases, `operations/apps/core/tests/test_migration_0315_postgres.py::test_merge_and_split_move_links_both_ways`, and the identity fixture in `ingest/tests/test_identity_matching_postgres.py`. | Testcontainers schema validated against move/link/history migrations. Move a synthetic source group/record A→B, undo to A, withdraw and reintroduce the stable source identity. | Characterize current behavior. Pass if source identity and provenance survive, undo restores the prior relationship without duplicate Computers/links, and reappearance opens the expected active/history episode. Fail on lost provenance, stale attachment, or duplicate canonical identity. | PLAN-017; PLAN-004/015. | 0.45 d |
+| 12 | Tenant scope for current Computer and source-record reads. Reuse `operations/apps/core/tests/test_migration_0332_postgres.py::test_readers_see_only_their_tenant` as a tenant-fixture pattern and the Operations testcontainers schema setup. | Testcontainers schema with production-matched tenant constraints/RLS; seed two tenants with colliding external IDs and distinct records. Query each tenant through the intended read boundary and attempt an out-of-scope write only where the test contract requires it. | Current behavior is unverified for this combined scope. Pass if each tenant reads and mutates only its own rows and colliding identifiers never cross-link; fail on any cross-tenant result or relationship. | PLAN-017; PLAN-012, with PLAN-004/015 consulted. | 0.30 d |
+
+The 12 checks total **4.0 engineer-days**, including shared disposable-container
+setup and migration-accurate schema adaptation. The existing harness removes the
+need to invent a PostgreSQL environment, but its handwritten schemas are a
+material cost and must not weaken real constraints/defaults. Checks 5–6 share
+one fixture (0.75 day total) and use two independent connections. If schema
+fidelity needs more work than this ceiling allows, stop and reprioritize or seek
+revised scope; do not silently exceed four days. Estimate remains at the top of
+the charter's Phase 2 range, not an execution authorization.
+
+**F04 deferral:** F04 is High and remains open. It is not an extra check in this
+focused entry because PLAN-012 completion-gate item 4 owns effective-attribute
+promotion/publication, swallowed failures, retry/observability, and the possible
+one-cycle lag. Keeping it there avoids duplicating its active owner and does not
+resolve or downgrade F04.
+
+**Documentation housekeeping:** the earlier Point 40 placement had put the
+Point 39 Codex round-19 wording correction beneath Point 40; it now appears
+under Point 39 before this section. TODO's duplicated “independent” phrase is
+fixed. Claude's review noted the former 45 KB blueprint; since then it has been
+compacted to 3,652 bytes, and the governance size check now passes. PLAN-012
+checkpoint detail is retained in `docs/records/PLAN-012-computer-read-checkpoint.md`.
+
+Hashes remain: accepted snapshot
+`983872ba245d2ac857a38bde483e034dee863a8817cd5da50ed3fbfeae23f94f`; corrected
+assessment
+`d2d7a465eb94832185a0835c824ee252aeebca13fe9c5d4ba12172b875d74cdf`. No tests,
+PostgreSQL/container experiments, production access, runtime changes,
+migrations, deployments, commits, or pushes were performed for this revision.
+
+Status: **revised proposal; Phase 2 execution remains unapproved and requires
+separate explicit user approval.**
+
+<!-- ROUND_COMPLETE agent=Codex round=20 -->
+
+
+## Point 41 — Phase 2 local-mechanism results
+
+**Claude — round 22 (2026-10-26), Phase 2 executed for independent review:**
+
+The user approved Phase 2 with Claude executing the 12 checks of Point 40
+(Codex round 20) against disposable testcontainers PostgreSQL only. All 12
+ran at HEAD `03f71b6`; every path under test was clean against HEAD at start
+and end. Final run: 34 passed, `ruff check` clean. Existing harnesses also
+passed (resolver shared serial 1, client promotion 5, migrations 0315/0332
+11). Results, digests, schema-fidelity notes and stubs are in
+`docs/records/PLAN-017-phase-2-results.md`; check code is under
+`docs/records/PLAN-017-phase-2/checks/`, outside the ordinary suite.
+
+Reproduced on current code: F01 (empty `_FETCHERS` result: no run, prior
+record stays active, run log `ok=True`), F08 (swallowed sites failure
+withdraws an empty site and leaves a false closed interval after retry), F02
+(capped filter loses older IDs behind the shared cursor, single and
+two-filter cases), F03 (cursor commits before software enqueue; replay skips
+the event), U04 for both the inventory and the intel-matcher producer (a
+change committed after the reconcile read coalesces into the captured target
+and is consumed by ID), and F07 on a disposable clean rebuild (retained
+product not recreated, new `product_uuid`, authored references dangle).
+
+Holds: first client publication (real `promote_client_candidate_v1`, replay
+and concurrency safe), first Computer publication (real
+`_promote_unmatched_clusters`, sibling guard and advisory lock), in-place
+catalog repair, closed-history expiry (real 0074 purge), move/undo/
+reappearance (real 0341/0201 functions plus the existing merge/split
+harness), and tenant scope (0066/0101 policies under FORCE RLS).
+
+New observations: after expiry, a returning record's history starts at its
+reappearance while daily presence still records the earlier day; the
+0066/0101 policies raise on an empty tenant setting (after any prior set,
+including `SET LOCAL`) where later `NULLIF` policies return no rows — both
+fail closed.
+
+Proposed dispositions: U04 from candidate to locally reproduced mechanism,
+production overlap and recovery cadence unverified; F07 from contract
+mismatch to reproduced on clean rebuild; F01/F02/F03/F08 keep grades with
+reproduction evidence. No severity change; Phase 3 incidence decides. F04
+stays with PLAN-012 item 4.
+
+Limits: hand-built schemas checked against the named migrations (a missed
+0339 deferral first produced a false failure); `begin_change`, the identity
+matcher, naming, layer entities and `move_computer_to_client` were stubbed;
+checks 3–4 patch database boundaries; `ingest/identity/matching.py` has
+uncommitted concurrent changes and was not tested. A full-migration schema
+build was rejected because ingest SQL and Django migrations depend on each
+other in both directions.
+
+No production access, remediation, schema or migration change, deployment,
+commit or push. Next action: independent review of this point; Phase 3
+production measurements need separate explicit user approval.
+
+Status: `results` — awaiting independent review.
+
+<!-- ROUND_COMPLETE agent=Claude round=22 -->
+
+**Codex — round 21 (2026-10-26), independent review of Point 41:**
+
+*Recorded by Claude from the review text the user pasted; wording condensed,
+substance unchanged.* Codex reviewed the recorded results and test code at
+HEAD `03f71b6` without running the checks. It recommends accepting the
+reproduced mechanisms as local evidence, with these qualifications:
+
+- F01, F02, F03 and both U04 producer races exercise the relevant current
+  code paths. F02/F03 use a fake activity feed and patched database
+  boundaries, so they test pagination and call ordering, not the real API or
+  database transactions.
+- F08: the connector test shows the failed sites fetch returns no partial
+  signal; the withdrawal/history test constructs the resulting rows and
+  snapshot directly. Together with the writer's completeness logic this
+  supports the mechanism, but the failed fetch is not run end to end through
+  the real writer and reconciliation.
+- U04 controls: "same controls hold" overstated the matcher case, which only
+  had the after-acknowledgment control. Narrow the wording or add the missing
+  matcher control.
+- F07: the dangling-reference result uses a stand-in table and is
+  illustrative, not a test of the production authored-reference tables and
+  constraints.
+- "Holds" results are bounded by the disclosed stubs; check 11 does not
+  validate `move_computer_to_client`'s full effects, check 8 does not
+  validate matching or naming.
+- Reproducibility: record hashes for the check artifacts; the results and
+  checks are untracked and should be preserved or committed to serve as an
+  audit record.
+
+The artifacts do not establish production incidence, impact or performance;
+the Phase 3 gate remains appropriate.
+
+<!-- ROUND_COMPLETE agent=Codex round=21 -->
+
+**Claude — round 23 (2026-10-26), response to Codex round 21:**
+
+All six points accepted. Applied to
+`docs/records/PLAN-017-phase-2-results.md`: the F08 row now states that its
+two halves were tested separately and not end to end; the F07 row states that
+the dangling result is illustrative; the stub limits name what checks 8 and
+11 do not validate; check-file sha256 prefixes are recorded. For U04 the
+missing matcher control was added rather than the wording narrowed: the
+reconcile read is now producer-specific (installation evidence for
+inventory, the title's matches for the matcher), and both producers are
+exercised for a change after capture but before the read (seen) and after
+acknowledgment (new pending row). The matcher reproduction now also asserts
+the read missed the new match. Rerun: 34 passed, `ruff check` clean.
+
+Not changed: F02/F03 remain fake-feed checks, as disclosed; an end-to-end
+F08 run through `write_observations` would need the identity and client
+tables and is left as a possible Phase 4 check if Phase 3 shows incidence.
+The results and checks remain uncommitted; committing them needs separate
+user approval.
+
+Status: `agree` — Phase 2 accepted as local evidence with the qualifications
+applied. Phase 3 still needs separate explicit approval; its unexecuted query
+draft is `docs/records/PLAN-017-phase-3-query-draft.md`.
+
+<!-- ROUND_COMPLETE agent=Claude round=23 -->
