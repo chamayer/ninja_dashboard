@@ -17,18 +17,29 @@
     <label>Client<br><select name="client"><option value="">All clients</option>{% for c in clients %}<option value="{{ c.slug }}"{% if filters.client == c.slug %} selected{% endif %}>{{ c.display_name }}</option>{% endfor %}</select></label>
     <label>Search<br><input name="q" value="{{ filters.q }}" placeholder="Program or computer name"></label>
     <label>Decision<br><select name="decision"><option value="">Any</option>{% for value, label in decision_choices %}<option value="{{ value }}"{% if filters.decision == value %} selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
-    {% if filters.product %}<input type="hidden" name="product" value="{{ filters.product }}">{% endif %}
-    {% if filters.publisher %}<input type="hidden" name="publisher" value="{{ filters.publisher }}">{% endif %}
+    <label>Product<br><input type="search" data-option-search="product-options" placeholder="Search products"><br><select id="product-options" name="product" multiple size="5" aria-label="Products">{% for product in products %}<option value="{{ product }}"{% if product in filters.product %} selected{% endif %}>{{ product }}</option>{% endfor %}</select></label>
+    <label>Publisher<br><input type="search" data-option-search="publisher-options" placeholder="Search publishers"><br><select id="publisher-options" name="publisher" multiple size="5" aria-label="Publishers">{% for publisher in publishers %}<option value="{{ publisher }}"{% if publisher in filters.publisher %} selected{% endif %}>{{ publisher }}</option>{% endfor %}</select></label>
+    <label>Computer<br><input type="search" data-option-search="computer-options" placeholder="Search Computers"><br><select id="computer-options" name="computer" multiple size="5" aria-label="Computers">{% for computer in computers %}<option value="{{ computer.id }}"{% if computer.id in filters.computer %} selected{% endif %}>{{ computer.label }}</option>{% endfor %}</select></label>
     <button type="submit">Filter</button>
     {% if page_query %}<a href="{% url 'software_installations' %}">Clear</a>{% endif %}
   </form>
-  {% if filters.product or filters.publisher %}<p class="muted" style="margin:.5rem 0 0;">{% if filters.product %}Program: <strong>{{ filters.product }}</strong>{% endif %}{% if filters.publisher %}{% if filters.product %} · {% endif %}Publisher: <strong>{{ filters.publisher }}</strong>{% endif %}</p>{% endif %}
 </div>
+<script>
+  document.querySelectorAll("[data-option-search]").forEach((input) => {
+    const select = document.getElementById(input.dataset.optionSearch);
+    input.addEventListener("input", () => {
+      const query = input.value.trim().toLocaleLowerCase();
+      for (const option of select.options) {
+        option.hidden = !option.selected && query !== "" && !option.text.toLocaleLowerCase().includes(query);
+      }
+    });
+  });
+</script>
 
 <div class="card">
   <p class="muted" style="margin:0 0 .4rem; font-size:.85rem;">Column sorting orders this page only; use the filters above to search every installation. The CSV has every matching installation.</p>
   <table class="ops-table" data-sortable data-server-table>
-    <thead><tr><th>Client</th><th>Computer</th><th>Program</th><th>Publisher</th><th>Version</th><th>Installed</th><th>Last seen</th><th>Decision</th></tr></thead>
+    <thead><tr><th>Client</th><th>Computer</th><th>Program</th><th>Publisher</th><th>Version</th><th>Install path</th><th>Installed</th><th>Last seen</th><th>Decision</th></tr></thead>
     <tbody>
     {% for row in rows %}
       <tr>
@@ -37,12 +48,13 @@
         <td><a href="{% url 'software_detail' name=row.product %}">{{ row.product }}</a></td>
         <td>{{ row.publisher }}</td>
         <td>{{ row.version }}</td>
+        <td title="{{ row.install_location }}">{{ row.install_location|truncatechars:100 }}</td>
         <td>{{ row.install_date|default:"" }}</td>
         <td>{{ row.last_seen|date:"Y-m-d H:i" }}</td>
         <td>{% if row.decision %}{{ row.decision }}{% else %}<span class="muted">No decision</span>{% endif %}</td>
       </tr>
     {% empty %}
-      <tr><td colspan="8" class="muted">No installations match these filters.</td></tr>
+      <tr><td colspan="9" class="muted">No installations match these filters.</td></tr>
     {% endfor %}
     </tbody>
   </table>

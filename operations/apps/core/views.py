@@ -7926,8 +7926,11 @@ def _installation_filters(request: HttpRequest) -> tuple[dict, list[str], list]:
     ``d`` (``v_device``) and ``c`` (client), and their parameters."""
     filters = {
         key: (request.GET.get(key) or "").strip()
-        for key in ("client", "product", "publisher", "q", "decision")
+        for key in ("client", "q", "decision")
     }
+    filters["product"] = list(dict.fromkeys(v.strip() for v in request.GET.getlist("product") if v.strip()))
+    filters["publisher"] = list(dict.fromkeys(v.strip() for v in request.GET.getlist("publisher") if v.strip()))
+    filters["computer"] = list(dict.fromkeys(v.strip() for v in request.GET.getlist("computer") if v.strip()))
     if filters["decision"] not in {*SoftwareDecision.Decision.values, "none"}:
         filters["decision"] = ""
     clauses = [
@@ -7941,11 +7944,14 @@ def _installation_filters(request: HttpRequest) -> tuple[dict, list[str], list]:
         clauses.append("c.slug = %s")
         params.append(filters["client"])
     if filters["product"]:
-        clauses.append("i.canonical_name = %s")
+        clauses.append("i.canonical_name = ANY(%s)")
         params.append(filters["product"])
     if filters["publisher"]:
-        clauses.append("i.publisher = %s")
+        clauses.append("i.publisher = ANY(%s)")
         params.append(filters["publisher"])
+    if filters["computer"]:
+        clauses.append("d.device_id::text = ANY(%s)")
+        params.append(filters["computer"])
     if filters["q"]:
         clauses.append("(i.canonical_name ILIKE %s OR d.canonical_hostname ILIKE %s)")
         params += [f"%{filters['q']}%"] * 2
@@ -8059,7 +8065,7 @@ def software_installations(request: HttpRequest) -> HttpResponse:
             f"""
             WITH page AS (
                 SELECT i.tenant_id, i.client_id, i.device_id, i.canonical_name, i.publisher,
-                       i.version, i.install_date, i.last_observed_at,
+                       i.version, i.install_date, i.install_location, i.last_observed_at,
                        c.display_name, c.slug, d.canonical_hostname
                 {_INSTALLATION_FROM}
                 {filter_joins}
@@ -8068,7 +8074,7 @@ def software_installations(request: HttpRequest) -> HttpResponse:
                  LIMIT %s OFFSET %s
             )
             SELECT i.display_name, i.slug, i.device_id, i.canonical_hostname, i.canonical_name,
-                   i.publisher, i.version, i.install_date, i.last_observed_at,
+                   i.publisher, i.version, i.install_date, i.install_location, i.last_observed_at,
                    {software_coverage.TITLE_DECISION}, {software_coverage.PUBLISHER_DECISION}
               FROM page i
               {software_coverage.EFFECTIVE_DECISION_JOINS}
@@ -8086,13 +8092,23 @@ def software_installations(request: HttpRequest) -> HttpResponse:
                 "publisher": r[5] or "",
                 "version": r[6] or "",
                 "install_date": r[7],
-                "last_seen": r[8],
-                "decision": _installation_decision_label(r[9], r[10]),
+                "install_location": r[8] or "",
+                "last_seen": r[9],
+                "decision": _installation_decision_label(r[10], r[11]),
             }
             for r in cur.fetchall()
         ]
     clients = Client.objects.filter(tenant_id=1, deleted_at__isnull=True).order_by("display_name")
-    query = {key: value for key, value in filters.items() if value}
+    query = [(key, value) for key, value in filters.items() if key not in {"product", "publisher", "computer"} and value]
+    query.extend((key, value) for key in ("product", "publisher", "computer") for value in filters[key])
+    with transaction.atomic(), connection.cursor() as cur:
+        cur.execute("SET LOCAL operations.tenant_id = 1")
+        cur.execute(f"SELECT DISTINCT i.canonical_name {_INSTALLATION_FROM} WHERE i.tenant_id = 1 AND i.deleted_at IS NULL AND i.stale_since IS NULL AND {current_computer_sql('d')} ORDER BY 1")
+        products = [r[0] for r in cur.fetchall()]
+        cur.execute(f"SELECT DISTINCT i.publisher {_INSTALLATION_FROM} WHERE i.tenant_id = 1 AND i.deleted_at IS NULL AND i.stale_since IS NULL AND {current_computer_sql('d')} AND i.publisher IS NOT NULL AND i.publisher <> '' ORDER BY 1")
+        publishers = [r[0] for r in cur.fetchall()]
+        cur.execute(f"SELECT DISTINCT d.device_id::text, d.canonical_hostname, c.display_name {_INSTALLATION_FROM} WHERE i.tenant_id = 1 AND i.deleted_at IS NULL AND i.stale_since IS NULL AND {current_computer_sql('d')} ORDER BY c.display_name, d.canonical_hostname, d.device_id")
+        computers = [{"id": r[0], "label": f"{r[2]} — {r[1] or 'Unnamed Computer'}"} for r in cur.fetchall()]
     return render(
         request,
         "software_installations.html",
@@ -8101,11 +8117,14 @@ def software_installations(request: HttpRequest) -> HttpResponse:
             "total": total,
             "filters": filters,
             "clients": clients,
+            "products": products,
+            "publishers": publishers,
+            "computers": computers,
             "decision_choices": [*SoftwareDecision.Decision.choices, ("none", "No decision")],
             "page": page,
             "num_pages": num_pages,
             "page_query": urlencode(query),
-            "csv_query": urlencode({**query, "format": "csv"}),
+            "csv_query": urlencode([*query, ("format", "csv")]),
         },
     )
 

@@ -285,6 +285,12 @@ client Software and Software › Clients open it filtered. Not stored
 per-installation decisions: PLAN-012/017 need measurements before any
 projection. Production timings (app role, read-only): page 2-2.5 s,
 decision filter about 7.7 s, CSV one client 3.3 s, all 19 s.
+Publisher, product, and Computer filters accept multiple exact selections,
+with searchable options scoped to current Computer installations; count, page,
+and CSV retain selected values through the shared server-side filters. The
+table also shows the install path, already included in CSV. No schema or public
+route changes. Validation: Python compilation and whitespace check; browser
+interaction not checked.
 Next action: user approves commit and push; later retire
 `org_software_devices` (TODO).
 
