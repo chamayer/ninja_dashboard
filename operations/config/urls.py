@@ -160,7 +160,7 @@ urlpatterns = [
         name="client_promotions_decide",
     ),
     path(
-        "inventory/clients/promotions/settings/",
+        "admin/client-matching/",
         client_promotion_settings,
         name="client_promotion_settings",
     ),

@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+
+{% block title %}Client matching{% endblock %}
+
+{% block content %}
+<div class="card">
+  <p><a href="{% url 'admin_settings' %}">← Settings</a></p>
+  <h1>Client matching</h1>
+  <p class="muted">When the resolver maps a new source group to a client, or creates a client, on its own (ADR-0041). Every automatic action is listed on Inventory › Clients to verify or undo.</p>
+  <form method="post" action="{% url 'client_promotion_settings' %}" style="display:grid; gap:.6rem; margin-top:.6rem; max-width:40rem;">{% csrf_token %}
+    <label><input type="checkbox" name="map_enabled"{% if promotion_settings.map_enabled %} checked{% endif %}> Map a new source group to an existing client when at least <input type="number" name="map_min_names" min="1" value="{{ promotion_settings.map_min_names }}" style="width:4rem;"> of its computer names belong only to that client</label>
+    <label><input type="checkbox" name="create_enabled"{% if promotion_settings.create_enabled %} checked{% endif %}> Create a provisional client when at least <input type="number" name="create_min_sources" min="2" value="{{ promotion_settings.create_min_sources }}" style="width:4rem;"> sources report the same new name, including <input name="create_required_source" value="{{ promotion_settings.create_required_source }}" style="width:9rem;" aria-label="Required source"></label>
+    <label>Only names seen at least <input type="number" name="min_seen_runs" min="1" value="{{ promotion_settings.min_seen_runs }}" style="width:4rem;"> times</label>
+    <div><button type="submit">Save</button></div>
+  </form>
+</div>
+{% endblock %}

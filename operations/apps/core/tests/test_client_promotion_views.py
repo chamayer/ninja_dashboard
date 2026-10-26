@@ -110,9 +110,13 @@ def test_settings_are_saved_as_admin_managed_config():
     }
 
 
-def test_inventory_lists_promotions_with_select_all_and_the_settings_form():
+def test_inventory_lists_promotions_and_the_settings_live_under_admin_settings():
     get_template("inventory_clients.html")
+    get_template("client_promotion_settings.html")
     page = (_ROOT / "templates" / "inventory_clients.html").read_text(encoding="utf-8")
     assert 'id="promoted-clients"' in page and 'id="promotion-select-all"' in page
     assert "{% url 'client_promotions_decide' %}" in page
-    assert "{% url 'client_promotion_settings' %}" in page
+    assert "client_promotion_settings" not in page
+    settings_page = (_ROOT / "templates" / "admin_settings.html").read_text(encoding="utf-8")
+    assert "{% url 'client_promotion_settings' %}" in settings_page
+    assert reverse("client_promotion_settings") == "/admin/client-matching/"

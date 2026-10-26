@@ -13491,7 +13491,6 @@ def inventory_clients(request: HttpRequest) -> HttpResponse:
                 )
             ),
             "promotions": _automatic_promotions(),
-            "promotion_settings": _promotion_settings(),
         },
     )
 
@@ -13627,10 +13626,19 @@ def client_promotions_decide(request: HttpRequest) -> HttpResponse:
 
 @login_required
 @require_admin
-@require_POST
 def client_promotion_settings(request: HttpRequest) -> HttpResponse:
-    """Save the resolver's promotion thresholds (ADR-0041)."""
-    back = _safe_next(request, "inventory_clients")
+    """Settings › Client matching: the resolver's promotion thresholds (ADR-0041)."""
+    back = reverse("client_promotion_settings")
+    if request.method != "POST":
+        return render(
+            request,
+            "client_promotion_settings.html",
+            {
+                "promotion_settings": _promotion_settings(),
+                "admin_group": "settings",
+                "admin_tab": "settings",
+            },
+        )
     try:
         config = {
             "map_enabled": request.POST.get("map_enabled") == "on",
