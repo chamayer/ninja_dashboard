@@ -40,7 +40,7 @@
             <tr>
                 <td>{{ r.finding_type.name }}</td>
                 <td class="muted">{{ r.finding_class }}</td>
-                <td>{{ r.client.display_name|default:"— all —" }}</td>
+                <td>{% if r.client %}<a href="{% url 'org_index' org_slug=r.client.slug %}">{{ r.client.display_name }}</a>{% else %}— all —{% endif %}</td>
                 <td class="mono">{% for k, v in r.match_criteria.items %}{{ k }}={{ v }} {% endfor %}</td>
                 <td class="muted">{{ r.min_severity|default:"—" }}</td>
                 <td class="muted">{{ r.min_confidence|default:"—" }}</td>
@@ -85,7 +85,7 @@
                 <td class="mono">{{ rt.target|truncatechars:60 }}</td>
                 <td class="muted">{{ rt.mode }}</td>
                 <td class="muted">{{ rt.severity_min }}</td>
-                <td class="muted">{{ rt.client.display_name|default:"—" }}</td>
+                <td class="muted">{% if rt.client %}<a href="{% url 'org_index' org_slug=rt.client.slug %}">{{ rt.client.display_name }}</a>{% else %}—{% endif %}</td>
                 <td class="muted">{{ rt.finding_type.name|default:"—" }}</td>
             </tr>
             {% endfor %}

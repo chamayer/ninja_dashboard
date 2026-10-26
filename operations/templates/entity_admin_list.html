@@ -46,7 +46,7 @@
       <tr>
         <td><a href="{% url 'entity_admin_detail' row.id %}">{{ row.display_label }}</a></td>
         <td>{{ row.entity_class_display }}</td>
-        <td>{{ row.client_display_name|default:"—" }}</td>
+        <td>{% if row.client_slug %}<a href="{% url 'org_index' org_slug=row.client_slug %}">{{ row.client_display_name }}</a>{% else %}{{ row.client_display_name|default:"—" }}{% endif %}</td>
         <td class="num">{{ row.active_source_count }}{% if row.missing_source_count %} <span class="badge badge-high">{{ row.missing_source_count }} missing</span>{% endif %}</td>
         <td class="num">{{ row.effective_attribute_count }}</td>
         <td class="num">{% if row.conflict_count %}<span class="badge badge-high">{{ row.conflict_count }}</span>{% else %}0{% endif %}</td>

@@ -81,7 +81,7 @@
                     {% endif %}
                 </td>
                 <td>{{ r.scope_label|title }}</td>
-                <td class="muted">{{ r.client|default:"—" }}</td>
+                <td class="muted">{% if r.client_slug %}<a href="{% url 'org_index' org_slug=r.client_slug %}">{{ r.client }}</a>{% else %}{{ r.client|default:"—" }}{% endif %}</td>
                 <td class="muted">{{ r.decided_by|default:"—" }}</td>
                 <td class="muted">{{ r.reason|default:"—" }}</td>
             </tr>

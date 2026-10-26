@@ -19,13 +19,13 @@
     {% endfor %}
     <p style="margin: 0.5rem 0 0;">
         {% if likely_client %}
-        <strong>Likely client:</strong> {{ likely_client.display_name }}
+        <strong>Likely client:</strong> {% if likely_client.client_slug %}<a href="{% url 'org_index' org_slug=likely_client.client_slug %}">{{ likely_client.display_name }}</a>{% else %}{{ likely_client.display_name }}{% endif %}
         <span class="muted">— already owns {{ likely_client.device_count }} of the {{ linked_total }} linked computer{{ linked_total|pluralize }} in these groups. Preselected under Map to existing.</span>
         {% elif name_match %}
-        <strong>Likely client:</strong> {{ name_match.display_name }}
+        <strong>Likely client:</strong> {% if name_match.client_slug %}<a href="{% url 'org_index' org_slug=name_match.client_slug %}">{{ name_match.display_name }}</a>{% else %}{{ name_match.display_name }}{% endif %}
         <span class="muted">— {{ name_match.record_count }} of the {{ named_total }} unlinked record{{ named_total|pluralize }} in these groups report computer names that only this client's computers have. Preselected under Map to existing.</span>
         {% elif fuzzy %}
-        <strong>No computer evidence.</strong> <span class="muted">Closest name: {{ fuzzy.0.client_name }} — check before mapping.</span>
+        <strong>No computer evidence.</strong> <span class="muted">Closest name: {% if fuzzy.0.client_slug %}<a href="{% url 'org_index' org_slug=fuzzy.0.client_slug %}">{{ fuzzy.0.client_name }}</a>{% else %}{{ fuzzy.0.client_name }}{% endif %} — check before mapping.</span>
         {% else %}
         <strong>No computer evidence or similar client name.</strong> <span class="muted">Likely a new client, or fix the name at the source.</span>
         {% endif %}
@@ -87,7 +87,7 @@
         <tbody>
             {% for o in device_overlap %}
             <tr style="border-bottom: 1px solid var(--border);">
-                <td style="padding: 0.4rem;"><strong>{{ o.display_name }}</strong></td>
+                <td style="padding: 0.4rem;"><strong>{% if o.client_slug %}<a href="{% url 'org_index' org_slug=o.client_slug %}">{{ o.display_name }}</a>{% else %}{{ o.display_name }}{% endif %}</strong></td>
                 <td style="padding: 0.4rem;">{{ o.device_count }}</td>
                 <td style="padding: 0.4rem;"><em class="muted">Suggests: map to this client</em></td>
             </tr>
@@ -118,7 +118,7 @@
         <tbody>
             {% for m in name_matches %}
             <tr style="border-bottom: 1px solid var(--border);">
-                <td style="padding: 0.4rem;"><strong>{{ m.display_name }}</strong></td>
+                <td style="padding: 0.4rem;"><strong>{% if m.client_slug %}<a href="{% url 'org_index' org_slug=m.client_slug %}">{{ m.display_name }}</a>{% else %}{{ m.display_name }}{% endif %}</strong></td>
                 <td style="padding: 0.4rem;">{{ m.record_count }} of {{ named_total }}</td>
             </tr>
             {% endfor %}
@@ -136,7 +136,7 @@
         {% for f in fuzzy %}
         <li>
             <strong>{{ f.match }}</strong>
-            {% if f.kind == "alias" %}(alias of <em>{{ f.client_name }}</em>){% endif %}
+            {% if f.kind == "alias" %}(alias of <em>{% if f.client_slug %}<a href="{% url 'org_index' org_slug=f.client_slug %}">{{ f.client_name }}</a>{% else %}{{ f.client_name }}{% endif %}</em>){% endif %}
         </li>
         {% endfor %}
     </ul>
@@ -160,8 +160,8 @@
             {% for d in sample_devices %}
             <tr style="border-bottom: 1px solid var(--border);">
                 <td style="padding: 0.4rem;"><span class="badge badge-info">{{ d.platform }}</span></td>
-                <td style="padding: 0.4rem;">{{ d.hostname }}</td>
-                <td style="padding: 0.4rem;">{{ d.resolved_client_name|default:"—" }}</td>
+                <td style="padding: 0.4rem;">{% if d.device_id and d.resolved_client_slug %}<a href="{% url 'device_detail' org_slug=d.resolved_client_slug device_id=d.device_id %}">{{ d.hostname }}</a>{% else %}{{ d.hostname }}{% endif %}</td>
+                <td style="padding: 0.4rem;">{% if d.resolved_client_slug %}<a href="{% url 'org_index' org_slug=d.resolved_client_slug %}">{{ d.resolved_client_name }}</a>{% else %}{{ d.resolved_client_name|default:"—" }}{% endif %}</td>
             </tr>
             {% endfor %}
         </tbody>
@@ -248,7 +248,7 @@
         {{ candidate.resolved_reason }}
     </p>
     {% if candidate.resolved_client %}
-    <p class="muted">Bound to client: <strong>{{ candidate.resolved_client.display_name }}</strong></p>
+    <p class="muted">Bound to client: <strong><a href="{% url 'org_index' org_slug=candidate.resolved_client.slug %}">{{ candidate.resolved_client.display_name }}</a></strong></p>
     {% endif %}
 </div>
 {% endif %}

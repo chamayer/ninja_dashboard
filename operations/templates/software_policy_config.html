@@ -38,7 +38,7 @@
         {% for held in held_devices %}
         <tr>
             <td>{% if held.client_slug %}<a href="{% url 'device_detail' held.client_slug held.device_id %}">{{ held.hostname|default:"Unnamed Computer" }}</a>{% else %}{{ held.hostname|default:"Unnamed Computer" }}{% endif %}</td>
-            <td>{{ held.client|default:"—" }}</td>
+            <td>{% if held.client_slug %}<a href="{% url 'org_index' org_slug=held.client_slug %}">{{ held.client }}</a>{% else %}{{ held.client|default:"—" }}{% endif %}</td>
             <td>{{ held.held_at|date:"Y-m-d H:i" }}</td>
             <td>{{ held.previous|default:"—" }}</td>
             <td>{{ held.listed|default:"—" }}</td>

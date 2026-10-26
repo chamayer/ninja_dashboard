@@ -257,7 +257,7 @@
                         <code>{{ row.subject_label }}</code>
                     {% endif %}
                 </td>
-                <td>{{ f.client.display_name|default:"—" }}</td>
+                <td>{% if f.client %}<a href="{% url 'org_index' org_slug=f.client.slug %}">{{ f.client.display_name }}</a>{% else %}—{% endif %}</td>
                 <td class="muted">{{ row.detail }}</td>
                 <td><span class="badge badge-{{ f.status }}">{{ f.get_status_display }}</span></td>
                 <td class="muted num">{{ f.last_detected_at|default:f.last_seen_at }}</td>

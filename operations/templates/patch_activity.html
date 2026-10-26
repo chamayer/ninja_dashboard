@@ -100,7 +100,7 @@
                 <td><span class="pa-sev-{{ r.severity }}">{{ r.severity|default:"—" }}</span></td>
                 <td class="pa-kb">{{ r.kb_number|default:"—" }}</td>
                 <td style="max-width:400px; word-wrap:break-word;">{{ r.name }}</td>
-                <td>{{ r.client_name }}</td>
+                <td><a href="{% url 'org_index' org_slug=r.client_slug %}">{{ r.client_name }}</a></td>
                 <td>
                     <a href="{% url 'device_detail' org_slug=r.client_slug device_id=r.device_id %}">
                         <code>{{ r.hostname }}</code>

@@ -1,3 +1,27 @@
+## PLAN-020 — Operations entity links in tables
+
+**Status:** Complete locally (2026-10-26); plan registry entry added
+2026-10-26. Goal: link names for
+identifiable clients, Computers, and other entities in tables to detail pages,
+preserving links that serve review, evidence, or source-record workflows.
+Breadcrumbs should provide useful return paths where straightforward. Scope is
+Operations UI templates and only the view context/routes needed to identify
+existing detail destinations; no schema or migration changes.
+
+**Checkpoint:** Added direct links across mapping review, client and Computer
+inventory, source records, generic entity evidence, patching, software, and
+notification tables. Existing candidate/source/filter workflow destinations
+remain available. Client and Computer detail pages have breadcrumbs; the
+generic entity detail page retains its existing Entity evidence return link.
+Python syntax compilation, plan registry validation, and
+`git diff --check` pass. Ruff reports no findings on the changed Python lines;
+the full files retain unrelated lint findings. Django checks are unavailable
+because Django is not installed locally.
+
+**Next:** commit this scoped change locally. Obtain explicit approval before
+the `origin` push, including its automatic deployment and any pending
+migrations.
+
 ## Client mappings — recorded and movable (ADR-0040)
 
 Status: ADR-0040 accepted 2026-10-23. Step A ("Computer under the wrong

@@ -178,7 +178,7 @@
         <tbody>
             {% for r in rows %}
             <tr>
-                <td>{{ r.client_name }}</td>
+                <td><a href="{% url 'org_index' org_slug=r.client_slug %}">{{ r.client_name }}</a></td>
                 <td class="pe-hostname">
                     <a href="{% url 'device_detail' org_slug=r.client_slug device_id=r.device_id %}">
                         <code>{{ r.hostname }}</code>

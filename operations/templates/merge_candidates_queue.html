@@ -68,7 +68,7 @@
             <tr style="border-bottom: 1px solid var(--border);">
                 <td style="padding: 0.5rem;"><code>{{ c.entity_type }}</code></td>
                 <td style="padding: 0.5rem;">{{ c.canonical_key }}</td>
-                <td style="padding: 0.5rem;">{{ c.client.display_name|default:"—" }}</td>
+                <td style="padding: 0.5rem;">{% if c.client %}<a href="{% url 'org_index' org_slug=c.client.slug %}">{{ c.client.display_name }}</a>{% else %}—{% endif %}</td>
                 <td style="padding: 0.5rem;">
                     {% for member in c.member_snapshots %}
                     {% if c.client %}<a href="{% url 'device_detail' c.client.slug member.device_id %}">{{ member.hostname|default:member.device_id }}</a>{% else %}{{ member.hostname|default:member.device_id }}{% endif %}{% if not forloop.last %}, {% endif %}

@@ -23,7 +23,7 @@
 <div class="card">
   <table class="ops-table" data-sortable data-server-table><thead><tr><th>Source</th><th>Record type</th><th>Source identity</th><th>Class</th><th>Client</th><th>Status</th><th>Last observed</th></tr></thead><tbody>
   {% for row in page %}
-    <tr><td>{{ row.source_name }}</td><td>{{ row.external_namespace|humanize_label }}</td><td><a href="{% url 'entity_candidate_detail' row.id %}">{{ row.external_id }}</a></td><td>{{ row.entity_class_display }}</td><td>{{ row.client_display_name|default:"—" }}</td><td>{{ row.status|humanize_label }}</td><td>{{ row.last_observed_at|date:"Y-m-d H:i" }}</td></tr>
+    <tr><td>{{ row.source_name }}</td><td>{{ row.external_namespace|humanize_label }}</td><td><a href="{% url 'entity_candidate_detail' row.id %}">{{ row.external_id }}</a></td><td>{{ row.entity_class_display }}</td><td>{% if row.client_slug %}<a href="{% url 'org_index' org_slug=row.client_slug %}">{{ row.client_display_name }}</a>{% else %}{{ row.client_display_name|default:"—" }}{% endif %}</td><td>{{ row.status|humanize_label }}</td><td>{{ row.last_observed_at|date:"Y-m-d H:i" }}</td></tr>
   {% empty %}<tr><td colspan="7" class="muted">No candidates match this filter.</td></tr>{% endfor %}
   </tbody></table>
 </div>

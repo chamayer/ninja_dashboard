@@ -31,7 +31,7 @@
         <tbody>
             {% for c in clients %}
             <tr>
-                <td class="primary-cell">{{ c.display_name }}</td>
+                <td class="primary-cell"><a href="{% url 'org_index' org_slug=c.slug %}">{{ c.display_name }}</a></td>
                 <td class="num">
                     {% if active_software %}
                     <a href="{% url 'software_installations' %}?client={{ c.slug|urlencode }}&amp;product={{ active_software|urlencode }}{% if active_software_publisher %}&amp;publisher={{ active_software_publisher|urlencode }}{% endif %}">

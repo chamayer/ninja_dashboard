@@ -218,3 +218,16 @@ do not open competing blueprints for the same work.
 - Consolidated charter: docs/plans/PLAN-017-consolidated-data-architecture-review-draft.md
 - Resume gate: Superseded by PLAN-017 on 2026-10-25 through explicit user adoption of the consolidated charter. Preserve this original source for provenance; resume only through PLAN-017 and its current authorization gates.
 - Last checked: 2026-10-25 (absorbed into PLAN-017; source text unchanged. PLAN-018 never independently entered execution, so Started and Completed remain —).
+
+## PLAN-020 — Operations entity links in tables
+
+- Scope: Link identifiable client, Computer, and other entity names in Operations tables to their detail pages; retain specific workflow destinations and add useful detail-page breadcrumbs.
+- Status: completed
+- Defined: 2026-10-26
+- Started: 2026-10-26
+- Completed: 2026-10-26
+- Blueprint: operations/BLUEPRINT.md
+- Source: operations/docs/requirements.md
+- Section: User interface; Acceptance criteria
+- Resume gate: Complete. Link identifiable entities in Operations tables to detail pages, preserve existing workflow destinations, and provide useful breadcrumbs. No schema, migration, commit, or deployment was in scope.
+- Last checked: 2026-10-26 (table links and breadcrumbs implemented. Python compilation, plan-registry validation, and `git diff --check` pass; Ruff reports no findings on changed Python lines while full files retain unrelated lint findings. Django system/template checks could not run because Django is not installed on the workstation.)

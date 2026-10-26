@@ -25,7 +25,7 @@ from .entity_candidate_decisions import (
     promote_candidate,
     reject_candidate,
 )
-from .models import Entity, EntityCandidate, EntityCandidateEvent
+from .models import Client, Entity, EntityCandidate, EntityCandidateEvent
 
 PAGE_SIZE = 100
 
@@ -33,6 +33,17 @@ PAGE_SIZE = 100
 def _rows(cursor) -> list[dict]:
     columns = [column.name for column in cursor.description]
     return [dict(zip(columns, row, strict=True)) for row in cursor.fetchall()]
+
+
+def _add_client_slugs(rows: list[dict], tenant_id: int) -> None:
+    client_ids = {row.get("client_id") for row in rows if row.get("client_id")}
+    slugs = dict(
+        Client.objects.filter(
+            tenant_id=tenant_id, id__in=client_ids, deleted_at__isnull=True
+        ).values_list("id", "slug")
+    )
+    for row in rows:
+        row["client_slug"] = slugs.get(row.get("client_id"), "")
 
 
 def _tenant_id(request: HttpRequest) -> int:
@@ -134,6 +145,7 @@ def entity_admin_list(request: HttpRequest) -> HttpResponse:
             (tenant_id,),
         )
         class_counts = _rows(cur)
+    _add_client_slugs(rows, tenant_id)
 
     if wants_csv(request):
         return csv_response(
@@ -445,6 +457,7 @@ def _entity_candidates_legacy_queue(request: HttpRequest) -> HttpResponse:
             (tenant_id,),
         )
         status_counts = {row[0]: row[1] for row in cur.fetchall()}
+    _add_client_slugs(rows, tenant_id)
 
     page = Paginator(rows, PAGE_SIZE).get_page(request.GET.get("page"))
     return render(

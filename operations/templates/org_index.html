@@ -102,6 +102,7 @@
 </style>
 
 {% if current_client %}
+<nav class="crumbs" aria-label="Breadcrumb"><a href="{% url 'home' %}">Dashboard</a> › <a href="{% url 'inventory_clients' %}">Clients</a> › <strong>{{ current_client.display_name }}</strong></nav>
 <div class="page-heading">
   <div>
     <h1>{{ current_client.display_name }}</h1>

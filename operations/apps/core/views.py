@@ -13335,6 +13335,20 @@ def _add_candidate_evidence(
         row["likely_client"] = _first_unseparated(
             row["linked_options"], live_by_row[index], separate
         ) or _first_unseparated(name_options.get(index, []), live_by_row[index], separate)
+    likely_ids = {
+        row["likely_client"]["client_id"]
+        for row in candidates
+        if row.get("likely_client")
+    }
+    likely_slugs = dict(
+        Client.objects.filter(tenant_id=1, id__in=likely_ids, deleted_at__isnull=True)
+        .values_list("id", "slug")
+    )
+    for row in candidates:
+        if row.get("likely_client"):
+            row["likely_client"]["client_slug"] = likely_slugs.get(
+                row["likely_client"]["client_id"], ""
+            )
 
 
 @login_required
@@ -17730,7 +17744,8 @@ def client_candidate_detail(request: HttpRequest, candidate_id) -> HttpResponse:
                         eo.canonical_hostname AS hostname,
                         eo.device_id,
                         d.client_id,
-                        c.display_name
+                        c.display_name,
+                        c.slug
                     FROM operations.v_entity_observation_admin_metadata eo
                     LEFT JOIN operations.devices d
                         ON d.id = eo.device_id AND d.deleted_at IS NULL
@@ -17745,19 +17760,34 @@ def client_candidate_detail(request: HttpRequest, candidate_id) -> HttpResponse:
                     """,
                     (external_ids,),
                 )
-                for platform, hostname, device_id, cid, cname in cur.fetchall():
+                for platform, hostname, device_id, cid, cname, client_slug in cur.fetchall():
                     sample_devices.append(
                         {
                             "platform": platform,
                             "hostname": hostname or "—",
+                            "device_id": device_id,
                             "resolved_client_id": cid,
                             "resolved_client_name": cname or "",
+                            "resolved_client_slug": client_slug or "",
                         }
                     )
 
     live_groups, records_by_group = _candidate_live_groups(candidate)
     device_overlap, linked_total = _candidate_client_overlap(live_groups, records_by_group)
     name_matches, named_total = _candidate_name_matches(live_groups)
+    known_client_ids = {
+        str(item["client_id"])
+        for item in (*device_overlap, *name_matches)
+        if item.get("client_id")
+    }
+    client_slugs = {
+        str(client_id): slug
+        for client_id, slug in Client.objects.filter(
+            tenant_id=1, id__in=known_client_ids, deleted_at__isnull=True
+        ).values_list("id", "slug")
+    }
+    for item in (*device_overlap, *name_matches):
+        item["client_slug"] = client_slugs.get(str(item.get("client_id")), "")
     # A client a source already keeps separate from this one is not suggested.
     separate = _client_source_ids(
         {item["client_id"] for item in device_overlap}
@@ -17792,7 +17822,24 @@ def client_candidate_detail(request: HttpRequest, candidate_id) -> HttpResponse:
         )
         for m in matches:
             kind, cid, cname = known_names[m]
-            fuzzy.append({"match": m, "kind": kind, "client_id": cid, "client_name": cname})
+            fuzzy.append(
+                {
+                    "match": m,
+                    "kind": kind,
+                    "client_id": cid,
+                    "client_name": cname,
+                }
+            )
+    fuzzy_slugs = {
+        str(client_id): slug
+        for client_id, slug in Client.objects.filter(
+            tenant_id=1,
+            id__in={item["client_id"] for item in fuzzy},
+            deleted_at__isnull=True,
+        ).values_list("id", "slug")
+    }
+    for item in fuzzy:
+        item["client_slug"] = fuzzy_slugs.get(str(item["client_id"]), "")
 
     all_clients = list(
         Client.objects.filter(tenant_id=1, deleted_at__isnull=True).order_by("display_name")
@@ -18457,6 +18504,7 @@ def software_decision_log(request: HttpRequest) -> HttpResponse:
                 d.canonical_name or (f"publisher: {d.publisher}" if d.publisher else "?")
             ),
             "client": d.client.display_name if d.client else None,
+            "client_slug": d.client.slug if d.client else "",
             "device_id": d.device_id,
             "decided_by": d.decided_by.username if d.decided_by else None,
             "decided_at": d.decided_at,
@@ -19420,7 +19468,7 @@ def _configured_source_data_status(now: datetime) -> tuple[list[dict], bool]:
                      ORDER BY substring(run.scope_identity FROM 16)::uuid,
                               run.requested_at DESC, run.id DESC
                 )
-                SELECT source.name, client.display_name,
+                SELECT source.name, client.display_name, client.slug,
                        COALESCE(success.occurred_at, platform_health.last_success_at),
                        latest.status, binding.schedule
                   FROM operations.source_bindings binding
@@ -19448,13 +19496,14 @@ def _configured_source_data_status(now: datetime) -> tuple[list[dict], bool]:
         return [], False
 
     sources = []
-    for source_name, client_name, success_at, latest_status, schedule in rows:
+    for source_name, client_name, client_slug, success_at, latest_status, schedule in rows:
         received_at = success_at
         schedule_minutes = _source_schedule_minutes(schedule or "")
         sources.append(
             {
                 "name": source_name,
                 "client_name": client_name or "",
+                "client_slug": client_slug or "",
                 "observed_at": received_at,
                 "needs_attention": bool(
                     latest_status in {"failed", "stalled"}

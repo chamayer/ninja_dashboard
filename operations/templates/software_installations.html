@@ -32,7 +32,7 @@
     <tbody>
     {% for row in rows %}
       <tr>
-        <td><a href="?{% if filters.q %}q={{ filters.q|urlencode }}&amp;{% endif %}client={{ row.client_slug }}">{{ row.client_name }}</a></td>
+        <td><a href="?{% if filters.q %}q={{ filters.q|urlencode }}&amp;{% endif %}client={{ row.client_slug }}">{{ row.client_name }}</a> <a class="muted" href="{% url 'org_index' org_slug=row.client_slug %}" title="Open client details">Details</a></td>
         <td><a href="{% url 'device_detail' org_slug=row.client_slug device_id=row.device_id %}">{{ row.hostname|default:"Unnamed Computer" }}</a></td>
         <td><a href="{% url 'software_detail' name=row.product %}">{{ row.product }}</a></td>
         <td>{{ row.publisher }}</td>

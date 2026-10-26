@@ -58,6 +58,14 @@ workflows.
 - Provide fleet/client/device navigation and search.
 - Provide Issues/findings, Patching, Software, Review, source health, client
   mapping, identity, notification, and policy workflows.
+- In tables, link the name of each identifiable client, Computer, or other
+  entity to its Operations detail page. Preserve links that serve a specific
+  workflow, such as opening review evidence or a source record; when the name
+  already serves that purpose, keep it intact and provide a separate entity
+  detail link where useful. For unresolved or ambiguous entities, link to the
+  relevant evidence or review page instead of implying a canonical identity.
+- Use breadcrumbs on entity detail pages when they provide a clear return path
+  through the navigation hierarchy and are straightforward to maintain.
 - Use human-readable operator language while preserving internal identifiers in
   storage.
 - Make filters and population denominators visible.
@@ -77,6 +85,8 @@ workflows.
 
 - Tenant and RLS behavior is verified.
 - Canonical, derived, operator, and effective layers remain distinct.
+- Table entity links preserve existing workflow destinations, and entity detail
+  pages provide useful breadcrumbs where applicable.
 - Migrations and refresh order are reviewed.
 - Django, Ruff, focused tests, and template/request checks pass as applicable.
 - Root VERSION and CHANGELOG are updated only for an approved stack release.
