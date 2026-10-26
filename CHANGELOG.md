@@ -2,6 +2,14 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.129.1] — 2026-10-26 — Retired Job configuration migration
+
+### Fixed
+
+- Migration `0351` no longer deletes the retired Jobs' schedules and schedule
+  events. Schedule events are append-only, so the delete was refused and
+  Operations could not start after 0.129.0. The two schedules stay disabled.
+
 ## [0.129.0] — 2026-10-26 — Legacy cleanup and pipeline correctness
 
 ### Added
@@ -30,7 +38,7 @@ All notable changes in this project follow [Semantic Versioning](https://semver.
 - Legacy data (migrations `0350`, `0351`, `117`, `118`): daily presence,
   `ninja_core.device_snapshots` and `device_health_snapshots`, the
   `ninja_agent_compliance` and `ninja_inventory` schemas, and the retired
-  Jobs' recovery policies and schedules (their runs are kept). About 34 GB;
+  Jobs' recovery policies (their runs and disabled schedules are kept). About 34 GB;
   every dropped table was exported first (PLAN-022).
 
 ## [0.128.15] — 2026-10-21 — Computers page-cell boundary

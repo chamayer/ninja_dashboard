@@ -32,10 +32,14 @@ Jobs rows naming the four removed Jobs (L9): history in `operator_job_runs`
 `job_definition_versions` 33; configuration in `job_schedules` 2,
 `job_recovery_policies` 9, `job_recovery_policy_authorities` 2. **Decided
 (user, 2026-10-26): keep runs, requests and recovery assessments as audit;
-remove all configuration.** Migration `0351_retired_job_configuration`
-deletes the recovery policies, approvals and the two (disabled, L10)
-schedules, together with their 78 schedule events, which reference the
-schedules and cannot outlive them.
+remove the recovery configuration.** Migration
+`0351_retired_job_configuration` deletes the recovery policies and approvals.
+The first version also deleted the two disabled schedules and their 78
+schedule events; production refused it because `job_schedule_events` is
+append-only (`reject_jobs_history_mutation`, 0183), which stopped Operations
+from starting after 0.129.0 (2026-10-26 21:07 UTC). Fixed in 0.129.1: the
+schedules and events stay. The pre-deploy checks had covered triggers on the
+dropped tables but not on the Jobs tables `0351` edits.
 
 Activity counters cover only the time since the last restart, so they are
 supporting evidence; the authority is the code search and the last-write

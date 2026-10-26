@@ -98,7 +98,9 @@ def test_daily_presence_drop(conn):
     ).fetchall() == [("findings",)]
 
 
-def test_retired_job_configuration_is_removed_and_other_jobs_kept(conn):
+def test_retired_job_configuration_is_removed_and_history_kept(conn):
+    # job_schedule_events carries the production append-only trigger
+    # (migration 0183), which refused 0351's first version on deploy.
     conn.execute("""
         CREATE TABLE operations.job_schedules (
             tenant_id bigint, id uuid, definition_key text,
@@ -107,6 +109,11 @@ def test_retired_job_configuration_is_removed_and_other_jobs_kept(conn):
             id uuid PRIMARY KEY DEFAULT gen_random_uuid(), tenant_id bigint,
             schedule_id uuid NOT NULL,
             FOREIGN KEY (tenant_id, schedule_id) REFERENCES operations.job_schedules (tenant_id, id));
+        CREATE FUNCTION operations.reject_jobs_history_mutation() RETURNS trigger
+            LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'Jobs history is append-only'; END $$;
+        CREATE TRIGGER immutable_job_schedule_events
+            BEFORE UPDATE OR DELETE OR TRUNCATE ON operations.job_schedule_events
+            FOR EACH STATEMENT EXECUTE FUNCTION operations.reject_jobs_history_mutation();
         CREATE TABLE operations.job_recovery_policies (definition_key text);
         CREATE TABLE operations.job_recovery_policy_authorities (definition_key text);
         INSERT INTO operations.job_schedules VALUES
@@ -122,10 +129,9 @@ def test_retired_job_configuration_is_removed_and_other_jobs_kept(conn):
         "operations.apps.core.migrations.0351_retired_job_configuration"
     )
     conn.execute(migration.FORWARD_SQL)
-    for table in ("job_schedules", "job_recovery_policies", "job_recovery_policy_authorities"):
+    for table in ("job_recovery_policies", "job_recovery_policy_authorities"):
         assert conn.execute(
             f"SELECT definition_key FROM operations.{table}"
         ).fetchall() == [("resolver",)]
-    assert conn.execute(
-        "SELECT schedule_id::text FROM operations.job_schedule_events"
-    ).fetchall() == [("00000000-0000-0000-0000-000000000002",)]
+    assert conn.execute("SELECT count(*) FROM operations.job_schedules").fetchone() == (2,)
+    assert conn.execute("SELECT count(*) FROM operations.job_schedule_events").fetchone() == (2,)
