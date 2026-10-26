@@ -28,7 +28,7 @@ SELECT 'entity'::text AS row_kind,
        finding.finding_details AS details,
        finding.first_seen_at AS first_detected_at,
        finding.last_seen_at AS last_detected_at,
-       finding.resolved_at
+       finding.closed_at AS resolved_at
   FROM operations.findings finding
   JOIN operations.finding_types finding_type ON finding_type.id = finding.finding_type_id
 UNION ALL

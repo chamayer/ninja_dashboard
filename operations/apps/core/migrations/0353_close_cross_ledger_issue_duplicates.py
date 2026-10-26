@@ -15,7 +15,6 @@ from django.db import migrations
 FORWARD_SQL = r"""
 UPDATE operations.findings entity_finding
    SET status = 'resolved',
-       resolved_at = now(),
        closed_at = COALESCE(entity_finding.closed_at, now()),
        finding_details = COALESCE(entity_finding.finding_details, '{}'::jsonb)
            || jsonb_build_object(

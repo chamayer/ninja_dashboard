@@ -723,3 +723,12 @@ is unverified and awaits normal approval/deployment.
 
 **Next action:** request separate origin-push approval. That push automatically
 deploys and applies migrations 0352-0353.
+
+**Deployment incident (2026-10-26):** Operations is restart-looping because
+migration 0352 references nonexistent `operations.findings.resolved_at`;
+entity findings store this timestamp as `closed_at`. Migration 0353 also tried
+to write nonexistent `resolved_at` when closing the exact duplicate. Both SQL
+references are corrected locally; 0352 exposes `closed_at` as read-model
+`resolved_at`, and 0353 updates `closed_at`. The failed 0352 startup attempt
+reported a PostgreSQL undefined-column error. Next: obtain approval to push the
+corrected migrations, then verify migration application and container health.
