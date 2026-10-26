@@ -2,6 +2,37 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.129.0] — 2026-10-26 — Legacy cleanup and pipeline correctness
+
+### Added
+
+- Operations tables link client, Computer and other entity names to their
+  detail pages (PLAN-020), including uniquely resolved candidate Computers.
+
+### Fixed
+
+- A source collection that returns no records is recorded as a failed,
+  not-complete run instead of a healthy zero-row run; nothing is withdrawn.
+- An activity run that stops at the page limit is recorded as `partial`, with
+  the reason, instead of only logging a warning.
+- Software demand from activities is queued before the activity cursor
+  advances, so an interruption cannot skip it.
+- A software change recorded while a findings run is in progress is no longer
+  acknowledged away by that run: reclassification targets carry a generation
+  (migration `0349`) and a run acknowledges only what it captured.
+
+### Removed
+
+- Legacy agent compliance: the bridge, its four Jobs (including the parity
+  check), its HTTP action routes and every `AGENT_COMPLIANCE_*` setting.
+  Notifications read only `NOTIFY_*`.
+- Ninja daily presence and the legacy snapshot backfill and restoration tools.
+- Legacy data (migrations `0350`, `0351`, `117`, `118`): daily presence,
+  `ninja_core.device_snapshots` and `device_health_snapshots`, the
+  `ninja_agent_compliance` and `ninja_inventory` schemas, and the retired
+  Jobs' recovery policies and schedules (their runs are kept). About 34 GB;
+  every dropped table was exported first (PLAN-022).
+
 ## [0.128.15] — 2026-10-21 — Computers page-cell boundary
 
 ### Changed
