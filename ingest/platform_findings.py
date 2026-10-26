@@ -167,6 +167,7 @@ def evaluate(*, dry_run: bool = True) -> dict[str, int]:
             _resolve_admin_absent(
                 cur, ft_failure, failure_keys, now, assessment_required=True
             )
+            _resolve_retired_operator_jobs_queue(cur, ft_queue, now)
             _resolve_admin_absent(
                 cur, ft_queue, queue_keys, now, assessment_required=True
             )
@@ -216,6 +217,29 @@ def _resolve_admin_absent(
            )
         """,
         (now, TENANT_ID, finding_type_id, keys),
+    )
+
+
+def _resolve_retired_operator_jobs_queue(
+    cur: Any, finding_type_id: int | None, now: datetime
+) -> None:
+    """Close the legacy operator.jobs queue finding with an audit reason."""
+    if finding_type_id is None:
+        return
+    cur.execute(
+        """
+        UPDATE operations.admin_findings finding
+           SET status = 'resolved', resolved_at = %s,
+               details = finding.details || jsonb_build_object(
+                   'resolution_reason', 'superseded_by_jobs_health_findings',
+                   'resolution_recorded_at', %s::text
+               )
+         WHERE finding.tenant_id = %s
+           AND finding.finding_type_id = %s
+           AND finding.condition_key = 'software_queue_stalled:operator.jobs'
+           AND finding.status IN ('open', 'acknowledged', 'investigating')
+        """,
+        (now, now.isoformat(), TENANT_ID, finding_type_id),
     )
 
 
@@ -338,6 +362,10 @@ def _eval_stalled_queues(
 
     keys: list[str] = []
     for queue_key, table_name, max_age_m, max_depth in registry:
+        # The durable Jobs health evaluator owns this queue now. Keep the
+        # software queue signal for software.scheduled/activity/demand only.
+        if queue_key == "operator.jobs":
+            continue
         if table_name == "operations.operator_job_runs":
             cur.execute(
                 """
@@ -742,6 +770,25 @@ def _eval_jobs_unmet_dependencies(
     for row in rows:
         dependency_id = str(row["dependency_id"])
         key = f"jobs_unmet_dependency:{dependency_id}"
+        parent = _active_jobs_dependency_parent(cur, row)
+        if parent is not None:
+            if not dry_run:
+                cur.execute(
+                    """
+                    UPDATE operations.admin_findings
+                       SET status = 'resolved', resolved_at = %s,
+                           details = details || jsonb_build_object(
+                               'resolution_reason', 'covered_by_upstream_job_failure',
+                               'covered_by_condition_key', %s,
+                               'covered_by_finding_type', %s,
+                               'resolution_recorded_at', %s::text
+                           )
+                     WHERE tenant_id = %s AND condition_key = %s
+                       AND status IN ('open', 'acknowledged', 'investigating')
+                    """,
+                    (now, parent[0], parent[1], now.isoformat(), TENANT_ID, key),
+                )
+            continue
         keys.append(key)
         counts["jobs_unmet_dependency"] += 1
         _emit_jobs_finding(
@@ -755,6 +802,43 @@ def _eval_jobs_unmet_dependencies(
             now=now,
             dry_run=dry_run,
         )
+
+
+def _active_jobs_dependency_parent(
+    cur: Any, dependency: dict[str, Any]
+) -> tuple[str, str] | None:
+    """Return an active finding for the exact prerequisite run or its job."""
+    prerequisite_run_id = str(dependency.get("prerequisite_job_run_id") or "")
+    prerequisite_job_key = str(dependency.get("prerequisite_job_key") or "")
+    if not prerequisite_run_id and not prerequisite_job_key:
+        return None
+    cur.execute(
+        """
+        SELECT finding.condition_key, finding_type.name
+          FROM operations.admin_findings finding
+          JOIN operations.finding_types finding_type
+            ON finding_type.id = finding.finding_type_id
+         WHERE finding.tenant_id = %s
+           AND finding.status IN ('open', 'acknowledged', 'investigating')
+           AND finding_type.name IN (
+               'jobs_timeout', 'jobs_repeated_failure', 'jobs_schedule_failure'
+           )
+           AND (
+               (finding_type.name = 'jobs_timeout'
+                AND finding.details->>'job_run_id' = %s)
+               OR (finding_type.name IN ('jobs_repeated_failure', 'jobs_schedule_failure')
+                   AND finding.details->>'job_key' = %s)
+           )
+         ORDER BY CASE finding_type.name
+                    WHEN 'jobs_timeout' THEN 0
+                    WHEN 'jobs_repeated_failure' THEN 1
+                    ELSE 2
+                  END, finding.last_detected_at DESC
+         LIMIT 1
+        """,
+        (TENANT_ID, prerequisite_run_id, prerequisite_job_key),
+    )
+    return cur.fetchone()
 
 
 def _eval_jobs_registry_mismatch(

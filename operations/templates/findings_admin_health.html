@@ -85,6 +85,12 @@
           {% for link in f.health_presentation.links %}{% if link.label == "Open Job configuration" %}<a href="{{ link.url }}">Open Job configuration</a>{% else %}<a href="{{ link.url }}">{{ link.label }}</a>{% endif %}{% endfor %}
           {% if f.status == "open" %}<form method="post" action="{% url 'admin_finding_acknowledge' f.id %}">{% csrf_token %}<button type="submit">Acknowledge</button></form>{% endif %}
         </div>
+        {% if f.covered_dependency_findings %}
+        <details class="health-technical">
+          <summary>{{ f.covered_dependency_findings|length }} dependency finding{{ f.covered_dependency_findings|length|pluralize }} covered by this failure</summary>
+          <ul>{% for child in f.covered_dependency_findings %}<li><a href="{{ child.url }}">{{ child.label }}</a></li>{% endfor %}</ul>
+        </details>
+        {% endif %}
         <details class="health-technical"><summary>Technical details</summary>
           <p>Condition key: <code>{{ f.condition_key }}</code></p>
           {% if f.assessment %}<p>Assessment: {{ f.assessment.disposition }} · policy {{ f.assessment.policy_version }} · {{ f.assessment.policy_digest|slice:":12" }}</p>

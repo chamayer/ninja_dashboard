@@ -43,15 +43,15 @@ do not open competing blueprints for the same work.
 ## PLAN-003 — Central work queue and finding state
 
 - Scope: Operations findings workflow
-- Status: verify
+- Status: completed
 - Defined: 2026-10-14
 - Started: 2026-10-15
-- Completed: —
-- Blueprint: —
+- Completed: 2026-10-26 (implementation complete locally; deployment pending separate approval)
+- Blueprint: operations/BLUEPRINT.md
 - Source: docs/archive/workspace-cleanup-2026-10-20/plan.md
 - Section: Active plan — Central work queue (design awaiting approval)
-- Resume gate: Compare the remaining W7-W9 items with current finding-state decisions and releases before reopening implementation.
-- Last checked: 2026-10-20 (live). Evaluator, patch-finding, and software-classifier runs had no failures in seven days; the current finding population is 37,885 open and 548,617 resolved, so workstream completeness is not established by health alone.
+- Resume gate: Origin push requires separate approval; it automatically deploys and applies migrations 0352-0353. PLAN-004 identity work remains excluded.
+- Last checked: 2026-10-26. W7 now suppresses a dependency only under an active exact-run/job parent, keeps its closure reason and parent key, and exposes related Job run links on Admin Health; the overlapping `operator.jobs` queue emitter closes with a reason. W8 adds a tenant-RLS, invoker-security union view and uses it for admin taxonomy counts; storage and resolution surfaces remain separate. W9 adds migration 0353 to close only exact active cross-ledger duplicates with the admin row ID and reason. `device_long_offline` is already historical, `multi_av_conflict` disabled, and source withdrawal was retired in 0316; identity-related candidates stay with PLAN-004. Python compilation, registry validation, and `git diff --check` pass. Django/database migration checks and production behavior remain unverified.
 
 ## PLAN-004 — Computer identity, history, and naming
 

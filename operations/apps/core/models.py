@@ -4581,6 +4581,30 @@ class AdminFinding(VersionedTenantScopedModel):
         return f"{self.finding_type_id}:{self.condition_key[:40]}"
 
 
+class IssueFindingReadModel(models.Model):
+    """Read-only common projection of entity and admin finding rows."""
+
+    row_kind = models.CharField(max_length=16)
+    id = models.UUIDField(primary_key=True)
+    tenant_id = models.BigIntegerField()
+    finding_type_id = models.PositiveSmallIntegerField()
+    finding_type_name = models.CharField(max_length=120)
+    condition_key = models.CharField(max_length=255)
+    severity = models.CharField(max_length=16)
+    status = models.CharField(max_length=24)
+    subject_type = models.CharField(max_length=32, null=True)
+    subject_id = models.UUIDField(null=True)
+    client_id = models.UUIDField(null=True)
+    details = models.JSONField()
+    first_detected_at = models.DateTimeField()
+    last_detected_at = models.DateTimeField()
+    resolved_at = models.DateTimeField(null=True)
+
+    class Meta:
+        managed = False
+        db_table = "v_issue_findings"
+
+
 class QueueRegistry(models.Model):
     """Registry of all known queues. No tenant isolation — global operator view."""
 

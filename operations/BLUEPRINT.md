@@ -685,3 +685,41 @@ are in `operations/TODO.md`.
 ## Next action
 
 Verify sign-in, sign-out, and password change on the deployed stack, then mark PLAN-013 complete.
+
+## PLAN-003 — Central work queue and finding state (W7-W9)
+
+**Status:** Implementation complete locally (2026-10-26); deployment push pending separate approval.
+**Goal:** complete W7-W9 while retaining separate entity and admin finding
+storage. PLAN-004 identity work is excluded.
+
+**Scope:** platform Jobs finding evaluation, Issues read projection, Admin
+Health reveal links, and finding-ledger/type housekeeping. No identity
+matching, candidate withdrawal, canonical data repair, or direct production
+writes. New migrations 0352-0353 apply through an approved deployment push.
+
+**Decisions:** W7 matches the prerequisite run for timeouts and prerequisite
+job key for repeated/scheduled failures. Covered dependency rows keep their
+history, reason, and parent key, and Admin Health exposes their run links.
+Only the overlapping `operator.jobs` queue signal is retired;
+software-specific queues remain. W8 uses a `security_invoker` union view with
+RLS and explicit runtime DML revokes; storage and existing action surfaces
+remain separate. W9 closes only exact same-type/key legacy entity duplicates
+when a matching active admin finding exists, preserving the admin finding ID
+and closure reason. Historical type rows remain retained.
+
+**Checkpoint:** W7 implemented in `ingest/platform_findings.py`; W8 view/model
+and Issues taxonomy counts added in migration 0352; W9 duplicate closure is
+migration 0353. Candidate dispositions confirmed: `device_long_offline` is
+historical, `multi_av_conflict` disabled, and withdrawn-source findings were
+retired by migration 0316. `device_stale_data` still has an active evaluator.
+Identity-related dormant candidates remain with PLAN-004. The remote-access
+action requires permission and reason; Ninja presence only counts
+`AgentDevice`.
+
+**Validation:** Python syntax compilation, plan-registry validation (22
+entries), and `git diff --check` pass. Django checks and database migration
+execution were unavailable locally; tests were not run. Production behavior
+is unverified and awaits normal approval/deployment.
+
+**Next action:** request separate origin-push approval. That push automatically
+deploys and applies migrations 0352-0353.

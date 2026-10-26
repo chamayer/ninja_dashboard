@@ -137,6 +137,7 @@ from .models import (
     EvaluatorConfig,
     Finding,
     FindingType,
+    IssueFindingReadModel,
     MergeCandidate,
     NotificationEvent,
     NotificationRoute,
@@ -5849,9 +5850,20 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
         admin_count_qs = admin_count_qs.filter(status__in=("resolved", "suppressed", "wontfix"))
     if severity_filter:
         admin_count_qs = admin_count_qs.filter(severity=severity_filter)
+    admin_read_qs = IssueFindingReadModel.objects.filter(row_kind="admin", tenant_id=1)
+    if status_filter in ("", "active"):
+        admin_read_qs = admin_read_qs.filter(status__in=_FINDING_ACTIVE_STATUSES)
+    elif status_filter == "open":
+        admin_read_qs = admin_read_qs.filter(status="open")
+    elif status_filter == "acknowledged":
+        admin_read_qs = admin_read_qs.filter(status__in=("acknowledged", "investigating"))
+    elif status_filter == "resolved":
+        admin_read_qs = admin_read_qs.filter(status__in=("resolved", "suppressed", "wontfix"))
+    if severity_filter:
+        admin_read_qs = admin_read_qs.filter(severity=severity_filter)
     admin_type_counts = {
-        row["finding_type__name"]: row["n"]
-        for row in admin_count_qs.values("finding_type__name").annotate(n=Count("id"))
+        row["finding_type_name"]: row["n"]
+        for row in admin_read_qs.values("finding_type_name").annotate(n=Count("id"))
     }
     for finding_type_name, count in admin_type_counts.items():
         current_type_counts[finding_type_name] = (
@@ -13946,8 +13958,51 @@ def findings_admin_health(request: HttpRequest) -> HttpResponse:
         for source_id, name in Source.objects.filter(id__in=source_ids).values_list("id", "name")
     }
     assessments = _condition_assessment_display("admin", (finding.id for finding in findings))
+    dependency_parent_keys = [
+        finding.condition_key
+        for finding in findings
+        if finding.finding_type.name
+        in {"jobs_timeout", "jobs_repeated_failure", "jobs_schedule_failure"}
+    ]
+    covered_dependencies_by_parent: dict[str, list[dict[str, str]]] = {}
+    if dependency_parent_keys:
+        covered_dependencies = (
+            AdminFinding.objects.filter(
+                tenant_id=1,
+                finding_type__name="jobs_unmet_dependency",
+                status="resolved",
+                details__resolution_reason="covered_by_upstream_job_failure",
+                details__covered_by_condition_key__in=dependency_parent_keys,
+            )
+            .only("condition_key", "details")
+            .order_by("-last_detected_at")[:500]
+        )
+        for child in covered_dependencies:
+            details = child.details or {}
+            parent_key = details.get("covered_by_condition_key")
+            run_id = details.get("dependent_job_run_id")
+            if not parent_key:
+                continue
+            child_url = reverse("admin_job_status")
+            if run_id:
+                child_url += "?" + urlencode({"run": run_id})
+            else:
+                child_url += "?" + urlencode(
+                    {"job": details.get("job_key") or details.get("dependent_job_key") or ""}
+                )
+            covered_dependencies_by_parent.setdefault(parent_key, []).append(
+                {
+                    "label": details.get("dependent_job_key")
+                    or details.get("job_key")
+                    or child.condition_key,
+                    "url": child_url,
+                }
+            )
     for finding in findings:
         finding.assessment = assessments.get(str(finding.id))
+        finding.covered_dependency_findings = covered_dependencies_by_parent.get(
+            finding.condition_key, []
+        )
         details = finding.details or {}
         ref = finding.subject_ref or {}
         finding.subject_client = clients.get(str(ref.get("client_id")))
