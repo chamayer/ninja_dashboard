@@ -1909,14 +1909,8 @@ def org_index(request: HttpRequest, org_slug: str) -> HttpResponse:
             status__in=_FINDING_ACTIVE_STATUSES,
         ).count()
         ctx["client_mapping_conflict_url"] = (
-            f"{reverse('findings_queue')}?"
-            + urlencode(
-                {
-                    "category": "inventory",
-                    "type": "client_mapping",
-                    "client": client.slug,
-                }
-            )
+            f"{reverse('client_mappings')}?"
+            + urlencode({"client_id": str(client.id)})
         )
         ctx["policy_count"] = ClientPolicy.objects.filter(tenant_id=1, client=client).count()
         ctx["policy_categories"] = list(
