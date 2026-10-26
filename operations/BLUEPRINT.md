@@ -210,6 +210,9 @@ masks name, hostname, serial, VM UUID and link in the safe metadata view
 production and rolled back: 9 restricted rows with 0 names/links; the other
 37,179 rows unchanged. Validation: Django check, makemigrations --check,
 `test_source_records_identification.py`, `test_table_controls.py`.
+Shipped `fcb488a`. Its per-row check triggered ~0.9 s of JIT per query;
+`ee180e1` (0346) joins the setting once: ~0.25-0.36 s on production, masking
+unchanged.
 Next action: ADR-0044 phase 2 (mapping table).
 
 ## Client mapping workflow — finish the single-inbox move
