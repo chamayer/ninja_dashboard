@@ -1,0 +1,316 @@
+{
+  "captured_at_utc": "2026-10-26T15:38:16.968818+00:00",
+  "wall_seconds": 2.804,
+  "stop_reason": null,
+  "results": [
+    {
+      "query": "M0",
+      "mode": "metadata_or_aggregate",
+      "preflight": {
+        "executing_role": "operations_migrate",
+        "server_version_num": "160014",
+        "transaction_read_only": "on",
+        "tenant_context": "1",
+        "executing_search_path": "pg_catalog",
+        "rolsuper": "t",
+        "rolbypassrls": "t"
+      },
+      "exit_code": 0,
+      "returned_rows": 7,
+      "rows": [
+        {
+          "rel": "operations.entity_observation_history",
+          "present": "t",
+          "columns_found": "11",
+          "columns_expected": "11"
+        },
+        {
+          "rel": "operations.operator_job_runs",
+          "present": "t",
+          "columns_found": "6",
+          "columns_expected": "6"
+        },
+        {
+          "rel": "operations.run_log",
+          "present": "t",
+          "columns_found": "5",
+          "columns_expected": "5"
+        },
+        {
+          "rel": "operations.software_reclassification_targets",
+          "present": "t",
+          "columns_found": "4",
+          "columns_expected": "4"
+        },
+        {
+          "rel": "operations.source_events",
+          "present": "t",
+          "columns_found": "4",
+          "columns_expected": "4"
+        },
+        {
+          "rel": "operations.source_instances",
+          "present": "t",
+          "columns_found": "4",
+          "columns_expected": "4"
+        },
+        {
+          "rel": "operations.sources",
+          "present": "t",
+          "columns_found": "2",
+          "columns_expected": "2"
+        }
+      ],
+      "status": "ok",
+      "wall_seconds": 0.341
+    },
+    {
+      "query": "M0b",
+      "mode": "metadata_or_aggregate",
+      "preflight": {
+        "executing_role": "operations_migrate",
+        "server_version_num": "160014",
+        "transaction_read_only": "on",
+        "tenant_context": "1",
+        "executing_search_path": "pg_catalog",
+        "rolsuper": "t",
+        "rolbypassrls": "t"
+      },
+      "exit_code": 0,
+      "returned_rows": 39,
+      "rows": [
+        {
+          "tablename": "entity_observation_history",
+          "indexname": "entity_observation_history_client_id_fae185bf",
+          "indexdef": "CREATE INDEX entity_observation_history_client_id_fae185bf ON operations.entity_observation_history USING btree (client_id)"
+        },
+        {
+          "tablename": "entity_observation_history",
+          "indexname": "entity_observation_history_closed_by_snapshot_run_id_349bfb67",
+          "indexdef": "CREATE INDEX entity_observation_history_closed_by_snapshot_run_id_349bfb67 ON operations.entity_observation_history USING btree (closed_by_snapshot_run_id)"
+        },
+        {
+          "tablename": "entity_observation_history",
+          "indexname": "entity_observation_history_closed_by_source_event_id_152714e2",
+          "indexdef": "CREATE INDEX entity_observation_history_closed_by_source_event_id_152714e2 ON operations.entity_observation_history USING btree (closed_by_source_event_id)"
+        },
+        {
+          "tablename": "entity_observation_history",
+          "indexname": "entity_observation_history_collector_instance_id_aa9f072c",
+          "indexdef": "CREATE INDEX entity_observation_history_collector_instance_id_aa9f072c ON operations.entity_observation_history USING btree (collector_instance_id)"
+        },
+        {
+          "tablename": "entity_observation_history",
+          "indexname": "entity_observation_history_device_id_d1803577",
+          "indexdef": "CREATE INDEX entity_observation_history_device_id_d1803577 ON operations.entity_observation_history USING btree (device_id)"
+        },
+        {
+          "tablename": "entity_observation_history",
+          "indexname": "entity_observation_history_last_seen_binding_id_3d3ee04a",
+          "indexdef": "CREATE INDEX entity_observation_history_last_seen_binding_id_3d3ee04a ON operations.entity_observation_history USING btree (last_seen_binding_id)"
+        },
+        {
+          "tablename": "entity_observation_history",
+          "indexname": "entity_observation_history_pkey",
+          "indexdef": "CREATE UNIQUE INDEX entity_observation_history_pkey ON operations.entity_observation_history USING btree (id)"
+        },
+        {
+          "tablename": "entity_observation_history",
+          "indexname": "entity_observation_history_source_binding_id_4ce80d59",
+          "indexdef": "CREATE INDEX entity_observation_history_source_binding_id_4ce80d59 ON operations.entity_observation_history USING btree (source_binding_id)"
+        },
+        {
+          "tablename": "entity_observation_history",
+          "indexname": "entity_observation_history_source_instance_id_e3aa414c",
+          "indexdef": "CREATE INDEX entity_observation_history_source_instance_id_e3aa414c ON operations.entity_observation_history USING btree (source_instance_id)"
+        },
+        {
+          "tablename": "entity_observation_history",
+          "indexname": "entity_observation_history_tenant_id_267c1776",
+          "indexdef": "CREATE INDEX entity_observation_history_tenant_id_267c1776 ON operations.entity_observation_history USING btree (tenant_id)"
+        },
+        {
+          "tablename": "entity_observation_history",
+          "indexname": "idx_obs_hist_effective",
+          "indexdef": "CREATE INDEX idx_obs_hist_effective ON operations.entity_observation_history USING btree (tenant_id, effective_from)"
+        },
+        {
+          "tablename": "entity_observation_history",
+          "indexname": "idx_obs_hist_record_identity",
+          "indexdef": "CREATE INDEX idx_obs_hist_record_identity ON operations.entity_observation_history USING btree (tenant_id, source_instance_id, external_id)"
+        },
+        {
+          "tablename": "entity_observation_history",
+          "indexname": "idx_obs_hist_retention",
+          "indexdef": "CREATE INDEX idx_obs_hist_retention ON operations.entity_observation_history USING btree (tenant_id, effective_to)"
+        },
+        {
+          "tablename": "entity_observation_history",
+          "indexname": "uq_obs_hist_open_identity",
+          "indexdef": "CREATE UNIQUE INDEX uq_obs_hist_open_identity ON operations.entity_observation_history USING btree (tenant_id, source_binding_id, entity_type, parent_source_key, entity_key) WHERE (effective_to IS NULL)"
+        },
+        {
+          "tablename": "entity_observation_history",
+          "indexname": "uq_obs_hist_open_stable_identity",
+          "indexdef": "CREATE UNIQUE INDEX uq_obs_hist_open_stable_identity ON operations.entity_observation_history USING btree (tenant_id, source_instance_id, external_namespace, parent_external_namespace, parent_external_id, external_id) WHERE (effective_to IS NULL)"
+        },
+        {
+          "tablename": "operator_job_runs",
+          "indexname": "idx_operator_job_runs_batch",
+          "indexdef": "CREATE INDEX idx_operator_job_runs_batch ON operations.operator_job_runs USING btree (tenant_id, batch_id, requested_at, id) WHERE (batch_id IS NOT NULL)"
+        },
+        {
+          "tablename": "operator_job_runs",
+          "indexname": "idx_operator_job_runs_heartbeat",
+          "indexdef": "CREATE INDEX idx_operator_job_runs_heartbeat ON operations.operator_job_runs USING btree (tenant_id, heartbeat_at) WHERE (status = 'running'::text)"
+        },
+        {
+          "tablename": "operator_job_runs",
+          "indexname": "idx_operator_job_runs_lane_queue",
+          "indexdef": "CREATE INDEX idx_operator_job_runs_lane_queue ON operations.operator_job_runs USING btree (tenant_id, lane, priority DESC, requested_at, id) WHERE (status = 'queued'::text)"
+        },
+        {
+          "tablename": "operator_job_runs",
+          "indexname": "idx_operator_job_runs_queue",
+          "indexdef": "CREATE INDEX idx_operator_job_runs_queue ON operations.operator_job_runs USING btree (tenant_id, requested_at, id) WHERE (status = 'queued'::text)"
+        },
+        {
+          "tablename": "operator_job_runs",
+          "indexname": "idx_operator_job_runs_status",
+          "indexdef": "CREATE INDEX idx_operator_job_runs_status ON operations.operator_job_runs USING btree (tenant_id, status, requested_at DESC)"
+        },
+        {
+          "tablename": "operator_job_runs",
+          "indexname": "jobs_identity_reference_unique",
+          "indexdef": "CREATE UNIQUE INDEX jobs_identity_reference_unique ON operations.operator_job_runs USING btree (tenant_id, id, job_key, definition_digest, scope_identity)"
+        },
+        {
+          "tablename": "operator_job_runs",
+          "indexname": "jobs_one_executing_run",
+          "indexdef": "CREATE UNIQUE INDEX jobs_one_executing_run ON operations.operator_job_runs USING btree (tenant_id, job_key, scope_identity) WHERE ((status = 'running'::text) AND (wait_category IS DISTINCT FROM 'workflow'::text))"
+        },
+        {
+          "tablename": "operator_job_runs",
+          "indexname": "jobs_one_queued_successor",
+          "indexdef": "CREATE UNIQUE INDEX jobs_one_queued_successor ON operations.operator_job_runs USING btree (tenant_id, job_key, scope_identity) WHERE (status = 'queued'::text)"
+        },
+        {
+          "tablename": "operator_job_runs",
+          "indexname": "jobs_tenant_id_unique",
+          "indexdef": "CREATE UNIQUE INDEX jobs_tenant_id_unique ON operations.operator_job_runs USING btree (tenant_id, id)"
+        },
+        {
+          "tablename": "operator_job_runs",
+          "indexname": "operator_job_runs_pkey",
+          "indexdef": "CREATE UNIQUE INDEX operator_job_runs_pkey ON operations.operator_job_runs USING btree (id)"
+        },
+        {
+          "tablename": "run_log",
+          "indexname": "idx_run_log_kind_started",
+          "indexdef": "CREATE INDEX idx_run_log_kind_started ON operations.run_log USING btree (tenant_id, kind, started_at)"
+        },
+        {
+          "tablename": "run_log",
+          "indexname": "run_log_pkey",
+          "indexdef": "CREATE UNIQUE INDEX run_log_pkey ON operations.run_log USING btree (id)"
+        },
+        {
+          "tablename": "run_log",
+          "indexname": "run_log_tenant_id_20980b59",
+          "indexdef": "CREATE INDEX run_log_tenant_id_20980b59 ON operations.run_log USING btree (tenant_id)"
+        },
+        {
+          "tablename": "software_reclassification_targets",
+          "indexname": "software_reclassification_targets_pending",
+          "indexdef": "CREATE INDEX software_reclassification_targets_pending ON operations.software_reclassification_targets USING btree (tenant_id, queued_at) WHERE (consumed_at IS NULL)"
+        },
+        {
+          "tablename": "software_reclassification_targets",
+          "indexname": "software_reclassification_targets_pending_unique",
+          "indexdef": "CREATE UNIQUE INDEX software_reclassification_targets_pending_unique ON operations.software_reclassification_targets USING btree (tenant_id, target_key, source) WHERE (consumed_at IS NULL)"
+        },
+        {
+          "tablename": "software_reclassification_targets",
+          "indexname": "software_reclassification_targets_pkey",
+          "indexdef": "CREATE UNIQUE INDEX software_reclassification_targets_pkey ON operations.software_reclassification_targets USING btree (id)"
+        },
+        {
+          "tablename": "source_events",
+          "indexname": "idx_source_events_processing",
+          "indexdef": "CREATE INDEX idx_source_events_processing ON operations.source_events USING btree (tenant_id, processing_status, event_at)"
+        },
+        {
+          "tablename": "source_events",
+          "indexname": "idx_source_events_type_time",
+          "indexdef": "CREATE INDEX idx_source_events_type_time ON operations.source_events USING btree (tenant_id, source_instance_id, event_type, event_at)"
+        },
+        {
+          "tablename": "source_events",
+          "indexname": "source_events_pkey",
+          "indexdef": "CREATE UNIQUE INDEX source_events_pkey ON operations.source_events USING btree (id)"
+        },
+        {
+          "tablename": "source_events",
+          "indexname": "source_events_source_binding_id_bba9ca6f",
+          "indexdef": "CREATE INDEX source_events_source_binding_id_bba9ca6f ON operations.source_events USING btree (source_binding_id)"
+        },
+        {
+          "tablename": "source_events",
+          "indexname": "source_events_source_instance_id_58df709e",
+          "indexdef": "CREATE INDEX source_events_source_instance_id_58df709e ON operations.source_events USING btree (source_instance_id)"
+        },
+        {
+          "tablename": "source_events",
+          "indexname": "source_events_tenant_id_7fbe466c",
+          "indexdef": "CREATE INDEX source_events_tenant_id_7fbe466c ON operations.source_events USING btree (tenant_id)"
+        },
+        {
+          "tablename": "source_events",
+          "indexname": "uq_source_events_external_id",
+          "indexdef": "CREATE UNIQUE INDEX uq_source_events_external_id ON operations.source_events USING btree (tenant_id, source_instance_id, external_event_id)"
+        },
+        {
+          "tablename": "source_events",
+          "indexname": "uq_source_events_tenant_id",
+          "indexdef": "CREATE UNIQUE INDEX uq_source_events_tenant_id ON operations.source_events USING btree (tenant_id, id)"
+        }
+      ],
+      "status": "ok",
+      "wall_seconds": 0.216
+    },
+    {
+      "query": "M0c",
+      "mode": "metadata_or_aggregate",
+      "preflight": {
+        "executing_role": "operations_migrate",
+        "server_version_num": "160014",
+        "transaction_read_only": "on",
+        "tenant_context": "1",
+        "executing_search_path": "pg_catalog",
+        "rolsuper": "t",
+        "rolbypassrls": "t"
+      },
+      "exit_code": 0,
+      "returned_rows": 1,
+      "rows": [
+        {
+          "org_history_from": "2026-07-22 04:52:01.529998+00",
+          "source_events_from": "2026-08-05 14:24:49.536475+00",
+          "activities_runs_from": "",
+          "job_runs_from": "2026-09-23 16:52:11.276051+00",
+          "consumed_targets_from": "2026-10-13 21:48:40.658126+00"
+        }
+      ],
+      "status": "ok",
+      "wall_seconds": 2.246
+    }
+  ],
+  "label": "m0-metadata",
+  "client_wall_seconds": 7.094,
+  "draft_sha256": "8ab3385aec40f64d7df219b6d9e5b0a796d1a0530562b94f9b88adc63ac28d9c",
+  "submitted_sql_sha256": {
+    "M0": "31bbc4d7b83269e2d935e533137a62c37ed85d044c0a8b205eadda17e896489d",
+    "M0b": "bab04029db2bee440a79592a9c38eb8462447d25f772e5f79dd96bf1cbfdf2c8",
+    "M0c": "cb2ccb027472c34cc35288f0a602a39cb2d0ccf8a10e29a97599eb9f1cb260a2"
+  }
+}

@@ -1,0 +1,39 @@
+{
+  "captured_at_utc": "2026-10-26T15:50:43.261548+00:00",
+  "wall_seconds": 3.725,
+  "stop_reason": null,
+  "results": [
+    {
+      "query": "M2r",
+      "mode": "metadata_or_aggregate",
+      "preflight": {
+        "executing_role": "operations_migrate",
+        "server_version_num": "160014",
+        "transaction_read_only": "on",
+        "tenant_context": "1",
+        "executing_search_path": "pg_catalog",
+        "rolsuper": "t",
+        "rolbypassrls": "t"
+      },
+      "exit_code": 0,
+      "returned_rows": 1,
+      "rows": [
+        {
+          "type_days": "403",
+          "max_events_one_type_one_day": "51651",
+          "type_days_over_10k": "14",
+          "type_days_over_50k": "1"
+        }
+      ],
+      "status": "ok",
+      "wall_seconds": 3.725
+    }
+  ],
+  "label": "r2-select-m2r",
+  "statement_timeout": "15s",
+  "client_wall_seconds": 7.438,
+  "draft_sha256": "f4a68de6047b7ed84d64364b3987462fcdae6f610bb124735fa16294df3f748b",
+  "submitted_sql_sha256": {
+    "M2r": "671bac0ed80af3ec281c2c693d00c861a0f9b6cd583e7d185106e52d6abf4781"
+  }
+}

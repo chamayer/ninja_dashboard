@@ -1,0 +1,12 @@
+{
+  "stop_reason": "helper_error",
+  "helper_exit_code": 255,
+  "label": "r1-plan",
+  "client_wall_seconds": 22.015,
+  "draft_sha256": "a04fe015059ed47d98dc3b60f0577c1d9333740d8ecf44bcc9f5717bc1e3c7e9",
+  "submitted_sql_sha256": {
+    "M1r": "fa1a7c0d3e76ce3212b77c9aa1077e4621912c0b6a81f9a81f2f4cbfacbd6b5d",
+    "M2r": "2b1743174bcca060283476e9d6cad5bb0f1049990e9316d4132d44fe8d35c705",
+    "M3r": "0e794e0361e7767d8dfa8e4f8e66b90b9df0e8b00c462827ba6a73217d5c34a2"
+  }
+}

@@ -1,0 +1,123 @@
+{
+  "captured_at_utc": "2026-10-26T15:39:32.717574+00:00",
+  "wall_seconds": 5.655,
+  "stop_reason": null,
+  "results": [
+    {
+      "query": "M4",
+      "mode": "metadata_or_aggregate",
+      "preflight": {
+        "executing_role": "operations_migrate",
+        "server_version_num": "160014",
+        "transaction_read_only": "on",
+        "tenant_context": "1",
+        "executing_search_path": "pg_catalog",
+        "rolsuper": "t",
+        "rolbypassrls": "t"
+      },
+      "exit_code": 0,
+      "returned_rows": 10,
+      "rows": [
+        {
+          "source": "cve_match",
+          "consumed_targets_30d": "14477",
+          "queued_during_consuming_run": "0"
+        },
+        {
+          "source": "intel-capability",
+          "consumed_targets_30d": "4",
+          "queued_during_consuming_run": "0"
+        },
+        {
+          "source": "intel-category",
+          "consumed_targets_30d": "5",
+          "queued_during_consuming_run": "0"
+        },
+        {
+          "source": "inventory",
+          "consumed_targets_30d": "37559",
+          "queued_during_consuming_run": "0"
+        },
+        {
+          "source": "source-refresh:reference.abusech",
+          "consumed_targets_30d": "31",
+          "queued_during_consuming_run": "0"
+        },
+        {
+          "source": "source-refresh:reference.chocolatey",
+          "consumed_targets_30d": "2",
+          "queued_during_consuming_run": "0"
+        },
+        {
+          "source": "source-refresh:reference.end-of-life",
+          "consumed_targets_30d": "10",
+          "queued_during_consuming_run": "0"
+        },
+        {
+          "source": "source-refresh:reference.otx",
+          "consumed_targets_30d": "44",
+          "queued_during_consuming_run": "0"
+        },
+        {
+          "source": "source-refresh:reference.remote-access",
+          "consumed_targets_30d": "2",
+          "queued_during_consuming_run": "0"
+        },
+        {
+          "source": "source-refresh:reference.winget",
+          "consumed_targets_30d": "9",
+          "queued_during_consuming_run": "0"
+        }
+      ],
+      "status": "ok",
+      "wall_seconds": 4.32
+    },
+    {
+      "query": "M5",
+      "mode": "metadata_or_aggregate",
+      "preflight": {
+        "executing_role": "operations_migrate",
+        "server_version_num": "160014",
+        "transaction_read_only": "on",
+        "tenant_context": "1",
+        "executing_search_path": "pg_catalog",
+        "rolsuper": "t",
+        "rolbypassrls": "t"
+      },
+      "exit_code": 0,
+      "returned_rows": 3,
+      "rows": [
+        {
+          "job_key": "intel-matcher",
+          "producer_runs": "98",
+          "consumer_runs": "537",
+          "overlapping_a_consumer": "86",
+          "finished_inside_a_consumer": "34"
+        },
+        {
+          "job_key": "software-enqueue-orgs",
+          "producer_runs": "23",
+          "consumer_runs": "537",
+          "overlapping_a_consumer": "14",
+          "finished_inside_a_consumer": "9"
+        },
+        {
+          "job_key": "software-queue-drain",
+          "producer_runs": "4977",
+          "consumer_runs": "537",
+          "overlapping_a_consumer": "1384",
+          "finished_inside_a_consumer": "1373"
+        }
+      ],
+      "status": "ok",
+      "wall_seconds": 1.334
+    }
+  ],
+  "label": "m45-select",
+  "client_wall_seconds": 9.437,
+  "draft_sha256": "8ab3385aec40f64d7df219b6d9e5b0a796d1a0530562b94f9b88adc63ac28d9c",
+  "submitted_sql_sha256": {
+    "M4": "136d13fb516ae2681b97bdf2e4ea4d4320ad93f173f75900815b77520399a32b",
+    "M5": "cfb48db2831e0c84039977d06f02f14bc1cfcea566ca5b9f1188023f64797fd0"
+  }
+}

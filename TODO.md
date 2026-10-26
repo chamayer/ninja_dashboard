@@ -7,15 +7,19 @@ Read Inbox at the start of every session.
 
 ## Inbox
 
-- [ ] **PLAN-017 — Phase 3 measurements:** Phase 2's 12
-      local checks are complete (docs/records/PLAN-017-phase-2-results.md,
-      review Point 41) and were accepted as local evidence (Codex round 21).
-      Phase 3 needs separate explicit approval (query draft:
-      docs/records/PLAN-017-phase-3-query-draft.md); prioritize incidence for F01 (empty collections),
-      F02 (activity cap warnings), F08 (sites failures) and U04
-      (findings/inventory/matcher job overlap). F04 remains owned by PLAN-012
-      item 4. Missing writer/refresh/capacity and ordinary-user/filter/content
-      parity measures still require separately justified scope.
+- [ ] **PLAN-017 — Phase 4 targeted verification, then Phase 5 design:**
+      Phase 3 incidence is recorded (docs/records/PLAN-017-phase-3-results.md):
+      U04 overlap common, F02 plausible during collection outages, F03 rare,
+      F01 not observed, F08 decided on mechanism. Phase 4 resolves F02 and
+      compares candidate fixes; any further production read needs separate
+      approval. F04 remains owned by PLAN-012 item 4. Writer/refresh/capacity
+      and ordinary-user parity measures still need separately justified scope.
+- [ ] **Collection log retention (from PLAN-017 Phase 3, 2026-10-26):** the
+      `ninja-jobs-worker` and `operations-ingest` container logs are lost on
+      every deploy, so warnings such as the activity page cap and the
+      SentinelOne sites failure leave no lasting record. Decide whether
+      to ship logs off the containers or record these warnings durably
+      (for example in the run log). Operational change; needs approval.
 - [ ] Operations M0 build is now tracked in module docs:
       `operations/BLUEPRINT.md`, `operations/SESSIONS.md`, and
       `operations/TODO.md`. Review current M0.3-M0.10 WIP before commit;

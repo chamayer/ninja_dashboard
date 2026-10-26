@@ -244,6 +244,114 @@ SELECT p.job_key,
   window possible. Zero overlap means the scheduler already serializes them in
   practice.
 
+## Revision 1 — after M0 and the M1/M4/M5 plans (awaiting approval)
+
+M0 and the plans exposed three drafting errors; M2, M3 and M1 were stopped
+under the rules above and are replaced by the bodies below. M4 and M5 ran as
+approved.
+
+- **M2/M3** read `operations.run_log` kind `activities`, which has no rows.
+  The activity ingest logs to `ninja_core.run_log` (`domain = 'activities'`,
+  status `ok`/`failed`/`running`; `ingest/runlog.py`). `source_events` also has
+  no `received_at` index, so per-run receipt windows would scan it. M2r uses
+  the indexed `event_at` per day instead; M3r reads `ninja_core.run_log`,
+  including the longest gap between successful runs (a long gap is when a
+  backlog could exceed the cap).
+- **M1** planned a parallel sequential scan of `entity_observation_history`.
+  M1r restricts to the SentinelOne and ScreenConnect source instances (the
+  latter as a comparison platform with groups) so the
+  `source_instance_id` index can be used. If the plan still scans the table,
+  M1r stops.
+- **L1** targeted `operations-ingest`, which started 2026-10-26 13:28 UTC and
+  does not run the scheduled collection jobs; those run in
+  `ninja-jobs-worker`. L1r repeats the same count-only commands there.
+
+```sql
+-- M1r (F08): org withdrawals then returns, SentinelOne and ScreenConnect only.
+WITH inst AS MATERIALIZED (
+ SELECT si.id, s.name AS platform
+   FROM operations.source_instances si
+   JOIN operations.sources s ON s.id = si.source_id
+  WHERE si.tenant_id = 1 AND s.name IN ('SentinelOne', 'ScreenConnect')
+), org AS MATERIALIZED (
+ SELECT i.platform, h.effective_to, h.closed_by_snapshot_run_id,
+        lead(h.effective_from) OVER (
+          PARTITION BY h.source_instance_id, h.external_namespace,
+                       h.parent_external_namespace, h.parent_external_id, h.external_id
+          ORDER BY h.effective_from) AS next_from
+   FROM operations.entity_observation_history h
+   JOIN inst i ON i.id = h.source_instance_id
+  WHERE h.tenant_id = 1 AND h.entity_type = 'org'
+)
+SELECT platform,
+       count(*) AS org_intervals,
+       count(*) FILTER (WHERE closed_by_snapshot_run_id IS NOT NULL) AS absence_closures,
+       count(*) FILTER (WHERE closed_by_snapshot_run_id IS NOT NULL
+                          AND next_from IS NOT NULL) AS closures_then_returned,
+       count(*) FILTER (WHERE closed_by_snapshot_run_id IS NOT NULL
+                          AND next_from - effective_to <= interval '1 day') AS returned_within_1d,
+       percentile_cont(0.5) WITHIN GROUP (
+         ORDER BY extract(epoch FROM next_from - effective_to))
+         FILTER (WHERE closed_by_snapshot_run_id IS NOT NULL AND next_from IS NOT NULL)
+         AS median_return_gap_seconds
+  FROM org
+ GROUP BY platform
+ ORDER BY platform;
+
+-- M2r (F02): Ninja events per event type per day by activity time, 30 days.
+WITH ninja AS MATERIALIZED (
+ SELECT si.id FROM operations.source_instances si
+   JOIN operations.sources s ON s.id = si.source_id
+  WHERE si.tenant_id = 1 AND lower(s.name) = 'ninja'
+), per_day AS (
+ SELECT e.event_type, date_trunc('day', e.event_at) AS day, count(*) AS events
+   FROM operations.source_events e
+  WHERE e.tenant_id = 1 AND e.source_instance_id IN (SELECT id FROM ninja)
+    AND e.event_at >= now() - interval '30 days' AND e.event_at < now()
+  GROUP BY e.event_type, date_trunc('day', e.event_at)
+)
+SELECT count(*) AS type_days,
+       max(events) AS max_events_one_type_one_day,
+       count(*) FILTER (WHERE events >= 10000) AS type_days_over_10k,
+       count(*) FILTER (WHERE events >= 50000) AS type_days_over_50k
+  FROM per_day;
+
+-- M3r (F02/F03): activity runs, failures, and the longest gap between
+-- successful runs, 30 days.
+WITH runs AS MATERIALIZED (
+ SELECT started_at, status FROM ninja_core.run_log
+  WHERE domain = 'activities'
+    AND started_at >= now() - interval '30 days' AND started_at < now()
+), ok AS (
+ SELECT started_at - lag(started_at) OVER (ORDER BY started_at) AS gap
+   FROM runs WHERE status = 'ok'
+)
+SELECT (SELECT count(*) FROM runs) AS activity_runs_30d,
+       (SELECT count(*) FROM runs WHERE status = 'failed') AS failed_runs,
+       (SELECT count(*) FROM runs WHERE status = 'running') AS unfinished_runs,
+       (SELECT min(started_at) FROM runs) AS window_from,
+       max(gap) AS longest_gap_between_ok_runs,
+       percentile_cont(0.5) WITHIN GROUP (ORDER BY extract(epoch FROM gap))
+         AS median_gap_seconds
+  FROM ok;
+```
+
+L1r (count-only, through the helper's SSH profile):
+
+```sh
+docker logs --since 720h ninja-jobs-worker 2>&1 | grep -c 'page cap for'
+docker logs --since 720h ninja-jobs-worker 2>&1 | grep -c 'SentinelOne sites fetch failed'
+docker inspect -f '{{.State.StartedAt}}' ninja-jobs-worker
+```
+
+## Revision 2 — M2r with a 15-second statement timeout (approved)
+
+M2r timed out at 5 seconds after an index-only scan plan. The user approved
+one rerun of the unchanged M2r body with `statement_timeout = '15s'` (the
+limit Phase 1 allowed for D4); every other wrapper setting and stop rule is
+unchanged. F08 is decided on mechanism and not measured further (M1r is not
+rewritten).
+
 ## Optional L1 — ingest log line counts (separate approval)
 
 Container logs are a different exposure (they can contain host names and

@@ -1,0 +1,21 @@
+{
+  "label": "l1r-log-counts",
+  "captured_at_utc": "2026-10-26T15:48:42.885414+00:00",
+  "results": {
+    "page_cap_lines": {
+      "exit_code": 1,
+      "value": "0",
+      "command_sha256": "5df189ebe2d81a9cba177b8ddc8f9be8bdb496b25529b4a8c8a826a48e28899b"
+    },
+    "sites_failed_lines": {
+      "exit_code": 1,
+      "value": "0",
+      "command_sha256": "bc4339b449522116327ed7f3ec85054f619654577301c4cc2efd14cc7d95d0de"
+    },
+    "container_started_at": {
+      "exit_code": 0,
+      "value": "2026-10-26T13:28:45.266891473Z",
+      "command_sha256": "751835eeb77875665387a94f6bca6327fbe8a7d51cc3a84995f349107104589e"
+    }
+  }
+}
