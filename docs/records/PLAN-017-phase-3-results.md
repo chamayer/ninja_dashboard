@@ -61,7 +61,8 @@ withdrawn as evidence. F02 is therefore **plausible in production during
 outages**, not proven: the aggregate does not show which day the peak fell on
 or whether the outage window has a gap for that type, and the logs from that
 period are gone. A per-day count for the busiest type across the outage
-window would settle it; it was not part of the approved scope.
+window would settle it; it was not part of the approved scope. **Superseded by Phase 4 M6:** the outage was fully caught up and the cap
+was not hit ([Phase 4](PLAN-017-phase-4-verification.md#m6-result)).
 
 F08: unmeasured. A further rewrite would have to force an index path (for
 example `source_instance_id = ANY (ARRAY(...))`) and be re-reviewed.
@@ -77,7 +78,7 @@ than the decision is worth.
 | Finding | Production evidence | Phase 3 reading |
 | --- | --- | --- |
 | F01 | 0 empty successful collections in 30 days (Phase 1 D5.2) | Mechanism only; not observed |
-| F02 | One 6.5-day activity outage; event types up to 51,651/day | Plausible during outages; unproven |
+| F02 | One 6.5-day activity outage, fully caught up (Phase 4 M6) | Not observed; mechanism remains |
 | F03 | 3 failed activity runs in 30 days | Rare at most |
 | F08 | Not measured | Decided on mechanism |
 | U04 | Producer finished inside a findings run ~45 times/day | Common precondition; staleness until the daily full run |

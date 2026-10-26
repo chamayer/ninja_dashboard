@@ -22,6 +22,7 @@ import time
 ROOT = pathlib.Path(__file__).resolve().parents[3]
 DRAFT = ROOT / "docs/records/PLAN-017-phase-3-query-draft.md"
 PHASE1 = ROOT / "docs/records/PLAN-017-diagnostic-queries.md"
+PHASE4 = ROOT / "docs/records/PLAN-017-phase-4-verification.md"
 EVIDENCE = pathlib.Path(__file__).resolve().parent
 BUDGET_SECONDS = 25
 
@@ -33,7 +34,8 @@ P0 = next(
     if b.startswith("-- P0:")
 )
 BODIES = {}
-for statements in blocks[1:]:  # the statement block, then any revision blocks
+phase4_blocks = re.findall(r"```sql\n(.*?)```", PHASE4.read_text(encoding="utf-8"), re.S)
+for statements in blocks[1:] + phase4_blocks:  # statements, revisions, Phase 4
     heads = list(re.finditer(r"^-- (M\d+[a-z]?)\b[^\n]*\n", statements, re.M))
     for i, head in enumerate(heads):
         end = heads[i + 1].start() if i + 1 < len(heads) else len(statements)
@@ -128,15 +130,15 @@ def helper(target: str, timeout: int):
 def capture(label: str, ids: list[str], explain: bool, timeout: str | None = None):
     prefix = PREFIX
     if timeout is not None:
-        # Revision 2: only M2r may run with the 15-second limit.
-        assert timeout == "15s" and ids == ["M2r"] and not explain
+        # Revision 2 (M2r) and Phase 4 (M6) may run with the 15-second limit.
+        assert timeout == "15s" and ids in (["M2r"], ["M6"])
         assert prefix.count("SET LOCAL statement_timeout = '5s';") == 1
         prefix = prefix.replace("statement_timeout = '5s'", "statement_timeout = '15s'")
     items = []
     for ident in ids:
         sql = BODIES[ident]
         if explain:
-            assert ident in {"M1", "M2", "M3", "M4", "M5", "M1r", "M2r", "M3r"}
+            assert ident in {"M1", "M2", "M3", "M4", "M5", "M1r", "M2r", "M3r", "M6"}
             sql = "EXPLAIN (ANALYZE FALSE, FORMAT JSON)\n" + sql
         items.append({"id": ident, "sql": sql,
                       "mode": "plain_explain" if explain else "metadata_or_aggregate"})
@@ -162,6 +164,7 @@ def capture(label: str, ids: list[str], explain: bool, timeout: str | None = Non
     result["statement_timeout"] = timeout or "5s"
     result["client_wall_seconds"] = round(time.monotonic() - start, 3)
     result["draft_sha256"] = hashlib.sha256(DRAFT.read_bytes()).hexdigest()
+    result["phase4_sha256"] = hashlib.sha256(PHASE4.read_bytes()).hexdigest()
     result["submitted_sql_sha256"] = {
         i["id"]: hashlib.sha256(i["sql"].encode()).hexdigest() for i in items}
     with destination.open("x", encoding="utf-8", newline="\n") as out:

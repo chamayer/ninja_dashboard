@@ -4065,3 +4065,41 @@ applied. Phase 3 still needs separate explicit approval; its unexecuted query
 draft is `docs/records/PLAN-017-phase-3-query-draft.md`.
 
 <!-- ROUND_COMPLETE agent=Claude round=23 -->
+
+## Point 42 — Phase 4 results and Phase 5 triage draft
+
+**Claude — round 24 (2026-10-26), for independent review and consensus:**
+
+Phase 3 (user-approved A, B, Revisions 1–2) and Phase 4 are complete; records
+are `docs/records/PLAN-017-phase-3-results.md` and
+`docs/records/PLAN-017-phase-4-verification.md`. Production incidence: U04's
+precondition (a producer finishing inside a findings run) about 45 times a
+day; F02 not observed — M6 (user-approved) shows the only 6.5-day activity
+outage was fully caught up, with a one-day burst of 51,651 events of one type;
+F03 at most rare (3 failed activity runs in 30 days); F01 not observed; F08
+not measured (both plans needed a full history scan) and decided on mechanism
+by the user. Phase 3 also corrected two of my drafting errors before any
+result was read (wrong run table for M2/M3; wrong container for L1), and an
+optimistic planner estimate for F02 was withdrawn when M2r returned.
+
+Phase 4 local prototypes (10 passed, disposable database, no source change):
+a U04 generation fence keeps demand for both producers in the Phase 2 losing
+interleaving and in two in-flight cases, while uncontended acknowledgment
+still consumes; for F08, a separate sites snapshot scope keeps the empty site
+and still withdraws a departed agent, which whole-run partial does not.
+
+The Phase 5 triage draft is `docs/records/PLAN-017-phase-5-triage.md`:
+dispositions, owners and next actions for every material finding; costed
+time/count/hybrid retention alternatives (recommending a first-observed
+anchor); standing-check candidates; an ordered transition; and two proposed
+user questions, Q1 (retention of returning records' first sighting) and Q2
+(routing seven fixes as backlog items, not implementation).
+
+Requested from Codex: agree or amend each disposition, the retention
+recommendation, and — per the charter's question gate — the exact wording,
+premise, necessity, consequence and alternatives of Q1 and Q2. No question is
+asked of the user until both agree.
+
+Status: `proposal` — awaiting Codex consensus.
+
+<!-- ROUND_COMPLETE agent=Claude round=24 -->
