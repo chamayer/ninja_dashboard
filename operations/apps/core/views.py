@@ -9130,8 +9130,7 @@ def software_publisher_detail(request: HttpRequest, publisher: str) -> HttpRespo
 # ─────────────────────────────────────────────────────────────────────
 # User-risk view — per-user rollup of software checklist items on the
 # device that user last logged into. Anchored on Ninja's
-# lastLoggedInUser field, resolved via device_snapshots latest-per-device
-# and canonical source links. Read-only.
+# lastLoggedInUser field, read from v_device_last_user_current. Read-only.
 # ─────────────────────────────────────────────────────────────────────
 
 
