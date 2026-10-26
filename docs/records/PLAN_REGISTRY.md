@@ -231,7 +231,7 @@ do not open competing blueprints for the same work.
 - Source: docs/plans/PLAN-019-data-pipeline-correctness-and-retention.md
 - Section: PLAN-019 — Data pipeline correctness and source-record retention (PLAN-017 follow-up)
 - Resume gate: Executing this plan or any step requires separate explicit user approval. Coordinates with PLAN-002/005/007, which keep their own statuses and gates; F04 stays with PLAN-012.
-- Last checked: 2026-10-26 (Step 1 committed `cb5c5e1`; F09 decided by the user: no daily presence for any source; Step 2 U04 fence and migration 0349 built and tested).
+- Last checked: 2026-10-26 (Step 1 and Step 2 (U04, migration 0349) deployed in 0.129.0; F09 decided: no daily presence; next is Step 3 with its own approval).
 
 ## PLAN-020 — Operations entity links in tables
 
@@ -271,4 +271,4 @@ do not open competing blueprints for the same work.
 - Source: docs/plans/PLAN-022-legacy-data-cleanup.md
 - Section: PLAN-022 — Legacy data and code cleanup
 - Resume gate: User approved immediate execution (2026-10-26). Three separately approved pushes: migration 0349; the code; then the drop migrations 0350, 0351, 117 and 118 after the archive is copied off-host and verified.
-- Last checked: 2026-10-26 (Wave A built and tested; images build; archive 4.6 GB verified on the host; independent review adopted).
+- Last checked: 2026-10-26 (Wave A deployed: 0.129.0 and 0.129.1; database 62.4 GB → 28 GB; one five-minute Operations outage from the first 0351, fixed by 0.129.1; Wave B items need their own design and approval).

@@ -66,15 +66,15 @@ on two `operations` relations and one each in `ninja_activities` and
   the table-of-contents check (data present for every dropped table) and
   SHA-256 hashes.
 
-## Wave A — execute now
+## Wave A — done 2026-10-26
 
 | Step | Change | Files | Status |
 | --- | --- | --- | --- |
-| A1 | Stop writing Ninja daily presence; remove the writer, its hook, the uncalled `_write_ninja_observations_legacy` and the backfill tool; migration `0350` drops the shadow view and `source_record_seen_daily` | `ingest/core/devices.py`, `ingest/observations.py`, `ingest/source_observations.py`, `ingest/backfill_ninja_daily_rollup.py`, tests, `0350` | built locally |
-| A2 | Drop `ninja_core.device_snapshots` and `device_health_snapshots`; remove `restore_ninja_historical_evidence.py` | SQL migration `117`, tool and its tests, `docs/operations.md` | built locally |
-| A3 | Retire agent compliance: remove the bridge package, its four Jobs (`agent-compliance`, `-evaluate`, `-review-digest`, `parity-check`), the `legacy_bridge` mechanism, every `AGENT_COMPLIANCE_*` setting (notifications now read only `NOTIFY_*`; production has notifications off, and four old delivery values in the host env file must be renamed to `NOTIFY_*` before notifications are switched on), the HTTP action routes (now `410`), the `_agent_compliance` raw key (now `_collector`); SQL migration `118` drops `ninja_inventory` and `ninja_agent_compliance`, refusing if anything outside depends on them | `ingest/agent_compliance/`, `ingest/parity_check.py`, `ingest/inventory/refresh.py`, `ingest/main.py`, `ingest/config.py`, `ingest/notifications.py`, `ingest/operator_job_queue.py`, connectors, `shared/jobs_registry.py`, `operations/apps/core/views.py`, `.env.example`, tests, `118` | built locally |
+| A1 | Stop writing Ninja daily presence; remove the writer, its hook, the uncalled `_write_ninja_observations_legacy` and the backfill tool; migration `0350` drops the shadow view and `source_record_seen_daily` | `ingest/core/devices.py`, `ingest/observations.py`, `ingest/source_observations.py`, `ingest/backfill_ninja_daily_rollup.py`, tests, `0350` | deployed |
+| A2 | Drop `ninja_core.device_snapshots` and `device_health_snapshots`; remove `restore_ninja_historical_evidence.py` | SQL migration `117`, tool and its tests, `docs/operations.md` | deployed |
+| A3 | Retire agent compliance: remove the bridge package, its four Jobs (`agent-compliance`, `-evaluate`, `-review-digest`, `parity-check`), the `legacy_bridge` mechanism, every `AGENT_COMPLIANCE_*` setting (notifications now read only `NOTIFY_*`; production has notifications off, and four old delivery values in the host env file must be renamed to `NOTIFY_*` before notifications are switched on), the HTTP action routes (now `410`), the `_agent_compliance` raw key (now `_collector`); SQL migration `118` drops `ninja_inventory` and `ninja_agent_compliance`, refusing if anything outside depends on them | `ingest/agent_compliance/`, `ingest/parity_check.py`, `ingest/inventory/refresh.py`, `ingest/main.py`, `ingest/config.py`, `ingest/notifications.py`, `ingest/operator_job_queue.py`, connectors, `shared/jobs_registry.py`, `operations/apps/core/views.py`, `.env.example`, tests, `118` | deployed |
 | A4 | Export every table A1–A3 drop, plus one full backup without the legacy rows, to `/amr-ch-01_data/ninja-dashboard/backups/operations/legacy-2026-10-26/`; verify table of contents and hashes | Host only | done 2026-10-26 19:51 UTC: 4.6 GB; daily presence 1, snapshots 2, agent compliance 21 tables of data; full dump 279 tables of data and no legacy rows; SHA-256 in `MANIFEST.txt` |
-| A5 | Three separately approved pushes (below); verify each on production | Commits: push 1 `6a7b51a` (`0349`); push 2 `beb41c9` (U04), `c5eccc6` (A1), `a97a19f` (A2), `1e4d777` (A3) and the records commit; push 3 the drop-migrations commit | committed, not pushed |
+| A5 | Three separately approved pushes (below); verify each on production | Push 1 `a2d7cbe` (`0349`), push 2 `cd98853` (code), push 3 `1b087ce` (0.129.0, drops), fix `4e13fa0` (0.129.1, `0351`) | done 2026-10-26 |
 
 ## Deploy order (after independent review, 2026-10-26)
 
@@ -116,6 +116,17 @@ Each item gets its own approval:
 - `ninja_activities.activities` retention (6.6 GB, live).
 - The SQL migration track and `ninja_core.schema_migrations`.
 - Root `TODO.md` historical sections, `archive/`, `inventory-scripts/`.
+
+## Outcome (2026-10-26)
+
+All of Wave A is deployed. Production after 0.129.1: database **28 GB** (was
+62.4 GB); the snapshot tables, both legacy schemas and daily presence are
+gone; retired Jobs keep 62 runs, 2 disabled schedules and 78 schedule events,
+with no recovery policies or approvals. **Incident:** 0.129.0's first `0351`
+was refused by the append-only schedule-events trigger, so Operations could
+not start from 21:07:38 to about 21:12:25 UTC; ingest and the Jobs worker
+stayed up, and the migration rolled back cleanly. Fixed by 0.129.1. Lesson:
+before a migration edits rows, check every trigger on the tables it touches.
 
 ## Validation so far (2026-10-26)
 
