@@ -182,6 +182,21 @@ Next action: when SSH is back, rehearse 0342 and 0343, check the stale rows
 and a source-refresh scope on production, then commit each change
 separately with user approval.
 
+#### PLAN-004 resolver finding lifecycle follow-up (measured 2026-10-26)
+
+At the end of each client-resolver run, reconcile `client_unattached_group`,
+`unnamed_source_group`, and `client_link_collision` findings when their source
+group is assigned, inactive, or gone. Also close a collision when the group no
+longer matches two or more clients. Record a reason for every closure. The
+read-only production check found 3 stale `client_unattached_group` findings
+among 8 active (one group is now attached to UTA and two refer to inactive
+source observations); 5 still describe active unattached groups. No active
+client-link collision was found. The open `unnamed_source_group` finding still
+describes an active unnamed group. See PLAN-004 in the registry.
+
+Generic entity-candidate withdrawal is a distinct lifecycle and is tracked in
+ready PLAN-021; do not treat it as covered by this client-resolver follow-up.
+
 ### Step F — client domains (ADR-0042, accepted 2026-10-23)
 
 Open point settled: claims are one source record's assertion (observation

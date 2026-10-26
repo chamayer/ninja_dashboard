@@ -107,7 +107,16 @@ module-specific; root `../TODO.md` keeps cross-repo items and pointers.
       read-only): of 38 open `unmatched_source_group` findings, 28 are for
       groups already linked to a client (nothing resolves them) and 7 repeat an
       open `client_unattached_group`. Close stale rows, then decide whether one
-      type should own "source group with no client".
+      type should own "source group with no client". PLAN-004 follow-up,
+      measured read-only 2026-10-26: 3 of 8 active `client_unattached_group`
+      findings are stale (one group is now attached; two source observations
+      are inactive); 5 remain valid. No active collision finding was present;
+      the open unnamed-group finding remains valid. Reconcile these findings
+      after each client-resolver run: `client_unattached_group`,
+      `unnamed_source_group`, and `client_link_collision` when a group is
+      assigned, inactive, or gone; also close collisions below two client
+      matches. Record each closure reason. Generic entity-candidate withdrawal
+      is separately tracked by PLAN-021.
 - [ ] **Overlapping identity findings** (measured 2026-10-23): 190 Computers
       carry identity findings; 23 carry two or more types, mostly
       `duplicate_device_records` with `identity_conflict`,

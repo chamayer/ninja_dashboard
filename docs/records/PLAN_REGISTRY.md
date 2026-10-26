@@ -65,6 +65,7 @@ do not open competing blueprints for the same work.
 - Section: Computer identity and platform change history (2026-10-16); How a Computer is named — ADR-0034 proposal (2026-10-19)
 - Resume gate: Reconcile post-ADR-0034 follow-ups against the 0.128.0 release and current ADRs.
 - Last checked: 2026-10-20 (live). Identity relations are present; 32 merges occurred in seven days and seven name collisions remain. This confirms activity, not completion of the follow-up plan.
+- Follow-up added 2026-10-26: reconcile `client_unattached_group`, `unnamed_source_group`, and `client_link_collision` at the end of each client-resolver run when a group is assigned, inactive, or gone. Also close a collision when the group no longer matches two or more clients. Record a reason for each closure. Entity-candidate withdrawal is tracked separately under PLAN-021.
 
 ## PLAN-005 — Jobs observability and schedule authority
 
@@ -244,3 +245,17 @@ do not open competing blueprints for the same work.
 - Section: User interface; Acceptance criteria
 - Resume gate: Complete. Link identifiable entities in Operations tables to detail pages, preserve existing workflow destinations, and provide useful breadcrumbs. No schema, migration, commit, or deployment was in scope.
 - Last checked: 2026-10-26 (table links and breadcrumbs implemented. Python compilation, plan-registry validation, and `git diff --check` pass; Ruff reports no findings on changed Python lines while full files retain unrelated lint findings. Django system/template checks could not run because Django is not installed on the workstation.)
+
+## PLAN-021 — Generic entity candidate lifecycle reconciliation
+
+- Scope: Reconcile generic entity candidates with current source-observation activity and entity source links, including an auditable withdrawal state and verification/backfill for existing stale candidates.
+- Status: ready
+- Defined: 2026-10-26
+- Started: —
+- Completed: —
+- Blueprint: —
+- Source: operations/docs/plans/PLAN-021-entity-candidate-lifecycle.md
+- Section: Generic entity candidate lifecycle reconciliation
+- Related plan: PLAN-004 covers client resolver findings; PLAN-021 concerns the separate generic `entity_candidates` projection and state machine.
+- Resume gate: Review the measured stale candidate population and verify the 74 observed-only candidates with source links. Approve implementation separately before changing candidate state, schema, or production data. Preserve attached identity/history and rejected decisions; withdrawal must be auditable and idempotent.
+- Last checked: 2026-10-26 (read-only production measurement: 576 pending and 12 observed-only candidates matched inactive observations without source links; 19 pending and 3,878 observed-only candidates matched active observations; 74 observed-only candidates had source links but were not attached. No active observation lacked either a candidate or source link. The 74 require freshness verification.)
