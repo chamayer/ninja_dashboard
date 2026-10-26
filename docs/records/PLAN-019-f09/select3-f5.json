@@ -1,0 +1,37 @@
+{
+  "captured_at_utc": "2026-10-26T18:42:08.351994+00:00",
+  "wall_seconds": 3.593,
+  "stop_reason": null,
+  "results": [
+    {
+      "query": "F5",
+      "mode": "metadata_or_aggregate",
+      "preflight": {
+        "executing_role": "operations_migrate",
+        "server_version_num": "160014",
+        "transaction_read_only": "on",
+        "tenant_context": "1",
+        "executing_search_path": "pg_catalog",
+        "rolsuper": "t",
+        "rolbypassrls": "t"
+      },
+      "exit_code": 0,
+      "returned_rows": 1,
+      "rows": [
+        {
+          "records": "8025",
+          "day_rows": "774069",
+          "episodes_strict": "24963",
+          "episodes_gap_3d": "13662",
+          "episodes_gap_7d": "8030"
+        }
+      ],
+      "status": "ok",
+      "wall_seconds": 3.593
+    }
+  ],
+  "label": "select3-f5",
+  "client_wall_seconds": 5.688,
+  "queries_sha256": "e4a55e7380a359669122b0bbf5f7ba67fc3427f09869825c186652235749980d",
+  "captured_by_client_utc": "2026-10-26T18:42:06.452096+00:00"
+}

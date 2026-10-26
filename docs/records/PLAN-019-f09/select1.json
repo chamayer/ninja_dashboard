@@ -1,0 +1,8 @@
+{
+  "stop_reason": "helper_error",
+  "helper_exit_code": 255,
+  "label": "select1",
+  "client_wall_seconds": 21.781,
+  "queries_sha256": "cd7afb54d758dcca6c8621310ef85ffbb8aa0b22fce30d0f6998cbd19f7c66af",
+  "captured_by_client_utc": "2026-10-26T18:27:33.360556+00:00"
+}

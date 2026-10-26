@@ -65,3 +65,15 @@ longer window. Showing basis and precision keeps every value explainable.
 
 Refines the 90-day closed-history purge of migration 0074; does not change it.
 Related: PLAN-017 Phase 5 triage (`docs/records/PLAN-017-phase-5-triage.md`).
+
+## Amendment — no daily presence (2026-10-26)
+
+The user decided that no source keeps daily presence (PLAN-019 F09). Presence
+over time is part of the significant-change trail: `active` (withdrawn and
+returned) is a significant field from the start, so every source gets first
+seen, last seen and each gap without one row per record per day. Measured on
+Ninja (PLAN-019 F09 results): 774,069 daily rows collapse to about 8,030
+presence stretches when gaps of up to seven days count as one. The anchor's
+`daily_presence_lower_bound` basis applies only to a backfill run before
+PLAN-022 drops `source_record_seen_daily`; after that, backfill uses the
+other bases.

@@ -1,0 +1,70 @@
+{
+  "captured_at_utc": "2026-10-26T19:27:44.001133+00:00",
+  "wall_seconds": 0.691,
+  "stop_reason": null,
+  "results": [
+    {
+      "query": "L9",
+      "mode": "metadata_or_aggregate",
+      "preflight": {
+        "executing_role": "operations_migrate",
+        "server_version_num": "160014",
+        "transaction_read_only": "on",
+        "tenant_context": "1",
+        "executing_search_path": "pg_catalog",
+        "rolsuper": "t",
+        "rolbypassrls": "t"
+      },
+      "exit_code": 0,
+      "returned_rows": 8,
+      "rows": [
+        {
+          "table_name": "job_definition_versions",
+          "column_name": "definition_key",
+          "rows": "33"
+        },
+        {
+          "table_name": "job_recovery_assessments",
+          "column_name": "definition_key",
+          "rows": "4"
+        },
+        {
+          "table_name": "job_recovery_policies",
+          "column_name": "definition_key",
+          "rows": "9"
+        },
+        {
+          "table_name": "job_recovery_policy_authorities",
+          "column_name": "definition_key",
+          "rows": "2"
+        },
+        {
+          "table_name": "job_requests",
+          "column_name": "definition_key",
+          "rows": "25"
+        },
+        {
+          "table_name": "job_schedule_events",
+          "column_name": "definition_key",
+          "rows": "78"
+        },
+        {
+          "table_name": "job_schedules",
+          "column_name": "definition_key",
+          "rows": "2"
+        },
+        {
+          "table_name": "operator_job_runs",
+          "column_name": "job_key",
+          "rows": "62"
+        }
+      ],
+      "status": "ok",
+      "wall_seconds": 0.691
+    }
+  ],
+  "label": "select3-jobs",
+  "client_wall_seconds": 18.687,
+  "queries_sha256": "0b899bc9722c60022fd5b0b2505b60e146eab218bf47c1ed2ea90110c5cf5166",
+  "captured_by_client_utc": "2026-10-26T19:27:42.019814+00:00"
+}

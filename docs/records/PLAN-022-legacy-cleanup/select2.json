@@ -1,0 +1,92 @@
+{
+  "captured_at_utc": "2026-10-26T19:05:12.328246+00:00",
+  "wall_seconds": 0.645,
+  "stop_reason": null,
+  "results": [
+    {
+      "query": "L6",
+      "mode": "metadata_or_aggregate",
+      "preflight": {
+        "executing_role": "operations_migrate",
+        "server_version_num": "160014",
+        "transaction_read_only": "on",
+        "tenant_context": "1",
+        "executing_search_path": "pg_catalog",
+        "rolsuper": "t",
+        "rolbypassrls": "t"
+      },
+      "exit_code": 0,
+      "returned_rows": 1,
+      "rows": [
+        {
+          "device_snapshots_last": "2026-08-03 21:21:01.499953+00",
+          "device_health_snapshots_last": "2026-08-03 21:21:01.499953+00"
+        }
+      ],
+      "status": "ok",
+      "wall_seconds": 0.182
+    },
+    {
+      "query": "L7",
+      "mode": "metadata_or_aggregate",
+      "preflight": {
+        "executing_role": "operations_migrate",
+        "server_version_num": "160014",
+        "transaction_read_only": "on",
+        "tenant_context": "1",
+        "executing_search_path": "pg_catalog",
+        "rolsuper": "t",
+        "rolbypassrls": "t"
+      },
+      "exit_code": 0,
+      "returned_rows": 1,
+      "rows": [
+        {
+          "source_runs_last": "2026-10-06 19:04:14.741171+00",
+          "platform_observations_last": "2026-10-06 19:04:14.741171+00",
+          "matrix_history_last": "2026-10-06 19:04:14.741171+00"
+        }
+      ],
+      "status": "ok",
+      "wall_seconds": 0.237
+    },
+    {
+      "query": "L8",
+      "mode": "metadata_or_aggregate",
+      "preflight": {
+        "executing_role": "operations_migrate",
+        "server_version_num": "160014",
+        "transaction_read_only": "on",
+        "tenant_context": "1",
+        "executing_search_path": "pg_catalog",
+        "rolsuper": "t",
+        "rolbypassrls": "t"
+      },
+      "exit_code": 0,
+      "returned_rows": 3,
+      "rows": [
+        {
+          "schema_name": "ninja_agent_compliance",
+          "owner": "ninja",
+          "relations": "51"
+        },
+        {
+          "schema_name": "ninja_core",
+          "owner": "ninja",
+          "relations": "19"
+        },
+        {
+          "schema_name": "ninja_inventory",
+          "owner": "ninja",
+          "relations": "21"
+        }
+      ],
+      "status": "ok",
+      "wall_seconds": 0.226
+    }
+  ],
+  "label": "select2",
+  "client_wall_seconds": 1.938,
+  "queries_sha256": "9eb6879b695d93b3b9c85fb30b6e57d28e590d63995ca193185e998b7b29a7ce",
+  "captured_by_client_utc": "2026-10-26T19:05:10.379350+00:00"
+}

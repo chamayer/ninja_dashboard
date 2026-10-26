@@ -1,0 +1,50 @@
+{
+  "captured_at_utc": "2026-10-26T19:49:12.334995+00:00",
+  "wall_seconds": 0.646,
+  "stop_reason": null,
+  "results": [
+    {
+      "query": "L11",
+      "mode": "metadata_or_aggregate",
+      "preflight": {
+        "executing_role": "operations_migrate",
+        "server_version_num": "160014",
+        "transaction_read_only": "on",
+        "tenant_context": "1",
+        "executing_search_path": "pg_catalog",
+        "rolsuper": "t",
+        "rolbypassrls": "t"
+      },
+      "exit_code": 0,
+      "returned_rows": 4,
+      "rows": [
+        {
+          "status": "cancelled",
+          "rows": "2",
+          "last_requested": "2026-10-06 20:45:55.871415+00"
+        },
+        {
+          "status": "completed",
+          "rows": "29",
+          "last_requested": "2026-10-07 22:29:44.099771+00"
+        },
+        {
+          "status": "failed",
+          "rows": "26",
+          "last_requested": "2026-10-05 16:45:48.126811+00"
+        },
+        {
+          "status": "stalled",
+          "rows": "5",
+          "last_requested": "2026-10-06 16:45:55.680503+00"
+        }
+      ],
+      "status": "ok",
+      "wall_seconds": 0.646
+    }
+  ],
+  "label": "select5-runs",
+  "client_wall_seconds": 2.109,
+  "queries_sha256": "74a95de3d91620f6dc76e0a3de554d84be95d7dceed449197b6193e80a98c1a5",
+  "captured_by_client_utc": "2026-10-26T19:49:10.314752+00:00"
+}

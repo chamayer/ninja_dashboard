@@ -1,0 +1,146 @@
+{
+  "captured_at_utc": "2026-10-26T19:05:10.242108+00:00",
+  "wall_seconds": 0.191,
+  "stop_reason": null,
+  "results": [
+    {
+      "query": "L7",
+      "mode": "plain_explain",
+      "preflight": {
+        "executing_role": "operations_migrate",
+        "server_version_num": "160014",
+        "transaction_read_only": "on",
+        "tenant_context": "1",
+        "executing_search_path": "pg_catalog",
+        "rolsuper": "t",
+        "rolbypassrls": "t"
+      },
+      "exit_code": 0,
+      "returned_rows": 1,
+      "plan": {
+        "Node Type": "Result",
+        "Parallel Aware": false,
+        "Async Capable": false,
+        "Startup Cost": 56.74,
+        "Total Cost": 56.75,
+        "Plan Rows": 1,
+        "Plan Width": 24,
+        "Plans": [
+          {
+            "Node Type": "Aggregate",
+            "Strategy": "Plain",
+            "Partial Mode": "Simple",
+            "Parent Relationship": "InitPlan",
+            "Subplan Name": "InitPlan 1 (returns $0)",
+            "Parallel Aware": false,
+            "Async Capable": false,
+            "Startup Cost": 55.8,
+            "Total Cost": 55.81,
+            "Plan Rows": 1,
+            "Plan Width": 8,
+            "Plans": [
+              {
+                "Node Type": "Seq Scan",
+                "Parent Relationship": "Outer",
+                "Parallel Aware": false,
+                "Async Capable": false,
+                "Relation Name": "source_runs",
+                "Alias": "source_runs",
+                "Startup Cost": 0.0,
+                "Total Cost": 50.64,
+                "Plan Rows": 2064,
+                "Plan Width": 8
+              }
+            ]
+          },
+          {
+            "Node Type": "Result",
+            "Parent Relationship": "InitPlan",
+            "Subplan Name": "InitPlan 3 (returns $2)",
+            "Parallel Aware": false,
+            "Async Capable": false,
+            "Startup Cost": 0.46,
+            "Total Cost": 0.47,
+            "Plan Rows": 1,
+            "Plan Width": 8,
+            "Plans": [
+              {
+                "Node Type": "Limit",
+                "Parent Relationship": "InitPlan",
+                "Subplan Name": "InitPlan 2 (returns $1)",
+                "Parallel Aware": false,
+                "Async Capable": false,
+                "Startup Cost": 0.43,
+                "Total Cost": 0.46,
+                "Plan Rows": 1,
+                "Plan Width": 8,
+                "Plans": [
+                  {
+                    "Node Type": "Index Only Scan",
+                    "Parent Relationship": "Outer",
+                    "Parallel Aware": false,
+                    "Async Capable": false,
+                    "Scan Direction": "Forward",
+                    "Index Name": "platform_observations_observed_at_idx",
+                    "Relation Name": "platform_observations",
+                    "Alias": "platform_observations",
+                    "Startup Cost": 0.43,
+                    "Total Cost": 80074.56,
+                    "Plan Rows": 3046718,
+                    "Plan Width": 8
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "Node Type": "Result",
+            "Parent Relationship": "InitPlan",
+            "Subplan Name": "InitPlan 5 (returns $4)",
+            "Parallel Aware": false,
+            "Async Capable": false,
+            "Startup Cost": 0.46,
+            "Total Cost": 0.47,
+            "Plan Rows": 1,
+            "Plan Width": 8,
+            "Plans": [
+              {
+                "Node Type": "Limit",
+                "Parent Relationship": "InitPlan",
+                "Subplan Name": "InitPlan 4 (returns $3)",
+                "Parallel Aware": false,
+                "Async Capable": false,
+                "Startup Cost": 0.43,
+                "Total Cost": 0.46,
+                "Plan Rows": 1,
+                "Plan Width": 8,
+                "Plans": [
+                  {
+                    "Node Type": "Index Only Scan",
+                    "Parent Relationship": "Outer",
+                    "Parallel Aware": false,
+                    "Async Capable": false,
+                    "Scan Direction": "Forward",
+                    "Index Name": "compliance_matrix_history_evaluated_at_idx",
+                    "Relation Name": "compliance_matrix_history",
+                    "Alias": "compliance_matrix_history",
+                    "Startup Cost": 0.43,
+                    "Total Cost": 142448.53,
+                    "Plan Rows": 5495727,
+                    "Plan Width": 8
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "status": "ok",
+      "wall_seconds": 0.191
+    }
+  ],
+  "label": "plan3",
+  "client_wall_seconds": 2.516,
+  "queries_sha256": "9eb6879b695d93b3b9c85fb30b6e57d28e590d63995ca193185e998b7b29a7ce",
+  "captured_by_client_utc": "2026-10-26T19:05:08.292457+00:00"
+}

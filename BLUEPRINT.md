@@ -1,3 +1,11 @@
+# PLAN-022 — Legacy data and code cleanup
+
+**Active** (approved for immediate execution 2026-10-26). Detail, evidence and deploy order: [PLAN-022](docs/plans/PLAN-022-legacy-data-cleanup.md).
+
+- **Done:** Wave A A1–A3 code and migrations (`0350`, `0351`, `117`, `118`) built and tested; images build; archive of every dropped table plus a full backup (4.6 GB) on the host, hashes verified; independent review adopted.
+- **Deploy:** push 1 `0349` only; push 2 the code; push 3 the drop migrations after the off-host archive copy is verified. Each push needs its own approval naming its migrations.
+- **Next:** push approvals; post-deploy checks per the plan.
+
 # PLAN-019 — Data pipeline correctness and source-record retention
 
 **Active** (started 2026-10-26 at the user's approval). Item detail and progress: [PLAN-019](docs/plans/PLAN-019-data-pipeline-correctness-and-retention.md).
@@ -5,7 +13,8 @@
 - **Step 1:** F07 docstring, F01 empty-fetch receipt, F02 cap detection (`run_log` status `partial`), F03 enqueue-before-cursor; committed, not pushed or deployed.
 - **Decisions:** an empty fetch is a failed collection (source-failure Issue), never a withdrawal; a capped activity run is `partial` and the cursor still advances until Step 3's continuation; Phase 2 check files stay frozen as evidence.
 - **Validation:** ingest suite 524 passed, 5 failed (pre-existing, outside this change); Phase 2 checks 1/3/4/9: F01 and F03 reproductions fail as intended, the rest pass; `ruff` clean.
-- **Next:** F09 read-only production estimate and Step 2 (U04) locally, both approved 2026-10-26. Push, deploy and production migrations stay separately gated. VERSION/CHANGELOG unchanged until release.
+- **Step 2 (U04):** generation fence and migration `0349` built and tested; F06 stage map in the plan. **F09:** decided, no daily presence for any source (removed by PLAN-022).
+- **Next:** ships with PLAN-022's push 1 (`0349`) and push 2 (code); then Step 3 with its own approval.
 
 # PLAN-017 — Consolidated data architecture review
 

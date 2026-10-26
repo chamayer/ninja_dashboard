@@ -1,0 +1,150 @@
+{
+  "captured_at_utc": "2026-10-26T20:29:15.184812+00:00",
+  "wall_seconds": 1.024,
+  "stop_reason": null,
+  "results": [
+    {
+      "query": "L14",
+      "mode": "metadata_or_aggregate",
+      "preflight": {
+        "executing_role": "operations_migrate",
+        "server_version_num": "160014",
+        "transaction_read_only": "on",
+        "tenant_context": "1",
+        "executing_search_path": "pg_catalog",
+        "rolsuper": "t",
+        "rolbypassrls": "t"
+      },
+      "exit_code": 0,
+      "returned_rows": 0,
+      "rows": [],
+      "status": "ok",
+      "wall_seconds": 0.527
+    },
+    {
+      "query": "L15",
+      "mode": "metadata_or_aggregate",
+      "preflight": {
+        "executing_role": "operations_migrate",
+        "server_version_num": "160014",
+        "transaction_read_only": "on",
+        "tenant_context": "1",
+        "executing_search_path": "pg_catalog",
+        "rolsuper": "t",
+        "rolbypassrls": "t"
+      },
+      "exit_code": 0,
+      "returned_rows": 17,
+      "rows": [
+        {
+          "kind": "default",
+          "on_object": "ninja_agent_compliance.clients",
+          "name": "client_id",
+          "detail": "nextval('ninja_agent_compliance.clients_client_id_seq'::regclass)"
+        },
+        {
+          "kind": "default",
+          "on_object": "ninja_agent_compliance.platform_sources",
+          "name": "source_id",
+          "detail": "nextval('ninja_agent_compliance.platform_sources_source_id_seq'::regclass)"
+        },
+        {
+          "kind": "default",
+          "on_object": "ninja_agent_compliance.client_aliases",
+          "name": "alias_id",
+          "detail": "nextval('ninja_agent_compliance.client_aliases_alias_id_seq'::regclass)"
+        },
+        {
+          "kind": "default",
+          "on_object": "ninja_agent_compliance.platform_requirements",
+          "name": "requirement_id",
+          "detail": "nextval('ninja_agent_compliance.platform_requirements_requirement_id_seq'::regclass)"
+        },
+        {
+          "kind": "default",
+          "on_object": "ninja_agent_compliance.notification_routes",
+          "name": "route_id",
+          "detail": "nextval('ninja_agent_compliance.notification_routes_route_id_seq'::regclass)"
+        },
+        {
+          "kind": "default",
+          "on_object": "ninja_agent_compliance.alert_rules",
+          "name": "rule_id",
+          "detail": "nextval('ninja_agent_compliance.alert_rules_rule_id_seq'::regclass)"
+        },
+        {
+          "kind": "default",
+          "on_object": "ninja_agent_compliance.alert_suppressions",
+          "name": "suppression_id",
+          "detail": "nextval('ninja_agent_compliance.alert_suppressions_suppression_id_seq'::regclass)"
+        },
+        {
+          "kind": "default",
+          "on_object": "ninja_agent_compliance.source_runs",
+          "name": "source_run_id",
+          "detail": "nextval('ninja_agent_compliance.source_runs_source_run_id_seq'::regclass)"
+        },
+        {
+          "kind": "default",
+          "on_object": "ninja_agent_compliance.platform_observations",
+          "name": "observation_id",
+          "detail": "nextval('ninja_agent_compliance.platform_observations_observation_id_seq'::regclass)"
+        },
+        {
+          "kind": "default",
+          "on_object": "ninja_agent_compliance.compliance_matrix_history",
+          "name": "history_id",
+          "detail": "nextval('ninja_agent_compliance.compliance_matrix_history_history_id_seq'::regclass)"
+        },
+        {
+          "kind": "default",
+          "on_object": "ninja_agent_compliance.compliance_findings",
+          "name": "finding_id",
+          "detail": "nextval('ninja_agent_compliance.compliance_findings_finding_id_seq'::regclass)"
+        },
+        {
+          "kind": "default",
+          "on_object": "ninja_agent_compliance.alert_events",
+          "name": "alert_event_id",
+          "detail": "nextval('ninja_agent_compliance.alert_events_alert_event_id_seq'::regclass)"
+        },
+        {
+          "kind": "default",
+          "on_object": "ninja_agent_compliance.org_alignment_history",
+          "name": "history_id",
+          "detail": "nextval('ninja_agent_compliance.org_alignment_history_history_id_seq'::regclass)"
+        },
+        {
+          "kind": "default",
+          "on_object": "ninja_agent_compliance.org_candidates",
+          "name": "candidate_id",
+          "detail": "nextval('ninja_agent_compliance.org_candidates_candidate_id_seq'::regclass)"
+        },
+        {
+          "kind": "default",
+          "on_object": "ninja_agent_compliance.human_decisions",
+          "name": "decision_id",
+          "detail": "nextval('ninja_agent_compliance.human_decisions_decision_id_seq'::regclass)"
+        },
+        {
+          "kind": "default",
+          "on_object": "ninja_agent_compliance.device_renames",
+          "name": "rename_id",
+          "detail": "nextval('ninja_agent_compliance.device_renames_rename_id_seq'::regclass)"
+        },
+        {
+          "kind": "default",
+          "on_object": "ninja_agent_compliance.client_platform_links",
+          "name": "link_id",
+          "detail": "nextval('ninja_agent_compliance.client_platform_links_link_id_seq'::regclass)"
+        }
+      ],
+      "status": "ok",
+      "wall_seconds": 0.497
+    }
+  ],
+  "label": "select7-routines",
+  "client_wall_seconds": 2.422,
+  "queries_sha256": "1d6d23dc4f63fee79ddd894343343a40840c259a39d0c6a08a6dc5b54ec27162",
+  "captured_by_client_utc": "2026-10-26T20:29:13.065120+00:00"
+}

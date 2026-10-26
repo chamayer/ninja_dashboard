@@ -1,0 +1,2067 @@
+{
+  "captured_at_utc": "2026-10-26T19:03:27.123994+00:00",
+  "wall_seconds": 3.071,
+  "stop_reason": null,
+  "results": [
+    {
+      "query": "L1",
+      "mode": "metadata_or_aggregate",
+      "preflight": {
+        "executing_role": "operations_migrate",
+        "server_version_num": "160014",
+        "transaction_read_only": "on",
+        "tenant_context": "1",
+        "executing_search_path": "pg_catalog",
+        "rolsuper": "t",
+        "rolbypassrls": "t"
+      },
+      "exit_code": 0,
+      "returned_rows": 1,
+      "rows": [
+        {
+          "database_bytes": "67029416983",
+          "stats_reset": ""
+        }
+      ],
+      "status": "ok",
+      "wall_seconds": 0.382
+    },
+    {
+      "query": "L2",
+      "mode": "metadata_or_aggregate",
+      "preflight": {
+        "executing_role": "operations_migrate",
+        "server_version_num": "160014",
+        "transaction_read_only": "on",
+        "tenant_context": "1",
+        "executing_search_path": "pg_catalog",
+        "rolsuper": "t",
+        "rolbypassrls": "t"
+      },
+      "exit_code": 0,
+      "returned_rows": 8,
+      "rows": [
+        {
+          "schema_name": "ninja_core",
+          "relations": "16",
+          "total_bytes": "25037176832"
+        },
+        {
+          "schema_name": "operations",
+          "relations": "253",
+          "total_bytes": "16503209984"
+        },
+        {
+          "schema_name": "ninja_agent_compliance",
+          "relations": "21",
+          "total_bytes": "13771522048"
+        },
+        {
+          "schema_name": "ninja_activities",
+          "relations": "4",
+          "total_bytes": "7090167808"
+        },
+        {
+          "schema_name": "intel",
+          "relations": "7",
+          "total_bytes": "2622324736"
+        },
+        {
+          "schema_name": "ninja_patches",
+          "relations": "5",
+          "total_bytes": "1779687424"
+        },
+        {
+          "schema_name": "ninja_inventory",
+          "relations": "7",
+          "total_bytes": "37830656"
+        },
+        {
+          "schema_name": "catalog",
+          "relations": "15",
+          "total_bytes": "27664384"
+        }
+      ],
+      "status": "ok",
+      "wall_seconds": 1.305
+    },
+    {
+      "query": "L3",
+      "mode": "metadata_or_aggregate",
+      "preflight": {
+        "executing_role": "operations_migrate",
+        "server_version_num": "160014",
+        "transaction_read_only": "on",
+        "tenant_context": "1",
+        "executing_search_path": "pg_catalog",
+        "rolsuper": "t",
+        "rolbypassrls": "t"
+      },
+      "exit_code": 0,
+      "returned_rows": 69,
+      "rows": [
+        {
+          "schema_name": "ninja_core",
+          "relname": "device_snapshots",
+          "relkind": "r",
+          "total_bytes": "15170043904",
+          "n_live_tup": "0",
+          "seq_scan": "0",
+          "last_seq_scan": "",
+          "idx_scan": "0",
+          "last_idx_scan": "",
+          "n_tup_ins": "0",
+          "n_tup_upd": "0",
+          "n_tup_del": "0"
+        },
+        {
+          "schema_name": "ninja_agent_compliance",
+          "relname": "platform_observations",
+          "relkind": "r",
+          "total_bytes": "8187150336",
+          "n_live_tup": "0",
+          "seq_scan": "0",
+          "last_seq_scan": "",
+          "idx_scan": "0",
+          "last_idx_scan": "",
+          "n_tup_ins": "0",
+          "n_tup_upd": "0",
+          "n_tup_del": "0"
+        },
+        {
+          "schema_name": "ninja_core",
+          "relname": "device_health_snapshots",
+          "relkind": "r",
+          "total_bytes": "7790608384",
+          "n_live_tup": "0",
+          "seq_scan": "0",
+          "last_seq_scan": "",
+          "idx_scan": "0",
+          "last_idx_scan": "",
+          "n_tup_ins": "0",
+          "n_tup_upd": "0",
+          "n_tup_del": "0"
+        },
+        {
+          "schema_name": "ninja_activities",
+          "relname": "activities",
+          "relkind": "r",
+          "total_bytes": "7054114816",
+          "n_live_tup": "21863",
+          "seq_scan": "105",
+          "last_seq_scan": "2026-10-26 18:31:34.919933+00",
+          "idx_scan": "21933",
+          "last_idx_scan": "2026-10-26 18:31:34.919933+00",
+          "n_tup_ins": "21863",
+          "n_tup_upd": "0",
+          "n_tup_del": "0"
+        },
+        {
+          "schema_name": "ninja_agent_compliance",
+          "relname": "compliance_matrix_history",
+          "relkind": "r",
+          "total_bytes": "3259498496",
+          "n_live_tup": "0",
+          "seq_scan": "0",
+          "last_seq_scan": "",
+          "idx_scan": "0",
+          "last_idx_scan": "",
+          "n_tup_ins": "0",
+          "n_tup_upd": "0",
+          "n_tup_del": "0"
+        },
+        {
+          "schema_name": "operations",
+          "relname": "entity_observation_current",
+          "relkind": "r",
+          "total_bytes": "3005366272",
+          "n_live_tup": "37635",
+          "seq_scan": "108",
+          "last_seq_scan": "2026-10-26 18:49:55.852311+00",
+          "idx_scan": "1748161620",
+          "last_idx_scan": "2026-10-26 19:01:23.093925+00",
+          "n_tup_ins": "256",
+          "n_tup_upd": "611867",
+          "n_tup_del": "0"
+        },
+        {
+          "schema_name": "ninja_agent_compliance",
+          "relname": "compliance_findings",
+          "relkind": "r",
+          "total_bytes": "2283175936",
+          "n_live_tup": "0",
+          "seq_scan": "0",
+          "last_seq_scan": "",
+          "idx_scan": "0",
+          "last_idx_scan": "",
+          "n_tup_ins": "0",
+          "n_tup_upd": "0",
+          "n_tup_del": "0"
+        },
+        {
+          "schema_name": "intel",
+          "relname": "cpes",
+          "relkind": "r",
+          "total_bytes": "1741496320",
+          "n_live_tup": "4821",
+          "seq_scan": "230",
+          "last_seq_scan": "2026-10-26 18:38:22.96541+00",
+          "idx_scan": "391641",
+          "last_idx_scan": "2026-10-26 18:33:11.771602+00",
+          "n_tup_ins": "4821",
+          "n_tup_upd": "0",
+          "n_tup_del": "0"
+        },
+        {
+          "schema_name": "ninja_core",
+          "relname": "devices",
+          "relkind": "r",
+          "total_bytes": "1620951040",
+          "n_live_tup": "29207",
+          "seq_scan": "266",
+          "last_seq_scan": "2026-10-26 18:54:27.21731+00",
+          "idx_scan": "1243151",
+          "last_idx_scan": "2026-10-26 19:01:23.093925+00",
+          "n_tup_ins": "161",
+          "n_tup_upd": "203741",
+          "n_tup_del": "0"
+        },
+        {
+          "schema_name": "ninja_patches",
+          "relname": "patch_facts",
+          "relkind": "r",
+          "total_bytes": "1606189056",
+          "n_live_tup": "558498",
+          "seq_scan": "489",
+          "last_seq_scan": "2026-10-26 18:30:54.219846+00",
+          "idx_scan": "641341",
+          "last_idx_scan": "2026-10-26 18:32:11.52932+00",
+          "n_tup_ins": "3694",
+          "n_tup_upd": "596391",
+          "n_tup_del": "0"
+        },
+        {
+          "schema_name": "operations",
+          "relname": "source_events",
+          "relkind": "r",
+          "total_bytes": "1507549184",
+          "n_live_tup": "59290",
+          "seq_scan": "3",
+          "last_seq_scan": "2026-10-26 15:38:16.95694+00",
+          "idx_scan": "59398",
+          "last_idx_scan": "2026-10-26 18:31:10.424863+00",
+          "n_tup_ins": "59290",
+          "n_tup_upd": "105",
+          "n_tup_del": "0"
+        },
+        {
+          "schema_name": "operations",
+          "relname": "software_installation_history",
+          "relkind": "r",
+          "total_bytes": "1390264320",
+          "n_live_tup": "1567350",
+          "seq_scan": "3",
+          "last_seq_scan": "2026-10-26 16:52:00.33872+00",
+          "idx_scan": "2619450",
+          "last_idx_scan": "2026-10-26 18:38:40.854523+00",
+          "n_tup_ins": "42999",
+          "n_tup_upd": "2641785",
+          "n_tup_del": "40564"
+        },
+        {
+          "schema_name": "operations",
+          "relname": "condition_assessments",
+          "relkind": "r",
+          "total_bytes": "1365532672",
+          "n_live_tup": "385758",
+          "seq_scan": "6",
+          "last_seq_scan": "2026-10-25 23:41:12.233866+00",
+          "idx_scan": "7477345",
+          "last_idx_scan": "2026-10-26 19:01:36.392539+00",
+          "n_tup_ins": "7383",
+          "n_tup_upd": "1405803",
+          "n_tup_del": "601"
+        },
+        {
+          "schema_name": "operations",
+          "relname": "software_installations_current",
+          "relkind": "r",
+          "total_bytes": "1114308608",
+          "n_live_tup": "625275",
+          "seq_scan": "1245",
+          "last_seq_scan": "2026-10-26 18:38:22.96541+00",
+          "idx_scan": "3668824",
+          "last_idx_scan": "2026-10-26 18:38:40.854523+00",
+          "n_tup_ins": "3831",
+          "n_tup_upd": "2713960",
+          "n_tup_del": "0"
+        },
+        {
+          "schema_name": "operations",
+          "relname": "entity_observation_history",
+          "relkind": "r",
+          "total_bytes": "900087808",
+          "n_live_tup": "16230",
+          "seq_scan": "495",
+          "last_seq_scan": "2026-10-26 18:56:25.323459+00",
+          "idx_scan": "327859",
+          "last_idx_scan": "2026-10-26 19:01:23.093925+00",
+          "n_tup_ins": "16585",
+          "n_tup_upd": "16650",
+          "n_tup_del": "717"
+        },
+        {
+          "schema_name": "intel",
+          "relname": "cves",
+          "relkind": "r",
+          "total_bytes": "877985792",
+          "n_live_tup": "165597",
+          "seq_scan": "12",
+          "last_seq_scan": "2026-10-26 18:33:11.771602+00",
+          "idx_scan": "8671708",
+          "last_idx_scan": "2026-10-26 18:38:22.96541+00",
+          "n_tup_ins": "7953",
+          "n_tup_upd": "468137",
+          "n_tup_del": "0"
+        },
+        {
+          "schema_name": "operations",
+          "relname": "entity_candidate_events",
+          "relkind": "r",
+          "total_bytes": "830496768",
+          "n_live_tup": "2163791",
+          "seq_scan": "0",
+          "last_seq_scan": "",
+          "idx_scan": "0",
+          "last_idx_scan": "",
+          "n_tup_ins": "899969",
+          "n_tup_upd": "0",
+          "n_tup_del": "0"
+        },
+        {
+          "schema_name": "operations",
+          "relname": "entity_attribute_claim_history",
+          "relkind": "r",
+          "total_bytes": "807919616",
+          "n_live_tup": "23243",
+          "seq_scan": "0",
+          "last_seq_scan": "",
+          "idx_scan": "249010",
+          "last_idx_scan": "2026-10-26 18:50:05.57908+00",
+          "n_tup_ins": "23243",
+          "n_tup_upd": "24571",
+          "n_tup_del": "0"
+        },
+        {
+          "schema_name": "operations",
+          "relname": "findings",
+          "relkind": "r",
+          "total_bytes": "750444544",
+          "n_live_tup": "596742",
+          "seq_scan": "137",
+          "last_seq_scan": "2026-10-26 18:54:27.21731+00",
+          "idx_scan": "8820660",
+          "last_idx_scan": "2026-10-26 19:01:37.06514+00",
+          "n_tup_ins": "6604",
+          "n_tup_upd": "960399",
+          "n_tup_del": "0"
+        },
+        {
+          "schema_name": "operations",
+          "relname": "entity_relationship_evidence_current",
+          "relkind": "r",
+          "total_bytes": "609378304",
+          "n_live_tup": "52859",
+          "seq_scan": "122",
+          "last_seq_scan": "2026-10-26 18:54:20.688618+00",
+          "idx_scan": "8088270",
+          "last_idx_scan": "2026-10-26 18:55:44.297556+00",
+          "n_tup_ins": "154",
+          "n_tup_upd": "3981722",
+          "n_tup_del": "0"
+        },
+        {
+          "schema_name": "operations",
+          "relname": "cve_match",
+          "relkind": "r",
+          "total_bytes": "507535360",
+          "n_live_tup": "740247",
+          "seq_scan": "123",
+          "last_seq_scan": "2026-10-26 18:33:18.088192+00",
+          "idx_scan": "6604447",
+          "last_idx_scan": "2026-10-26 18:38:22.96541+00",
+          "n_tup_ins": "6599135",
+          "n_tup_upd": "0",
+          "n_tup_del": "6510149"
+        },
+        {
+          "schema_name": "ninja_core",
+          "relname": "custom_field_values",
+          "relkind": "r",
+          "total_bytes": "377126912",
+          "n_live_tup": "86229",
+          "seq_scan": "0",
+          "last_seq_scan": "",
+          "idx_scan": "382982",
+          "last_idx_scan": "2026-10-26 18:54:27.21731+00",
+          "n_tup_ins": "2657",
+          "n_tup_upd": "378905",
+          "n_tup_del": "0"
+        },
+        {
+          "schema_name": "operations",
+          "relname": "entity_relationship_evidence_history",
+          "relkind": "r",
+          "total_bytes": "341147648",
+          "n_live_tup": "61299",
+          "seq_scan": "2",
+          "last_seq_scan": "2026-10-26 02:00:46.034158+00",
+          "idx_scan": "1991057",
+          "last_idx_scan": "2026-10-26 18:54:17.915154+00",
+          "n_tup_ins": "157",
+          "n_tup_upd": "2028315",
+          "n_tup_del": "0"
+        },
+        {
+          "schema_name": "operations",
+          "relname": "software_device_readiness",
+          "relkind": "r",
+          "total_bytes": "340688896",
+          "n_live_tup": "427557",
+          "seq_scan": "124",
+          "last_seq_scan": "2026-10-26 18:38:39.067695+00",
+          "idx_scan": "7836547",
+          "last_idx_scan": "2026-10-26 18:38:39.067695+00",
+          "n_tup_ins": "91",
+          "n_tup_upd": "4547426",
+          "n_tup_del": "0"
+        },
+        {
+          "schema_name": "operations",
+          "relname": "findings_change_history",
+          "relkind": "r",
+          "total_bytes": "338436096",
+          "n_live_tup": "156657",
+          "seq_scan": "0",
+          "last_seq_scan": "",
+          "idx_scan": "0",
+          "last_idx_scan": "",
+          "n_tup_ins": "59236",
+          "n_tup_upd": "0",
+          "n_tup_del": "0"
+        },
+        {
+          "schema_name": "ninja_patches",
+          "relname": "latest_install_outcome",
+          "relkind": "m",
+          "total_bytes": "143409152",
+          "n_live_tup": "398703",
+          "seq_scan": "408",
+          "last_seq_scan": "2026-10-26 18:30:54.219846+00",
+          "idx_scan": "0",
+          "last_idx_scan": "",
+          "n_tup_ins": "13553898",
+          "n_tup_upd": "0",
+          "n_tup_del": "0"
+        },
+        {
+          "schema_name": "ninja_core",
+          "relname": "software_activity_queue",
+          "relkind": "r",
+          "total_bytes": "39731200",
+          "n_live_tup": "129451",
+          "seq_scan": "113",
+          "last_seq_scan": "2026-10-26 18:39:57.296652+00",
+          "idx_scan": "54028",
+          "last_idx_scan": "2026-10-26 19:00:52.311771+00",
+          "n_tup_ins": "7251",
+          "n_tup_upd": "14502",
+          "n_tup_del": "0"
+        },
+        {
+          "schema_name": "ninja_inventory",
+          "relname": "source_observations_current",
+          "relkind": "m",
+          "total_bytes": "30523392",
+          "n_live_tup": "0",
+          "seq_scan": "0",
+          "last_seq_scan": "",
+          "idx_scan": "0",
+          "last_idx_scan": "",
+          "n_tup_ins": "0",
+          "n_tup_upd": "0",
+          "n_tup_del": "0"
+        },
+        {
+          "schema_name": "ninja_patches",
+          "relname": "current_patch_state",
+          "relkind": "m",
+          "total_bytes": "29286400",
+          "n_live_tup": "118731",
+          "seq_scan": "340",
+          "last_seq_scan": "2026-10-26 18:30:54.219846+00",
+          "idx_scan": "0",
+          "last_idx_scan": "",
+          "n_tup_ins": "4025377",
+          "n_tup_upd": "0",
+          "n_tup_del": "0"
+        },
+        {
+          "schema_name": "ninja_core",
+          "relname": "run_log",
+          "relkind": "r",
+          "total_bytes": "28811264",
+          "n_live_tup": "472",
+          "seq_scan": "72",
+          "last_seq_scan": "2026-10-26 18:40:00.561331+00",
+          "idx_scan": "618",
+          "last_idx_scan": "2026-10-26 18:55:44.592972+00",
+          "n_tup_ins": "472",
+          "n_tup_upd": "477",
+          "n_tup_del": "0"
+        },
+        {
+          "schema_name": "ninja_activities",
+          "relname": "patch_warning_events_recent",
+          "relkind": "m",
+          "total_bytes": "25542656",
+          "n_live_tup": "39574",
+          "seq_scan": "245",
+          "last_seq_scan": "2026-10-26 18:31:34.919933+00",
+          "idx_scan": "0",
+          "last_idx_scan": "",
+          "n_tup_ins": "1384175",
+          "n_tup_upd": "0",
+          "n_tup_del": "0"
+        },
+        {
+          "schema_name": "ninja_agent_compliance",
+          "relname": "compliance_matrix_current",
+          "relkind": "r",
+          "total_bytes": "21168128",
+          "n_live_tup": "0",
+          "seq_scan": "0",
+          "last_seq_scan": "",
+          "idx_scan": "0",
+          "last_idx_scan": "",
+          "n_tup_ins": "0",
+          "n_tup_upd": "0",
+          "n_tup_del": "0"
+        },
+        {
+          "schema_name": "ninja_agent_compliance",
+          "relname": "client_platform_links",
+          "relkind": "r",
+          "total_bytes": "10682368",
+          "n_live_tup": "0",
+          "seq_scan": "0",
+          "last_seq_scan": "",
+          "idx_scan": "0",
+          "last_idx_scan": "",
+          "n_tup_ins": "0",
+          "n_tup_upd": "0",
+          "n_tup_del": "0"
+        },
+        {
+          "schema_name": "ninja_activities",
+          "relname": "system_reboot_events_recent",
+          "relkind": "m",
+          "total_bytes": "8667136",
+          "n_live_tup": "96504",
+          "seq_scan": "70",
+          "last_seq_scan": "2026-10-26 18:31:34.919933+00",
+          "idx_scan": "0",
+          "last_idx_scan": "",
+          "n_tup_ins": "3375937",
+          "n_tup_upd": "0",
+          "n_tup_del": "0"
+        },
+        {
+          "schema_name": "ninja_agent_compliance",
+          "relname": "org_alignment_history",
+          "relkind": "r",
+          "total_bytes": "7405568",
+          "n_live_tup": "0",
+          "seq_scan": "0",
+          "last_seq_scan": "",
+          "idx_scan": "0",
+          "last_idx_scan": "",
+          "n_tup_ins": "0",
+          "n_tup_upd": "0",
+          "n_tup_del": "0"
+        },
+        {
+          "schema_name": "ninja_core",
+          "relname": "latest_device_health",
+          "relkind": "m",
+          "total_bytes": "6029312",
+          "n_live_tup": "5624",
+          "seq_scan": "108",
+          "last_seq_scan": "2026-10-26 18:23:29.795766+00",
+          "idx_scan": "71",
+          "last_idx_scan": "2026-10-26 18:23:49.897741+00",
+          "n_tup_ins": "203587",
+          "n_tup_upd": "0",
+          "n_tup_del": "0"
+        },
+        {
+          "schema_name": "ninja_inventory",
+          "relname": "devices_current",
+          "relkind": "m",
+          "total_bytes": "3784704",
+          "n_live_tup": "0",
+          "seq_scan": "0",
+          "last_seq_scan": "",
+          "idx_scan": "0",
+          "last_idx_scan": "",
+          "n_tup_ins": "0",
+          "n_tup_upd": "0",
+          "n_tup_del": "0"
+        },
+        {
+          "schema_name": "ninja_inventory",
+          "relname": "serial_quality_current",
+          "relkind": "m",
+          "total_bytes": "3293184",
+          "n_live_tup": "0",
+          "seq_scan": "0",
+          "last_seq_scan": "",
+          "idx_scan": "0",
+          "last_idx_scan": "",
+          "n_tup_ins": "0",
+          "n_tup_upd": "0",
+          "n_tup_del": "0"
+        },
+        {
+          "schema_name": "ninja_core",
+          "relname": "policies",
+          "relkind": "r",
+          "total_bytes": "1884160",
+          "n_live_tup": "226",
+          "seq_scan": "0",
+          "last_seq_scan": "",
+          "idx_scan": "22382",
+          "last_idx_scan": "2026-10-26 18:54:27.21731+00",
+          "n_tup_ins": "0",
+          "n_tup_upd": "3348",
+          "n_tup_del": "0"
+        },
+        {
+          "schema_name": "ninja_activities",
+          "relname": "device_activity_signal",
+          "relkind": "m",
+          "total_bytes": "1843200",
+          "n_live_tup": "4708",
+          "seq_scan": "175",
+          "last_seq_scan": "2026-10-26 18:31:34.919933+00",
+          "idx_scan": "72",
+          "last_idx_scan": "2026-10-26 18:23:49.897741+00",
+          "n_tup_ins": "164255",
+          "n_tup_upd": "0",
+          "n_tup_del": "0"
+        },
+        {
+          "schema_name": "ninja_core",
+          "relname": "locations",
+          "relkind": "r",
+          "total_bytes": "1368064",
+          "n_live_tup": "562",
+          "seq_scan": "462",
+          "last_seq_scan": "2026-10-26 17:40:59.198809+00",
+          "idx_scan": "9451",
+          "last_idx_scan": "2026-10-26 18:22:57.79936+00",
+          "n_tup_ins": "0",
+          "n_tup_upd": "9288",
+          "n_tup_del": "0"
+        },
+        {
+          "schema_name": "ninja_agent_compliance",
+          "relname": "client_aliases",
+          "relkind": "r",
+          "total_bytes": "638976",
+          "n_live_tup": "0",
+          "seq_scan": "0",
+          "last_seq_scan": "",
+          "idx_scan": "0",
+          "last_idx_scan": "",
+          "n_tup_ins": "0",
+          "n_tup_upd": "0",
+          "n_tup_del": "0"
+        },
+        {
+          "schema_name": "ninja_agent_compliance",
+          "relname": "org_candidates",
+          "relkind": "r",
+          "total_bytes": "524288",
+          "n_live_tup": "0",
+          "seq_scan": "0",
+          "last_seq_scan": "",
+          "idx_scan": "0",
+          "last_idx_scan": "",
+          "n_tup_ins": "0",
+          "n_tup_upd": "0",
+          "n_tup_del": "0"
+        },
+        {
+          "schema_name": "ninja_agent_compliance",
+          "relname": "source_runs",
+          "relkind": "r",
+          "total_bytes": "475136",
+          "n_live_tup": "0",
+          "seq_scan": "0",
+          "last_seq_scan": "",
+          "idx_scan": "0",
+          "last_idx_scan": "",
+          "n_tup_ins": "0",
+          "n_tup_upd": "0",
+          "n_tup_del": "0"
+        },
+        {
+          "schema_name": "ninja_patches",
+          "relname": "device_patch_signal",
+          "relkind": "m",
+          "total_bytes": "442368",
+          "n_live_tup": "3300",
+          "seq_scan": "102",
+          "last_seq_scan": "2026-10-26 18:30:54.219846+00",
+          "idx_scan": "132120",
+          "last_idx_scan": "2026-10-26 18:32:11.52932+00",
+          "n_tup_ins": "112149",
+          "n_tup_upd": "0",
+          "n_tup_del": "0"
+        },
+        {
+          "schema_name": "ninja_patches",
+          "relname": "device_patch_activity",
+          "relkind": "m",
+          "total_bytes": "360448",
+          "n_live_tup": "3377",
+          "seq_scan": "68",
+          "last_seq_scan": "2026-10-26 18:30:54.219846+00",
+          "idx_scan": "29379",
+          "last_idx_scan": "2026-10-26 13:10:03.949958+00",
+          "n_tup_ins": "114777",
+          "n_tup_upd": "0",
+          "n_tup_del": "0"
+        },
+        {
+          "schema_name": "ninja_core",
+          "relname": "organizations",
+          "relkind": "r",
+          "total_bytes": "270336",
+          "n_live_tup": "78",
+          "seq_scan": "36",
+          "last_seq_scan": "2026-10-26 18:49:40.230072+00",
+          "idx_scan": "3042",
+          "last_idx_scan": "2026-10-26 18:36:40.688175+00",
+          "n_tup_ins": "0",
+          "n_tup_upd": "2808",
+          "n_tup_del": "0"
+        },
+        {
+          "schema_name": "ninja_agent_compliance",
+          "relname": "device_renames",
+          "relkind": "r",
+          "total_bytes": "196608",
+          "n_live_tup": "0",
+          "seq_scan": "0",
+          "last_seq_scan": "",
+          "idx_scan": "0",
+          "last_idx_scan": "",
+          "n_tup_ins": "0",
+          "n_tup_upd": "0",
+          "n_tup_del": "0"
+        },
+        {
+          "schema_name": "ninja_agent_compliance",
+          "relname": "org_alignment_current",
+          "relkind": "r",
+          "total_bytes": "131072",
+          "n_live_tup": "0",
+          "seq_scan": "0",
+          "last_seq_scan": "",
+          "idx_scan": "0",
+          "last_idx_scan": "",
+          "n_tup_ins": "0",
+          "n_tup_upd": "0",
+          "n_tup_del": "0"
+        },
+        {
+          "schema_name": "ninja_inventory",
+          "relname": "identity_conflicts_current",
+          "relkind": "m",
+          "total_bytes": "114688",
+          "n_live_tup": "0",
+          "seq_scan": "0",
+          "last_seq_scan": "",
+          "idx_scan": "0",
+          "last_idx_scan": "",
+          "n_tup_ins": "0",
+          "n_tup_upd": "0",
+          "n_tup_del": "0"
+        },
+        {
+          "schema_name": "ninja_agent_compliance",
+          "relname": "clients",
+          "relkind": "r",
+          "total_bytes": "114688",
+          "n_live_tup": "0",
+          "seq_scan": "0",
+          "last_seq_scan": "",
+          "idx_scan": "0",
+          "last_idx_scan": "",
+          "n_tup_ins": "0",
+          "n_tup_upd": "0",
+          "n_tup_del": "0"
+        },
+        {
+          "schema_name": "ninja_core",
+          "relname": "device_troubleshooting_signal",
+          "relkind": "m",
+          "total_bytes": "90112",
+          "n_live_tup": "0",
+          "seq_scan": "360",
+          "last_seq_scan": "2026-10-26 18:23:49.897741+00",
+          "idx_scan": "0",
+          "last_idx_scan": "",
+          "n_tup_ins": "0",
+          "n_tup_upd": "0",
+          "n_tup_del": "0"
+        },
+        {
+          "schema_name": "ninja_core",
+          "relname": "v_active_devices",
+          "relkind": "m",
+          "total_bytes": "73728",
+          "n_live_tup": "0",
+          "seq_scan": "612",
+          "last_seq_scan": "2026-10-26 18:49:41.655398+00",
+          "idx_scan": "288",
+          "last_idx_scan": "2026-10-26 18:23:49.897741+00",
+          "n_tup_ins": "0",
+          "n_tup_upd": "0",
+          "n_tup_del": "0"
+        },
+        {
+          "schema_name": "ninja_core",
+          "relname": "schema_migrations",
+          "relkind": "r",
+          "total_bytes": "65536",
+          "n_live_tup": "0",
+          "seq_scan": "7",
+          "last_seq_scan": "2026-10-26 17:36:30.78016+00",
+          "idx_scan": "0",
+          "last_idx_scan": "",
+          "n_tup_ins": "0",
+          "n_tup_upd": "0",
+          "n_tup_del": "0"
+        },
+        {
+          "schema_name": "ninja_core",
+          "relname": "ingest_state",
+          "relkind": "r",
+          "total_bytes": "65536",
+          "n_live_tup": "0",
+          "seq_scan": "35",
+          "last_seq_scan": "2026-10-26 18:30:54.380751+00",
+          "idx_scan": "35",
+          "last_idx_scan": "2026-10-26 18:31:11.43254+00",
+          "n_tup_ins": "0",
+          "n_tup_upd": "35",
+          "n_tup_del": "0"
+        },
+        {
+          "schema_name": "ninja_agent_compliance",
+          "relname": "alert_rules",
+          "relkind": "r",
+          "total_bytes": "49152",
+          "n_live_tup": "0",
+          "seq_scan": "0",
+          "last_seq_scan": "",
+          "idx_scan": "0",
+          "last_idx_scan": "",
+          "n_tup_ins": "0",
+          "n_tup_upd": "0",
+          "n_tup_del": "0"
+        },
+        {
+          "schema_name": "ninja_agent_compliance",
+          "relname": "platform_sources",
+          "relkind": "r",
+          "total_bytes": "49152",
+          "n_live_tup": "0",
+          "seq_scan": "0",
+          "last_seq_scan": "",
+          "idx_scan": "0",
+          "last_idx_scan": "",
+          "n_tup_ins": "0",
+          "n_tup_upd": "0",
+          "n_tup_del": "0"
+        },
+        {
+          "schema_name": "ninja_inventory",
+          "relname": "unresolved_source_records_current",
+          "relkind": "m",
+          "total_bytes": "49152",
+          "n_live_tup": "0",
+          "seq_scan": "0",
+          "last_seq_scan": "",
+          "idx_scan": "0",
+          "last_idx_scan": "",
+          "n_tup_ins": "0",
+          "n_tup_upd": "0",
+          "n_tup_del": "0"
+        },
+        {
+          "schema_name": "ninja_agent_compliance",
+          "relname": "org_excludes",
+          "relkind": "r",
+          "total_bytes": "49152",
+          "n_live_tup": "0",
+          "seq_scan": "0",
+          "last_seq_scan": "",
+          "idx_scan": "0",
+          "last_idx_scan": "",
+          "n_tup_ins": "0",
+          "n_tup_upd": "0",
+          "n_tup_del": "0"
+        },
+        {
+          "schema_name": "ninja_agent_compliance",
+          "relname": "human_decisions",
+          "relkind": "r",
+          "total_bytes": "49152",
+          "n_live_tup": "0",
+          "seq_scan": "0",
+          "last_seq_scan": "",
+          "idx_scan": "0",
+          "last_idx_scan": "",
+          "n_tup_ins": "0",
+          "n_tup_upd": "0",
+          "n_tup_del": "0"
+        },
+        {
+          "schema_name": "ninja_agent_compliance",
+          "relname": "platform_requirements",
+          "relkind": "r",
+          "total_bytes": "49152",
+          "n_live_tup": "0",
+          "seq_scan": "0",
+          "last_seq_scan": "",
+          "idx_scan": "0",
+          "last_idx_scan": "",
+          "n_tup_ins": "0",
+          "n_tup_upd": "0",
+          "n_tup_del": "0"
+        },
+        {
+          "schema_name": "ninja_agent_compliance",
+          "relname": "notification_routes",
+          "relkind": "r",
+          "total_bytes": "49152",
+          "n_live_tup": "0",
+          "seq_scan": "0",
+          "last_seq_scan": "",
+          "idx_scan": "0",
+          "last_idx_scan": "",
+          "n_tup_ins": "0",
+          "n_tup_upd": "0",
+          "n_tup_del": "0"
+        },
+        {
+          "schema_name": "ninja_inventory",
+          "relname": "merge_candidates_current",
+          "relkind": "m",
+          "total_bytes": "40960",
+          "n_live_tup": "0",
+          "seq_scan": "0",
+          "last_seq_scan": "",
+          "idx_scan": "0",
+          "last_idx_scan": "",
+          "n_tup_ins": "0",
+          "n_tup_upd": "0",
+          "n_tup_del": "0"
+        },
+        {
+          "schema_name": "ninja_core",
+          "relname": "patching_enabled_policies",
+          "relkind": "r",
+          "total_bytes": "32768",
+          "n_live_tup": "2",
+          "seq_scan": "36",
+          "last_seq_scan": "2026-10-26 18:22:57.79936+00",
+          "idx_scan": "0",
+          "last_idx_scan": "",
+          "n_tup_ins": "72",
+          "n_tup_upd": "0",
+          "n_tup_del": "0"
+        },
+        {
+          "schema_name": "ninja_core",
+          "relname": "custom_field_definitions",
+          "relkind": "r",
+          "total_bytes": "24576",
+          "n_live_tup": "0",
+          "seq_scan": "0",
+          "last_seq_scan": "",
+          "idx_scan": "0",
+          "last_idx_scan": "",
+          "n_tup_ins": "0",
+          "n_tup_upd": "0",
+          "n_tup_del": "0"
+        },
+        {
+          "schema_name": "ninja_agent_compliance",
+          "relname": "alert_suppressions",
+          "relkind": "r",
+          "total_bytes": "24576",
+          "n_live_tup": "0",
+          "seq_scan": "0",
+          "last_seq_scan": "",
+          "idx_scan": "0",
+          "last_idx_scan": "",
+          "n_tup_ins": "0",
+          "n_tup_upd": "0",
+          "n_tup_del": "0"
+        },
+        {
+          "schema_name": "ninja_agent_compliance",
+          "relname": "alert_events",
+          "relkind": "r",
+          "total_bytes": "24576",
+          "n_live_tup": "0",
+          "seq_scan": "0",
+          "last_seq_scan": "",
+          "idx_scan": "0",
+          "last_idx_scan": "",
+          "n_tup_ins": "0",
+          "n_tup_upd": "0",
+          "n_tup_del": "0"
+        },
+        {
+          "schema_name": "ninja_inventory",
+          "relname": "inventory_summary_current",
+          "relkind": "m",
+          "total_bytes": "24576",
+          "n_live_tup": "0",
+          "seq_scan": "0",
+          "last_seq_scan": "",
+          "idx_scan": "",
+          "last_idx_scan": "",
+          "n_tup_ins": "0",
+          "n_tup_upd": "0",
+          "n_tup_del": "0"
+        },
+        {
+          "schema_name": "ninja_agent_compliance",
+          "relname": "alert_state",
+          "relkind": "r",
+          "total_bytes": "16384",
+          "n_live_tup": "0",
+          "seq_scan": "0",
+          "last_seq_scan": "",
+          "idx_scan": "0",
+          "last_idx_scan": "",
+          "n_tup_ins": "0",
+          "n_tup_upd": "0",
+          "n_tup_del": "0"
+        }
+      ],
+      "status": "ok",
+      "wall_seconds": 0.872
+    },
+    {
+      "query": "L4",
+      "mode": "metadata_or_aggregate",
+      "preflight": {
+        "executing_role": "operations_migrate",
+        "server_version_num": "160014",
+        "transaction_read_only": "on",
+        "tenant_context": "1",
+        "executing_search_path": "pg_catalog",
+        "rolsuper": "t",
+        "rolbypassrls": "t"
+      },
+      "exit_code": 0,
+      "returned_rows": 123,
+      "rows": [
+        {
+          "dependent_schema": "ninja_activities",
+          "dependent_name": "device_activity_signal",
+          "dependent_kind": "m",
+          "referenced_schema": "ninja_activities",
+          "referenced_name": "activities"
+        },
+        {
+          "dependent_schema": "ninja_activities",
+          "dependent_name": "patch_warning_events_recent",
+          "dependent_kind": "m",
+          "referenced_schema": "ninja_activities",
+          "referenced_name": "activities"
+        },
+        {
+          "dependent_schema": "ninja_activities",
+          "dependent_name": "system_reboot_events_recent",
+          "dependent_kind": "m",
+          "referenced_schema": "ninja_activities",
+          "referenced_name": "activities"
+        },
+        {
+          "dependent_schema": "ninja_agent_compliance",
+          "dependent_name": "v_active_findings",
+          "dependent_kind": "v",
+          "referenced_schema": "ninja_agent_compliance",
+          "referenced_name": "alert_suppressions"
+        },
+        {
+          "dependent_schema": "ninja_agent_compliance",
+          "dependent_name": "v_active_findings",
+          "dependent_kind": "v",
+          "referenced_schema": "ninja_agent_compliance",
+          "referenced_name": "compliance_findings"
+        },
+        {
+          "dependent_schema": "ninja_agent_compliance",
+          "dependent_name": "v_alert_rules_human",
+          "dependent_kind": "v",
+          "referenced_schema": "ninja_agent_compliance",
+          "referenced_name": "alert_rules"
+        },
+        {
+          "dependent_schema": "ninja_agent_compliance",
+          "dependent_name": "v_alert_rules_human",
+          "dependent_kind": "v",
+          "referenced_schema": "ninja_agent_compliance",
+          "referenced_name": "clients"
+        },
+        {
+          "dependent_schema": "ninja_agent_compliance",
+          "dependent_name": "v_alert_rules_human",
+          "dependent_kind": "v",
+          "referenced_schema": "ninja_agent_compliance",
+          "referenced_name": "notification_routes"
+        },
+        {
+          "dependent_schema": "ninja_agent_compliance",
+          "dependent_name": "v_alias_collisions",
+          "dependent_kind": "v",
+          "referenced_schema": "ninja_agent_compliance",
+          "referenced_name": "client_aliases"
+        },
+        {
+          "dependent_schema": "ninja_agent_compliance",
+          "dependent_name": "v_alias_collisions",
+          "dependent_kind": "v",
+          "referenced_schema": "ninja_agent_compliance",
+          "referenced_name": "clients"
+        },
+        {
+          "dependent_schema": "ninja_agent_compliance",
+          "dependent_name": "v_alignment_mismatches",
+          "dependent_kind": "v",
+          "referenced_schema": "ninja_agent_compliance",
+          "referenced_name": "org_alignment_current"
+        },
+        {
+          "dependent_schema": "ninja_agent_compliance",
+          "dependent_name": "v_all_devices_human",
+          "dependent_kind": "v",
+          "referenced_schema": "ninja_agent_compliance",
+          "referenced_name": "v_device_state_current"
+        },
+        {
+          "dependent_schema": "ninja_agent_compliance",
+          "dependent_name": "v_compliance_matrix_current",
+          "dependent_kind": "v",
+          "referenced_schema": "ninja_agent_compliance",
+          "referenced_name": "compliance_matrix_current"
+        },
+        {
+          "dependent_schema": "ninja_agent_compliance",
+          "dependent_name": "v_cross_client_conflicts",
+          "dependent_kind": "v",
+          "referenced_schema": "ninja_agent_compliance",
+          "referenced_name": "compliance_matrix_current"
+        },
+        {
+          "dependent_schema": "ninja_agent_compliance",
+          "dependent_name": "v_customer_alert_setup",
+          "dependent_kind": "v",
+          "referenced_schema": "ninja_agent_compliance",
+          "referenced_name": "alert_rules"
+        },
+        {
+          "dependent_schema": "ninja_agent_compliance",
+          "dependent_name": "v_customer_alert_setup",
+          "dependent_kind": "v",
+          "referenced_schema": "ninja_agent_compliance",
+          "referenced_name": "clients"
+        },
+        {
+          "dependent_schema": "ninja_agent_compliance",
+          "dependent_name": "v_customer_alert_setup",
+          "dependent_kind": "v",
+          "referenced_schema": "ninja_agent_compliance",
+          "referenced_name": "notification_routes"
+        },
+        {
+          "dependent_schema": "ninja_agent_compliance",
+          "dependent_name": "v_customer_name_queue",
+          "dependent_kind": "v",
+          "referenced_schema": "ninja_agent_compliance",
+          "referenced_name": "clients"
+        },
+        {
+          "dependent_schema": "ninja_agent_compliance",
+          "dependent_name": "v_customer_name_queue",
+          "dependent_kind": "v",
+          "referenced_schema": "ninja_agent_compliance",
+          "referenced_name": "platform_observations"
+        },
+        {
+          "dependent_schema": "ninja_agent_compliance",
+          "dependent_name": "v_customer_name_queue",
+          "dependent_kind": "v",
+          "referenced_schema": "ninja_agent_compliance",
+          "referenced_name": "v_org_candidates_current"
+        },
+        {
+          "dependent_schema": "ninja_agent_compliance",
+          "dependent_name": "v_device_gap_summary",
+          "dependent_kind": "v",
+          "referenced_schema": "ninja_agent_compliance",
+          "referenced_name": "v_device_work_queue"
+        },
+        {
+          "dependent_schema": "ninja_agent_compliance",
+          "dependent_name": "v_device_ignores_current",
+          "dependent_kind": "v",
+          "referenced_schema": "ninja_agent_compliance",
+          "referenced_name": "alert_suppressions"
+        },
+        {
+          "dependent_schema": "ninja_agent_compliance",
+          "dependent_name": "v_device_ignores_current",
+          "dependent_kind": "v",
+          "referenced_schema": "ninja_agent_compliance",
+          "referenced_name": "clients"
+        },
+        {
+          "dependent_schema": "ninja_agent_compliance",
+          "dependent_name": "v_device_merge_candidates",
+          "dependent_kind": "v",
+          "referenced_schema": "ninja_agent_compliance",
+          "referenced_name": "platform_observations"
+        },
+        {
+          "dependent_schema": "ninja_agent_compliance",
+          "dependent_name": "v_device_merge_candidates",
+          "dependent_kind": "v",
+          "referenced_schema": "ninja_agent_compliance",
+          "referenced_name": "v_human_decisions_current"
+        },
+        {
+          "dependent_schema": "ninja_agent_compliance",
+          "dependent_name": "v_device_platform_detail_current",
+          "dependent_kind": "v",
+          "referenced_schema": "ninja_agent_compliance",
+          "referenced_name": "compliance_matrix_current"
+        },
+        {
+          "dependent_schema": "ninja_agent_compliance",
+          "dependent_name": "v_device_platform_detail_current",
+          "dependent_kind": "v",
+          "referenced_schema": "ninja_agent_compliance",
+          "referenced_name": "platform_observations"
+        },
+        {
+          "dependent_schema": "ninja_agent_compliance",
+          "dependent_name": "v_device_platform_detail_current",
+          "dependent_kind": "v",
+          "referenced_schema": "ninja_agent_compliance",
+          "referenced_name": "v_device_state_current"
+        },
+        {
+          "dependent_schema": "ninja_agent_compliance",
+          "dependent_name": "v_device_platform_detail_current",
+          "dependent_kind": "v",
+          "referenced_schema": "ninja_agent_compliance",
+          "referenced_name": "v_human_decisions_current"
+        },
+        {
+          "dependent_schema": "ninja_agent_compliance",
+          "dependent_name": "v_device_state_current",
+          "dependent_kind": "v",
+          "referenced_schema": "ninja_agent_compliance",
+          "referenced_name": "alert_suppressions"
+        },
+        {
+          "dependent_schema": "ninja_agent_compliance",
+          "dependent_name": "v_device_state_current",
+          "dependent_kind": "v",
+          "referenced_schema": "ninja_agent_compliance",
+          "referenced_name": "compliance_matrix_current"
+        },
+        {
+          "dependent_schema": "ninja_agent_compliance",
+          "dependent_name": "v_device_state_current",
+          "dependent_kind": "v",
+          "referenced_schema": "ninja_agent_compliance",
+          "referenced_name": "org_excludes"
+        },
+        {
+          "dependent_schema": "ninja_agent_compliance",
+          "dependent_name": "v_device_state_current",
+          "dependent_kind": "v",
+          "referenced_schema": "ninja_agent_compliance",
+          "referenced_name": "platform_observations"
+        },
+        {
+          "dependent_schema": "ninja_agent_compliance",
+          "dependent_name": "v_device_state_current",
+          "dependent_kind": "v",
+          "referenced_schema": "ninja_agent_compliance",
+          "referenced_name": "v_human_decisions_current"
+        },
+        {
+          "dependent_schema": "ninja_agent_compliance",
+          "dependent_name": "v_device_work_queue",
+          "dependent_kind": "v",
+          "referenced_schema": "ninja_agent_compliance",
+          "referenced_name": "v_device_state_current"
+        },
+        {
+          "dependent_schema": "ninja_agent_compliance",
+          "dependent_name": "v_hostname_cross_customer_conflicts",
+          "dependent_kind": "v",
+          "referenced_schema": "ninja_agent_compliance",
+          "referenced_name": "compliance_matrix_current"
+        },
+        {
+          "dependent_schema": "ninja_agent_compliance",
+          "dependent_name": "v_human_decisions_current",
+          "dependent_kind": "v",
+          "referenced_schema": "ninja_agent_compliance",
+          "referenced_name": "human_decisions"
+        },
+        {
+          "dependent_schema": "ninja_agent_compliance",
+          "dependent_name": "v_native_device_customer_conflicts",
+          "dependent_kind": "v",
+          "referenced_schema": "ninja_agent_compliance",
+          "referenced_name": "platform_observations"
+        },
+        {
+          "dependent_schema": "ninja_agent_compliance",
+          "dependent_name": "v_native_device_customer_conflicts",
+          "dependent_kind": "v",
+          "referenced_schema": "ninja_agent_compliance",
+          "referenced_name": "source_runs"
+        },
+        {
+          "dependent_schema": "ninja_agent_compliance",
+          "dependent_name": "v_notification_queue",
+          "dependent_kind": "v",
+          "referenced_schema": "ninja_agent_compliance",
+          "referenced_name": "alert_events"
+        },
+        {
+          "dependent_schema": "ninja_agent_compliance",
+          "dependent_name": "v_notification_queue",
+          "dependent_kind": "v",
+          "referenced_schema": "ninja_agent_compliance",
+          "referenced_name": "alert_rules"
+        },
+        {
+          "dependent_schema": "ninja_agent_compliance",
+          "dependent_name": "v_notification_queue",
+          "dependent_kind": "v",
+          "referenced_schema": "ninja_agent_compliance",
+          "referenced_name": "alert_state"
+        },
+        {
+          "dependent_schema": "ninja_agent_compliance",
+          "dependent_name": "v_notification_queue",
+          "dependent_kind": "v",
+          "referenced_schema": "ninja_agent_compliance",
+          "referenced_name": "notification_routes"
+        },
+        {
+          "dependent_schema": "ninja_agent_compliance",
+          "dependent_name": "v_notification_queue",
+          "dependent_kind": "v",
+          "referenced_schema": "ninja_agent_compliance",
+          "referenced_name": "v_active_findings"
+        },
+        {
+          "dependent_schema": "ninja_agent_compliance",
+          "dependent_name": "v_notification_routes_human",
+          "dependent_kind": "v",
+          "referenced_schema": "ninja_agent_compliance",
+          "referenced_name": "notification_routes"
+        },
+        {
+          "dependent_schema": "ninja_agent_compliance",
+          "dependent_name": "v_notifications_ready",
+          "dependent_kind": "v",
+          "referenced_schema": "ninja_agent_compliance",
+          "referenced_name": "v_notification_queue"
+        },
+        {
+          "dependent_schema": "ninja_agent_compliance",
+          "dependent_name": "v_org_alignment_current",
+          "dependent_kind": "v",
+          "referenced_schema": "ninja_agent_compliance",
+          "referenced_name": "org_alignment_current"
+        },
+        {
+          "dependent_schema": "ninja_agent_compliance",
+          "dependent_name": "v_org_candidates_current",
+          "dependent_kind": "v",
+          "referenced_schema": "ninja_agent_compliance",
+          "referenced_name": "client_aliases"
+        },
+        {
+          "dependent_schema": "ninja_agent_compliance",
+          "dependent_name": "v_org_candidates_current",
+          "dependent_kind": "v",
+          "referenced_schema": "ninja_agent_compliance",
+          "referenced_name": "clients"
+        },
+        {
+          "dependent_schema": "ninja_agent_compliance",
+          "dependent_name": "v_org_candidates_current",
+          "dependent_kind": "v",
+          "referenced_schema": "ninja_agent_compliance",
+          "referenced_name": "org_candidates"
+        },
+        {
+          "dependent_schema": "ninja_agent_compliance",
+          "dependent_name": "v_platform_link_collisions",
+          "dependent_kind": "v",
+          "referenced_schema": "ninja_agent_compliance",
+          "referenced_name": "client_platform_links"
+        },
+        {
+          "dependent_schema": "ninja_agent_compliance",
+          "dependent_name": "v_remediation_candidates",
+          "dependent_kind": "v",
+          "referenced_schema": "ninja_agent_compliance",
+          "referenced_name": "alert_suppressions"
+        },
+        {
+          "dependent_schema": "ninja_agent_compliance",
+          "dependent_name": "v_remediation_candidates",
+          "dependent_kind": "v",
+          "referenced_schema": "ninja_agent_compliance",
+          "referenced_name": "compliance_matrix_current"
+        },
+        {
+          "dependent_schema": "ninja_agent_compliance",
+          "dependent_name": "v_required_platforms_effective",
+          "dependent_kind": "v",
+          "referenced_schema": "ninja_agent_compliance",
+          "referenced_name": "clients"
+        },
+        {
+          "dependent_schema": "ninja_agent_compliance",
+          "dependent_name": "v_required_platforms_effective",
+          "dependent_kind": "v",
+          "referenced_schema": "ninja_agent_compliance",
+          "referenced_name": "platform_requirements"
+        },
+        {
+          "dependent_schema": "ninja_agent_compliance",
+          "dependent_name": "v_source_health_current",
+          "dependent_kind": "v",
+          "referenced_schema": "ninja_agent_compliance",
+          "referenced_name": "clients"
+        },
+        {
+          "dependent_schema": "ninja_agent_compliance",
+          "dependent_name": "v_source_health_current",
+          "dependent_kind": "v",
+          "referenced_schema": "ninja_agent_compliance",
+          "referenced_name": "platform_sources"
+        },
+        {
+          "dependent_schema": "ninja_agent_compliance",
+          "dependent_name": "v_source_health_current",
+          "dependent_kind": "v",
+          "referenced_schema": "ninja_agent_compliance",
+          "referenced_name": "source_runs"
+        },
+        {
+          "dependent_schema": "ninja_agent_compliance",
+          "dependent_name": "v_source_work_current",
+          "dependent_kind": "v",
+          "referenced_schema": "ninja_agent_compliance",
+          "referenced_name": "clients"
+        },
+        {
+          "dependent_schema": "ninja_agent_compliance",
+          "dependent_name": "v_source_work_current",
+          "dependent_kind": "v",
+          "referenced_schema": "ninja_agent_compliance",
+          "referenced_name": "platform_requirements"
+        },
+        {
+          "dependent_schema": "ninja_agent_compliance",
+          "dependent_name": "v_source_work_current",
+          "dependent_kind": "v",
+          "referenced_schema": "ninja_agent_compliance",
+          "referenced_name": "platform_sources"
+        },
+        {
+          "dependent_schema": "ninja_agent_compliance",
+          "dependent_name": "v_source_work_current",
+          "dependent_kind": "v",
+          "referenced_schema": "ninja_agent_compliance",
+          "referenced_name": "v_source_health_current"
+        },
+        {
+          "dependent_schema": "ninja_agent_compliance",
+          "dependent_name": "v_system_health_queue",
+          "dependent_kind": "v",
+          "referenced_schema": "ninja_agent_compliance",
+          "referenced_name": "alert_events"
+        },
+        {
+          "dependent_schema": "ninja_agent_compliance",
+          "dependent_name": "v_system_health_queue",
+          "dependent_kind": "v",
+          "referenced_schema": "ninja_agent_compliance",
+          "referenced_name": "compliance_findings"
+        },
+        {
+          "dependent_schema": "ninja_agent_compliance",
+          "dependent_name": "v_system_health_queue",
+          "dependent_kind": "v",
+          "referenced_schema": "ninja_agent_compliance",
+          "referenced_name": "notification_routes"
+        },
+        {
+          "dependent_schema": "ninja_agent_compliance",
+          "dependent_name": "v_system_health_queue",
+          "dependent_kind": "v",
+          "referenced_schema": "ninja_agent_compliance",
+          "referenced_name": "v_source_work_current"
+        },
+        {
+          "dependent_schema": "ninja_agent_compliance",
+          "dependent_name": "v_unmapped_platform_customers",
+          "dependent_kind": "v",
+          "referenced_schema": "ninja_agent_compliance",
+          "referenced_name": "org_excludes"
+        },
+        {
+          "dependent_schema": "ninja_agent_compliance",
+          "dependent_name": "v_unmapped_platform_customers",
+          "dependent_kind": "v",
+          "referenced_schema": "ninja_agent_compliance",
+          "referenced_name": "platform_observations"
+        },
+        {
+          "dependent_schema": "ninja_agent_compliance",
+          "dependent_name": "v_unmapped_platform_customers",
+          "dependent_kind": "v",
+          "referenced_schema": "ninja_agent_compliance",
+          "referenced_name": "source_runs"
+        },
+        {
+          "dependent_schema": "ninja_core",
+          "dependent_name": "device_troubleshooting_signal",
+          "dependent_kind": "m",
+          "referenced_schema": "ninja_activities",
+          "referenced_name": "device_activity_signal"
+        },
+        {
+          "dependent_schema": "ninja_core",
+          "dependent_name": "device_troubleshooting_signal",
+          "dependent_kind": "m",
+          "referenced_schema": "ninja_core",
+          "referenced_name": "latest_device_health"
+        },
+        {
+          "dependent_schema": "ninja_core",
+          "dependent_name": "device_troubleshooting_signal",
+          "dependent_kind": "m",
+          "referenced_schema": "ninja_core",
+          "referenced_name": "organizations"
+        },
+        {
+          "dependent_schema": "ninja_core",
+          "dependent_name": "device_troubleshooting_signal",
+          "dependent_kind": "m",
+          "referenced_schema": "ninja_core",
+          "referenced_name": "policies"
+        },
+        {
+          "dependent_schema": "ninja_core",
+          "dependent_name": "device_troubleshooting_signal",
+          "dependent_kind": "m",
+          "referenced_schema": "ninja_core",
+          "referenced_name": "v_active_devices"
+        },
+        {
+          "dependent_schema": "ninja_core",
+          "dependent_name": "device_troubleshooting_signal",
+          "dependent_kind": "m",
+          "referenced_schema": "ninja_patches",
+          "referenced_name": "current_patch_state"
+        },
+        {
+          "dependent_schema": "ninja_core",
+          "dependent_name": "device_troubleshooting_signal",
+          "dependent_kind": "m",
+          "referenced_schema": "ninja_patches",
+          "referenced_name": "device_patch_signal"
+        },
+        {
+          "dependent_schema": "ninja_core",
+          "dependent_name": "device_troubleshooting_signal",
+          "dependent_kind": "m",
+          "referenced_schema": "ninja_patches",
+          "referenced_name": "latest_install_outcome"
+        },
+        {
+          "dependent_schema": "ninja_core",
+          "dependent_name": "v_active_devices",
+          "dependent_kind": "m",
+          "referenced_schema": "ninja_core",
+          "referenced_name": "custom_field_values"
+        },
+        {
+          "dependent_schema": "ninja_core",
+          "dependent_name": "v_active_devices",
+          "dependent_kind": "m",
+          "referenced_schema": "ninja_core",
+          "referenced_name": "devices"
+        },
+        {
+          "dependent_schema": "ninja_core",
+          "dependent_name": "v_active_devices",
+          "dependent_kind": "m",
+          "referenced_schema": "ninja_core",
+          "referenced_name": "patching_enabled_policies"
+        },
+        {
+          "dependent_schema": "ninja_core",
+          "dependent_name": "v_active_devices",
+          "dependent_kind": "m",
+          "referenced_schema": "ninja_core",
+          "referenced_name": "policies"
+        },
+        {
+          "dependent_schema": "ninja_core",
+          "dependent_name": "v_device_custom_fields",
+          "dependent_kind": "v",
+          "referenced_schema": "ninja_core",
+          "referenced_name": "custom_field_values"
+        },
+        {
+          "dependent_schema": "ninja_core",
+          "dependent_name": "v_location_custom_fields",
+          "dependent_kind": "v",
+          "referenced_schema": "ninja_core",
+          "referenced_name": "custom_field_values"
+        },
+        {
+          "dependent_schema": "ninja_core",
+          "dependent_name": "v_organization_custom_fields",
+          "dependent_kind": "v",
+          "referenced_schema": "ninja_core",
+          "referenced_name": "custom_field_values"
+        },
+        {
+          "dependent_schema": "ninja_inventory",
+          "dependent_name": "devices_current",
+          "dependent_kind": "m",
+          "referenced_schema": "ninja_inventory",
+          "referenced_name": "v_devices_current_live"
+        },
+        {
+          "dependent_schema": "ninja_inventory",
+          "dependent_name": "identity_conflicts_current",
+          "dependent_kind": "m",
+          "referenced_schema": "ninja_inventory",
+          "referenced_name": "v_identity_conflicts_current_live"
+        },
+        {
+          "dependent_schema": "ninja_inventory",
+          "dependent_name": "inventory_summary_current",
+          "dependent_kind": "m",
+          "referenced_schema": "ninja_inventory",
+          "referenced_name": "v_inventory_summary_current_live"
+        },
+        {
+          "dependent_schema": "ninja_inventory",
+          "dependent_name": "merge_candidates_current",
+          "dependent_kind": "m",
+          "referenced_schema": "ninja_inventory",
+          "referenced_name": "v_merge_candidates_current_live"
+        },
+        {
+          "dependent_schema": "ninja_inventory",
+          "dependent_name": "serial_quality_current",
+          "dependent_kind": "m",
+          "referenced_schema": "ninja_inventory",
+          "referenced_name": "v_serial_quality_current_live"
+        },
+        {
+          "dependent_schema": "ninja_inventory",
+          "dependent_name": "source_observations_current",
+          "dependent_kind": "m",
+          "referenced_schema": "ninja_inventory",
+          "referenced_name": "v_source_observations_current_live"
+        },
+        {
+          "dependent_schema": "ninja_inventory",
+          "dependent_name": "unresolved_source_records_current",
+          "dependent_kind": "m",
+          "referenced_schema": "ninja_inventory",
+          "referenced_name": "v_unresolved_source_records_current_live"
+        },
+        {
+          "dependent_schema": "ninja_inventory",
+          "dependent_name": "v_devices_current",
+          "dependent_kind": "v",
+          "referenced_schema": "ninja_inventory",
+          "referenced_name": "devices_current"
+        },
+        {
+          "dependent_schema": "ninja_inventory",
+          "dependent_name": "v_devices_current_live",
+          "dependent_kind": "v",
+          "referenced_schema": "ninja_agent_compliance",
+          "referenced_name": "v_device_platform_detail_current"
+        },
+        {
+          "dependent_schema": "ninja_inventory",
+          "dependent_name": "v_devices_current_live",
+          "dependent_kind": "v",
+          "referenced_schema": "ninja_agent_compliance",
+          "referenced_name": "v_device_state_current"
+        },
+        {
+          "dependent_schema": "ninja_inventory",
+          "dependent_name": "v_devices_current_live",
+          "dependent_kind": "v",
+          "referenced_schema": "ninja_inventory",
+          "referenced_name": "v_source_observations_current_live"
+        },
+        {
+          "dependent_schema": "ninja_inventory",
+          "dependent_name": "v_identity_conflicts_current",
+          "dependent_kind": "v",
+          "referenced_schema": "ninja_inventory",
+          "referenced_name": "identity_conflicts_current"
+        },
+        {
+          "dependent_schema": "ninja_inventory",
+          "dependent_name": "v_identity_conflicts_current_live",
+          "dependent_kind": "v",
+          "referenced_schema": "ninja_inventory",
+          "referenced_name": "v_source_observations_current_live"
+        },
+        {
+          "dependent_schema": "ninja_inventory",
+          "dependent_name": "v_inventory_summary_current",
+          "dependent_kind": "v",
+          "referenced_schema": "ninja_inventory",
+          "referenced_name": "inventory_summary_current"
+        },
+        {
+          "dependent_schema": "ninja_inventory",
+          "dependent_name": "v_inventory_summary_current_live",
+          "dependent_kind": "v",
+          "referenced_schema": "ninja_inventory",
+          "referenced_name": "v_devices_current_live"
+        },
+        {
+          "dependent_schema": "ninja_inventory",
+          "dependent_name": "v_inventory_summary_current_live",
+          "dependent_kind": "v",
+          "referenced_schema": "ninja_inventory",
+          "referenced_name": "v_identity_conflicts_current_live"
+        },
+        {
+          "dependent_schema": "ninja_inventory",
+          "dependent_name": "v_inventory_summary_current_live",
+          "dependent_kind": "v",
+          "referenced_schema": "ninja_inventory",
+          "referenced_name": "v_merge_candidates_current_live"
+        },
+        {
+          "dependent_schema": "ninja_inventory",
+          "dependent_name": "v_inventory_summary_current_live",
+          "dependent_kind": "v",
+          "referenced_schema": "ninja_inventory",
+          "referenced_name": "v_serial_quality_current_live"
+        },
+        {
+          "dependent_schema": "ninja_inventory",
+          "dependent_name": "v_inventory_summary_current_live",
+          "dependent_kind": "v",
+          "referenced_schema": "ninja_inventory",
+          "referenced_name": "v_unresolved_source_records_current_live"
+        },
+        {
+          "dependent_schema": "ninja_inventory",
+          "dependent_name": "v_merge_candidates_current",
+          "dependent_kind": "v",
+          "referenced_schema": "ninja_inventory",
+          "referenced_name": "merge_candidates_current"
+        },
+        {
+          "dependent_schema": "ninja_inventory",
+          "dependent_name": "v_merge_candidates_current_live",
+          "dependent_kind": "v",
+          "referenced_schema": "ninja_agent_compliance",
+          "referenced_name": "v_device_merge_candidates"
+        },
+        {
+          "dependent_schema": "ninja_inventory",
+          "dependent_name": "v_merge_candidates_current_live",
+          "dependent_kind": "v",
+          "referenced_schema": "ninja_inventory",
+          "referenced_name": "v_devices_current"
+        },
+        {
+          "dependent_schema": "ninja_inventory",
+          "dependent_name": "v_merge_candidates_current_live",
+          "dependent_kind": "v",
+          "referenced_schema": "ninja_inventory",
+          "referenced_name": "v_source_observations_current"
+        },
+        {
+          "dependent_schema": "ninja_inventory",
+          "dependent_name": "v_serial_quality_current",
+          "dependent_kind": "v",
+          "referenced_schema": "ninja_inventory",
+          "referenced_name": "serial_quality_current"
+        },
+        {
+          "dependent_schema": "ninja_inventory",
+          "dependent_name": "v_serial_quality_current_live",
+          "dependent_kind": "v",
+          "referenced_schema": "ninja_inventory",
+          "referenced_name": "v_source_observations_current_live"
+        },
+        {
+          "dependent_schema": "ninja_inventory",
+          "dependent_name": "v_source_observations_current",
+          "dependent_kind": "v",
+          "referenced_schema": "ninja_inventory",
+          "referenced_name": "source_observations_current"
+        },
+        {
+          "dependent_schema": "ninja_inventory",
+          "dependent_name": "v_source_observations_current_live",
+          "dependent_kind": "v",
+          "referenced_schema": "ninja_agent_compliance",
+          "referenced_name": "platform_observations"
+        },
+        {
+          "dependent_schema": "ninja_inventory",
+          "dependent_name": "v_source_observations_current_live",
+          "dependent_kind": "v",
+          "referenced_schema": "ninja_core",
+          "referenced_name": "devices"
+        },
+        {
+          "dependent_schema": "ninja_inventory",
+          "dependent_name": "v_unresolved_source_records_current",
+          "dependent_kind": "v",
+          "referenced_schema": "ninja_inventory",
+          "referenced_name": "unresolved_source_records_current"
+        },
+        {
+          "dependent_schema": "ninja_inventory",
+          "dependent_name": "v_unresolved_source_records_current_live",
+          "dependent_kind": "v",
+          "referenced_schema": "ninja_agent_compliance",
+          "referenced_name": "org_excludes"
+        },
+        {
+          "dependent_schema": "ninja_inventory",
+          "dependent_name": "v_unresolved_source_records_current_live",
+          "dependent_kind": "v",
+          "referenced_schema": "ninja_inventory",
+          "referenced_name": "v_source_observations_current_live"
+        },
+        {
+          "dependent_schema": "ninja_patches",
+          "dependent_name": "current_patch_state",
+          "dependent_kind": "m",
+          "referenced_schema": "ninja_patches",
+          "referenced_name": "patch_facts"
+        },
+        {
+          "dependent_schema": "ninja_patches",
+          "dependent_name": "device_patch_activity",
+          "dependent_kind": "m",
+          "referenced_schema": "ninja_patches",
+          "referenced_name": "patch_facts"
+        },
+        {
+          "dependent_schema": "ninja_patches",
+          "dependent_name": "device_patch_signal",
+          "dependent_kind": "m",
+          "referenced_schema": "ninja_patches",
+          "referenced_name": "patch_facts"
+        },
+        {
+          "dependent_schema": "ninja_patches",
+          "dependent_name": "latest_install_outcome",
+          "dependent_kind": "m",
+          "referenced_schema": "ninja_patches",
+          "referenced_name": "patch_facts"
+        },
+        {
+          "dependent_schema": "operations",
+          "dependent_name": "device_patching_scope_current",
+          "dependent_kind": "m",
+          "referenced_schema": "ninja_core",
+          "referenced_name": "custom_field_values"
+        },
+        {
+          "dependent_schema": "operations",
+          "dependent_name": "device_patching_scope_current",
+          "dependent_kind": "m",
+          "referenced_schema": "ninja_core",
+          "referenced_name": "devices"
+        },
+        {
+          "dependent_schema": "operations",
+          "dependent_name": "device_patching_scope_current",
+          "dependent_kind": "m",
+          "referenced_schema": "ninja_core",
+          "referenced_name": "policies"
+        },
+        {
+          "dependent_schema": "operations",
+          "dependent_name": "ninja_device_seen_daily_shadow",
+          "dependent_kind": "v",
+          "referenced_schema": "operations",
+          "referenced_name": "source_record_seen_daily"
+        }
+      ],
+      "status": "ok",
+      "wall_seconds": 0.2
+    },
+    {
+      "query": "L5",
+      "mode": "metadata_or_aggregate",
+      "preflight": {
+        "executing_role": "operations_migrate",
+        "server_version_num": "160014",
+        "transaction_read_only": "on",
+        "tenant_context": "1",
+        "executing_search_path": "pg_catalog",
+        "rolsuper": "t",
+        "rolbypassrls": "t"
+      },
+      "exit_code": 0,
+      "returned_rows": 18,
+      "rows": [
+        {
+          "grantee": "metabase_ro",
+          "table_schema": "ninja_activities",
+          "tables": "1"
+        },
+        {
+          "grantee": "metabase_ro",
+          "table_schema": "ninja_patches",
+          "tables": "1"
+        },
+        {
+          "grantee": "metabase_ro",
+          "table_schema": "operations",
+          "tables": "2"
+        },
+        {
+          "grantee": "ninja",
+          "table_schema": "ninja_activities",
+          "tables": "1"
+        },
+        {
+          "grantee": "ninja",
+          "table_schema": "ninja_agent_compliance",
+          "tables": "51"
+        },
+        {
+          "grantee": "ninja",
+          "table_schema": "ninja_core",
+          "tables": "16"
+        },
+        {
+          "grantee": "ninja",
+          "table_schema": "ninja_inventory",
+          "tables": "14"
+        },
+        {
+          "grantee": "ninja",
+          "table_schema": "ninja_patches",
+          "tables": "1"
+        },
+        {
+          "grantee": "ninja_ingest",
+          "table_schema": "operations",
+          "tables": "2"
+        },
+        {
+          "grantee": "operations_app",
+          "table_schema": "ninja_activities",
+          "tables": "1"
+        },
+        {
+          "grantee": "operations_app",
+          "table_schema": "ninja_core",
+          "tables": "13"
+        },
+        {
+          "grantee": "operations_app",
+          "table_schema": "ninja_patches",
+          "tables": "1"
+        },
+        {
+          "grantee": "operations_app",
+          "table_schema": "operations",
+          "tables": "2"
+        },
+        {
+          "grantee": "operations_migrate",
+          "table_schema": "operations",
+          "tables": "2"
+        },
+        {
+          "grantee": "operations_naming",
+          "table_schema": "operations",
+          "tables": "2"
+        },
+        {
+          "grantee": "operations_readonly",
+          "table_schema": "ninja_activities",
+          "tables": "1"
+        },
+        {
+          "grantee": "operations_readonly",
+          "table_schema": "ninja_patches",
+          "tables": "1"
+        },
+        {
+          "grantee": "operations_readonly",
+          "table_schema": "operations",
+          "tables": "2"
+        }
+      ],
+      "status": "ok",
+      "wall_seconds": 0.311
+    }
+  ],
+  "label": "select1",
+  "client_wall_seconds": 5.516,
+  "queries_sha256": "6a9bf86bb4d5d26e0425a96985a59da2a7cf81d6d3d89d92142c09b755bc5e78",
+  "captured_by_client_utc": "2026-10-26T19:03:25.291056+00:00"
+}

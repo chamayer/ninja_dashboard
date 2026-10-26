@@ -1,0 +1,65 @@
+{
+  "captured_at_utc": "2026-10-26T19:50:32.690357+00:00",
+  "wall_seconds": 0.617,
+  "stop_reason": null,
+  "results": [
+    {
+      "query": "L12",
+      "mode": "metadata_or_aggregate",
+      "preflight": {
+        "executing_role": "operations_migrate",
+        "server_version_num": "160014",
+        "transaction_read_only": "on",
+        "tenant_context": "1",
+        "executing_search_path": "pg_catalog",
+        "rolsuper": "t",
+        "rolbypassrls": "t"
+      },
+      "exit_code": 0,
+      "returned_rows": 2,
+      "rows": [
+        {
+          "kind": "view",
+          "dependents": ""
+        },
+        {
+          "kind": "foreign_key",
+          "dependents": ""
+        }
+      ],
+      "status": "ok",
+      "wall_seconds": 0.372
+    },
+    {
+      "query": "L13",
+      "mode": "metadata_or_aggregate",
+      "preflight": {
+        "executing_role": "operations_migrate",
+        "server_version_num": "160014",
+        "transaction_read_only": "on",
+        "tenant_context": "1",
+        "executing_search_path": "pg_catalog",
+        "rolsuper": "t",
+        "rolbypassrls": "t"
+      },
+      "exit_code": 0,
+      "returned_rows": 2,
+      "rows": [
+        {
+          "kind": "view",
+          "dependents": ""
+        },
+        {
+          "kind": "foreign_key",
+          "dependents": ""
+        }
+      ],
+      "status": "ok",
+      "wall_seconds": 0.245
+    }
+  ],
+  "label": "select6-guards",
+  "client_wall_seconds": 3.234,
+  "queries_sha256": "ab070392bbb452624e21af896133df39c20d2ab917973834f5452c9c6ef897f2",
+  "captured_by_client_utc": "2026-10-26T19:50:30.652245+00:00"
+}

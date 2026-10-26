@@ -654,3 +654,15 @@ Device-layer semantics.
 This record supersedes class-specific source-link infrastructure as the target
 architecture. Legacy links remain compatibility authorities until the migration
 plan's read cutover and contract phases are separately approved and completed.
+
+## Amendment — legacy snapshot and rollup retirement (2026-10-26)
+
+PLAN-022 is the separately approved operational phase this ADR requires for
+legacy snapshot cleanup. `ninja_core.device_snapshots` and
+`device_health_snapshots` (no writer since 2026-08-03; only one-off backfill
+and restoration tools read them) and the compact daily rollup
+(`source_record_seen_daily`, whose daily active-device trend never gained a
+reader) are exported and then dropped. The user waived the restore
+rehearsal (2026-10-26) as disproportionate. The rollback point is the
+PLAN-022 export: each archive's table of contents must list data for every
+dropped table, and its SHA-256 is recorded.

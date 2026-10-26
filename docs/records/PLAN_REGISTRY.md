@@ -83,14 +83,14 @@ do not open competing blueprints for the same work.
 ## PLAN-006 — Legacy agent-compliance retirement
 
 - Scope: Root and Operations platform cleanup
-- Status: deferred
+- Status: superseded
 - Defined: 2026-10-13
 - Started: —
 - Completed: —
 - Blueprint: —
 - Source: docs/archive/workspace-cleanup-2026-10-20/backlog.md
 - Section: Legacy agent-compliance cutover
-- Resume gate: Approve a compatibility and data-retention plan before destructive retirement work.
+- Resume gate: Superseded by PLAN-022 on 2026-10-26 (user approved immediate legacy cleanup, including agent compliance).
 
 ## PLAN-007 — Ingest domain separation
 
@@ -231,7 +231,7 @@ do not open competing blueprints for the same work.
 - Source: docs/plans/PLAN-019-data-pipeline-correctness-and-retention.md
 - Section: PLAN-019 — Data pipeline correctness and source-record retention (PLAN-017 follow-up)
 - Resume gate: Executing this plan or any step requires separate explicit user approval. Coordinates with PLAN-002/005/007, which keep their own statuses and gates; F04 stays with PLAN-012.
-- Last checked: 2026-10-26 (user approved execution; Step 1 F07, F01, F02 detection and F03 implemented and tested; F09 estimate and Step 2 approved next).
+- Last checked: 2026-10-26 (Step 1 committed `cb5c5e1`; F09 decided by the user: no daily presence for any source; Step 2 U04 fence and migration 0349 built and tested).
 
 ## PLAN-020 — Operations entity links in tables
 
@@ -259,3 +259,16 @@ do not open competing blueprints for the same work.
 - Related plan: PLAN-004 covers client resolver findings; PLAN-021 concerns the separate generic `entity_candidates` projection and state machine.
 - Resume gate: Review the measured stale candidate population and verify the 74 observed-only candidates with source links. Approve implementation separately before changing candidate state, schema, or production data. Preserve attached identity/history and rejected decisions; withdrawal must be auditable and idempotent.
 - Last checked: 2026-10-26 (read-only production measurement: 576 pending and 12 observed-only candidates matched inactive observations without source links; 19 pending and 3,878 observed-only candidates matched active observations; 74 observed-only candidates had source links but were not attached. No active observation lacked either a candidate or source link. The 74 require freshness verification.)
+
+## PLAN-022 — Legacy data and code cleanup
+
+- Scope: Export and remove legacy tables, schemas, views, Jobs and code no current workflow reads: Ninja daily presence, legacy Ninja snapshots, agent compliance (absorbs PLAN-006) and the inventory schema; Wave B items need their own design.
+- Status: active
+- Defined: 2026-10-26
+- Started: 2026-10-26
+- Completed: —
+- Blueprint: BLUEPRINT.md
+- Source: docs/plans/PLAN-022-legacy-data-cleanup.md
+- Section: PLAN-022 — Legacy data and code cleanup
+- Resume gate: User approved immediate execution (2026-10-26). Three separately approved pushes: migration 0349; the code; then the drop migrations 0350, 0351, 117 and 118 after the archive is copied off-host and verified.
+- Last checked: 2026-10-26 (Wave A built and tested; images build; archive 4.6 GB verified on the host; independent review adopted).

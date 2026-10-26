@@ -9,11 +9,28 @@ Read Inbox at the start of every session.
 
 - [ ] **PLAN-019 — Data pipeline correctness and source-record retention:**
       `active` (docs/plans/PLAN-019-data-pipeline-correctness-and-retention.md);
-      Step 1 done; F09 estimate and Step 2 next. PLAN-017 is
-      completed. F04 stays with PLAN-012 item 4.
+      Step 1 done; F09 decided (no daily presence); Step 2 (U04) built.
+      F04 stays with PLAN-012 item 4.
+- [ ] **PLAN-022 — Legacy data and code cleanup:** `active`
+      (docs/plans/PLAN-022-legacy-data-cleanup.md); absorbs PLAN-006.
+- [ ] **Software title/catalog publication trigger (PLAN-019 F06 map):**
+      `software_title_current` and the catalog projection refresh only when
+      the same inventory run changed something; if that refresh fails, they
+      stay stale until a later run changes something. Candidate: a durable
+      "needs publish" marker. Not approved.
+- [ ] **Ninja collection gaps (PLAN-019 F09, 2026-10-26):** on 7 of 147
+      days no Ninja daily presence was written at all (2026-10-24 among
+      them), which suggests days without a successful Ninja collection.
+      Investigate in the run history.
+- [ ] **Rename notification delivery settings on the host (PLAN-022):** the
+      host `.env` still carries `AGENT_COMPLIANCE_SMTP_PORT`, `_SMTP_STARTTLS`,
+      `_ZENDESK_URL` and `_ZENDESK_REQUESTER_NAME`, which code no longer
+      reads. Before switching notifications on: copy them to `NOTIFY_*`,
+      verify, then remove every `AGENT_COMPLIANCE_*` key. Keep them until the
+      PLAN-022 rollback window closes.
 - [ ] **F05 purge measurement (from PLAN-017):** measure observation and
       software history purge duration and lock waits before choosing
-      batching or a job bound; R08, under PLAN-006's gate.
+      batching or a job bound; R08 (PLAN-006 is superseded by PLAN-022).
 - [ ] **Collection log retention (from PLAN-017 Phase 3, 2026-10-26):** the
       `ninja-jobs-worker` and `operations-ingest` container logs are lost on
       every deploy, so warnings such as the activity page cap and the
@@ -24,10 +41,6 @@ Read Inbox at the start of every session.
       `operations/BLUEPRINT.md`, `operations/SESSIONS.md`, and
       `operations/TODO.md`. Review current M0.3-M0.10 WIP before commit;
       approve M0.11 before more schema work.
-- [ ] After v0.32.0 redeploys, run `/run/agent-compliance` and
-      execute the new validation queries (docs/operations.md
-      "id-link sanity") to confirm no
-      `(platform, platform_group_id)` maps to multiple client_ids.
 - [ ] SC session `YLSedison` (UTA, session id
       `f2499b9f-0ff7-4fb9-a336-45f0008e31a8`) has empty `GuestInfo`
       so it does not collapse with the `NJ3` device that Ninja now

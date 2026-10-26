@@ -58,8 +58,44 @@ reviewed migration.
     Ingest suite: 524 passed, 5 failed; the 5 are source-text assertions on
     `main.py`, `operator_job_queue.py`, `evaluator.py`, identity grouping and
     the hardcoded-mapping scan, none touched here.
-- F09 assessment and Step 2 (U04): approved 2026-10-26; F09 uses a read-only production
-  row-growth estimate.
+- F09 assessment (2026-10-26, approved read-only production aggregates):
+  [results](../records/PLAN-019-f09-results.md). Daily presence for the five
+  non-Ninja sources would add about 20,200 rows (2.8 MB) a day, about 1.0 GB a
+  year with no retention; agent sources without Hudu about 0.48 GB a year.
+  **Decided (user, 2026-10-26): no daily presence for any source.** Presence
+  over time becomes part of the ADR 0045 trail (Step 4); Ninja's daily
+  presence is removed by PLAN-022 A1. The "half coverage" was by design:
+  presence covered only Ninja's device record, not its device-health record.
+- Step 2 U04 (2026-10-26, approved for local build; uncommitted):
+  - Migration `0349_software_target_generation` adds
+    `software_reclassification_targets.generation bigint NOT NULL DEFAULT 1`
+    (metadata-only add).
+  - Every producer conflict clause increments it: the three inventory
+    statements (`REMOVE_SQL`, `RELINK_SQL`, `CHANGED_TITLES_SQL`), the
+    matcher, and `RECORD_WHOLE_FLEET_SQL`. `pending_scope` captures
+    `(id, generation)`; `consume_targets` acknowledges only unchanged
+    generations. `operator_job_queue.py` passes the captured list through
+    unchanged.
+  - Test: `ingest/tests/test_software_target_generation_postgres.py`
+    (10 passed) runs the real statements on the real 0250/0277/0349 SQL as
+    `ninja_ingest` under RLS on two connections. With the old id-only
+    acknowledgment swapped back in, 7 race cases fail and the 3 controls pass.
+    The Phase 2 check 5/6 file no longer runs (its hand-built schema lacks the
+    column); it stays frozen as evidence.
+  - Deploy note: the Operations entrypoint applies 0349 on start, while the
+    ingest and jobs-worker containers do not wait for it. A software job that
+    runs in that gap fails with an undefined-column error and rolls back; the
+    next run recovers. Push approval must include the migration.
+- F06 stage map (with U04). After an inventory apply commits:
+  | Stage | Trigger | Coalescing ack race? | On failure |
+  | --- | --- | --- | --- |
+  | Findings (`software_reconcile`) | Durable targets | Yes; fenced by U04 | Targets stay pending |
+  | `device_software_exposure_current` | After a successful findings run, before targets are consumed | No | Targets stay pending; retried |
+  | `software_title_current` | In-memory `material_changed` of that inventory run | No (full concurrent refresh) | Stale until the next run that changes something |
+  | `v_software_safety` | Same, plus matcher and whole-fleet findings runs | No | Repaired by those runs |
+  | Catalog projection, then EOL | Same as `software_title_current` | No | Stale until the next changing run; EOL failure is logged |
+  No other stage needs a generation fence. The non-durable trigger for title
+  current and the catalog is a separate gap (backlog), not U04.
 
 F05 purge measurement stays in the root backlog under R08 and PLAN-006's
 gate. F04 stays with PLAN-012 item 4.

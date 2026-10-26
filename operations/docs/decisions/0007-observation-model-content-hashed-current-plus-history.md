@@ -389,3 +389,11 @@ Constraint:
   layer now has two physical tables mapping to its two jobs.
 - Supersedes DESIGN.md line 16 "No parallel observation tables."
   DESIGN.md updated in the same track.
+
+## Amendment — daily presence retired (2026-10-26)
+
+The provisional compact daily presence (`source_record_seen_daily`, no
+automatic deletion, pending reassessment) is retired: the user decided that no
+source keeps daily presence, and nothing read it. PLAN-022 removes the writer
+and drops the table and its shadow view after export. Presence over time
+moves to the ADR 0045 significant-change trail.

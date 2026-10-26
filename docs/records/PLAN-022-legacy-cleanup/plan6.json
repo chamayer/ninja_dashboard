@@ -1,0 +1,67 @@
+{
+  "captured_at_utc": "2026-10-26T19:49:09.932505+00:00",
+  "wall_seconds": 0.24,
+  "stop_reason": null,
+  "results": [
+    {
+      "query": "L11",
+      "mode": "plain_explain",
+      "preflight": {
+        "executing_role": "operations_migrate",
+        "server_version_num": "160014",
+        "transaction_read_only": "on",
+        "tenant_context": "1",
+        "executing_search_path": "pg_catalog",
+        "rolsuper": "t",
+        "rolbypassrls": "t"
+      },
+      "exit_code": 0,
+      "returned_rows": 1,
+      "plan": {
+        "Node Type": "Aggregate",
+        "Strategy": "Sorted",
+        "Partial Mode": "Simple",
+        "Parallel Aware": false,
+        "Async Capable": false,
+        "Startup Cost": 5074.49,
+        "Total Cost": 5075.17,
+        "Plan Rows": 5,
+        "Plan Width": 25,
+        "Plans": [
+          {
+            "Node Type": "Sort",
+            "Parent Relationship": "Outer",
+            "Parallel Aware": false,
+            "Async Capable": false,
+            "Startup Cost": 5074.49,
+            "Total Cost": 5074.65,
+            "Plan Rows": 63,
+            "Plan Width": 17,
+            "Plans": [
+              {
+                "Node Type": "Index Scan",
+                "Parent Relationship": "Outer",
+                "Parallel Aware": false,
+                "Async Capable": false,
+                "Scan Direction": "Forward",
+                "Index Name": "jobs_identity_reference_unique",
+                "Relation Name": "operator_job_runs",
+                "Alias": "operator_job_runs",
+                "Startup Cost": 0.41,
+                "Total Cost": 5072.61,
+                "Plan Rows": 63,
+                "Plan Width": 17
+              }
+            ]
+          }
+        ]
+      },
+      "status": "ok",
+      "wall_seconds": 0.24
+    }
+  ],
+  "label": "plan6",
+  "client_wall_seconds": 1.641,
+  "queries_sha256": "74a95de3d91620f6dc76e0a3de554d84be95d7dceed449197b6193e80a98c1a5",
+  "captured_by_client_utc": "2026-10-26T19:49:07.903379+00:00"
+}

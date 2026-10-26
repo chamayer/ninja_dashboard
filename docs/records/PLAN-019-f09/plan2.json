@@ -1,0 +1,121 @@
+{
+  "captured_at_utc": "2026-10-26T18:41:50.056784+00:00",
+  "wall_seconds": 0.557,
+  "stop_reason": null,
+  "results": [
+    {
+      "query": "F5",
+      "mode": "plain_explain",
+      "preflight": {
+        "executing_role": "operations_migrate",
+        "server_version_num": "160014",
+        "transaction_read_only": "on",
+        "tenant_context": "1",
+        "executing_search_path": "pg_catalog",
+        "rolsuper": "t",
+        "rolbypassrls": "t"
+      },
+      "exit_code": 0,
+      "returned_rows": 1,
+      "plan": {
+        "Node Type": "Aggregate",
+        "Strategy": "Plain",
+        "Partial Mode": "Simple",
+        "Parallel Aware": false,
+        "Async Capable": false,
+        "Startup Cost": 79387.1,
+        "Total Cost": 79387.11,
+        "Plan Rows": 1,
+        "Plan Width": 40,
+        "Plans": [
+          {
+            "Node Type": "WindowAgg",
+            "Parent Relationship": "Outer",
+            "Parallel Aware": false,
+            "Async Capable": false,
+            "Startup Cost": 0.42,
+            "Total Cost": 55911.41,
+            "Plan Rows": 782523,
+            "Plan Width": 24,
+            "Plans": [
+              {
+                "Node Type": "Index Only Scan",
+                "Parent Relationship": "Outer",
+                "Parallel Aware": false,
+                "Async Capable": false,
+                "Scan Direction": "Forward",
+                "Index Name": "source_record_seen_daily_pkey",
+                "Relation Name": "source_record_seen_daily",
+                "Alias": "source_record_seen_daily",
+                "Startup Cost": 0.42,
+                "Total Cost": 40260.95,
+                "Plan Rows": 782523,
+                "Plan Width": 20
+              }
+            ]
+          }
+        ]
+      },
+      "status": "ok",
+      "wall_seconds": 0.248
+    },
+    {
+      "query": "F6",
+      "mode": "plain_explain",
+      "preflight": {
+        "executing_role": "operations_migrate",
+        "server_version_num": "160014",
+        "transaction_read_only": "on",
+        "tenant_context": "1",
+        "executing_search_path": "pg_catalog",
+        "rolsuper": "t",
+        "rolbypassrls": "t"
+      },
+      "exit_code": 0,
+      "returned_rows": 1,
+      "plan": {
+        "Node Type": "Aggregate",
+        "Strategy": "Plain",
+        "Partial Mode": "Simple",
+        "Parallel Aware": false,
+        "Async Capable": false,
+        "Startup Cost": 112235.56,
+        "Total Cost": 112235.57,
+        "Plan Rows": 1,
+        "Plan Width": 12,
+        "Plans": [
+          {
+            "Node Type": "Sort",
+            "Parent Relationship": "Outer",
+            "Parallel Aware": false,
+            "Async Capable": false,
+            "Startup Cost": 104410.33,
+            "Total Cost": 106366.64,
+            "Plan Rows": 782523,
+            "Plan Width": 4,
+            "Plans": [
+              {
+                "Node Type": "Seq Scan",
+                "Parent Relationship": "Outer",
+                "Parallel Aware": false,
+                "Async Capable": false,
+                "Relation Name": "source_record_seen_daily",
+                "Alias": "source_record_seen_daily",
+                "Startup Cost": 0.0,
+                "Total Cost": 17110.54,
+                "Plan Rows": 782523,
+                "Plan Width": 4
+              }
+            ]
+          }
+        ]
+      },
+      "status": "ok",
+      "wall_seconds": 0.309
+    }
+  ],
+  "label": "plan2",
+  "client_wall_seconds": 4.141,
+  "queries_sha256": "e4a55e7380a359669122b0bbf5f7ba67fc3427f09869825c186652235749980d",
+  "captured_by_client_utc": "2026-10-26T18:41:48.164822+00:00"
+}

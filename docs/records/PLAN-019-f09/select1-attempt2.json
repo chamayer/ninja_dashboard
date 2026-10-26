@@ -1,0 +1,515 @@
+{
+  "captured_at_utc": "2026-10-26T18:28:13.639528+00:00",
+  "wall_seconds": 3.334,
+  "stop_reason": null,
+  "results": [
+    {
+      "query": "F1",
+      "mode": "metadata_or_aggregate",
+      "preflight": {
+        "executing_role": "operations_migrate",
+        "server_version_num": "160014",
+        "transaction_read_only": "on",
+        "tenant_context": "1",
+        "executing_search_path": "pg_catalog",
+        "rolsuper": "t",
+        "rolbypassrls": "t"
+      },
+      "exit_code": 0,
+      "returned_rows": 3,
+      "rows": [
+        {
+          "relname": "entity_observation_current",
+          "est_rows": "63415",
+          "table_bytes": "2831548416",
+          "index_bytes": "173817856",
+          "total_bytes": "3005366272"
+        },
+        {
+          "relname": "entity_observation_history",
+          "est_rows": "572736",
+          "table_bytes": "754810880",
+          "index_bytes": "145276928",
+          "total_bytes": "900087808"
+        },
+        {
+          "relname": "source_record_seen_daily",
+          "est_rows": "694757",
+          "table_bytes": "60080128",
+          "index_bytes": "46956544",
+          "total_bytes": "107036672"
+        }
+      ],
+      "status": "ok",
+      "wall_seconds": 0.382
+    },
+    {
+      "query": "F2",
+      "mode": "metadata_or_aggregate",
+      "preflight": {
+        "executing_role": "operations_migrate",
+        "server_version_num": "160014",
+        "transaction_read_only": "on",
+        "tenant_context": "1",
+        "executing_search_path": "pg_catalog",
+        "rolsuper": "t",
+        "rolbypassrls": "t"
+      },
+      "exit_code": 0,
+      "returned_rows": 70,
+      "rows": [
+        {
+          "rollup_day": "2026-10-12",
+          "platform": "Ninja",
+          "entity_type": "agent.rmm",
+          "presence_rows": "4662"
+        },
+        {
+          "rollup_day": "2026-10-12",
+          "platform": "Ninja",
+          "entity_type": "monitor.target",
+          "presence_rows": "1"
+        },
+        {
+          "rollup_day": "2026-10-12",
+          "platform": "Ninja",
+          "entity_type": "network.device",
+          "presence_rows": "2"
+        },
+        {
+          "rollup_day": "2026-10-12",
+          "platform": "Ninja",
+          "entity_type": "vm.guest",
+          "presence_rows": "852"
+        },
+        {
+          "rollup_day": "2026-10-12",
+          "platform": "Ninja",
+          "entity_type": "vm.host",
+          "presence_rows": "100"
+        },
+        {
+          "rollup_day": "2026-10-13",
+          "platform": "Ninja",
+          "entity_type": "agent.rmm",
+          "presence_rows": "4668"
+        },
+        {
+          "rollup_day": "2026-10-13",
+          "platform": "Ninja",
+          "entity_type": "monitor.target",
+          "presence_rows": "1"
+        },
+        {
+          "rollup_day": "2026-10-13",
+          "platform": "Ninja",
+          "entity_type": "network.device",
+          "presence_rows": "2"
+        },
+        {
+          "rollup_day": "2026-10-13",
+          "platform": "Ninja",
+          "entity_type": "vm.guest",
+          "presence_rows": "871"
+        },
+        {
+          "rollup_day": "2026-10-13",
+          "platform": "Ninja",
+          "entity_type": "vm.host",
+          "presence_rows": "100"
+        },
+        {
+          "rollup_day": "2026-10-14",
+          "platform": "Ninja",
+          "entity_type": "agent.rmm",
+          "presence_rows": "4673"
+        },
+        {
+          "rollup_day": "2026-10-14",
+          "platform": "Ninja",
+          "entity_type": "monitor.target",
+          "presence_rows": "1"
+        },
+        {
+          "rollup_day": "2026-10-14",
+          "platform": "Ninja",
+          "entity_type": "network.device",
+          "presence_rows": "2"
+        },
+        {
+          "rollup_day": "2026-10-14",
+          "platform": "Ninja",
+          "entity_type": "vm.guest",
+          "presence_rows": "867"
+        },
+        {
+          "rollup_day": "2026-10-14",
+          "platform": "Ninja",
+          "entity_type": "vm.host",
+          "presence_rows": "100"
+        },
+        {
+          "rollup_day": "2026-10-15",
+          "platform": "Ninja",
+          "entity_type": "agent.rmm",
+          "presence_rows": "4679"
+        },
+        {
+          "rollup_day": "2026-10-15",
+          "platform": "Ninja",
+          "entity_type": "monitor.target",
+          "presence_rows": "1"
+        },
+        {
+          "rollup_day": "2026-10-15",
+          "platform": "Ninja",
+          "entity_type": "network.device",
+          "presence_rows": "2"
+        },
+        {
+          "rollup_day": "2026-10-15",
+          "platform": "Ninja",
+          "entity_type": "vm.guest",
+          "presence_rows": "859"
+        },
+        {
+          "rollup_day": "2026-10-15",
+          "platform": "Ninja",
+          "entity_type": "vm.host",
+          "presence_rows": "100"
+        },
+        {
+          "rollup_day": "2026-10-16",
+          "platform": "Ninja",
+          "entity_type": "agent.rmm",
+          "presence_rows": "4679"
+        },
+        {
+          "rollup_day": "2026-10-16",
+          "platform": "Ninja",
+          "entity_type": "monitor.target",
+          "presence_rows": "1"
+        },
+        {
+          "rollup_day": "2026-10-16",
+          "platform": "Ninja",
+          "entity_type": "network.device",
+          "presence_rows": "2"
+        },
+        {
+          "rollup_day": "2026-10-16",
+          "platform": "Ninja",
+          "entity_type": "vm.guest",
+          "presence_rows": "865"
+        },
+        {
+          "rollup_day": "2026-10-16",
+          "platform": "Ninja",
+          "entity_type": "vm.host",
+          "presence_rows": "100"
+        },
+        {
+          "rollup_day": "2026-10-17",
+          "platform": "Ninja",
+          "entity_type": "agent.rmm",
+          "presence_rows": "4679"
+        },
+        {
+          "rollup_day": "2026-10-17",
+          "platform": "Ninja",
+          "entity_type": "monitor.target",
+          "presence_rows": "1"
+        },
+        {
+          "rollup_day": "2026-10-17",
+          "platform": "Ninja",
+          "entity_type": "network.device",
+          "presence_rows": "2"
+        },
+        {
+          "rollup_day": "2026-10-17",
+          "platform": "Ninja",
+          "entity_type": "vm.guest",
+          "presence_rows": "860"
+        },
+        {
+          "rollup_day": "2026-10-17",
+          "platform": "Ninja",
+          "entity_type": "vm.host",
+          "presence_rows": "100"
+        },
+        {
+          "rollup_day": "2026-10-18",
+          "platform": "Ninja",
+          "entity_type": "agent.rmm",
+          "presence_rows": "4678"
+        },
+        {
+          "rollup_day": "2026-10-18",
+          "platform": "Ninja",
+          "entity_type": "monitor.target",
+          "presence_rows": "1"
+        },
+        {
+          "rollup_day": "2026-10-18",
+          "platform": "Ninja",
+          "entity_type": "network.device",
+          "presence_rows": "2"
+        },
+        {
+          "rollup_day": "2026-10-18",
+          "platform": "Ninja",
+          "entity_type": "vm.guest",
+          "presence_rows": "865"
+        },
+        {
+          "rollup_day": "2026-10-18",
+          "platform": "Ninja",
+          "entity_type": "vm.host",
+          "presence_rows": "100"
+        },
+        {
+          "rollup_day": "2026-10-19",
+          "platform": "Ninja",
+          "entity_type": "agent.rmm",
+          "presence_rows": "4689"
+        },
+        {
+          "rollup_day": "2026-10-19",
+          "platform": "Ninja",
+          "entity_type": "monitor.target",
+          "presence_rows": "1"
+        },
+        {
+          "rollup_day": "2026-10-19",
+          "platform": "Ninja",
+          "entity_type": "network.device",
+          "presence_rows": "2"
+        },
+        {
+          "rollup_day": "2026-10-19",
+          "platform": "Ninja",
+          "entity_type": "vm.guest",
+          "presence_rows": "919"
+        },
+        {
+          "rollup_day": "2026-10-19",
+          "platform": "Ninja",
+          "entity_type": "vm.host",
+          "presence_rows": "100"
+        },
+        {
+          "rollup_day": "2026-10-20",
+          "platform": "Ninja",
+          "entity_type": "agent.rmm",
+          "presence_rows": "4695"
+        },
+        {
+          "rollup_day": "2026-10-20",
+          "platform": "Ninja",
+          "entity_type": "monitor.target",
+          "presence_rows": "1"
+        },
+        {
+          "rollup_day": "2026-10-20",
+          "platform": "Ninja",
+          "entity_type": "network.device",
+          "presence_rows": "2"
+        },
+        {
+          "rollup_day": "2026-10-20",
+          "platform": "Ninja",
+          "entity_type": "vm.guest",
+          "presence_rows": "912"
+        },
+        {
+          "rollup_day": "2026-10-20",
+          "platform": "Ninja",
+          "entity_type": "vm.host",
+          "presence_rows": "100"
+        },
+        {
+          "rollup_day": "2026-10-21",
+          "platform": "Ninja",
+          "entity_type": "agent.rmm",
+          "presence_rows": "4700"
+        },
+        {
+          "rollup_day": "2026-10-21",
+          "platform": "Ninja",
+          "entity_type": "monitor.target",
+          "presence_rows": "1"
+        },
+        {
+          "rollup_day": "2026-10-21",
+          "platform": "Ninja",
+          "entity_type": "network.device",
+          "presence_rows": "2"
+        },
+        {
+          "rollup_day": "2026-10-21",
+          "platform": "Ninja",
+          "entity_type": "vm.guest",
+          "presence_rows": "882"
+        },
+        {
+          "rollup_day": "2026-10-21",
+          "platform": "Ninja",
+          "entity_type": "vm.host",
+          "presence_rows": "100"
+        },
+        {
+          "rollup_day": "2026-10-22",
+          "platform": "Ninja",
+          "entity_type": "agent.rmm",
+          "presence_rows": "4702"
+        },
+        {
+          "rollup_day": "2026-10-22",
+          "platform": "Ninja",
+          "entity_type": "monitor.target",
+          "presence_rows": "1"
+        },
+        {
+          "rollup_day": "2026-10-22",
+          "platform": "Ninja",
+          "entity_type": "network.device",
+          "presence_rows": "2"
+        },
+        {
+          "rollup_day": "2026-10-22",
+          "platform": "Ninja",
+          "entity_type": "vm.guest",
+          "presence_rows": "857"
+        },
+        {
+          "rollup_day": "2026-10-22",
+          "platform": "Ninja",
+          "entity_type": "vm.host",
+          "presence_rows": "100"
+        },
+        {
+          "rollup_day": "2026-10-23",
+          "platform": "Ninja",
+          "entity_type": "agent.rmm",
+          "presence_rows": "4702"
+        },
+        {
+          "rollup_day": "2026-10-23",
+          "platform": "Ninja",
+          "entity_type": "monitor.target",
+          "presence_rows": "1"
+        },
+        {
+          "rollup_day": "2026-10-23",
+          "platform": "Ninja",
+          "entity_type": "network.device",
+          "presence_rows": "2"
+        },
+        {
+          "rollup_day": "2026-10-23",
+          "platform": "Ninja",
+          "entity_type": "vm.guest",
+          "presence_rows": "857"
+        },
+        {
+          "rollup_day": "2026-10-23",
+          "platform": "Ninja",
+          "entity_type": "vm.host",
+          "presence_rows": "100"
+        },
+        {
+          "rollup_day": "2026-10-25",
+          "platform": "Ninja",
+          "entity_type": "agent.rmm",
+          "presence_rows": "4709"
+        },
+        {
+          "rollup_day": "2026-10-25",
+          "platform": "Ninja",
+          "entity_type": "monitor.target",
+          "presence_rows": "1"
+        },
+        {
+          "rollup_day": "2026-10-25",
+          "platform": "Ninja",
+          "entity_type": "network.device",
+          "presence_rows": "2"
+        },
+        {
+          "rollup_day": "2026-10-25",
+          "platform": "Ninja",
+          "entity_type": "vm.guest",
+          "presence_rows": "857"
+        },
+        {
+          "rollup_day": "2026-10-25",
+          "platform": "Ninja",
+          "entity_type": "vm.host",
+          "presence_rows": "100"
+        },
+        {
+          "rollup_day": "2026-10-26",
+          "platform": "Ninja",
+          "entity_type": "agent.rmm",
+          "presence_rows": "4760"
+        },
+        {
+          "rollup_day": "2026-10-26",
+          "platform": "Ninja",
+          "entity_type": "monitor.target",
+          "presence_rows": "1"
+        },
+        {
+          "rollup_day": "2026-10-26",
+          "platform": "Ninja",
+          "entity_type": "network.device",
+          "presence_rows": "2"
+        },
+        {
+          "rollup_day": "2026-10-26",
+          "platform": "Ninja",
+          "entity_type": "vm.guest",
+          "presence_rows": "872"
+        },
+        {
+          "rollup_day": "2026-10-26",
+          "platform": "Ninja",
+          "entity_type": "vm.host",
+          "presence_rows": "100"
+        }
+      ],
+      "status": "ok",
+      "wall_seconds": 2.566
+    },
+    {
+      "query": "F4",
+      "mode": "metadata_or_aggregate",
+      "preflight": {
+        "executing_role": "operations_migrate",
+        "server_version_num": "160014",
+        "transaction_read_only": "on",
+        "tenant_context": "1",
+        "executing_search_path": "pg_catalog",
+        "rolsuper": "t",
+        "rolbypassrls": "t"
+      },
+      "exit_code": 0,
+      "returned_rows": 1,
+      "rows": [
+        {
+          "first_day": "2026-06-02",
+          "last_day": "2026-10-26",
+          "rows": "774069",
+          "backfilled_rows": "335647"
+        }
+      ],
+      "status": "ok",
+      "wall_seconds": 0.386
+    }
+  ],
+  "label": "select1-attempt2",
+  "client_wall_seconds": 8.672,
+  "queries_sha256": "cd7afb54d758dcca6c8621310ef85ffbb8aa0b22fce30d0f6998cbd19f7c66af",
+  "captured_by_client_utc": "2026-10-26T18:28:11.795493+00:00"
+}

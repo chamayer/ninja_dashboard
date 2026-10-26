@@ -31,6 +31,11 @@ test-data/
 /archive/metabase/*
 !/archive/metabase/RESTORE.md
 
+# ── PLAN-022 legacy data archive (local-only) ───────────────────────
+# Off-host copy of the pg_dump archives taken before the legacy drops.
+# Contains customer data: never commit it.
+/archive/plan022-legacy-2026-10-26/
+
 # ── Reference data (not code) ────────────────────────────────────────
 # NinjaRMM OpenAPI specifications — local development reference used to design
 # source connectors and schemas. Re-download from Ninja docs when needed.

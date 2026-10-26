@@ -1,0 +1,38 @@
+{
+  "captured_at_utc": "2026-10-26T19:39:17.085362+00:00",
+  "wall_seconds": 0.286,
+  "stop_reason": null,
+  "results": [
+    {
+      "query": "L10",
+      "mode": "metadata_or_aggregate",
+      "preflight": {
+        "executing_role": "operations_migrate",
+        "server_version_num": "160014",
+        "transaction_read_only": "on",
+        "tenant_context": "1",
+        "executing_search_path": "pg_catalog",
+        "rolsuper": "t",
+        "rolbypassrls": "t"
+      },
+      "exit_code": 0,
+      "returned_rows": 2,
+      "rows": [
+        {
+          "definition_key": "agent-compliance",
+          "enabled": "f"
+        },
+        {
+          "definition_key": "agent-compliance-evaluate",
+          "enabled": "f"
+        }
+      ],
+      "status": "ok",
+      "wall_seconds": 0.286
+    }
+  ],
+  "label": "select4-schedules",
+  "client_wall_seconds": 1.703,
+  "queries_sha256": "825a4eba315eed914fac937f9d04573e6eb5f09afb1d724820cb52286a993e85",
+  "captured_by_client_utc": "2026-10-26T19:39:15.083592+00:00"
+}

@@ -1,0 +1,51 @@
+{
+  "captured_at_utc": "2026-10-26T19:39:08.342587+00:00",
+  "wall_seconds": 0.355,
+  "stop_reason": null,
+  "results": [
+    {
+      "query": "L10",
+      "mode": "plain_explain",
+      "preflight": {
+        "executing_role": "operations_migrate",
+        "server_version_num": "160014",
+        "transaction_read_only": "on",
+        "tenant_context": "1",
+        "executing_search_path": "pg_catalog",
+        "rolsuper": "t",
+        "rolbypassrls": "t"
+      },
+      "exit_code": 0,
+      "returned_rows": 1,
+      "plan": {
+        "Node Type": "Sort",
+        "Parallel Aware": false,
+        "Async Capable": false,
+        "Startup Cost": 100.32,
+        "Total Cost": 100.33,
+        "Plan Rows": 4,
+        "Plan Width": 17,
+        "Plans": [
+          {
+            "Node Type": "Seq Scan",
+            "Parent Relationship": "Outer",
+            "Parallel Aware": false,
+            "Async Capable": false,
+            "Relation Name": "job_schedules",
+            "Alias": "job_schedules",
+            "Startup Cost": 0.0,
+            "Total Cost": 100.28,
+            "Plan Rows": 4,
+            "Plan Width": 17
+          }
+        ]
+      },
+      "status": "ok",
+      "wall_seconds": 0.355
+    }
+  ],
+  "label": "plan4",
+  "client_wall_seconds": 3.406,
+  "queries_sha256": "825a4eba315eed914fac937f9d04573e6eb5f09afb1d724820cb52286a993e85",
+  "captured_by_client_utc": "2026-10-26T19:39:06.329659+00:00"
+}

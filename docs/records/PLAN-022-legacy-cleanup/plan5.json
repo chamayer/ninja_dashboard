@@ -1,0 +1,28 @@
+{
+  "captured_at_utc": "2026-10-26T19:48:49.225141+00:00",
+  "wall_seconds": 0.279,
+  "stop_reason": "query_error",
+  "results": [
+    {
+      "query": "L11",
+      "mode": "plain_explain",
+      "preflight": {
+        "executing_role": "operations_migrate",
+        "server_version_num": "160014",
+        "transaction_read_only": "on",
+        "tenant_context": "1",
+        "executing_search_path": "pg_catalog",
+        "rolsuper": "t",
+        "rolbypassrls": "t"
+      },
+      "exit_code": 3,
+      "status": "query_error",
+      "sqlstate": "42703",
+      "wall_seconds": 0.279
+    }
+  ],
+  "label": "plan5",
+  "client_wall_seconds": 3.203,
+  "queries_sha256": "acca21ed170ecf1aae0f0546359988a93236efdfdd3ae4004a5e69056b7f4e77",
+  "captured_by_client_utc": "2026-10-26T19:48:47.206269+00:00"
+}

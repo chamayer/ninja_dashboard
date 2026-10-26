@@ -1,0 +1,285 @@
+{
+  "captured_at_utc": "2026-10-26T20:29:35.430922+00:00",
+  "wall_seconds": 0.206,
+  "stop_reason": null,
+  "results": [
+    {
+      "query": "L16",
+      "mode": "plain_explain",
+      "preflight": {
+        "executing_role": "operations_migrate",
+        "server_version_num": "160014",
+        "transaction_read_only": "on",
+        "tenant_context": "1",
+        "executing_search_path": "pg_catalog",
+        "rolsuper": "t",
+        "rolbypassrls": "t"
+      },
+      "exit_code": 0,
+      "returned_rows": 1,
+      "plan": {
+        "Node Type": "Limit",
+        "Parallel Aware": false,
+        "Async Capable": false,
+        "Startup Cost": 711.62,
+        "Total Cost": 1292.8,
+        "Plan Rows": 4,
+        "Plan Width": 96,
+        "Plans": [
+          {
+            "Node Type": "Append",
+            "Parent Relationship": "InitPlan",
+            "Subplan Name": "CTE inside",
+            "Parallel Aware": false,
+            "Async Capable": false,
+            "Startup Cost": 4.9,
+            "Total Cost": 704.41,
+            "Plan Rows": 103,
+            "Plan Width": 8,
+            "Plans": [
+              {
+                "Node Type": "Hash Join",
+                "Parent Relationship": "Member",
+                "Parallel Aware": false,
+                "Async Capable": false,
+                "Join Type": "Inner",
+                "Startup Cost": 4.9,
+                "Total Cost": 345.28,
+                "Plan Rows": 38,
+                "Plan Width": 8,
+                "Plans": [
+                  {
+                    "Node Type": "Seq Scan",
+                    "Parent Relationship": "Outer",
+                    "Parallel Aware": false,
+                    "Async Capable": false,
+                    "Relation Name": "pg_class",
+                    "Alias": "c",
+                    "Startup Cost": 0.0,
+                    "Total Cost": 332.65,
+                    "Plan Rows": 2865,
+                    "Plan Width": 8
+                  },
+                  {
+                    "Node Type": "Hash",
+                    "Parent Relationship": "Inner",
+                    "Parallel Aware": false,
+                    "Async Capable": false,
+                    "Startup Cost": 4.88,
+                    "Total Cost": 4.88,
+                    "Plan Rows": 2,
+                    "Plan Width": 4,
+                    "Plans": [
+                      {
+                        "Node Type": "Seq Scan",
+                        "Parent Relationship": "Outer",
+                        "Parallel Aware": false,
+                        "Async Capable": false,
+                        "Relation Name": "pg_namespace",
+                        "Alias": "n",
+                        "Startup Cost": 0.0,
+                        "Total Cost": 4.88,
+                        "Plan Rows": 2,
+                        "Plan Width": 4
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "Node Type": "Hash Join",
+                "Parent Relationship": "Member",
+                "Parallel Aware": false,
+                "Async Capable": false,
+                "Join Type": "Inner",
+                "Startup Cost": 4.9,
+                "Total Cost": 146.1,
+                "Plan Rows": 19,
+                "Plan Width": 8,
+                "Plans": [
+                  {
+                    "Node Type": "Seq Scan",
+                    "Parent Relationship": "Outer",
+                    "Parallel Aware": false,
+                    "Async Capable": false,
+                    "Relation Name": "pg_type",
+                    "Alias": "t",
+                    "Startup Cost": 0.0,
+                    "Total Cost": 137.33,
+                    "Plan Rows": 1433,
+                    "Plan Width": 8
+                  },
+                  {
+                    "Node Type": "Hash",
+                    "Parent Relationship": "Inner",
+                    "Parallel Aware": false,
+                    "Async Capable": false,
+                    "Startup Cost": 4.88,
+                    "Total Cost": 4.88,
+                    "Plan Rows": 2,
+                    "Plan Width": 4,
+                    "Plans": [
+                      {
+                        "Node Type": "Seq Scan",
+                        "Parent Relationship": "Outer",
+                        "Parallel Aware": false,
+                        "Async Capable": false,
+                        "Relation Name": "pg_namespace",
+                        "Alias": "n_1",
+                        "Startup Cost": 0.0,
+                        "Total Cost": 4.88,
+                        "Plan Rows": 2,
+                        "Plan Width": 4
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "Node Type": "Hash Join",
+                "Parent Relationship": "Member",
+                "Parallel Aware": false,
+                "Async Capable": false,
+                "Join Type": "Inner",
+                "Startup Cost": 4.9,
+                "Total Cost": 212.51,
+                "Plan Rows": 46,
+                "Plan Width": 8,
+                "Plans": [
+                  {
+                    "Node Type": "Seq Scan",
+                    "Parent Relationship": "Outer",
+                    "Parallel Aware": false,
+                    "Async Capable": false,
+                    "Relation Name": "pg_proc",
+                    "Alias": "p",
+                    "Startup Cost": 0.0,
+                    "Total Cost": 198.34,
+                    "Plan Rows": 3434,
+                    "Plan Width": 8
+                  },
+                  {
+                    "Node Type": "Hash",
+                    "Parent Relationship": "Inner",
+                    "Parallel Aware": false,
+                    "Async Capable": false,
+                    "Startup Cost": 4.88,
+                    "Total Cost": 4.88,
+                    "Plan Rows": 2,
+                    "Plan Width": 4,
+                    "Plans": [
+                      {
+                        "Node Type": "Seq Scan",
+                        "Parent Relationship": "Outer",
+                        "Parallel Aware": false,
+                        "Async Capable": false,
+                        "Relation Name": "pg_namespace",
+                        "Alias": "n_2",
+                        "Startup Cost": 0.0,
+                        "Total Cost": 4.88,
+                        "Plan Rows": 2,
+                        "Plan Width": 4
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "Node Type": "Hash Join",
+            "Parent Relationship": "Outer",
+            "Parallel Aware": false,
+            "Async Capable": false,
+            "Join Type": "Anti",
+            "Startup Cost": 7.21,
+            "Total Cost": 588.39,
+            "Plan Rows": 4,
+            "Plan Width": 96,
+            "Plans": [
+              {
+                "Node Type": "Hash Join",
+                "Parent Relationship": "Outer",
+                "Parallel Aware": false,
+                "Async Capable": false,
+                "Join Type": "Inner",
+                "Startup Cost": 3.6,
+                "Total Cost": 584.68,
+                "Plan Rows": 4,
+                "Plan Width": 20,
+                "Plans": [
+                  {
+                    "Node Type": "Seq Scan",
+                    "Parent Relationship": "Outer",
+                    "Parallel Aware": false,
+                    "Async Capable": false,
+                    "Relation Name": "pg_depend",
+                    "Alias": "d",
+                    "Startup Cost": 0.0,
+                    "Total Cost": 495.17,
+                    "Plan Rows": 11449,
+                    "Plan Width": 20
+                  },
+                  {
+                    "Node Type": "Hash",
+                    "Parent Relationship": "Inner",
+                    "Parallel Aware": false,
+                    "Async Capable": false,
+                    "Startup Cost": 2.06,
+                    "Total Cost": 2.06,
+                    "Plan Rows": 103,
+                    "Plan Width": 8,
+                    "Plans": [
+                      {
+                        "Node Type": "CTE Scan",
+                        "Parent Relationship": "Outer",
+                        "Parallel Aware": false,
+                        "Async Capable": false,
+                        "CTE Name": "inside",
+                        "Alias": "i",
+                        "Startup Cost": 0.0,
+                        "Total Cost": 2.06,
+                        "Plan Rows": 103,
+                        "Plan Width": 8
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "Node Type": "Hash",
+                "Parent Relationship": "Inner",
+                "Parallel Aware": false,
+                "Async Capable": false,
+                "Startup Cost": 2.06,
+                "Total Cost": 2.06,
+                "Plan Rows": 103,
+                "Plan Width": 8,
+                "Plans": [
+                  {
+                    "Node Type": "CTE Scan",
+                    "Parent Relationship": "Outer",
+                    "Parallel Aware": false,
+                    "Async Capable": false,
+                    "CTE Name": "inside",
+                    "Alias": "self",
+                    "Startup Cost": 0.0,
+                    "Total Cost": 2.06,
+                    "Plan Rows": 103,
+                    "Plan Width": 8
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "status": "ok",
+      "wall_seconds": 0.206
+    }
+  ],
+  "label": "plan8",
+  "client_wall_seconds": 2.172,
+  "queries_sha256": "04a922159b5a4f3acae4e5346021dac3efc769d48fa1535df370d5cad60528bd",
+  "captured_by_client_utc": "2026-10-26T20:29:33.307842+00:00"
+}
