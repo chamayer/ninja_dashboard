@@ -120,3 +120,32 @@ def test_inventory_lists_promotions_and_the_settings_live_under_admin_settings()
     settings_page = (_ROOT / "templates" / "admin_settings.html").read_text(encoding="utf-8")
     assert "{% url 'client_promotion_settings' %}" in settings_page
     assert reverse("client_promotion_settings") == "/admin/client-matching/"
+
+
+def test_a_promoted_group_that_now_reports_the_client_name_needs_no_verifying():
+    client = SimpleNamespace(display_name="MDA", deleted_at=None, verified_at=None)
+    candidate = SimpleNamespace(
+        resolved_client=client,
+        status=views.ClientCandidate.Status.MAPPED,
+        source_refs=[{"source_id": 1, "external_id": "mda"}, {"source_id": 2, "external_id": "7"}],
+    )
+    references = [
+        {
+            "source_id": 1,
+            "external_id": "mda",
+            "observed_name": "mda",
+            "mapping_state": "automatic",
+        },
+        {"source_id": 2, "external_id": "7", "observed_name": "M.D.A", "mapping_state": "review"},
+    ]
+    with (
+        mock.patch.object(views.ClientCandidate, "objects") as candidates,
+        mock.patch.object(views, "client_source_references", return_value=references),
+    ):
+        candidates.filter.return_value.select_related.return_value.order_by.return_value = [
+            candidate
+        ]
+        assert views._automatic_promotions() == []
+        references[1]["observed_name"] = "Prompt"
+        [promotion] = views._automatic_promotions()
+    assert [g["external_id"] for g in promotion["unconfirmed"]] == ["7"]

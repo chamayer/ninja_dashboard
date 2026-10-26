@@ -13511,6 +13511,11 @@ def _promotion_settings() -> dict:
     return {**_PROMOTION_SETTING_DEFAULTS, **((row.config or {}) if row else {})}
 
 
+def _client_name_key(name: str) -> str:
+    """Names compared as the client resolver does (``client_resolver._norm``)."""
+    return re.sub(r"[\s\-_.]", "", name or "").lower().strip()
+
+
 def _automatic_promotions() -> list[dict]:
     """Candidates the resolver promoted that an operator has not verified (ADR-0041).
 
@@ -13542,7 +13547,14 @@ def _automatic_promotions() -> list[dict]:
             for ref in candidate.source_refs or []
             if (key := (ref.get("source_id"), str(ref.get("external_id")))) in links
         ]
-        unconfirmed = [g for g in groups if g["mapping_state"] in ("automatic", "review")]
+        # A group now reporting the client's own name (e.g. after a rename) is a
+        # plain name match, as the resolver compares names: nothing to verify.
+        unconfirmed = [
+            g
+            for g in groups
+            if g["mapping_state"] in ("automatic", "review")
+            and _client_name_key(g["observed_name"]) != _client_name_key(client.display_name)
+        ]
         if client.deleted_at or not (unconfirmed or (created and not client.verified_at)):
             continue
         promotions.append(
