@@ -357,12 +357,13 @@ WITH removed AS (
     RETURNING 1
 )
 , targeted AS (
-    INSERT INTO operations.software_reclassification_targets
+    INSERT INTO operations.software_reclassification_targets AS target
         (tenant_id, target_key, canonical_name, source)
     SELECT DISTINCT %(tenant_id)s, left('name:' || lower(canonical_name), 300), lower(canonical_name), 'inventory'
       FROM removed
      WHERE canonical_name <> ''
-    ON CONFLICT (tenant_id, target_key, source) WHERE consumed_at IS NULL DO NOTHING
+    ON CONFLICT (tenant_id, target_key, source) WHERE consumed_at IS NULL
+    DO UPDATE SET generation = target.generation + 1
     RETURNING 1
 )
 SELECT (SELECT COUNT(*) FROM removed)
@@ -473,12 +474,13 @@ WITH relinked AS (
        AND v.version IS DISTINCT FROM COALESCE(c.version, '')
     RETURNING c.canonical_name
 ), targeted AS (
-    INSERT INTO operations.software_reclassification_targets
+    INSERT INTO operations.software_reclassification_targets AS target
         (tenant_id, target_key, canonical_name, source)
     SELECT DISTINCT %(tenant_id)s, left('name:' || lower(canonical_name), 300), lower(canonical_name), 'inventory'
       FROM relinked
      WHERE canonical_name <> ''
-    ON CONFLICT (tenant_id, target_key, source) WHERE consumed_at IS NULL DO NOTHING
+    ON CONFLICT (tenant_id, target_key, source) WHERE consumed_at IS NULL
+    DO UPDATE SET generation = target.generation + 1
     RETURNING 1
 )
 SELECT (SELECT COUNT(*) FROM relinked)
@@ -487,13 +489,17 @@ SELECT (SELECT COUNT(*) FROM relinked)
 # The change feed for the software findings run: every title with a new or
 # changed installation (removals and relinks are recorded by their own
 # statements). The findings run reconciles only these titles.
+# A change for a title already pending bumps its generation instead of being
+# dropped, so a findings run that captured the row earlier cannot acknowledge
+# it (PLAN-017 U04, migration 0349).
 CHANGED_TITLES_SQL = """
-INSERT INTO operations.software_reclassification_targets
+INSERT INTO operations.software_reclassification_targets AS target
         (tenant_id, target_key, canonical_name, source)
     SELECT DISTINCT %(tenant_id)s, left('name:' || lower(canonical_name), 300), lower(canonical_name), 'inventory'
       FROM inventory_delta
      WHERE kind <> 'unchanged' AND canonical_name <> ''
-    ON CONFLICT (tenant_id, target_key, source) WHERE consumed_at IS NULL DO NOTHING
+    ON CONFLICT (tenant_id, target_key, source) WHERE consumed_at IS NULL
+    DO UPDATE SET generation = target.generation + 1
     RETURNING 1
 """
 

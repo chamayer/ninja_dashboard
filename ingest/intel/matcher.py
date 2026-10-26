@@ -465,7 +465,7 @@ def _match_and_upsert() -> int:
             if cur.fetchone()[0] is not None:
                 cur.execute(
                 """
-                INSERT INTO operations.software_reclassification_targets
+                INSERT INTO operations.software_reclassification_targets AS target
                     (tenant_id, target_key, software_version_id, canonical_name, source)
                 SELECT DISTINCT %s,
                        CASE WHEN changed.software_version_id IS NOT NULL
@@ -493,7 +493,7 @@ def _match_and_upsert() -> int:
                          FROM operations.cve_match WHERE tenant_id = %s)
                   ) changed
                 ON CONFLICT (tenant_id, target_key, source) WHERE consumed_at IS NULL
-                DO UPDATE SET queued_at = now()
+                DO UPDATE SET queued_at = now(), generation = target.generation + 1
                 """,
                     (_TENANT_ID, _TENANT_ID, _TENANT_ID),
                 )

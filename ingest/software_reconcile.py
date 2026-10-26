@@ -1207,11 +1207,17 @@ def write_assessments(
 # projections) records the whole-fleet marker. The routine findings run
 # reconciles just the named titles; the daily full run and every decision run
 # cover everything and clear whatever is pending.
+#
+# A producer that records a change for a row already pending increments its
+# ``generation``. A run acknowledges only the generation it captured, so a
+# change that arrives after the capture (and so possibly after the run read
+# the evidence) stays pending for the next run (PLAN-017 U04, migration 0349).
 
 WHOLE_FLEET_KEY = "all"
 
 PENDING_TARGETS_SQL = """
-SELECT target.id, target.target_key, lower(target.canonical_name), target.software_version_id
+SELECT target.id, target.target_key, lower(target.canonical_name), target.software_version_id,
+       target.generation
   FROM operations.software_reclassification_targets target
  WHERE target.tenant_id = %(tid)s AND target.consumed_at IS NULL
 """
@@ -1224,16 +1230,19 @@ SELECT DISTINCT lower(installation.canonical_name)
 """
 
 CONSUME_TARGETS_SQL = """
-UPDATE operations.software_reclassification_targets
+UPDATE operations.software_reclassification_targets target
    SET consumed_at = now()
- WHERE tenant_id = %(tid)s AND id = ANY(%(ids)s::uuid[]) AND consumed_at IS NULL
+  FROM unnest(%(ids)s::uuid[], %(generations)s::bigint[]) AS captured(id, generation)
+ WHERE target.tenant_id = %(tid)s AND target.id = captured.id
+   AND target.generation = captured.generation AND target.consumed_at IS NULL
 """
 
 RECORD_WHOLE_FLEET_SQL = """
-INSERT INTO operations.software_reclassification_targets
+INSERT INTO operations.software_reclassification_targets AS target
     (tenant_id, target_key, canonical_name, source)
 VALUES (%(tid)s, 'all', '*', %(source)s)
-ON CONFLICT (tenant_id, target_key, source) WHERE consumed_at IS NULL DO NOTHING
+ON CONFLICT (tenant_id, target_key, source) WHERE consumed_at IS NULL
+DO UPDATE SET generation = target.generation + 1
 """
 
 
@@ -1253,13 +1262,16 @@ def scope_from_targets(
     return sorted(titles)
 
 
-def pending_scope(tenant_id: int, *, whole_fleet: bool) -> tuple[list[str], list[str] | None]:
-    """(target ids this run will consume, title scope or None for the fleet)."""
+def pending_scope(
+    tenant_id: int, *, whole_fleet: bool
+) -> tuple[list[tuple[str, int]], list[str] | None]:
+    """(captured (id, generation) targets this run will consume, title scope or
+    None for the fleet)."""
     with db.transaction() as cur:
         cur.execute(f"SET LOCAL operations.tenant_id = {int(tenant_id)}")
         cur.execute(PENDING_TARGETS_SQL, {"tid": tenant_id})
         targets = cur.fetchall()
-        ids = [str(row[0]) for row in targets]
+        ids = [(str(row[0]), int(row[4])) for row in targets]
         if whole_fleet:
             return ids, None
         versions = [row[3] for row in targets if row[3] is not None]
@@ -1270,12 +1282,20 @@ def pending_scope(tenant_id: int, *, whole_fleet: bool) -> tuple[list[str], list
     return ids, scope_from_targets(targets, version_titles)
 
 
-def consume_targets(tenant_id: int, ids: list[str]) -> None:
-    if not ids:
+def consume_targets(tenant_id: int, captured: list[tuple[str, int]]) -> None:
+    """Acknowledge the captured targets whose generation has not moved since."""
+    if not captured:
         return
     with db.transaction() as cur:
         cur.execute(f"SET LOCAL operations.tenant_id = {int(tenant_id)}")
-        cur.execute(CONSUME_TARGETS_SQL, {"tid": tenant_id, "ids": ids})
+        cur.execute(
+            CONSUME_TARGETS_SQL,
+            {
+                "tid": tenant_id,
+                "ids": [target_id for target_id, _ in captured],
+                "generations": [generation for _, generation in captured],
+            },
+        )
 
 
 def record_whole_fleet(cur: Any, tenant_id: int, source: str) -> None:

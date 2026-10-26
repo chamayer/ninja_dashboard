@@ -233,7 +233,9 @@ def test_every_inventory_change_names_its_title_in_the_change_feed():
     for sql in (software.REMOVE_SQL, software.RELINK_SQL, software.CHANGED_TITLES_SQL):
         assert "INSERT INTO operations.software_reclassification_targets" in sql
         assert "'inventory'" in sql
-        assert "WHERE consumed_at IS NULL DO NOTHING" in sql
+        # A coalesced change bumps the generation so an earlier capture
+        # cannot acknowledge it (PLAN-017 U04).
+        assert "DO UPDATE SET generation = target.generation + 1" in sql
     assert "kind <> 'unchanged'" in software.CHANGED_TITLES_SQL
 
 
