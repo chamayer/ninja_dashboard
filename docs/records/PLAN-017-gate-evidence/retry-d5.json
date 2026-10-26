@@ -1,0 +1,705 @@
+{
+  "batch": "D5",
+  "captured_at_utc": "2026-10-25T22:49:21.401917+00:00",
+  "wall_seconds": 4.489,
+  "stop_reason": null,
+  "results": [
+    {
+      "query": "D5.1",
+      "mode": "metadata_or_aggregate",
+      "preflight": {
+        "executing_role": "operations_migrate",
+        "server_version_num": "160014",
+        "transaction_read_only": "on",
+        "tenant_context": "1",
+        "executing_search_path": "pg_catalog",
+        "rolsuper": "t",
+        "rolbypassrls": "t"
+      },
+      "exit_code": 0,
+      "returned_rows": 1,
+      "rows": [
+        {
+          "sampled": "5000",
+          "open_rows": "266",
+          "closed_over_30d": "3174",
+          "closed_over_90d": "2",
+          "closed_over_365d": "0",
+          "sample_first_interval": "2026-07-22 04:52:01.529998+00",
+          "sample_last_close": "2026-10-25 22:36:09.116507+00"
+        }
+      ],
+      "status": "ok",
+      "wall_seconds": 3.193
+    },
+    {
+      "query": "D5.4",
+      "mode": "metadata_or_aggregate",
+      "preflight": {
+        "executing_role": "operations_migrate",
+        "server_version_num": "160014",
+        "transaction_read_only": "on",
+        "tenant_context": "1",
+        "executing_search_path": "pg_catalog",
+        "rolsuper": "t",
+        "rolbypassrls": "t"
+      },
+      "exit_code": 0,
+      "returned_rows": 2,
+      "rows": [
+        {
+          "dataset": "capability_machine",
+          "sampled": "558",
+          "current_rows": "542",
+          "closed_episodes": "16"
+        },
+        {
+          "dataset": "capability_operator",
+          "sampled": "0",
+          "current_rows": "0",
+          "closed_episodes": "0"
+        }
+      ],
+      "status": "ok",
+      "wall_seconds": 0.212
+    },
+    {
+      "query": "D5.5",
+      "mode": "metadata_or_aggregate",
+      "preflight": {
+        "executing_role": "operations_migrate",
+        "server_version_num": "160014",
+        "transaction_read_only": "on",
+        "tenant_context": "1",
+        "executing_search_path": "pg_catalog",
+        "rolsuper": "t",
+        "rolbypassrls": "t"
+      },
+      "exit_code": 0,
+      "returned_rows": 68,
+      "rows": [
+        {
+          "schemaname": "catalog",
+          "tablename": "capability_assertion_machine",
+          "attname": "withdrawn_at",
+          "null_frac": "0.97126436",
+          "avg_width": "8",
+          "n_distinct": "2",
+          "correlation": "1"
+        },
+        {
+          "schemaname": "catalog",
+          "tablename": "category_assertion_machine",
+          "attname": "withdrawn_at",
+          "null_frac": "1",
+          "avg_width": "8",
+          "n_distinct": "0",
+          "correlation": ""
+        },
+        {
+          "schemaname": "catalog",
+          "tablename": "lolrmm_tool",
+          "attname": "withdrawn_at",
+          "null_frac": "1",
+          "avg_width": "8",
+          "n_distinct": "0",
+          "correlation": ""
+        },
+        {
+          "schemaname": "intel",
+          "tablename": "cpes",
+          "attname": "raw_nvd",
+          "null_frac": "0",
+          "avg_width": "557",
+          "n_distinct": "-1",
+          "correlation": "0.36269006"
+        },
+        {
+          "schemaname": "intel",
+          "tablename": "cves",
+          "attname": "raw_nvd",
+          "null_frac": "0.0071",
+          "avg_width": "147",
+          "n_distinct": "-0.9929",
+          "correlation": "0.78948927"
+        },
+        {
+          "schemaname": "ninja_agent_compliance",
+          "tablename": "client_platform_links",
+          "attname": "last_seen_at",
+          "null_frac": "0",
+          "avg_width": "8",
+          "n_distinct": "1",
+          "correlation": "1"
+        },
+        {
+          "schemaname": "ninja_agent_compliance",
+          "tablename": "compliance_findings",
+          "attname": "last_seen_at",
+          "null_frac": "0",
+          "avg_width": "8",
+          "n_distinct": "1100",
+          "correlation": "0.95830625"
+        },
+        {
+          "schemaname": "ninja_agent_compliance",
+          "tablename": "org_candidates",
+          "attname": "last_seen_at",
+          "null_frac": "0",
+          "avg_width": "8",
+          "n_distinct": "10",
+          "correlation": "0.26535267"
+        },
+        {
+          "schemaname": "ninja_agent_compliance",
+          "tablename": "platform_observations",
+          "attname": "last_seen_at",
+          "null_frac": "0.044",
+          "avg_width": "8",
+          "n_distinct": "42656",
+          "correlation": "0.8068833"
+        },
+        {
+          "schemaname": "ninja_agent_compliance",
+          "tablename": "platform_observations",
+          "attname": "observed_at",
+          "null_frac": "0",
+          "avg_width": "8",
+          "n_distinct": "246",
+          "correlation": "0.99919575"
+        },
+        {
+          "schemaname": "ninja_agent_compliance",
+          "tablename": "platform_observations",
+          "attname": "raw_data",
+          "null_frac": "0",
+          "avg_width": "595",
+          "n_distinct": "297992",
+          "correlation": "0.023102472"
+        },
+        {
+          "schemaname": "ninja_core",
+          "tablename": "device_troubleshooting_signal",
+          "attname": "last_seen_at",
+          "null_frac": "0.3461813",
+          "avg_width": "8",
+          "n_distinct": "-0.49726385",
+          "correlation": "0.00036904478"
+        },
+        {
+          "schemaname": "ninja_core",
+          "tablename": "devices",
+          "attname": "last_seen_at",
+          "null_frac": "0",
+          "avg_width": "8",
+          "n_distinct": "331",
+          "correlation": "0.13700274"
+        },
+        {
+          "schemaname": "ninja_core",
+          "tablename": "software_activity_queue",
+          "attname": "queued_at",
+          "null_frac": "0",
+          "avg_width": "8",
+          "n_distinct": "-1",
+          "correlation": "-0.06946604"
+        },
+        {
+          "schemaname": "ninja_core",
+          "tablename": "v_active_devices",
+          "attname": "last_seen_at",
+          "null_frac": "0",
+          "avg_width": "8",
+          "n_distinct": "1",
+          "correlation": "1"
+        },
+        {
+          "schemaname": "ninja_inventory",
+          "tablename": "identity_conflicts_current",
+          "attname": "last_seen_at",
+          "null_frac": "0",
+          "avg_width": "8",
+          "n_distinct": "-0.432",
+          "correlation": "0.35934868"
+        },
+        {
+          "schemaname": "ninja_inventory",
+          "tablename": "merge_candidates_current",
+          "attname": "last_seen_at",
+          "null_frac": "0",
+          "avg_width": "8",
+          "n_distinct": "-0.7777778",
+          "correlation": "-0.033333335"
+        },
+        {
+          "schemaname": "ninja_inventory",
+          "tablename": "serial_quality_current",
+          "attname": "last_seen_at",
+          "null_frac": "0.04624321",
+          "avg_width": "8",
+          "n_distinct": "-0.60742307",
+          "correlation": "0.4219018"
+        },
+        {
+          "schemaname": "ninja_inventory",
+          "tablename": "source_observations_current",
+          "attname": "last_seen_at",
+          "null_frac": "0.04624321",
+          "avg_width": "8",
+          "n_distinct": "-0.60742307",
+          "correlation": "0.3826593"
+        },
+        {
+          "schemaname": "ninja_inventory",
+          "tablename": "source_observations_current",
+          "attname": "observed_at",
+          "null_frac": "0",
+          "avg_width": "8",
+          "n_distinct": "81",
+          "correlation": "0.8619571"
+        },
+        {
+          "schemaname": "ninja_inventory",
+          "tablename": "source_observations_current",
+          "attname": "raw_data",
+          "null_frac": "0",
+          "avg_width": "586",
+          "n_distinct": "-1",
+          "correlation": "0.99809647"
+        },
+        {
+          "schemaname": "ninja_inventory",
+          "tablename": "unresolved_source_records_current",
+          "attname": "last_seen_at",
+          "null_frac": "0",
+          "avg_width": "8",
+          "n_distinct": "-0.97619045",
+          "correlation": "-0.14463982"
+        },
+        {
+          "schemaname": "ninja_inventory",
+          "tablename": "unresolved_source_records_current",
+          "attname": "observed_at",
+          "null_frac": "0",
+          "avg_width": "8",
+          "n_distinct": "-0.14285715",
+          "correlation": "-0.02844178"
+        },
+        {
+          "schemaname": "ninja_patches",
+          "tablename": "device_patch_signal",
+          "attname": "last_seen_at",
+          "null_frac": "0.0006062443",
+          "avg_width": "8",
+          "n_distinct": "-0.8923916",
+          "correlation": "0.16551591"
+        },
+        {
+          "schemaname": "operations",
+          "tablename": "agent_instances",
+          "attname": "effective_from",
+          "null_frac": "0",
+          "avg_width": "8",
+          "n_distinct": "161",
+          "correlation": "0.33970994"
+        },
+        {
+          "schemaname": "operations",
+          "tablename": "agent_instances",
+          "attname": "effective_to",
+          "null_frac": "1",
+          "avg_width": "8",
+          "n_distinct": "0",
+          "correlation": ""
+        },
+        {
+          "schemaname": "operations",
+          "tablename": "agent_instances",
+          "attname": "last_seen_at",
+          "null_frac": "0",
+          "avg_width": "8",
+          "n_distinct": "133",
+          "correlation": "0.5604954"
+        },
+        {
+          "schemaname": "operations",
+          "tablename": "assets",
+          "attname": "effective_from",
+          "null_frac": "0",
+          "avg_width": "8",
+          "n_distinct": "386",
+          "correlation": "0.21720228"
+        },
+        {
+          "schemaname": "operations",
+          "tablename": "assets",
+          "attname": "effective_to",
+          "null_frac": "1",
+          "avg_width": "8",
+          "n_distinct": "0",
+          "correlation": ""
+        },
+        {
+          "schemaname": "operations",
+          "tablename": "assets",
+          "attname": "last_seen_at",
+          "null_frac": "0",
+          "avg_width": "8",
+          "n_distinct": "423",
+          "correlation": "0.27208138"
+        },
+        {
+          "schemaname": "operations",
+          "tablename": "client_candidates",
+          "attname": "last_seen_at",
+          "null_frac": "0",
+          "avg_width": "8",
+          "n_distinct": "-0.7894737",
+          "correlation": "0.42969692"
+        },
+        {
+          "schemaname": "operations",
+          "tablename": "device_software_exposure_current",
+          "attname": "last_seen_at",
+          "null_frac": "0",
+          "avg_width": "8",
+          "n_distinct": "4",
+          "correlation": "0.5746177"
+        },
+        {
+          "schemaname": "operations",
+          "tablename": "entity_attribute_claim_current",
+          "attname": "withdrawn_at",
+          "null_frac": "0.75546664",
+          "avg_width": "8",
+          "n_distinct": "1139",
+          "correlation": "0.016481675"
+        },
+        {
+          "schemaname": "operations",
+          "tablename": "entity_attribute_claim_history",
+          "attname": "effective_from",
+          "null_frac": "0",
+          "avg_width": "8",
+          "n_distinct": "2437",
+          "correlation": "0.8082454"
+        },
+        {
+          "schemaname": "operations",
+          "tablename": "entity_attribute_claim_history",
+          "attname": "effective_to",
+          "null_frac": "0.2105",
+          "avg_width": "8",
+          "n_distinct": "1788",
+          "correlation": "0.7965383"
+        },
+        {
+          "schemaname": "operations",
+          "tablename": "entity_attribute_effective_dirty",
+          "attname": "queued_at",
+          "null_frac": "0",
+          "avg_width": "8",
+          "n_distinct": "1",
+          "correlation": "1"
+        },
+        {
+          "schemaname": "operations",
+          "tablename": "entity_observation_current",
+          "attname": "canonical_data",
+          "null_frac": "0",
+          "avg_width": "622",
+          "n_distinct": "-0.41359758",
+          "correlation": "0.38054773"
+        },
+        {
+          "schemaname": "operations",
+          "tablename": "entity_observation_current",
+          "attname": "last_seen_at",
+          "null_frac": "0",
+          "avg_width": "8",
+          "n_distinct": "299",
+          "correlation": "-0.06669116"
+        },
+        {
+          "schemaname": "operations",
+          "tablename": "entity_observation_current",
+          "attname": "observed_at",
+          "null_frac": "0",
+          "avg_width": "8",
+          "n_distinct": "299",
+          "correlation": "-0.06669116"
+        },
+        {
+          "schemaname": "operations",
+          "tablename": "entity_observation_current",
+          "attname": "raw_data",
+          "null_frac": "0",
+          "avg_width": "256",
+          "n_distinct": "-0.91237694",
+          "correlation": "0.37132552"
+        },
+        {
+          "schemaname": "operations",
+          "tablename": "entity_observation_current",
+          "attname": "withdrawn_at",
+          "null_frac": "0.8323689",
+          "avg_width": "8",
+          "n_distinct": "314",
+          "correlation": "0.52444017"
+        },
+        {
+          "schemaname": "operations",
+          "tablename": "entity_observation_history",
+          "attname": "effective_from",
+          "null_frac": "0",
+          "avg_width": "8",
+          "n_distinct": "2187",
+          "correlation": "0.92054695"
+        },
+        {
+          "schemaname": "operations",
+          "tablename": "entity_observation_history",
+          "attname": "effective_to",
+          "null_frac": "0.052033335",
+          "avg_width": "8",
+          "n_distinct": "2144",
+          "correlation": "0.9446736"
+        },
+        {
+          "schemaname": "operations",
+          "tablename": "entity_observation_history",
+          "attname": "last_seen_at",
+          "null_frac": "0",
+          "avg_width": "8",
+          "n_distinct": "2175",
+          "correlation": "0.9475557"
+        },
+        {
+          "schemaname": "operations",
+          "tablename": "entity_observation_history",
+          "attname": "material_data",
+          "null_frac": "0",
+          "avg_width": "718",
+          "n_distinct": "39263",
+          "correlation": "0.20180796"
+        },
+        {
+          "schemaname": "operations",
+          "tablename": "entity_observations",
+          "attname": "canonical_data",
+          "null_frac": "0",
+          "avg_width": "350",
+          "n_distinct": "90695",
+          "correlation": "0.09677908"
+        },
+        {
+          "schemaname": "operations",
+          "tablename": "entity_observations",
+          "attname": "observed_at",
+          "null_frac": "0",
+          "avg_width": "8",
+          "n_distinct": "3896",
+          "correlation": "0.9998427"
+        },
+        {
+          "schemaname": "operations",
+          "tablename": "entity_observations",
+          "attname": "raw_data",
+          "null_frac": "0",
+          "avg_width": "143",
+          "n_distinct": "38721",
+          "correlation": "0.17102712"
+        },
+        {
+          "schemaname": "operations",
+          "tablename": "entity_relationship_dirty",
+          "attname": "queued_at",
+          "null_frac": "0",
+          "avg_width": "8",
+          "n_distinct": "-1",
+          "correlation": "0.9421944"
+        },
+        {
+          "schemaname": "operations",
+          "tablename": "entity_relationship_evidence_current",
+          "attname": "withdrawn_at",
+          "null_frac": "0.9948079",
+          "avg_width": "8",
+          "n_distinct": "29",
+          "correlation": "-0.24690382"
+        },
+        {
+          "schemaname": "operations",
+          "tablename": "entity_relationship_evidence_history",
+          "attname": "effective_from",
+          "null_frac": "0",
+          "avg_width": "8",
+          "n_distinct": "133",
+          "correlation": "0.098104395"
+        },
+        {
+          "schemaname": "operations",
+          "tablename": "entity_relationship_evidence_history",
+          "attname": "effective_to",
+          "null_frac": "0.5956754",
+          "avg_width": "8",
+          "n_distinct": "52",
+          "correlation": "-0.07430076"
+        },
+        {
+          "schemaname": "operations",
+          "tablename": "entity_source_link_history",
+          "attname": "effective_from",
+          "null_frac": "0",
+          "avg_width": "8",
+          "n_distinct": "-0.10516432",
+          "correlation": "0.9047319"
+        },
+        {
+          "schemaname": "operations",
+          "tablename": "entity_source_link_history",
+          "attname": "effective_to",
+          "null_frac": "0.958",
+          "avg_width": "8",
+          "n_distinct": "517",
+          "correlation": "-0.40519786"
+        },
+        {
+          "schemaname": "operations",
+          "tablename": "entity_source_links",
+          "attname": "last_seen_at",
+          "null_frac": "0",
+          "avg_width": "8",
+          "n_distinct": "552",
+          "correlation": "-0.122953914"
+        },
+        {
+          "schemaname": "operations",
+          "tablename": "findings",
+          "attname": "last_seen_at",
+          "null_frac": "0",
+          "avg_width": "8",
+          "n_distinct": "738",
+          "correlation": "0.56938535"
+        },
+        {
+          "schemaname": "operations",
+          "tablename": "os_instances",
+          "attname": "effective_from",
+          "null_frac": "0",
+          "avg_width": "8",
+          "n_distinct": "330",
+          "correlation": "0.31131554"
+        },
+        {
+          "schemaname": "operations",
+          "tablename": "os_instances",
+          "attname": "effective_to",
+          "null_frac": "1",
+          "avg_width": "8",
+          "n_distinct": "0",
+          "correlation": ""
+        },
+        {
+          "schemaname": "operations",
+          "tablename": "os_instances",
+          "attname": "last_seen_at",
+          "null_frac": "0",
+          "avg_width": "8",
+          "n_distinct": "490",
+          "correlation": "0.12725241"
+        },
+        {
+          "schemaname": "operations",
+          "tablename": "safety_signal",
+          "attname": "observed_at",
+          "null_frac": "0",
+          "avg_width": "8",
+          "n_distinct": "-0.8488047",
+          "correlation": "0.59363574"
+        },
+        {
+          "schemaname": "operations",
+          "tablename": "software_installation_history",
+          "attname": "effective_from",
+          "null_frac": "0",
+          "avg_width": "8",
+          "n_distinct": "26370",
+          "correlation": "0.14420502"
+        },
+        {
+          "schemaname": "operations",
+          "tablename": "software_installation_history",
+          "attname": "effective_to",
+          "null_frac": "0.3931",
+          "avg_width": "8",
+          "n_distinct": "22648",
+          "correlation": "0.49749014"
+        },
+        {
+          "schemaname": "operations",
+          "tablename": "software_installation_history",
+          "attname": "last_seen_at",
+          "null_frac": "0",
+          "avg_width": "8",
+          "n_distinct": "17728",
+          "correlation": "0.8192918"
+        },
+        {
+          "schemaname": "operations",
+          "tablename": "software_reclassification_targets",
+          "attname": "consumed_at",
+          "null_frac": "0.004333333",
+          "avg_width": "8",
+          "n_distinct": "335",
+          "correlation": "0.97444403"
+        },
+        {
+          "schemaname": "operations",
+          "tablename": "software_reclassification_targets",
+          "attname": "queued_at",
+          "null_frac": "0",
+          "avg_width": "8",
+          "n_distinct": "805",
+          "correlation": "0.97450864"
+        },
+        {
+          "schemaname": "operations",
+          "tablename": "source_record_seen_daily",
+          "attname": "rollup_day",
+          "null_frac": "0",
+          "avg_width": "4",
+          "n_distinct": "126",
+          "correlation": "0.98801863"
+        },
+        {
+          "schemaname": "operations",
+          "tablename": "source_run_queue",
+          "attname": "queued_at",
+          "null_frac": "0",
+          "avg_width": "8",
+          "n_distinct": "-1",
+          "correlation": "0.44190425"
+        },
+        {
+          "schemaname": "operations",
+          "tablename": "unmatched_source_groups",
+          "attname": "last_seen_at",
+          "null_frac": "0",
+          "avg_width": "8",
+          "n_distinct": "-0.46153846",
+          "correlation": "0.6703297"
+        }
+      ],
+      "status": "ok",
+      "wall_seconds": 1.084
+    }
+  ],
+  "client_wall_seconds": 6.813,
+  "query_document_sha256": "3de18e913eb2a191a78920da4c8c6484fb148e95fed65c18cabf83d48d6f818d",
+  "submitted_sql_sha256": {
+    "D5.1": "78cf42554d2cef2978335b128e16480289b90e5825b2bf0f69a6a014374fa5ba",
+    "D5.4": "47f1bd90998f09805a63b4e0edec788f729a6d5d8d6606b014da5a7ebf3d8e19",
+    "D5.5": "526e144afde838141524a08dd96962e64e4a9e0b4d44c957827e2455b394e666"
+  }
+}

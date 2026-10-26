@@ -190,3 +190,31 @@ do not open competing blueprints for the same work.
 - Section: PLAN-014 — Requirement applicability
 - Resume gate: After deployment, run platform-evaluate and compare covered counts and requirement-state drift with the measured impact; then mark complete.
 - Last checked: 2026-10-21 (implemented with migration 0333 and ADR-0036; local validation passed; deployment pending).
+
+## PLAN-017 — Consolidated data architecture review and target design
+
+- Scope: Adopted consolidated architecture, lifecycle, retention, recovery, efficiency, index/view, and A1–A10 review from acquisition through operator results and expiry; assessment and proposed design only, no remediation
+- Status: active
+- Defined: 2026-10-23
+- Started: 2026-10-25
+- Completed: —
+- Blueprint: BLUEPRINT.md
+- Source: docs/plans/PLAN-017-consolidated-data-architecture-review-draft.md
+- Section: PLAN-017 — Consolidated data architecture review and target design
+- Original source: operations/docs/plans/PLAN-017-data-architecture-review.md
+- Resume gate: Phase 1 accepted by independent review (debate Point 39, Claude round 20, 2026-10-26); no acceptance blocker. N1–N4/N6 wording corrections are applied in the amended assessment, and N5 is applied to TODO; the accepted assessment bytes and original checkpoint remain preserved. Before later-phase work, review the concurrent 7a0e791 identity/Operations source delta recorded in the correction checkpoint. Phase 2 local mechanisms, further measurements, Phases 3–5, remediation, deployments, commits and pushes each require separate explicit authorization; Phase 2 entry defines pass/fail criteria. PLAN-018 remains absorbed. PLAN-012/014/004/015/002/005/007 retain implementation ownership. Recheck current HEAD/digests, preserve concurrent work/evidence, and use the root blueprint.
+- Last checked: 2026-10-26 (independent review accepted Phase 1 at HEAD 054dcfb; concurrent HEAD 7a0e791 now has eight changed paths among the 949-file baseline, three previously known and five additional, with digests recorded; N1–N6 wording corrections applied or verified; A/B/C evidence hashes match. F08 Medium conditional, U04 candidate and 7–16 engineer-day later-phase range unchanged. This pass made documentation edits only; no probes, experiments, runtime changes, commits or pushes by this session. Whole PLAN-017 remains open).
+
+## PLAN-018 — Independent end-to-end data and ingest architecture review
+
+- Scope: Independent end-to-end data and ingest architecture review strictly for data integrity, performance, and avoiding unnecessary duplication; includes collection completeness, authority, constraints, repeated calculations/storage, processing order, and reader consistency
+- Status: superseded
+- Defined: 2026-10-23
+- Started: —
+- Completed: —
+- Blueprint: —
+- Source: docs/plans/PLAN-018-end-to-end-data-ingest-review.md
+- Section: PLAN-018 — Independent end-to-end data and ingest architecture review
+- Consolidated charter: docs/plans/PLAN-017-consolidated-data-architecture-review-draft.md
+- Resume gate: Superseded by PLAN-017 on 2026-10-25 through explicit user adoption of the consolidated charter. Preserve this original source for provenance; resume only through PLAN-017 and its current authorization gates.
+- Last checked: 2026-10-25 (absorbed into PLAN-017; source text unchanged. PLAN-018 never independently entered execution, so Started and Completed remain —).

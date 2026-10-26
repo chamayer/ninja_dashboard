@@ -1,0 +1,98 @@
+{
+  "batch": "D1",
+  "captured_at_utc": "2026-10-25T23:07:55.786355+00:00",
+  "wall_seconds": 0.245,
+  "stop_reason": null,
+  "results": [
+    {
+      "query": "D1.3",
+      "mode": "metadata_or_aggregate",
+      "preflight": {
+        "executing_role": "operations_migrate",
+        "server_version_num": "160014",
+        "transaction_read_only": "on",
+        "tenant_context": "1",
+        "executing_search_path": "pg_catalog",
+        "rolsuper": "t",
+        "rolbypassrls": "t"
+      },
+      "exit_code": 0,
+      "returned_rows": 6,
+      "rows": [
+        {
+          "schema_name": "operations",
+          "relation_name": "run_log",
+          "index_name": "idx_run_log_kind_started",
+          "amname": "btree",
+          "indisprimary": "f",
+          "indisunique": "f",
+          "indisvalid": "t",
+          "indisready": "t",
+          "index_definition": "CREATE INDEX idx_run_log_kind_started ON operations.run_log USING btree (tenant_id, kind, started_at)"
+        },
+        {
+          "schema_name": "operations",
+          "relation_name": "run_log",
+          "index_name": "run_log_pkey",
+          "amname": "btree",
+          "indisprimary": "t",
+          "indisunique": "t",
+          "indisvalid": "t",
+          "indisready": "t",
+          "index_definition": "CREATE UNIQUE INDEX run_log_pkey ON operations.run_log USING btree (id)"
+        },
+        {
+          "schema_name": "operations",
+          "relation_name": "run_log",
+          "index_name": "run_log_tenant_id_20980b59",
+          "amname": "btree",
+          "indisprimary": "f",
+          "indisunique": "f",
+          "indisvalid": "t",
+          "indisready": "t",
+          "index_definition": "CREATE INDEX run_log_tenant_id_20980b59 ON operations.run_log USING btree (tenant_id)"
+        },
+        {
+          "schema_name": "operations",
+          "relation_name": "software_reclassification_targets",
+          "index_name": "software_reclassification_targets_pending",
+          "amname": "btree",
+          "indisprimary": "f",
+          "indisunique": "f",
+          "indisvalid": "t",
+          "indisready": "t",
+          "index_definition": "CREATE INDEX software_reclassification_targets_pending ON operations.software_reclassification_targets USING btree (tenant_id, queued_at) WHERE (consumed_at IS NULL)"
+        },
+        {
+          "schema_name": "operations",
+          "relation_name": "software_reclassification_targets",
+          "index_name": "software_reclassification_targets_pending_unique",
+          "amname": "btree",
+          "indisprimary": "f",
+          "indisunique": "t",
+          "indisvalid": "t",
+          "indisready": "t",
+          "index_definition": "CREATE UNIQUE INDEX software_reclassification_targets_pending_unique ON operations.software_reclassification_targets USING btree (tenant_id, target_key, source) WHERE (consumed_at IS NULL)"
+        },
+        {
+          "schema_name": "operations",
+          "relation_name": "software_reclassification_targets",
+          "index_name": "software_reclassification_targets_pkey",
+          "amname": "btree",
+          "indisprimary": "t",
+          "indisunique": "t",
+          "indisvalid": "t",
+          "indisready": "t",
+          "index_definition": "CREATE UNIQUE INDEX software_reclassification_targets_pkey ON operations.software_reclassification_targets USING btree (id)"
+        }
+      ],
+      "status": "ok",
+      "wall_seconds": 0.245
+    }
+  ],
+  "client_wall_seconds": 2.485,
+  "query_document_sha256": "7d7dcff73390dc6cf39cd28a526eef21febb1e95eb8fcbe518b8ddccc2900aef",
+  "submitted_sql_sha256": {
+    "D1.3": "f4be19a383625afebe8be527388928933ac787ce66e3af9db24ec7a53c76f700"
+  }
+}

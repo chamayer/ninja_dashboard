@@ -1,0 +1,19 @@
+{
+  "captured_at_utc": "2026-10-25T22:46:46.352801+00:00",
+  "user_authorization": "retry",
+  "helper_exit_code": 0,
+  "preflight_passed": true,
+  "sql_sha256": "470812373d16cc677ad64a05ba1c42eae89577155ec81e057076fd9e2e019adc",
+  "raw_output_retained": false,
+  "numbered_bodies_submitted": [],
+  "scope": "A/B1 only; C paused per latest scheduling confirmation; B2 unapproved",
+  "preflight": {
+    "executing_role": "operations_migrate",
+    "server_version_num": "160014",
+    "transaction_read_only": "on",
+    "tenant_context": "1",
+    "executing_search_path": "pg_catalog",
+    "rolsuper": "t",
+    "rolbypassrls": "t"
+  }
+}

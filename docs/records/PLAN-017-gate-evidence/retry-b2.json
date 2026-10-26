@@ -1,0 +1,208 @@
+{
+  "batch": "D3",
+  "captured_at_utc": "2026-10-25T23:05:40.716359+00:00",
+  "wall_seconds": 8.254,
+  "stop_reason": null,
+  "results": [
+    {
+      "query": "D3.1",
+      "mode": "metadata_or_aggregate",
+      "preflight": {
+        "executing_role": "operations_migrate",
+        "server_version_num": "160014",
+        "transaction_read_only": "on",
+        "tenant_context": "1",
+        "executing_search_path": "pg_catalog",
+        "rolsuper": "t",
+        "rolbypassrls": "t"
+      },
+      "exit_code": 0,
+      "returned_rows": 1,
+      "rows": [
+        {
+          "sampled": "5000",
+          "sampled_tenants": "1",
+          "parity_candidates": "0",
+          "multiple_open_candidates": "0"
+        }
+      ],
+      "status": "ok",
+      "wall_seconds": 3.206
+    },
+    {
+      "query": "D3.2",
+      "mode": "metadata_or_aggregate",
+      "preflight": {
+        "executing_role": "operations_migrate",
+        "server_version_num": "160014",
+        "transaction_read_only": "on",
+        "tenant_context": "1",
+        "executing_search_path": "pg_catalog",
+        "rolsuper": "t",
+        "rolbypassrls": "t"
+      },
+      "exit_code": 0,
+      "returned_rows": 1,
+      "rows": [
+        {
+          "sampled": "5000",
+          "missing_device": "0",
+          "device_tenant_mismatch": "0",
+          "missing_client": "0",
+          "client_tenant_mismatch": "0",
+          "client_attribution_candidates": "10",
+          "missing_source_reference": "0",
+          "source_scope_candidates": "0"
+        }
+      ],
+      "status": "ok",
+      "wall_seconds": 0.389
+    },
+    {
+      "query": "D3.3",
+      "mode": "metadata_or_aggregate",
+      "preflight": {
+        "executing_role": "operations_migrate",
+        "server_version_num": "160014",
+        "transaction_read_only": "on",
+        "tenant_context": "1",
+        "executing_search_path": "pg_catalog",
+        "rolsuper": "t",
+        "rolbypassrls": "t"
+      },
+      "exit_code": 0,
+      "returned_rows": 1,
+      "rows": [
+        {
+          "sampled": "5000",
+          "unlinked": "0",
+          "missing_version": "0",
+          "missing_product": "0",
+          "missing_publisher": "0"
+        }
+      ],
+      "status": "ok",
+      "wall_seconds": 0.83
+    },
+    {
+      "query": "D3.4",
+      "mode": "metadata_or_aggregate",
+      "preflight": {
+        "executing_role": "operations_migrate",
+        "server_version_num": "160014",
+        "transaction_read_only": "on",
+        "tenant_context": "1",
+        "executing_search_path": "pg_catalog",
+        "rolsuper": "t",
+        "rolbypassrls": "t"
+      },
+      "exit_code": 0,
+      "returned_rows": 1,
+      "rows": [
+        {
+          "sampled": "5000",
+          "missing_current": "0",
+          "current_scope_candidates": "0",
+          "missing_run": "0",
+          "run_tenant_mismatch": "0",
+          "provenance_candidates": "0"
+        }
+      ],
+      "status": "ok",
+      "wall_seconds": 3.143
+    },
+    {
+      "query": "D3.5",
+      "mode": "metadata_or_aggregate",
+      "preflight": {
+        "executing_role": "operations_migrate",
+        "server_version_num": "160014",
+        "transaction_read_only": "on",
+        "tenant_context": "1",
+        "executing_search_path": "pg_catalog",
+        "rolsuper": "t",
+        "rolbypassrls": "t"
+      },
+      "exit_code": 0,
+      "returned_rows": 1,
+      "rows": [
+        {
+          "sampled": "5000",
+          "complete_count_candidates": "2355",
+          "time_order_candidates": "0",
+          "recorded_complete_empty": "0"
+        }
+      ],
+      "status": "ok",
+      "wall_seconds": 0.25
+    },
+    {
+      "query": "D3.6",
+      "mode": "metadata_or_aggregate",
+      "preflight": {
+        "executing_role": "operations_migrate",
+        "server_version_num": "160014",
+        "transaction_read_only": "on",
+        "tenant_context": "1",
+        "executing_search_path": "pg_catalog",
+        "rolsuper": "t",
+        "rolbypassrls": "t"
+      },
+      "exit_code": 0,
+      "returned_rows": 2,
+      "rows": [
+        {
+          "dataset": "active_jobs_prefix",
+          "sampled": "0",
+          "pending_in_sample": "0",
+          "oldest_pending_in_sample": "",
+          "expired_lease_candidates": "0"
+        },
+        {
+          "dataset": "effective_dirty_prefix",
+          "sampled": "0",
+          "pending_in_sample": "0",
+          "oldest_pending_in_sample": "",
+          "expired_lease_candidates": ""
+        }
+      ],
+      "status": "ok",
+      "wall_seconds": 0.251
+    },
+    {
+      "query": "D3.7",
+      "mode": "metadata_or_aggregate",
+      "preflight": {
+        "executing_role": "operations_migrate",
+        "server_version_num": "160014",
+        "transaction_read_only": "on",
+        "tenant_context": "1",
+        "executing_search_path": "pg_catalog",
+        "rolsuper": "t",
+        "rolbypassrls": "t"
+      },
+      "exit_code": 0,
+      "returned_rows": 1,
+      "rows": [
+        {
+          "sampled_open_drift_records": "597",
+          "recorded_within_24h": "597",
+          "sample_oldest_last_found": "2026-10-25 23:01:19.589153+00"
+        }
+      ],
+      "status": "ok",
+      "wall_seconds": 0.184
+    }
+  ],
+  "client_wall_seconds": 12.063,
+  "query_document_sha256": "7d7dcff73390dc6cf39cd28a526eef21febb1e95eb8fcbe518b8ddccc2900aef",
+  "submitted_sql_sha256": {
+    "D3.1": "7b7d0accdc449cdeac3e8a40622a9526d4ab7f321e89c8501b8da16f16901b28",
+    "D3.2": "6ffd47c8eb5ce359e05dd620c0fcf4876f6500c457d3145793d70a183c2cc300",
+    "D3.3": "34f4525290b452ad42003c618673f01d24f7883efdfad0693cd71d7553eb510e",
+    "D3.4": "14a9e71f0484524b08be14b11cd0de0fc76513096ba869cd91b3cdf41c77deb9",
+    "D3.5": "055d1799ef7f78e120eb5856d1901bf9be8caf54c4654361f656072d563e85c9",
+    "D3.6": "6f907ec19d4d3f6a2c82dd687a062e6eefa92446fec9f2f8635c0b96e4203d23",
+    "D3.7": "1df5553ae16155a00cf3fb199cdbc0dad23fc12b4c80a857cb19048891df4d80"
+  }
+}

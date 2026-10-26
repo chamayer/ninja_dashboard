@@ -1,0 +1,136 @@
+{
+  "batch": "D5",
+  "captured_at_utc": "2026-10-25T23:12:56.567623+00:00",
+  "wall_seconds": 0.398,
+  "stop_reason": null,
+  "results": [
+    {
+      "query": "D5.2",
+      "mode": "plain_explain",
+      "preflight": {
+        "executing_role": "operations_migrate",
+        "server_version_num": "160014",
+        "transaction_read_only": "on",
+        "tenant_context": "1",
+        "executing_search_path": "pg_catalog",
+        "rolsuper": "t",
+        "rolbypassrls": "t"
+      },
+      "exit_code": 0,
+      "returned_rows": 1,
+      "plan": {
+        "Node Type": "Sort",
+        "Parallel Aware": false,
+        "Async Capable": false,
+        "Startup Cost": 318.99,
+        "Total Cost": 319.02,
+        "Plan Rows": 10,
+        "Plan Width": 72,
+        "Plans": [
+          {
+            "Node Type": "Aggregate",
+            "Strategy": "Hashed",
+            "Partial Mode": "Simple",
+            "Parent Relationship": "Outer",
+            "Parallel Aware": false,
+            "Async Capable": false,
+            "Startup Cost": 318.7,
+            "Total Cost": 318.83,
+            "Plan Rows": 10,
+            "Plan Width": 72,
+            "Plans": [
+              {
+                "Node Type": "Seq Scan",
+                "Parent Relationship": "Outer",
+                "Parallel Aware": false,
+                "Async Capable": false,
+                "Relation Name": "run_log",
+                "Alias": "run_log",
+                "Startup Cost": 0.0,
+                "Total Cost": 295.44,
+                "Plan Rows": 1329,
+                "Plan Width": 53
+              }
+            ]
+          }
+        ]
+      },
+      "status": "ok",
+      "wall_seconds": 0.216
+    },
+    {
+      "query": "D5.3",
+      "mode": "plain_explain",
+      "preflight": {
+        "executing_role": "operations_migrate",
+        "server_version_num": "160014",
+        "transaction_read_only": "on",
+        "tenant_context": "1",
+        "executing_search_path": "pg_catalog",
+        "rolsuper": "t",
+        "rolbypassrls": "t"
+      },
+      "exit_code": 0,
+      "returned_rows": 1,
+      "plan": {
+        "Node Type": "Aggregate",
+        "Strategy": "Plain",
+        "Partial Mode": "Simple",
+        "Parallel Aware": false,
+        "Async Capable": false,
+        "Startup Cost": 40.64,
+        "Total Cost": 40.65,
+        "Plan Rows": 1,
+        "Plan Width": 32,
+        "Plans": [
+          {
+            "Node Type": "Limit",
+            "Parent Relationship": "InitPlan",
+            "Subplan Name": "CTE sample",
+            "Parallel Aware": false,
+            "Async Capable": false,
+            "Startup Cost": 0.14,
+            "Total Cost": 35.44,
+            "Plan Rows": 189,
+            "Plan Width": 8,
+            "Plans": [
+              {
+                "Node Type": "Index Only Scan",
+                "Parent Relationship": "Outer",
+                "Parallel Aware": false,
+                "Async Capable": false,
+                "Scan Direction": "Forward",
+                "Index Name": "software_reclassification_targets_pending",
+                "Relation Name": "software_reclassification_targets",
+                "Alias": "software_reclassification_targets",
+                "Startup Cost": 0.14,
+                "Total Cost": 35.44,
+                "Plan Rows": 189,
+                "Plan Width": 8
+              }
+            ]
+          },
+          {
+            "Node Type": "CTE Scan",
+            "Parent Relationship": "Outer",
+            "Parallel Aware": false,
+            "Async Capable": false,
+            "Alias": "sample",
+            "Startup Cost": 0.0,
+            "Total Cost": 3.78,
+            "Plan Rows": 189,
+            "Plan Width": 8
+          }
+        ]
+      },
+      "status": "ok",
+      "wall_seconds": 0.182
+    }
+  ],
+  "client_wall_seconds": 4.203,
+  "query_document_sha256": "7d7dcff73390dc6cf39cd28a526eef21febb1e95eb8fcbe518b8ddccc2900aef",
+  "submitted_sql_sha256": {
+    "D5.2": "74d744e92664c1d0ca903b2f274e408d0a5e8fc0fcd2967f42c9d6dd3d9e1f03",
+    "D5.3": "a912b5398ec3896dab9fd9be469c14c59ee9b63a23e16aef80954b2d644d3c34"
+  }
+}

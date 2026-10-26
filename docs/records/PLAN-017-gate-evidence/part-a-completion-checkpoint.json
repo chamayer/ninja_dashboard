@@ -1,0 +1,14 @@
+{
+  "recorded_at_utc": "2026-10-25T23:20:49.844762+00:00",
+  "head": "fcb488a0a852ca85b25912b349f05ade5b56f011",
+  "checked_source_paths": 951,
+  "unreconciled_source_deltas": [],
+  "original_six_evidence_hashes_match": true,
+  "new_migration_0345_sha256": "3965962f4620f30d2199e0e5be8b2ae3d4f466a078c4523c3ed66364a4795fcf",
+  "Part_A_query_set_complete": true,
+  "B1_and_approved_B2_complete": true,
+  "Phase_1_complete": false,
+  "Codex_probe_window": "released; no active probe",
+  "C": "Separate Claude checkpoint reports completed probes/no active probe; overlap/deployment consistency not verified here",
+  "runtime_changes_commits_pushes_deployments_by_this_session": false
+}

@@ -7,6 +7,16 @@ Read Inbox at the start of every session.
 
 ## Inbox
 
+- [ ] **PLAN-017 — Gated follow-up verification:** after independent Phase 1
+      acceptance and separate authorization, reuse disposable fixtures for
+      complete/partial/empty acquisition (F01/F08), cursor/demand handoff,
+      same-title mutation during target acknowledgment (U04), first-identity
+      publication, and expiry/catalog recovery. Required setups and owners
+      are in [the assessment](docs/records/PLAN-017-phase-1-assessment.md);
+      pass/fail criteria are defined at Phase 2 entry. Missing
+      writer/refresh/capacity and ordinary-user/filter/content parity measures
+      require their own justified scope. This is deferred verification, not
+      approved remediation or a request to rerun completed A/B/C.
 - [ ] Operations M0 build is now tracked in module docs:
       `operations/BLUEPRINT.md`, `operations/SESSIONS.md`, and
       `operations/TODO.md`. Review current M0.3-M0.10 WIP before commit;

@@ -1,0 +1,25 @@
+{
+  "recorded_at_utc": "2026-10-25T23:14:40.514998+00:00",
+  "fresh_attempt_authorized": true,
+  "fresh_plain_plans_captured": true,
+  "D5.2": {
+    "startup_cost": 318.99,
+    "total_cost": 319.02,
+    "root_estimated_rows": 10,
+    "scan": "Seq Scan run_log",
+    "estimated_matching_rows": 1329,
+    "observed_relation_estimated_rows": 6292,
+    "observed_main_bytes": 892928,
+    "gate": "Written index-backed-access prerequisite not met; no SELECT submitted"
+  },
+  "D5.3": {
+    "startup_cost": 40.64,
+    "total_cost": 40.65,
+    "root_estimated_rows": 1,
+    "scan": "Index Only Scan software_reclassification_targets_pending",
+    "gate": "Installed valid/ready index and affordable plan confirmed; no SELECT submitted because combined wall budget expired during review"
+  },
+  "budget_stop": "30-second fresh window elapsed before SELECT submission; no automatic reset/retry",
+  "pending_request": "One new bounded SELECT batch for both, with explicit one-batch D5.2 sequential-scan exception; unchanged SQL/wrappers/privacy/timeouts",
+  "scope": "No C, maintenance, repairs, migrations, deployments, commits or pushes"
+}

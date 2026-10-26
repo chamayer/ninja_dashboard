@@ -1,0 +1,6 @@
+{
+  "authorization": "Authorize one fresh D5 attempt",
+  "scope": "Exact D5.2/3 plain plans then SELECTs only after index/plan review; new combined 30-second wall budget, existing wrappers/timeouts/privacy unchanged",
+  "started_at_utc": "2026-10-25T23:12:49.916309+00:00",
+  "local_monotonic_started": 1674190.906
+}

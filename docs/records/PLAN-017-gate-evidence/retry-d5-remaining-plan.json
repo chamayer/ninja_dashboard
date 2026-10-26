@@ -1,0 +1,11 @@
+{
+  "batch": "D5",
+  "stop_reason": "helper_error",
+  "helper_exit_code": 255,
+  "client_wall_seconds": 21.86,
+  "query_document_sha256": "7d7dcff73390dc6cf39cd28a526eef21febb1e95eb8fcbe518b8ddccc2900aef",
+  "submitted_sql_sha256": {
+    "D5.2": "74d744e92664c1d0ca903b2f274e408d0a5e8fc0fcd2967f42c9d6dd3d9e1f03",
+    "D5.3": "a912b5398ec3896dab9fd9be469c14c59ee9b63a23e16aef80954b2d644d3c34"
+  }
+}

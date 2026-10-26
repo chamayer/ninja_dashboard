@@ -1,0 +1,1006 @@
+{
+  "batch": "D3",
+  "captured_at_utc": "2026-10-25T22:49:02.518839+00:00",
+  "wall_seconds": 1.766,
+  "stop_reason": null,
+  "results": [
+    {
+      "query": "D3.1",
+      "mode": "plain_explain",
+      "preflight": {
+        "executing_role": "operations_migrate",
+        "server_version_num": "160014",
+        "transaction_read_only": "on",
+        "tenant_context": "1",
+        "executing_search_path": "pg_catalog",
+        "rolsuper": "t",
+        "rolbypassrls": "t"
+      },
+      "exit_code": 0,
+      "returned_rows": 1,
+      "plan": {
+        "Node Type": "Aggregate",
+        "Strategy": "Plain",
+        "Partial Mode": "Simple",
+        "Parallel Aware": false,
+        "Async Capable": false,
+        "Startup Cost": 101663.03,
+        "Total Cost": 101663.04,
+        "Plan Rows": 1,
+        "Plan Width": 32,
+        "Plans": [
+          {
+            "Node Type": "Limit",
+            "Parent Relationship": "InitPlan",
+            "Subplan Name": "CTE sample",
+            "Parallel Aware": false,
+            "Async Capable": false,
+            "Startup Cost": 0.42,
+            "Total Cost": 16618.33,
+            "Plan Rows": 5000,
+            "Plan Width": 60,
+            "Plans": [
+              {
+                "Node Type": "Index Scan",
+                "Parent Relationship": "Outer",
+                "Parallel Aware": false,
+                "Async Capable": false,
+                "Scan Direction": "Forward",
+                "Index Name": "entity_observation_current_pkey",
+                "Relation Name": "entity_observation_current",
+                "Alias": "entity_observation_current",
+                "Startup Cost": 0.42,
+                "Total Cost": 306335.1,
+                "Plan Rows": 92170,
+                "Plan Width": 60
+              }
+            ]
+          },
+          {
+            "Node Type": "Sort",
+            "Parent Relationship": "Outer",
+            "Parallel Aware": false,
+            "Async Capable": false,
+            "Startup Cost": 407.19,
+            "Total Cost": 419.69,
+            "Plan Rows": 5000,
+            "Plan Width": 605,
+            "Plans": [
+              {
+                "Node Type": "CTE Scan",
+                "Parent Relationship": "Outer",
+                "Parallel Aware": false,
+                "Async Capable": false,
+                "Alias": "sample",
+                "Startup Cost": 0.0,
+                "Total Cost": 100.0,
+                "Plan Rows": 5000,
+                "Plan Width": 605
+              }
+            ]
+          },
+          {
+            "Node Type": "Aggregate",
+            "Strategy": "Plain",
+            "Partial Mode": "Simple",
+            "Parent Relationship": "SubPlan",
+            "Subplan Name": "SubPlan 2",
+            "Parallel Aware": false,
+            "Async Capable": false,
+            "Startup Cost": 8.44,
+            "Total Cost": 8.45,
+            "Plan Rows": 1,
+            "Plan Width": 8,
+            "Plans": [
+              {
+                "Node Type": "Index Only Scan",
+                "Parent Relationship": "Outer",
+                "Parallel Aware": false,
+                "Async Capable": false,
+                "Scan Direction": "Forward",
+                "Index Name": "uq_obs_hist_open_stable_identity",
+                "Relation Name": "entity_observation_history",
+                "Alias": "h",
+                "Startup Cost": 0.41,
+                "Total Cost": 8.44,
+                "Plan Rows": 1,
+                "Plan Width": 0
+              }
+            ]
+          },
+          {
+            "Node Type": "Aggregate",
+            "Strategy": "Plain",
+            "Partial Mode": "Simple",
+            "Parent Relationship": "SubPlan",
+            "Subplan Name": "SubPlan 3",
+            "Parallel Aware": false,
+            "Async Capable": false,
+            "Startup Cost": 8.44,
+            "Total Cost": 8.45,
+            "Plan Rows": 1,
+            "Plan Width": 8,
+            "Plans": [
+              {
+                "Node Type": "Index Only Scan",
+                "Parent Relationship": "Outer",
+                "Parallel Aware": false,
+                "Async Capable": false,
+                "Scan Direction": "Forward",
+                "Index Name": "uq_obs_hist_open_stable_identity",
+                "Relation Name": "entity_observation_history",
+                "Alias": "h_1",
+                "Startup Cost": 0.41,
+                "Total Cost": 8.44,
+                "Plan Rows": 1,
+                "Plan Width": 0
+              }
+            ]
+          }
+        ]
+      },
+      "status": "ok",
+      "wall_seconds": 0.432
+    },
+    {
+      "query": "D3.2",
+      "mode": "plain_explain",
+      "preflight": {
+        "executing_role": "operations_migrate",
+        "server_version_num": "160014",
+        "transaction_read_only": "on",
+        "tenant_context": "1",
+        "executing_search_path": "pg_catalog",
+        "rolsuper": "t",
+        "rolbypassrls": "t"
+      },
+      "exit_code": 0,
+      "returned_rows": 1,
+      "plan": {
+        "Node Type": "Aggregate",
+        "Strategy": "Plain",
+        "Partial Mode": "Simple",
+        "Parallel Aware": false,
+        "Async Capable": false,
+        "Startup Cost": 19115.84,
+        "Total Cost": 19115.85,
+        "Plan Rows": 1,
+        "Plan Width": 64,
+        "Plans": [
+          {
+            "Node Type": "Limit",
+            "Parent Relationship": "InitPlan",
+            "Subplan Name": "CTE sample",
+            "Parallel Aware": false,
+            "Async Capable": false,
+            "Startup Cost": 0.42,
+            "Total Cost": 16618.33,
+            "Plan Rows": 5000,
+            "Plan Width": 88,
+            "Plans": [
+              {
+                "Node Type": "Index Scan",
+                "Parent Relationship": "Outer",
+                "Parallel Aware": false,
+                "Async Capable": false,
+                "Scan Direction": "Forward",
+                "Index Name": "entity_observation_current_pkey",
+                "Relation Name": "entity_observation_current",
+                "Alias": "entity_observation_current",
+                "Startup Cost": 0.42,
+                "Total Cost": 306335.1,
+                "Plan Rows": 92170,
+                "Plan Width": 88
+              }
+            ]
+          },
+          {
+            "Node Type": "Hash Join",
+            "Parent Relationship": "Outer",
+            "Parallel Aware": false,
+            "Async Capable": false,
+            "Join Type": "Left",
+            "Startup Cost": 2169.16,
+            "Total Cost": 2322.51,
+            "Plan Rows": 5000,
+            "Plan Width": 184,
+            "Plans": [
+              {
+                "Node Type": "Hash Join",
+                "Parent Relationship": "Outer",
+                "Parallel Aware": false,
+                "Async Capable": false,
+                "Join Type": "Left",
+                "Startup Cost": 2168.05,
+                "Total Cost": 2307.99,
+                "Plan Rows": 5000,
+                "Plan Width": 160,
+                "Plans": [
+                  {
+                    "Node Type": "Hash Join",
+                    "Parent Relationship": "Outer",
+                    "Parallel Aware": false,
+                    "Async Capable": false,
+                    "Join Type": "Left",
+                    "Startup Cost": 2166.94,
+                    "Total Cost": 2293.48,
+                    "Plan Rows": 5000,
+                    "Plan Width": 136,
+                    "Plans": [
+                      {
+                        "Node Type": "Hash Join",
+                        "Parent Relationship": "Outer",
+                        "Parallel Aware": false,
+                        "Async Capable": false,
+                        "Join Type": "Left",
+                        "Startup Cost": 2162.23,
+                        "Total Cost": 2275.36,
+                        "Plan Rows": 5000,
+                        "Plan Width": 112,
+                        "Plans": [
+                          {
+                            "Node Type": "CTE Scan",
+                            "Parent Relationship": "Outer",
+                            "Parallel Aware": false,
+                            "Async Capable": false,
+                            "Alias": "sample",
+                            "Startup Cost": 0.0,
+                            "Total Cost": 100.0,
+                            "Plan Rows": 5000,
+                            "Plan Width": 72
+                          },
+                          {
+                            "Node Type": "Hash",
+                            "Parent Relationship": "Inner",
+                            "Parallel Aware": false,
+                            "Async Capable": false,
+                            "Startup Cost": 2085.99,
+                            "Total Cost": 2085.99,
+                            "Plan Rows": 6099,
+                            "Plan Width": 40,
+                            "Plans": [
+                              {
+                                "Node Type": "Seq Scan",
+                                "Parent Relationship": "Outer",
+                                "Parallel Aware": false,
+                                "Async Capable": false,
+                                "Relation Name": "devices",
+                                "Alias": "d",
+                                "Startup Cost": 0.0,
+                                "Total Cost": 2085.99,
+                                "Plan Rows": 6099,
+                                "Plan Width": 40
+                              }
+                            ]
+                          }
+                        ]
+                      },
+                      {
+                        "Node Type": "Hash",
+                        "Parent Relationship": "Inner",
+                        "Parallel Aware": false,
+                        "Async Capable": false,
+                        "Startup Cost": 3.76,
+                        "Total Cost": 3.76,
+                        "Plan Rows": 76,
+                        "Plan Width": 24,
+                        "Plans": [
+                          {
+                            "Node Type": "Seq Scan",
+                            "Parent Relationship": "Outer",
+                            "Parallel Aware": false,
+                            "Async Capable": false,
+                            "Relation Name": "clients",
+                            "Alias": "c",
+                            "Startup Cost": 0.0,
+                            "Total Cost": 3.76,
+                            "Plan Rows": 76,
+                            "Plan Width": 24
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "Node Type": "Hash",
+                    "Parent Relationship": "Inner",
+                    "Parallel Aware": false,
+                    "Async Capable": false,
+                    "Startup Cost": 1.05,
+                    "Total Cost": 1.05,
+                    "Plan Rows": 5,
+                    "Plan Width": 40,
+                    "Plans": [
+                      {
+                        "Node Type": "Seq Scan",
+                        "Parent Relationship": "Outer",
+                        "Parallel Aware": false,
+                        "Async Capable": false,
+                        "Relation Name": "source_bindings",
+                        "Alias": "binding",
+                        "Startup Cost": 0.0,
+                        "Total Cost": 1.05,
+                        "Plan Rows": 5,
+                        "Plan Width": 40
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "Node Type": "Hash",
+                "Parent Relationship": "Inner",
+                "Parallel Aware": false,
+                "Async Capable": false,
+                "Startup Cost": 1.05,
+                "Total Cost": 1.05,
+                "Plan Rows": 5,
+                "Plan Width": 24,
+                "Plans": [
+                  {
+                    "Node Type": "Seq Scan",
+                    "Parent Relationship": "Outer",
+                    "Parallel Aware": false,
+                    "Async Capable": false,
+                    "Relation Name": "source_instances",
+                    "Alias": "instance",
+                    "Startup Cost": 0.0,
+                    "Total Cost": 1.05,
+                    "Plan Rows": 5,
+                    "Plan Width": 24
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "status": "ok",
+      "wall_seconds": 0.217
+    },
+    {
+      "query": "D3.3",
+      "mode": "plain_explain",
+      "preflight": {
+        "executing_role": "operations_migrate",
+        "server_version_num": "160014",
+        "transaction_read_only": "on",
+        "tenant_context": "1",
+        "executing_search_path": "pg_catalog",
+        "rolsuper": "t",
+        "rolbypassrls": "t"
+      },
+      "exit_code": 0,
+      "returned_rows": 1,
+      "plan": {
+        "Node Type": "Aggregate",
+        "Strategy": "Plain",
+        "Partial Mode": "Simple",
+        "Parallel Aware": false,
+        "Async Capable": false,
+        "Startup Cost": 5249.36,
+        "Total Cost": 5249.37,
+        "Plan Rows": 1,
+        "Plan Width": 40,
+        "Plans": [
+          {
+            "Node Type": "Limit",
+            "Parent Relationship": "InitPlan",
+            "Subplan Name": "CTE sample",
+            "Parallel Aware": false,
+            "Async Capable": false,
+            "Startup Cost": 0.55,
+            "Total Cost": 2111.42,
+            "Plan Rows": 5000,
+            "Plan Width": 79,
+            "Plans": [
+              {
+                "Node Type": "Index Scan",
+                "Parent Relationship": "Outer",
+                "Parallel Aware": false,
+                "Async Capable": false,
+                "Scan Direction": "Forward",
+                "Index Name": "software_installations_current_pkey",
+                "Relation Name": "software_installations_current",
+                "Alias": "software_installations_current",
+                "Startup Cost": 0.55,
+                "Total Cost": 259189.64,
+                "Plan Rows": 613939,
+                "Plan Width": 79
+              }
+            ]
+          },
+          {
+            "Node Type": "Hash Join",
+            "Parent Relationship": "Outer",
+            "Parallel Aware": false,
+            "Async Capable": false,
+            "Join Type": "Left",
+            "Startup Cost": 2936.06,
+            "Total Cost": 3075.44,
+            "Plan Rows": 5000,
+            "Plan Width": 40,
+            "Plans": [
+              {
+                "Node Type": "Hash Join",
+                "Parent Relationship": "Outer",
+                "Parallel Aware": false,
+                "Async Capable": false,
+                "Join Type": "Left",
+                "Startup Cost": 2776.69,
+                "Total Cost": 2902.94,
+                "Plan Rows": 5000,
+                "Plan Width": 32,
+                "Plans": [
+                  {
+                    "Node Type": "Hash Join",
+                    "Parent Relationship": "Outer",
+                    "Parallel Aware": false,
+                    "Async Capable": false,
+                    "Join Type": "Left",
+                    "Startup Cost": 1850.63,
+                    "Total Cost": 1963.76,
+                    "Plan Rows": 5000,
+                    "Plan Width": 24,
+                    "Plans": [
+                      {
+                        "Node Type": "CTE Scan",
+                        "Parent Relationship": "Outer",
+                        "Parallel Aware": false,
+                        "Async Capable": false,
+                        "Alias": "sample",
+                        "Startup Cost": 0.0,
+                        "Total Cost": 100.0,
+                        "Plan Rows": 5000,
+                        "Plan Width": 8
+                      },
+                      {
+                        "Node Type": "Hash",
+                        "Parent Relationship": "Inner",
+                        "Parallel Aware": false,
+                        "Async Capable": false,
+                        "Startup Cost": 1205.28,
+                        "Total Cost": 1205.28,
+                        "Plan Rows": 51628,
+                        "Plan Width": 16,
+                        "Plans": [
+                          {
+                            "Node Type": "Seq Scan",
+                            "Parent Relationship": "Outer",
+                            "Parallel Aware": false,
+                            "Async Capable": false,
+                            "Relation Name": "software_versions",
+                            "Alias": "v",
+                            "Startup Cost": 0.0,
+                            "Total Cost": 1205.28,
+                            "Plan Rows": 51628,
+                            "Plan Width": 16
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "Node Type": "Hash",
+                    "Parent Relationship": "Inner",
+                    "Parallel Aware": false,
+                    "Async Capable": false,
+                    "Startup Cost": 615.47,
+                    "Total Cost": 615.47,
+                    "Plan Rows": 24847,
+                    "Plan Width": 16,
+                    "Plans": [
+                      {
+                        "Node Type": "Seq Scan",
+                        "Parent Relationship": "Outer",
+                        "Parallel Aware": false,
+                        "Async Capable": false,
+                        "Relation Name": "products",
+                        "Alias": "p",
+                        "Startup Cost": 0.0,
+                        "Total Cost": 615.47,
+                        "Plan Rows": 24847,
+                        "Plan Width": 16
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "Node Type": "Hash",
+                "Parent Relationship": "Inner",
+                "Parallel Aware": false,
+                "Async Capable": false,
+                "Startup Cost": 95.83,
+                "Total Cost": 95.83,
+                "Plan Rows": 5083,
+                "Plan Width": 8,
+                "Plans": [
+                  {
+                    "Node Type": "Seq Scan",
+                    "Parent Relationship": "Outer",
+                    "Parallel Aware": false,
+                    "Async Capable": false,
+                    "Relation Name": "publishers",
+                    "Alias": "publisher",
+                    "Startup Cost": 0.0,
+                    "Total Cost": 95.83,
+                    "Plan Rows": 5083,
+                    "Plan Width": 8
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "status": "ok",
+      "wall_seconds": 0.268
+    },
+    {
+      "query": "D3.4",
+      "mode": "plain_explain",
+      "preflight": {
+        "executing_role": "operations_migrate",
+        "server_version_num": "160014",
+        "transaction_read_only": "on",
+        "tenant_context": "1",
+        "executing_search_path": "pg_catalog",
+        "rolsuper": "t",
+        "rolbypassrls": "t"
+      },
+      "exit_code": 0,
+      "returned_rows": 1,
+      "plan": {
+        "Node Type": "Aggregate",
+        "Strategy": "Plain",
+        "Partial Mode": "Simple",
+        "Parallel Aware": false,
+        "Async Capable": false,
+        "Startup Cost": 12843.86,
+        "Total Cost": 12843.87,
+        "Plan Rows": 1,
+        "Plan Width": 48,
+        "Plans": [
+          {
+            "Node Type": "Limit",
+            "Parent Relationship": "InitPlan",
+            "Subplan Name": "CTE sample",
+            "Parallel Aware": false,
+            "Async Capable": false,
+            "Startup Cost": 0.42,
+            "Total Cost": 330.83,
+            "Plan Rows": 5000,
+            "Plan Width": 52,
+            "Plans": [
+              {
+                "Node Type": "Index Scan",
+                "Parent Relationship": "Outer",
+                "Parallel Aware": false,
+                "Async Capable": false,
+                "Scan Direction": "Forward",
+                "Index Name": "source_record_seen_daily_pkey",
+                "Relation Name": "source_record_seen_daily",
+                "Alias": "source_record_seen_daily",
+                "Startup Cost": 0.42,
+                "Total Cost": 51293.33,
+                "Plan Rows": 776223,
+                "Plan Width": 52
+              }
+            ]
+          },
+          {
+            "Node Type": "Hash Join",
+            "Parent Relationship": "Outer",
+            "Parallel Aware": false,
+            "Async Capable": false,
+            "Join Type": "Left",
+            "Startup Cost": 12274.27,
+            "Total Cost": 12400.53,
+            "Plan Rows": 5000,
+            "Plan Width": 339,
+            "Plans": [
+              {
+                "Node Type": "Hash Join",
+                "Parent Relationship": "Outer",
+                "Parallel Aware": false,
+                "Async Capable": false,
+                "Join Type": "Left",
+                "Startup Cost": 11985.34,
+                "Total Cost": 12098.47,
+                "Plan Rows": 5000,
+                "Plan Width": 315,
+                "Plans": [
+                  {
+                    "Node Type": "CTE Scan",
+                    "Parent Relationship": "Outer",
+                    "Parallel Aware": false,
+                    "Async Capable": false,
+                    "Alias": "sample",
+                    "Startup Cost": 0.0,
+                    "Total Cost": 100.0,
+                    "Plan Rows": 5000,
+                    "Plan Width": 299
+                  },
+                  {
+                    "Node Type": "Hash",
+                    "Parent Relationship": "Inner",
+                    "Parallel Aware": false,
+                    "Async Capable": false,
+                    "Startup Cost": 10833.22,
+                    "Total Cost": 10833.22,
+                    "Plan Rows": 92170,
+                    "Plan Width": 32,
+                    "Plans": [
+                      {
+                        "Node Type": "Index Only Scan",
+                        "Parent Relationship": "Outer",
+                        "Parallel Aware": false,
+                        "Async Capable": false,
+                        "Scan Direction": "Forward",
+                        "Index Name": "uq_obs_current_tenant_record_namespace",
+                        "Relation Name": "entity_observation_current",
+                        "Alias": "c",
+                        "Startup Cost": 0.42,
+                        "Total Cost": 10833.22,
+                        "Plan Rows": 92170,
+                        "Plan Width": 32
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "Node Type": "Hash",
+                "Parent Relationship": "Inner",
+                "Parallel Aware": false,
+                "Async Capable": false,
+                "Startup Cost": 216.19,
+                "Total Cost": 216.19,
+                "Plan Rows": 5819,
+                "Plan Width": 24,
+                "Plans": [
+                  {
+                    "Node Type": "Seq Scan",
+                    "Parent Relationship": "Outer",
+                    "Parallel Aware": false,
+                    "Async Capable": false,
+                    "Relation Name": "observation_snapshot_runs",
+                    "Alias": "r",
+                    "Startup Cost": 0.0,
+                    "Total Cost": 216.19,
+                    "Plan Rows": 5819,
+                    "Plan Width": 24
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "status": "ok",
+      "wall_seconds": 0.209
+    },
+    {
+      "query": "D3.5",
+      "mode": "plain_explain",
+      "preflight": {
+        "executing_role": "operations_migrate",
+        "server_version_num": "160014",
+        "transaction_read_only": "on",
+        "tenant_context": "1",
+        "executing_search_path": "pg_catalog",
+        "rolsuper": "t",
+        "rolbypassrls": "t"
+      },
+      "exit_code": 0,
+      "returned_rows": 1,
+      "plan": {
+        "Node Type": "Aggregate",
+        "Strategy": "Plain",
+        "Partial Mode": "Simple",
+        "Parallel Aware": false,
+        "Async Capable": false,
+        "Startup Cost": 830.07,
+        "Total Cost": 830.08,
+        "Plan Rows": 1,
+        "Plan Width": 32,
+        "Plans": [
+          {
+            "Node Type": "Limit",
+            "Parent Relationship": "InitPlan",
+            "Subplan Name": "CTE sample",
+            "Parallel Aware": false,
+            "Async Capable": false,
+            "Startup Cost": 580.07,
+            "Total Cost": 592.57,
+            "Plan Rows": 5000,
+            "Plan Width": 54,
+            "Plans": [
+              {
+                "Node Type": "Sort",
+                "Parent Relationship": "Outer",
+                "Parallel Aware": false,
+                "Async Capable": false,
+                "Startup Cost": 580.07,
+                "Total Cost": 594.62,
+                "Plan Rows": 5819,
+                "Plan Width": 54,
+                "Plans": [
+                  {
+                    "Node Type": "Seq Scan",
+                    "Parent Relationship": "Outer",
+                    "Parallel Aware": false,
+                    "Async Capable": false,
+                    "Relation Name": "observation_snapshot_runs",
+                    "Alias": "observation_snapshot_runs",
+                    "Startup Cost": 0.0,
+                    "Total Cost": 216.19,
+                    "Plan Rows": 5819,
+                    "Plan Width": 54
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "Node Type": "CTE Scan",
+            "Parent Relationship": "Outer",
+            "Parallel Aware": false,
+            "Async Capable": false,
+            "Alias": "sample",
+            "Startup Cost": 0.0,
+            "Total Cost": 100.0,
+            "Plan Rows": 5000,
+            "Plan Width": 87
+          }
+        ]
+      },
+      "status": "ok",
+      "wall_seconds": 0.212
+    },
+    {
+      "query": "D3.6",
+      "mode": "plain_explain",
+      "preflight": {
+        "executing_role": "operations_migrate",
+        "server_version_num": "160014",
+        "transaction_read_only": "on",
+        "tenant_context": "1",
+        "executing_search_path": "pg_catalog",
+        "rolsuper": "t",
+        "rolbypassrls": "t"
+      },
+      "exit_code": 0,
+      "returned_rows": 1,
+      "plan": {
+        "Node Type": "Append",
+        "Parallel Aware": false,
+        "Async Capable": false,
+        "Startup Cost": 10.67,
+        "Total Cost": 10.72,
+        "Plan Rows": 2,
+        "Plan Width": 64,
+        "Plans": [
+          {
+            "Node Type": "Limit",
+            "Parent Relationship": "InitPlan",
+            "Subplan Name": "CTE jobs",
+            "Parallel Aware": false,
+            "Async Capable": false,
+            "Startup Cost": 10.61,
+            "Total Cost": 10.62,
+            "Plan Rows": 1,
+            "Plan Width": 44,
+            "Plans": [
+              {
+                "Node Type": "Sort",
+                "Parent Relationship": "Outer",
+                "Parallel Aware": false,
+                "Async Capable": false,
+                "Startup Cost": 10.61,
+                "Total Cost": 10.62,
+                "Plan Rows": 1,
+                "Plan Width": 44,
+                "Plans": [
+                  {
+                    "Node Type": "Index Scan",
+                    "Parent Relationship": "Outer",
+                    "Parallel Aware": false,
+                    "Async Capable": false,
+                    "Scan Direction": "Forward",
+                    "Index Name": "idx_operator_job_runs_status",
+                    "Relation Name": "operator_job_runs",
+                    "Alias": "operator_job_runs",
+                    "Startup Cost": 0.41,
+                    "Total Cost": 10.6,
+                    "Plan Rows": 1,
+                    "Plan Width": 44
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "Node Type": "Limit",
+            "Parent Relationship": "InitPlan",
+            "Subplan Name": "CTE dirty",
+            "Parallel Aware": false,
+            "Async Capable": false,
+            "Startup Cost": 0.01,
+            "Total Cost": 0.02,
+            "Plan Rows": 1,
+            "Plan Width": 24,
+            "Plans": [
+              {
+                "Node Type": "Sort",
+                "Parent Relationship": "Outer",
+                "Parallel Aware": false,
+                "Async Capable": false,
+                "Startup Cost": 0.01,
+                "Total Cost": 0.02,
+                "Plan Rows": 1,
+                "Plan Width": 24,
+                "Plans": [
+                  {
+                    "Node Type": "Seq Scan",
+                    "Parent Relationship": "Outer",
+                    "Parallel Aware": false,
+                    "Async Capable": false,
+                    "Relation Name": "entity_attribute_effective_dirty",
+                    "Alias": "entity_attribute_effective_dirty",
+                    "Startup Cost": 0.0,
+                    "Total Cost": 0.0,
+                    "Plan Rows": 1,
+                    "Plan Width": 24
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "Node Type": "Aggregate",
+            "Strategy": "Plain",
+            "Partial Mode": "Simple",
+            "Parent Relationship": "Member",
+            "Parallel Aware": false,
+            "Async Capable": false,
+            "Startup Cost": 0.04,
+            "Total Cost": 0.05,
+            "Plan Rows": 1,
+            "Plan Width": 64,
+            "Plans": [
+              {
+                "Node Type": "CTE Scan",
+                "Parent Relationship": "Outer",
+                "Parallel Aware": false,
+                "Async Capable": false,
+                "Alias": "jobs",
+                "Startup Cost": 0.0,
+                "Total Cost": 0.02,
+                "Plan Rows": 1,
+                "Plan Width": 48
+              }
+            ]
+          },
+          {
+            "Node Type": "Aggregate",
+            "Strategy": "Plain",
+            "Partial Mode": "Simple",
+            "Parent Relationship": "Member",
+            "Parallel Aware": false,
+            "Async Capable": false,
+            "Startup Cost": 0.03,
+            "Total Cost": 0.04,
+            "Plan Rows": 1,
+            "Plan Width": 64,
+            "Plans": [
+              {
+                "Node Type": "CTE Scan",
+                "Parent Relationship": "Outer",
+                "Parallel Aware": false,
+                "Async Capable": false,
+                "Alias": "dirty",
+                "Startup Cost": 0.0,
+                "Total Cost": 0.02,
+                "Plan Rows": 1,
+                "Plan Width": 8
+              }
+            ]
+          }
+        ]
+      },
+      "status": "ok",
+      "wall_seconds": 0.218
+    },
+    {
+      "query": "D3.7",
+      "mode": "plain_explain",
+      "preflight": {
+        "executing_role": "operations_migrate",
+        "server_version_num": "160014",
+        "transaction_read_only": "on",
+        "tenant_context": "1",
+        "executing_search_path": "pg_catalog",
+        "rolsuper": "t",
+        "rolbypassrls": "t"
+      },
+      "exit_code": 0,
+      "returned_rows": 1,
+      "plan": {
+        "Node Type": "Aggregate",
+        "Strategy": "Plain",
+        "Partial Mode": "Simple",
+        "Parallel Aware": false,
+        "Async Capable": false,
+        "Startup Cost": 288.9,
+        "Total Cost": 288.91,
+        "Plan Rows": 1,
+        "Plan Width": 24,
+        "Plans": [
+          {
+            "Node Type": "Limit",
+            "Parent Relationship": "InitPlan",
+            "Subplan Name": "CTE sample",
+            "Parallel Aware": false,
+            "Async Capable": false,
+            "Startup Cost": 266.52,
+            "Total Cost": 268.01,
+            "Plan Rows": 597,
+            "Plan Width": 16,
+            "Plans": [
+              {
+                "Node Type": "Sort",
+                "Parent Relationship": "Outer",
+                "Parallel Aware": false,
+                "Async Capable": false,
+                "Startup Cost": 266.52,
+                "Total Cost": 268.01,
+                "Plan Rows": 597,
+                "Plan Width": 16,
+                "Plans": [
+                  {
+                    "Node Type": "Seq Scan",
+                    "Parent Relationship": "Outer",
+                    "Parallel Aware": false,
+                    "Async Capable": false,
+                    "Relation Name": "device_requirement_state_drift",
+                    "Alias": "device_requirement_state_drift",
+                    "Startup Cost": 0.0,
+                    "Total Cost": 238.99,
+                    "Plan Rows": 597,
+                    "Plan Width": 16
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "Node Type": "CTE Scan",
+            "Parent Relationship": "Outer",
+            "Parallel Aware": false,
+            "Async Capable": false,
+            "Alias": "sample",
+            "Startup Cost": 0.0,
+            "Total Cost": 11.94,
+            "Plan Rows": 597,
+            "Plan Width": 8
+          }
+        ]
+      },
+      "status": "ok",
+      "wall_seconds": 0.208
+    }
+  ],
+  "client_wall_seconds": 4.203,
+  "query_document_sha256": "3de18e913eb2a191a78920da4c8c6484fb148e95fed65c18cabf83d48d6f818d",
+  "submitted_sql_sha256": {
+    "D3.1": "e1e4ee50fa90809175fa8a0c4b0ea211ef79527f4ea55df836ced15ffe076191",
+    "D3.2": "6df87d37af0530bc006d4a8b159327c9b80a7b875817f2a361fb7a8b2aa4747e",
+    "D3.3": "261d49155ccfbe7e6183803fe904a87cedff2bc410f8bef08d703668a5740a6c",
+    "D3.4": "607eb83a24619234253b6d5d457b26d554840486e4da5ca26dc1b7dfb536d6ed",
+    "D3.5": "0aa077711a4da7eefd82271fbaf81be7e84b671d8eb1f622801821c0f542118a",
+    "D3.6": "fb71004f3d82bad5c87e94bef206a9b268ae0c3a226d030352a9a446a7ac5717",
+    "D3.7": "35540130e4e233647cba0d38ce741adb9cf172fa9b91d35d4beff4cb2d4bc5cc"
+  }
+}

@@ -1,0 +1,2343 @@
+{
+  "minimum_capture_separation_seconds": 945.169484,
+  "matching_relations": 328,
+  "first_only_relations": [],
+  "second_only_relations": [],
+  "relation_allocation_deltas": [
+    {
+      "schema": "catalog",
+      "relation": "capability",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "catalog",
+      "relation": "capability_assertion_machine",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "catalog",
+      "relation": "capability_assertion_operator",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "catalog",
+      "relation": "capability_rule",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "catalog",
+      "relation": "capability_source",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "catalog",
+      "relation": "capability_tag_rule",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "catalog",
+      "relation": "category_assertion_machine",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "catalog",
+      "relation": "category_assertion_operator",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "catalog",
+      "relation": "category_source",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "catalog",
+      "relation": "category_tag_rule",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "catalog",
+      "relation": "lolrmm_tool",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "catalog",
+      "relation": "products",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "catalog",
+      "relation": "publishers",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "catalog",
+      "relation": "software_category",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "catalog",
+      "relation": "software_versions",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "intel",
+      "relation": "cpe_backfill_state",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "intel",
+      "relation": "cpes",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "intel",
+      "relation": "cves",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "intel",
+      "relation": "eol_managed_product_rules",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "intel",
+      "relation": "eol_products",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "intel",
+      "relation": "eol_releases",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "intel",
+      "relation": "windows_servicing_rules",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "ninja_activities",
+      "relation": "activities",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "ninja_activities",
+      "relation": "device_activity_signal",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "ninja_activities",
+      "relation": "patch_warning_events_recent",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "ninja_activities",
+      "relation": "system_reboot_events_recent",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "ninja_agent_compliance",
+      "relation": "alert_events",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "ninja_agent_compliance",
+      "relation": "alert_rules",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "ninja_agent_compliance",
+      "relation": "alert_state",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "ninja_agent_compliance",
+      "relation": "alert_suppressions",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "ninja_agent_compliance",
+      "relation": "client_aliases",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "ninja_agent_compliance",
+      "relation": "client_platform_links",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "ninja_agent_compliance",
+      "relation": "clients",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "ninja_agent_compliance",
+      "relation": "compliance_findings",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "ninja_agent_compliance",
+      "relation": "compliance_matrix_current",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "ninja_agent_compliance",
+      "relation": "compliance_matrix_history",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "ninja_agent_compliance",
+      "relation": "device_renames",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "ninja_agent_compliance",
+      "relation": "human_decisions",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "ninja_agent_compliance",
+      "relation": "notification_routes",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "ninja_agent_compliance",
+      "relation": "org_alignment_current",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "ninja_agent_compliance",
+      "relation": "org_alignment_history",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "ninja_agent_compliance",
+      "relation": "org_candidates",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "ninja_agent_compliance",
+      "relation": "org_excludes",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "ninja_agent_compliance",
+      "relation": "platform_observations",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "ninja_agent_compliance",
+      "relation": "platform_requirements",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "ninja_agent_compliance",
+      "relation": "platform_sources",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "ninja_agent_compliance",
+      "relation": "source_runs",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "ninja_core",
+      "relation": "custom_field_definitions",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "ninja_core",
+      "relation": "custom_field_values",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "ninja_core",
+      "relation": "device_health_snapshots",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "ninja_core",
+      "relation": "device_snapshots",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "ninja_core",
+      "relation": "device_troubleshooting_signal",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "ninja_core",
+      "relation": "devices",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "ninja_core",
+      "relation": "ingest_state",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "ninja_core",
+      "relation": "latest_device_health",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "ninja_core",
+      "relation": "locations",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "ninja_core",
+      "relation": "organizations",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "ninja_core",
+      "relation": "patching_enabled_policies",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "ninja_core",
+      "relation": "policies",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "ninja_core",
+      "relation": "run_log",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "ninja_core",
+      "relation": "schema_migrations",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "ninja_core",
+      "relation": "software_activity_queue",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "ninja_core",
+      "relation": "v_active_devices",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "ninja_inventory",
+      "relation": "devices_current",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "ninja_inventory",
+      "relation": "identity_conflicts_current",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "ninja_inventory",
+      "relation": "inventory_summary_current",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "ninja_inventory",
+      "relation": "merge_candidates_current",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "ninja_inventory",
+      "relation": "serial_quality_current",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "ninja_inventory",
+      "relation": "source_observations_current",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "ninja_inventory",
+      "relation": "unresolved_source_records_current",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "ninja_patches",
+      "relation": "current_patch_state",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "ninja_patches",
+      "relation": "device_patch_activity",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "ninja_patches",
+      "relation": "device_patch_signal",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "ninja_patches",
+      "relation": "latest_install_outcome",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "ninja_patches",
+      "relation": "patch_facts",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "admin_findings",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "admin_findings_change_history",
+      "total_bytes_delta": 32768,
+      "main_bytes_delta": 24576,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "agent_instance_field_history",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "agent_instances",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "agents",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "agents_change_history",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "asset_field_history",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "assets",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "attribute_authority_policies",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "attribute_authority_policies_change_history",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "attribute_definitions",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "attribute_definitions_change_history",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "audit_log",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "auth_group",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "auth_group_change_history",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "auth_group_permissions",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "auth_group_permissions_change_history",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "auth_permission",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "change_actions",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "change_history_registry",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "client_candidates",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "client_candidates_change_history",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "client_health_trend_current",
+      "total_bytes_delta": 8192,
+      "main_bytes_delta": 8192,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "client_name_aliases",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "client_name_aliases_change_history",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "client_org_excludes",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "client_org_excludes_change_history",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "client_policies",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "client_policies_change_history",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "client_source_mapping_decisions",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "client_source_mapping_decisions_change_history",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "client_user_links",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "client_user_links_change_history",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "client_users",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "client_users_change_history",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "clients",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "clients_change_history",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "collector_instances",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "collector_instances_change_history",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "collectors",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "collectors_change_history",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "computer_merges",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "computer_merges_change_history",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "computer_name_collisions",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "condition_assessments",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "condition_participants",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "condition_policies",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "condition_policy_reviews",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "condition_policy_versions",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "condition_reviewed_distinct",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "coverage_requirements",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "coverage_requirements_change_history",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "cve_match",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "cve_match_change_history",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "dead_letter_observations",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "device_agent_presence_current",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "device_operator_decisions",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "device_operator_decisions_change_history",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "device_patching_override",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "device_patching_override_change_history",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "device_patching_scope_current",
+      "total_bytes_delta": -278528,
+      "main_bytes_delta": -278528,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "device_requirement_state",
+      "total_bytes_delta": -2039808,
+      "main_bytes_delta": -2039808,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "device_requirement_state_drift",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "device_session_current",
+      "total_bytes_delta": 1777664,
+      "main_bytes_delta": 1777664,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "device_software_exposure_current",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "device_windows_servicing_current",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "devices",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "devices_change_history",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "django_admin_log",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "django_content_type",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "django_migrations",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "django_session",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "entities",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "entities_change_history",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "entity_attribute_claim_current",
+      "total_bytes_delta": 8192,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "entity_attribute_claim_history",
+      "total_bytes_delta": 49152,
+      "main_bytes_delta": 24576,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "entity_attribute_conflict_claim_support",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "entity_attribute_conflict_current",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "entity_attribute_decision_current",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "entity_attribute_decision_member_current",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "entity_attribute_effective_claim_support",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "entity_attribute_effective_current",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "entity_attribute_effective_current_change_history",
+      "total_bytes_delta": 90112,
+      "main_bytes_delta": 90112,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "entity_attribute_effective_dirty",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "entity_attribute_effective_member_current",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "entity_attribute_projection_state",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "entity_attribute_withheld_current",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "entity_candidate_events",
+      "total_bytes_delta": 2752512,
+      "main_bytes_delta": 1736704,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "entity_candidates",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "entity_class_scopes",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "entity_class_scopes_change_history",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "entity_classes",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "entity_classes_change_history",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "entity_observation_current",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "entity_observation_history",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "entity_observations",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "entity_relationship_decision_current",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "entity_relationship_dirty",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "entity_relationship_evidence_current",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "entity_relationship_evidence_history",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "entity_relationship_evidence_support",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "entity_relationships",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "entity_relationships_change_history",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "entity_source_link_history",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "entity_source_links",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "entity_types",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "entity_types_change_history",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "eol_product_map",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "eol_product_map_change_history",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "evaluator_config",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "evaluator_config_change_history",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "finding_state",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "finding_state_drift",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "finding_types",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "finding_types_change_history",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "findings",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "findings_change_history",
+      "total_bytes_delta": 1515520,
+      "main_bytes_delta": 1310720,
+      "toast_total_bytes_delta": 49152
+    },
+    {
+      "schema": "operations",
+      "relation": "identity_authority_policies",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "identity_authority_policies_change_history",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "identity_match_policies",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "identity_match_policies_change_history",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "identity_roaming_records",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "identity_value_rejections",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "identity_value_rejections_change_history",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "intel_ingest_status",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "intel_matcher_hints",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "intel_matcher_hints_change_history",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "job_definition_versions",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "job_dependencies",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "job_domain_attempts",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "job_lane_limits",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "job_lane_limits_change_history",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "job_recovery_assessments",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "job_recovery_policies",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "job_recovery_policies_change_history",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "job_recovery_policy_authorities",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "job_recovery_policy_authorities_change_history",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "job_requests",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "job_resource_claims",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "job_resource_limits",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "job_resource_limits_change_history",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "job_runtime_heartbeats",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "job_schedule_events",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "job_schedules",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "job_schedules_change_history",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "maintenance_cadence",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "merge_candidates",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "merge_candidates_change_history",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "node_class_mappings",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "node_class_mappings_change_history",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "notification_events",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "notification_routes",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "notification_routes_change_history",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "notification_rules",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "notification_rules_change_history",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "notification_state",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "observation_snapshot_runs",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "operating_system_installation_source_identities",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "operating_system_installations",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "operating_system_installations_change_history",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "operator_decision_dimensions",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "operator_decision_dimensions_change_history",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "operator_job_events",
+      "total_bytes_delta": 16384,
+      "main_bytes_delta": 16384,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "operator_job_runs",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "os_family_mappings",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "os_family_mappings_change_history",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "os_group_mappings",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "os_group_mappings_change_history",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "os_instance_field_history",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "os_instances",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "parity_report",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "patch_evaluation_reconciliation",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "patch_evaluation_state",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "patching_scope_default",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "patching_scope_default_change_history",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "patching_scope_policy_allowlist",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "patching_scope_policy_allowlist_change_history",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "patching_scope_signal",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "patching_scope_signal_change_history",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "placeholder_org_names",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "placeholder_org_names_change_history",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "platform_aliases",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "platform_aliases_change_history",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "platform_product_map",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "platform_product_map_change_history",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "product_authorizations",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "product_authorizations_change_history",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "publisher_aliases",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "publisher_aliases_change_history",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "publisher_categories",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "publisher_categories_change_history",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "queue_registry",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "queue_registry_change_history",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "relationship_authority_policies",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "relationship_authority_policies_change_history",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "relationship_types",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "relationship_types_change_history",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "requirement_profile_items",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "requirement_profile_items_change_history",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "requirement_profiles",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "requirement_profiles_change_history",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "run_log",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "safety_signal",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "secrets",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "secrets_change_history",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "software_catalog",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "software_catalog_change_history",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "software_classifier_rules",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "software_classifier_rules_change_history",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "software_decisions",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "software_decisions_change_history",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "software_device_readiness",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "software_full_reclassification_state",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "software_installation_history",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "software_installations_current",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "software_inventory_devices",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "software_reclassification_targets",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "software_suggestion_rules",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "software_suggestion_rules_change_history",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "software_title_current",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "source_action_requests",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "source_bindings",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "source_bindings_change_history",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "source_events",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "source_field_mappings",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "source_field_mappings_change_history",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "source_health_current",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "source_instances",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "source_instances_change_history",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "source_name_kinds",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "source_name_kinds_change_history",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "source_record_lifecycle_mappings",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "source_record_lifecycle_mappings_change_history",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "source_record_seen_daily",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "source_refresh_outputs",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "source_run_queue",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "sources",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "sources_change_history",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "suppression_rules",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "suppression_rules_change_history",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "tenants",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "tenants_change_history",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "title_intel_cache",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "unmatched_source_groups",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "unmatched_source_groups_change_history",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "user_groups",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "user_groups_change_history",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "user_permissions",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "user_permissions_change_history",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "users",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "users_change_history",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "v_eol_mapping_candidates",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    },
+    {
+      "schema": "operations",
+      "relation": "v_software_safety",
+      "total_bytes_delta": 0,
+      "main_bytes_delta": 0,
+      "toast_total_bytes_delta": 0
+    }
+  ],
+  "counter_comparison": {
+    "D2.3": {
+      "first_captured_at": "2026-10-25 22:48:43.387609+00",
+      "second_captured_at": "2026-10-25 23:04:30.69042+00",
+      "first_stats_reset": null,
+      "second_stats_reset": null,
+      "known_unchanged_reset_epoch": false,
+      "all_counters_nondecreasing": true,
+      "observed_deltas": {
+        "xact_commit": 3478,
+        "xact_rollback": 18,
+        "blks_read": 4605419,
+        "blks_hit": 282687873,
+        "temp_files": 66,
+        "temp_bytes": 791363491,
+        "deadlocks": 0,
+        "tup_inserted": 56108,
+        "tup_updated": 126901,
+        "tup_deleted": 47281
+      },
+      "validity": "reset timestamp unavailable; differences conditional, not proven reset-free"
+    },
+    "D2.4": {
+      "first_captured_at": "2026-10-25 22:48:43.578026+00",
+      "second_captured_at": "2026-10-25 23:04:30.888701+00",
+      "first_stats_reset": "2026-10-25 07:17:39.039384+00",
+      "second_stats_reset": "2026-10-25 07:17:39.039384+00",
+      "known_unchanged_reset_epoch": true,
+      "all_counters_nondecreasing": true,
+      "observed_deltas": {
+        "wal_records": 1481321,
+        "wal_fpi": 122986,
+        "wal_bytes": 549058531
+      },
+      "validity": "same known cluster reset epoch; cluster-wide, no dataset attribution"
+    }
+  },
+  "index_usage_census": "1000 rows each capture, incomplete; no global index-use or retirement conclusion",
+  "limits": "Sizes are allocation observations, not exact data growth/retention rates or bloat; totals contain indexes/TOAST, do not add components twice; per-table counter reset epochs not measured; normal and diagnostic workload mixed"
+}

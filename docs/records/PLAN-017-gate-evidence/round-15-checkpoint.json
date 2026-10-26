@@ -1,0 +1,63 @@
+{
+  "review_date": "2026-10-25",
+  "round": "Codex 15 / Claude 17 amendments",
+  "head": "70e64f597d49a2f64ad4f752e1c1ac46f8fb93f9",
+  "basis": "Fresh snapshot and earlier delta retained unchanged; source content recheck only. No deployed state inferred.",
+  "changed_files": [
+    {
+      "path": "operations/apps/core/tests/test_table_controls.py",
+      "baseline_sha256": "7ef9e936e226e141a482b0f7be27a4e7d571c57bb3364cee8dd36722ec07e370",
+      "current_sha256": "5ed2e6743f8d8054a40dcaf4894d94e84acb3c9a87935ff1a5c3d0ce7b7f239d"
+    },
+    {
+      "path": "operations/apps/core/views.py",
+      "baseline_sha256": "296f973fd0cb581519c189cd4a8e3dd3f0244ed650b9bedab9228618402296f8",
+      "current_sha256": "829885acd6128e7a7dd202e7351d476081ad4b46d2e0aaff58fe29f451a8f7e9"
+    },
+    {
+      "path": "operations/templates/source_records.html",
+      "baseline_sha256": "34c6978684f9f14515ff62682389eb5b1600584fc3cbffbf1d0c2141d45d3349",
+      "current_sha256": "37b787396849283fe77c83d4a3bd5ec04dcab1cc570e18e119e18366cebd8ea1"
+    }
+  ],
+  "previously_added_files": [
+    {
+      "path": "operations/apps/core/migrations/0344_source_record_layout_and_url.py",
+      "sha256": "75dd3b3df014c4d28437f4361cdf3bd54066eaaf8cfcd271f68daa65d24f69b0"
+    },
+    {
+      "path": "operations/apps/core/tests/test_source_records_identification.py",
+      "sha256": "cc828dff6cd82b74b1b2bd9f9c6b64d4a6225ecbaa4c9f8ef3f2250b0ba5f11a"
+    }
+  ],
+  "reviewed_reader_function_digests": [
+    {
+      "function": "fleet_coverage",
+      "line": 15092,
+      "sha256": "d2f53df01b452a5a3d1bc072f74805773329379470aade5d8549cc7559a77a70"
+    },
+    {
+      "function": "source_records",
+      "line": 16809,
+      "sha256": "b0ea618b5716f971c3cf26873aa1be26e165ce36ce3771d29b2d4df9cd90ead1"
+    },
+    {
+      "function": "_admin_health_sources",
+      "line": 19100,
+      "sha256": "562ecb531d60756ad25b7225d7a3904f01e960233179e29dfa0790152688d46a"
+    },
+    {
+      "function": "_configured_source_data_status",
+      "line": 19134,
+      "sha256": "e394dcd27f5bd7c28f7b41fc77be42aae7e09eb9487c43019b6a108930a1e80a"
+    }
+  ],
+  "prior_evidence_hashes": {
+    "build_static_inventory.py": "83addd8d7dd9ae1296d50245eddd3bf9bff4333a3d3b0c7f4effca5c93cc8780",
+    "checkpoint-recheck.json": "1846623f8c768c9adcb56f875bfd63e14194a255f9d6a3ce5d9ae4f28274ca63",
+    "file-routing.csv": "7e04dae687e236b0e24b8880c4be219309d87dd641cb093ab13b04f80e8fdd0c",
+    "object-occurrences.csv": "427891bf4673fd3c7491a2c5a313bd8671abe0894dc65b6db7af2844115feed1",
+    "python-definitions.csv": "0e79cd84426690317fb8e307c46f64d3c8c176652da3b31c06e665c7b2eb0331",
+    "source-baseline.json": "e563ed95530d90147a58da05667eff5bf09d7be8605b48df45d83bd3a5972608"
+  }
+}

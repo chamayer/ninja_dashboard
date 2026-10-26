@@ -1,0 +1,9 @@
+{
+  "recorded_at_utc": "2026-10-25T23:18:57.822114+00:00",
+  "authorization": "User: finish part A, following the concrete pending request for the two SELECTs and one-batch D5.2 sequential-scan exception",
+  "scope": "One new 30-second SELECT batch for exact D5.2/D5.3 using captured plans; D5.2 scan exception only for this batch; all other roles/wrappers/5-second statement/privacy/stop limits unchanged",
+  "D5.2_review": "Plain plan 318.99..319.02 chooses Seq Scan; latest captured table estimate 6292 rows/892928 main bytes. This is the previously disclosed exception, not a planner setting or index change. Uncapped 30-day aggregate grouped only by platform.",
+  "exact_query_and_wrapper_hashes_match": true,
+  "scheduling": "Resume A window under latest user confirmation Claude C paused; no C work",
+  "outside_scope": "C; runtime changes, maintenance, migrations, repairs, deployments, commits or pushes"
+}

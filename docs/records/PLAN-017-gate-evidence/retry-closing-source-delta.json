@@ -1,0 +1,55 @@
+{
+  "captured_at_utc": "2026-10-25T23:06:45.740471+00:00",
+  "head": "fcb488a0a852ca85b25912b349f05ade5b56f011",
+  "source_paths_checked": 951,
+  "source_deltas": [
+    {
+      "path": "operations/apps/core/views.py",
+      "previously_reviewed_sha256": "829885acd6128e7a7dd202e7351d476081ad4b46d2e0aaff58fe29f451a8f7e9",
+      "current_sha256": "de1dab7e6ab201cd3588a03c9357bd4d7fe20c3f9d69b3bad0dfc06d60754f6c"
+    },
+    {
+      "path": "operations/templates/source_records.html",
+      "previously_reviewed_sha256": "37b787396849283fe77c83d4a3bd5ec04dcab1cc570e18e119e18366cebd8ea1",
+      "current_sha256": "8881f2caf20c4367abad77d88f6004d5e852e7acdf80705dbb92d7e9be9efedb"
+    },
+    {
+      "path": "operations/apps/core/tests/test_source_records_identification.py",
+      "previously_reviewed_sha256": "cc828dff6cd82b74b1b2bd9f9c6b64d4a6225ecbaa4c9f8ef3f2250b0ba5f11a",
+      "current_sha256": "e518024eb328c6a3e1c0a8629ae2dbfb0aa32817cfec1ed4d35b702dbaa70cfb"
+    }
+  ],
+  "new_task_relevant_source": [
+    {
+      "path": "operations/apps/core/migrations/0345_restricted_source_layouts.py",
+      "sha256": "3965962f4620f30d2199e0e5be8b2ae3d4f466a078c4523c3ed66364a4795fcf"
+    }
+  ],
+  "reader_function_digests": [
+    {
+      "function": "fleet_coverage",
+      "current_sha256": "d2f53df01b452a5a3d1bc072f74805773329379470aade5d8549cc7559a77a70",
+      "matches_round15": true
+    },
+    {
+      "function": "source_records",
+      "current_sha256": "b7a424464137a843c1e7f47f3ae61eb3438ddf0ae4b2ab6fd909298991be11c3",
+      "matches_round15": false
+    },
+    {
+      "function": "_admin_health_sources",
+      "current_sha256": "562ecb531d60756ad25b7225d7a3904f01e960233179e29dfa0790152688d46a",
+      "matches_round15": true
+    },
+    {
+      "function": "_configured_source_data_status",
+      "current_sha256": "e394dcd27f5bd7c28f7b41fc77be42aae7e09eb9487c43019b6a108930a1e80a",
+      "matches_round15": true
+    }
+  ],
+  "original_evidence_hashes_match": true,
+  "diagnostic_document_current_sha256": "7d7dcff73390dc6cf39cd28a526eef21febb1e95eb8fcbe518b8ddccc2900aef",
+  "D2_exact_bodies_wrapper_P0_rechecked_unchanged_before_second_capture": true,
+  "all_captured_A_B1_D3_query_bodies_unchanged_at_second_capture": true,
+  "routing": "Concurrent edits affect C reader/template/test and local migration 0345; C owner must reconcile new source baseline before its own command review/execution. No deployment/migration state inferred. A/B1/B2 exact SQL and original evidence preserved."
+}

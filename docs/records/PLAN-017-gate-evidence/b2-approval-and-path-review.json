@@ -1,0 +1,15 @@
+{
+  "reviewed_at_utc": "2026-10-25T23:05:26.230714+00:00",
+  "authorization": "User: i approve all testing; interpreted within current review as B2 for all seven exact D3 SELECTs, unchanged caps/wrappers/stop conditions; no C or later-phase expansion",
+  "B1_exact_SELECT_bodies_unchanged": true,
+  "D3.6_review": {
+    "obsolete_index": "uq_operator_job_runs_active",
+    "local_drop_migration": "0223_jobs_queued_successors",
+    "installed_valid_ready_index": "idx_operator_job_runs_status",
+    "definition": "btree (tenant_id, status, requested_at DESC)",
+    "observed_plan": "Index Scan using idx_operator_job_runs_status; estimated 1 matching row, scan 0.41..10.60, sort 10.61..10.62, root total 10.72",
+    "dirty_queue_index_valid_ready": "idx_attr_effective_dirty_queue (queued_at, id); planner selects estimated tiny sequential scan/sort",
+    "conclusion": "Old named-partial-index assertion is obsolete. Current installed index supports exact tenant/status lookup; reviewed access path accepted for this approved B2, no query/schema/planner-setting change."
+  },
+  "D3.1_risk_accepted": "User approval follows actual 101663.03/101663.04 cost report and repeated-history-lookup warning; 5-second statement timeout remains, any timeout stops batch without retry."
+}

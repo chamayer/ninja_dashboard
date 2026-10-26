@@ -1,0 +1,86 @@
+{
+  "recorded_at_utc": "2026-10-26T13:27:51.193211+00:00",
+  "head_at_review": "054dcfb7ed07eae084966c3d0c45eef0b3785064",
+  "phase_1_accepted": true,
+  "plan_017_status": "active",
+  "review": "docs/plans/review-plan-017-018.md Point 39 Claude round 20",
+  "original_completion_checkpoint": "assessment-completion-checkpoint.json",
+  "reviewed_assessment_snapshot": "assessment-reviewed-983872ba.md.snapshot",
+  "reviewed_assessment_sha256": "983872ba245d2ac857a38bde483e034dee863a8817cd5da50ed3fbfeae23f94f",
+  "amended_assessment_sha256": "d2d7a465eb94832185a0835c824ee252aeebca13fe9c5d4ba12172b875d74cdf",
+  "input_A_B_sha256": "acf3688479ff4eb74873bce76e6f78e96051e61705e6609648ada00c23d3b876",
+  "input_C_sha256": "e8832209b548ffbe76e6671e6d27ab53e5703df22e43a88993fe83f96ca449a8",
+  "corrections": {
+    "N1": "applied",
+    "N2": "applied",
+    "N3": "applied",
+    "N4": "applied",
+    "N5": "verified in TODO.md",
+    "N6": "applied"
+  },
+  "findings_severity_owners_estimate_changed": false,
+  "new_external_probes_or_runtime_changes": false,
+  "validation": {
+    "registry_entries": 18,
+    "registry_validator": "passed",
+    "governance_validator": "passed with existing blueprint-size and current-state-date warnings",
+    "assessment_links": 25,
+    "assessment_links_missing": 0,
+    "scoped_diff_check": "passed",
+    "edited_markdown_trailing_whitespace": "none",
+    "reviewed_and_input_digests": "matched"
+  },
+  "next_action": "Wait for separate Phase 2 authorization; first review concurrent identity/Operations source delta and define Phase 2 pass/fail criteria at entry",
+  "head_at_amendment": "7a0e791bc6de86d5644f124cc21852ddb06d34ae",
+  "concurrent_commit": {
+    "from_review_head": "054dcfb7ed07eae084966c3d0c45eef0b3785064",
+    "to_current_head": "7a0e791bc6de86d5644f124cc21852ddb06d34ae",
+    "subject": "Rename a client when its sources rename it (ADR-0040 decision 7)",
+    "scope": "separate identity/Operations work; no assessment or A/B/C evidence in commit"
+  },
+  "source_baseline_recheck": {
+    "baseline_file_count": 949,
+    "changed_file_count": 8,
+    "previously_known_changed_paths": [
+      "operations/apps/core/tests/test_table_controls.py",
+      "operations/apps/core/views.py",
+      "operations/templates/source_records.html"
+    ],
+    "additional_changed_file_count": 5,
+    "current_digests": [
+      {
+        "path": "ingest/identity/client_resolver.py",
+        "current_sha256": "a711245e9a4c81330a706ddb7a3c426fa7a9b55407b05c6c185b7ba546982846"
+      },
+      {
+        "path": "ingest/tests/test_client_name_drift_contract.py",
+        "current_sha256": "14dd6a4075462ceaa32b479d338e7744f1c4ebf6a8726d8de92a64129f094799"
+      },
+      {
+        "path": "operations/apps/core/client_workspace.py",
+        "current_sha256": "e98e5a83ad2b1cb6ff5b642778b888bfddcb862ab66c96bd4db6ae3cc528b79b"
+      },
+      {
+        "path": "operations/apps/core/tests/test_table_controls.py",
+        "current_sha256": "5ed2e6743f8d8054a40dcaf4894d94e84acb3c9a87935ff1a5c3d0ce7b7f239d"
+      },
+      {
+        "path": "operations/apps/core/views.py",
+        "current_sha256": "2f6e4baa94b518dffe067e6f798b3ce03d46b373df65dcba84da0f7c2b3f7804"
+      },
+      {
+        "path": "operations/config/urls.py",
+        "current_sha256": "72d4ec3a0f7d20022894724dd55d4807d16baa829287894c2e06cf3263ccee5f"
+      },
+      {
+        "path": "operations/templates/org_index.html",
+        "current_sha256": "0cb5860b7e696b47486f38aff658b8cd793d44f6cdd1d28726a6fcdb79ccac4d"
+      },
+      {
+        "path": "operations/templates/source_records.html",
+        "current_sha256": "8881f2caf20c4367abad77d88f6004d5e852e7acdf80705dbb92d7e9be9efedb"
+      }
+    ],
+    "interpretation": "Concurrent commit advanced HEAD after acceptance; current identity/Operations delta requires review before any later phase. Acceptance remains anchored to reviewed HEAD and assessment."
+  }
+}

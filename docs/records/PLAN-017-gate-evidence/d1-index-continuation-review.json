@@ -1,0 +1,9 @@
+{
+  "reviewed_at_utc": "2026-10-25T23:07:50.863019+00:00",
+  "authorization": "User: dont skip anything ... do it NOW; scoped continuation necessary to finish approved A",
+  "scope": "D1.3 original SELECT list/joins/schema namespace filter and 1000-row cap unchanged; adds operations schema and two-relation filter only",
+  "privacy": "Only index schema DDL/validity metadata; no data rows, full kind or source_key values",
+  "budget": "Prior D1 3063 rows/8.016 client seconds; continuation must retain total <=10000 metadata rows and combined active probe time <=30s",
+  "query_sha256": "f4be19a383625afebe8be527388928933ac787ce66e3af9db24ec7a53c76f700",
+  "execution": "same wrapper and per-connection P0; no grants/settings/index changes"
+}

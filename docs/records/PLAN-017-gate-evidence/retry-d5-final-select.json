@@ -1,0 +1,106 @@
+{
+  "batch": "D5",
+  "captured_at_utc": "2026-10-25T23:19:04.040567+00:00",
+  "wall_seconds": 0.432,
+  "stop_reason": null,
+  "results": [
+    {
+      "query": "D5.2",
+      "mode": "metadata_or_aggregate",
+      "preflight": {
+        "executing_role": "operations_migrate",
+        "server_version_num": "160014",
+        "transaction_read_only": "on",
+        "tenant_context": "1",
+        "executing_search_path": "pg_catalog",
+        "rolsuper": "t",
+        "rolbypassrls": "t"
+      },
+      "exit_code": 0,
+      "returned_rows": 6,
+      "rows": [
+        {
+          "platform": "Hudu",
+          "source_receipts_30d": "124",
+          "source_ok_zero": "0",
+          "source_failed": "0",
+          "window_started_min": "2026-09-26 01:01:20.906699+00",
+          "window_ended_max": "2026-10-25 21:44:24.469532+00"
+        },
+        {
+          "platform": "LogMeIn",
+          "source_receipts_30d": "132",
+          "source_ok_zero": "0",
+          "source_failed": "0",
+          "window_started_min": "2026-09-26 00:55:50.88734+00",
+          "window_ended_max": "2026-10-25 21:51:43.769389+00"
+        },
+        {
+          "platform": "Ninja",
+          "source_receipts_30d": "414",
+          "source_ok_zero": "0",
+          "source_failed": "39",
+          "window_started_min": "2026-09-25 23:59:30.867988+00",
+          "window_ended_max": "2026-10-25 22:48:51.040739+00"
+        },
+        {
+          "platform": "R-U-ON",
+          "source_receipts_30d": "72",
+          "source_ok_zero": "0",
+          "source_failed": "0",
+          "window_started_min": "2026-10-12 22:40:48.578708+00",
+          "window_ended_max": "2026-10-25 21:58:32.521689+00"
+        },
+        {
+          "platform": "ScreenConnect",
+          "source_receipts_30d": "131",
+          "source_ok_zero": "0",
+          "source_failed": "0",
+          "window_started_min": "2026-09-26 00:55:50.88734+00",
+          "window_ended_max": "2026-10-25 21:38:05.311114+00"
+        },
+        {
+          "platform": "SentinelOne",
+          "source_receipts_30d": "127",
+          "source_ok_zero": "0",
+          "source_failed": "0",
+          "window_started_min": "2026-09-26 00:55:50.88734+00",
+          "window_ended_max": "2026-10-25 21:44:15.545548+00"
+        }
+      ],
+      "status": "ok",
+      "wall_seconds": 0.214
+    },
+    {
+      "query": "D5.3",
+      "mode": "metadata_or_aggregate",
+      "preflight": {
+        "executing_role": "operations_migrate",
+        "server_version_num": "160014",
+        "transaction_read_only": "on",
+        "tenant_context": "1",
+        "executing_search_path": "pg_catalog",
+        "rolsuper": "t",
+        "rolbypassrls": "t"
+      },
+      "exit_code": 0,
+      "returned_rows": 1,
+      "rows": [
+        {
+          "sampled": "0",
+          "sampled_pending": "0",
+          "sample_oldest_pending": "",
+          "sample_newest_pending": ""
+        }
+      ],
+      "status": "ok",
+      "wall_seconds": 0.218
+    }
+  ],
+  "client_wall_seconds": 3.75,
+  "query_document_sha256": "7d7dcff73390dc6cf39cd28a526eef21febb1e95eb8fcbe518b8ddccc2900aef",
+  "submitted_sql_sha256": {
+    "D5.2": "d60b7d958eb775c6699749a053a4a7eb9824cf3e3135ed145a3a7f2989b430d7",
+    "D5.3": "3e8c8a5867a20afa0fad7b6172c07c07d61cc5aeb671e8ff50a37a8a35857030"
+  }
+}

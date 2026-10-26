@@ -1,0 +1,5 @@
+{
+  "reviewed_at_utc": "2026-10-25T23:13:20.790476+00:00",
+  "D5.2": "Plain plan chooses Seq Scan run_log, root 318.99..319.02, estimated 1329 matching rows/10 platform output rows; documented index-backed-access gate not met; no SELECT submitted",
+  "D5.3": "Index Only Scan software_reclassification_targets_pending, 0.14..35.44, estimated189; root40.64..40.65; approved affordable installed-index path"
+}
