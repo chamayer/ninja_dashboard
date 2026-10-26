@@ -8107,7 +8107,7 @@ def software_installations(request: HttpRequest) -> HttpResponse:
         products = [r[0] for r in cur.fetchall()]
         cur.execute(f"SELECT DISTINCT i.publisher {_INSTALLATION_FROM} WHERE i.tenant_id = 1 AND i.deleted_at IS NULL AND i.stale_since IS NULL AND {current_computer_sql('d')} AND i.publisher IS NOT NULL AND i.publisher <> '' ORDER BY 1")
         publishers = [r[0] for r in cur.fetchall()]
-        cur.execute(f"SELECT DISTINCT d.device_id::text, d.canonical_hostname, c.display_name {_INSTALLATION_FROM} WHERE i.tenant_id = 1 AND i.deleted_at IS NULL AND i.stale_since IS NULL AND {current_computer_sql('d')} ORDER BY c.display_name, d.canonical_hostname, d.device_id")
+        cur.execute(f"SELECT DISTINCT d.device_id::text, d.canonical_hostname, c.display_name {_INSTALLATION_FROM} WHERE i.tenant_id = 1 AND i.deleted_at IS NULL AND i.stale_since IS NULL AND {current_computer_sql('d')} ORDER BY c.display_name, d.canonical_hostname, d.device_id::text")
         computers = [{"id": r[0], "label": f"{r[2]} — {r[1] or 'Unnamed Computer'}"} for r in cur.fetchall()]
     return render(
         request,
