@@ -129,6 +129,16 @@ def run_source_observations(
             continue
         try:
             rows = _FETCHERS[source.platform](source, observed_at)
+            if not rows:
+                # An empty fetch is not evidence that every record vanished:
+                # write_observations opens no snapshot run for it, so nothing
+                # is withdrawn. Recording it as a healthy zero-row run hid
+                # that from the source guard (PLAN-017 F01). Withdrawal on an
+                # empty result would need an explicit per-source policy.
+                raise RuntimeError(
+                    "Collection returned no records; not treated as a complete "
+                    "collection, so no records were withdrawn."
+                )
             written = write_observations(source, rows, batch_id, observed_at)
             counts[source.platform] = counts.get(source.platform, 0) + written
             _record_source_run(source, observed_at, ok=True, rows=written)

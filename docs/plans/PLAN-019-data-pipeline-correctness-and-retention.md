@@ -34,6 +34,33 @@ reviewed migration.
 | 3 | F02 fix | Bounded per-filter continuation (design in the Phase 5 triage); prototype on the Phase 2 activity harness first. Until it ships the risk of losing events behind the cursor in a backlog over the cap is accepted | Phase 2 check 3 |
 | 4 | Retention (ADR 0045) | First-observed anchor with basis and precision, then the significant-change trail after measuring which fields drive interval churn | Phase 2 check 10; new measurement needs approval |
 
+## Progress
+
+- 2026-10-26: user approved starting execution. Step 1 implemented and
+  committed (not pushed or deployed):
+  - F07: `ingest/software_catalog.py` docstring now states in-place rerun
+    only; catalog rows are retained anchors.
+  - F01: `run_source_observations` records an empty fetch as a failed
+    (not-complete) run with a plain reason and reports it through
+    `SourceObservationFailure`; `write_observations` is not called, so
+    nothing is withdrawn. Consequence: a source that is legitimately empty
+    now raises a source-failure Issue until a per-source empty policy exists.
+  - F02 detection: a page-cap hit sets `stats["partial_reason"]`; `run_log`
+    finalizes such runs as `status='partial'` with the reason in
+    `error_text`. No `ninja_core.run_log` consumer reads the `activities`
+    domain status (checked: `main.last_successful_run_at` is unused for it).
+  - F03: software demand is enqueued before `_set_last_id`.
+  - Tests: `ingest/tests/test_activities_cap_and_order.py` (new),
+    `ingest/tests/test_source_observation_failures.py` (F01 case added).
+    Phase 2 checks 1 and 4 reproductions now fail as intended; their
+    controls, check 3 (loss still reproduces until Step 3) and check 9 pass.
+    The Phase 2 check files stay frozen as evidence pinned to `03f71b6`.
+    Ingest suite: 524 passed, 5 failed; the 5 are source-text assertions on
+    `main.py`, `operator_job_queue.py`, `evaluator.py`, identity grouping and
+    the hardcoded-mapping scan, none touched here.
+- F09 assessment and Step 2 (U04): approved 2026-10-26; F09 uses a read-only production
+  row-growth estimate.
+
 F05 purge measurement stays in the root backlog under R08 and PLAN-006's
 gate. F04 stays with PLAN-012 item 4.
 

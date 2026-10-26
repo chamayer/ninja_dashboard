@@ -89,6 +89,7 @@ def run(client: NinjaClient) -> int:
         all_rows: list[dict[str, Any]] = []
         max_id = last_id
         total_fetched = 0
+        capped_filters: list[str] = []
 
         if statuscode_allowlist:
             log.info(
@@ -96,11 +97,13 @@ def run(client: NinjaClient) -> int:
                 len(statuscode_allowlist),
             )
             for code in sorted(statuscode_allowlist):
-                fetched, max_id = _pull_one(
+                fetched, max_id, capped = _pull_one(
                     client, {"status": code}, code,
                     last_id, max_id, known_device_ids, all_rows,
                 )
                 total_fetched += fetched
+                if capped:
+                    capped_filters.append(code)
         elif sources:
             log.warning(
                 "INGEST_ACTIVITY_TYPES_INCLUDE not set — falling back to "
@@ -108,12 +111,14 @@ def run(client: NinjaClient) -> int:
                 len(sources),
             )
             for source in sources:
-                fetched, max_id = _pull_one(
+                fetched, max_id, capped = _pull_one(
                     client, {"type": source}, source,
                     last_id, max_id, known_device_ids, all_rows,
                 )
                 total_fetched += fetched
-            fetched, max_id = _pull_one(
+                if capped:
+                    capped_filters.append(source)
+            fetched, max_id, capped = _pull_one(
                 client,
                 {"status": "NODE_DELETED"},
                 "NODE_DELETED",
@@ -123,13 +128,15 @@ def run(client: NinjaClient) -> int:
                 all_rows,
             )
             total_fetched += fetched
+            if capped:
+                capped_filters.append("NODE_DELETED")
         else:
             log.warning(
                 "Neither INGEST_ACTIVITY_TYPES_INCLUDE nor "
                 "INGEST_ACTIVITY_SOURCES is set — collecting only required "
                 "NODE_DELETED source events"
             )
-            fetched, max_id = _pull_one(
+            fetched, max_id, capped = _pull_one(
                 client,
                 {"status": "NODE_DELETED"},
                 "NODE_DELETED",
@@ -139,6 +146,8 @@ def run(client: NinjaClient) -> int:
                 all_rows,
             )
             total_fetched += fetched
+            if capped:
+                capped_filters.append("NODE_DELETED")
 
         # SOFTWARE_* activities are triggers, not records. Their only job is
         # to enqueue an inventory rescan (_enqueue_software_activities below
@@ -163,14 +172,28 @@ def run(client: NinjaClient) -> int:
                     )
                 source_events = capture_ninja_events(cur, all_rows)
 
-        if max_id > last_id:
-            _set_last_id(max_id)
-
+        # Durable software demand before the cursor moves: an interruption
+        # between the two otherwise leaves SOFTWARE_* triggers behind the
+        # cursor with no queue entry (PLAN-017 F03). Enqueue is idempotent per
+        # computer, so a replay after a failed cursor write is harmless.
         if settings.SOFTWARE_QUEUE_ENABLED and all_rows:
             _enqueue_software_activities(all_rows)
 
+        if max_id > last_id:
+            _set_last_id(max_id)
+
         _refresh_activity_summary_views()
         stats["rows_inserted"] = inserted
+        if capped_filters:
+            # The cursor still advances past the capped walk, so older events
+            # in that backlog are not fetched later. Recording the run as
+            # partial makes the gap visible; it does not recover it
+            # (PLAN-017 F02; bounded continuation is PLAN-019 Step 3).
+            stats["partial_reason"] = (
+                f"Stopped at the {_MAX_PAGES_PER_SOURCE}-page limit for "
+                f"{', '.join(capped_filters)}; older activities in that backlog "
+                "were not fetched and will not be fetched by later runs."
+            )
         log.info(
             "activities: fetched %d total, kept %d, stored %d, inserted %d, "
             "trigger_only_discarded %d, generic_events=%s, cursor %d → %d",
@@ -188,14 +211,16 @@ def _pull_one(
     max_id: int,
     known_device_ids: set[int],
     out_rows: list[dict],
-) -> tuple[int, int]:
+) -> tuple[int, int, bool]:
     """Walk back from latest with the given server-side filter, until
     we cross last_id. Server-side filter means everything returned is
-    kept (no client-side rejection). Returns (fetched, new_max_id)."""
+    kept (no client-side rejection). Returns (fetched, new_max_id, capped),
+    where capped means the page limit stopped the walk before last_id."""
     log.info("Pulling activities for %s (last_id=%d)", label, last_id)
     cursor: int | None = None
     fetched = 0
     kept = 0
+    capped = False
 
     for page_num in range(1, _MAX_PAGES_PER_SOURCE + 1):
         params: dict[str, Any] = {"pageSize": _PAGE_SIZE, **filter_params}
@@ -240,11 +265,12 @@ def _pull_one(
         if page_num % 10 == 0:
             log.info("  %s: page %d, %d fetched", label, page_num, fetched)
     else:
+        capped = True
         log.warning("Hit %d-page cap for %s", _MAX_PAGES_PER_SOURCE, label)
 
     if fetched > 0:
         log.info("  %s done: fetched %d, kept %d", label, fetched, kept)
-    return fetched, max_id
+    return fetched, max_id, capped
 
 
 def _first_run(client: NinjaClient) -> int:

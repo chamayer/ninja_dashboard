@@ -8,8 +8,8 @@ Read Inbox at the start of every session.
 ## Inbox
 
 - [ ] **PLAN-019 — Data pipeline correctness and source-record retention:**
-      `ready` (docs/plans/PLAN-019-data-pipeline-correctness-and-retention.md);
-      executing it or any step needs separate user approval. PLAN-017 is
+      `active` (docs/plans/PLAN-019-data-pipeline-correctness-and-retention.md);
+      Step 1 done; F09 estimate and Step 2 next. PLAN-017 is
       completed. F04 stays with PLAN-012 item 4.
 - [ ] **F05 purge measurement (from PLAN-017):** measure observation and
       software history purge duration and lock waits before choosing

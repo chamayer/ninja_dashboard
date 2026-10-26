@@ -1,6 +1,15 @@
+# PLAN-019 — Data pipeline correctness and source-record retention
+
+**Active** (started 2026-10-26 at the user's approval). Item detail and progress: [PLAN-019](docs/plans/PLAN-019-data-pipeline-correctness-and-retention.md).
+
+- **Step 1:** F07 docstring, F01 empty-fetch receipt, F02 cap detection (`run_log` status `partial`), F03 enqueue-before-cursor; committed, not pushed or deployed.
+- **Decisions:** an empty fetch is a failed collection (source-failure Issue), never a withdrawal; a capped activity run is `partial` and the cursor still advances until Step 3's continuation; Phase 2 check files stay frozen as evidence.
+- **Validation:** ingest suite 524 passed, 5 failed (pre-existing, outside this change); Phase 2 checks 1/3/4/9: F01 and F03 reproductions fail as intended, the rest pass; `ruff` clean.
+- **Next:** F09 read-only production estimate and Step 2 (U04) locally, both approved 2026-10-26. Push, deploy and production migrations stay separately gated. VERSION/CHANGELOG unchanged until release.
+
 # PLAN-017 — Consolidated data architecture review
 
-**Completed 2026-10-26.** See the [registry](docs/records/PLAN_REGISTRY.md) and [Phase 5 triage](docs/records/PLAN-017-phase-5-triage.md). Follow-up: [PLAN-019](docs/plans/PLAN-019-data-pipeline-correctness-and-retention.md), `ready`; execution needs separate user approval. No PLAN-017 work remains open here.
+**Completed 2026-10-26.** See the [registry](docs/records/PLAN_REGISTRY.md) and [Phase 5 triage](docs/records/PLAN-017-phase-5-triage.md). Follow-up: PLAN-019, now active (above). No PLAN-017 work remains open here.
 
 # PLAN-012 — Computers inventory read model
 

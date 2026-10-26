@@ -10,7 +10,10 @@ Usage:
         ...do work...
         stats["rows_upserted"] = N
 
-On clean exit the row is updated to status='ok' with timings + counts.
+On clean exit the row is updated to status='ok' with timings + counts,
+or to status='partial' when the work set `stats["partial_reason"]`: the run
+finished but knowingly left work behind (e.g. an activity page cap), and the
+reason is kept in error_text so it is visible rather than only logged.
 On exception the row gets status='failed' with the exception text,
 then the exception is re-raised so the caller still sees it.
 
@@ -28,6 +31,7 @@ import logging
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import datetime, timezone
+from typing import Any
 
 from ingest import db
 
@@ -54,7 +58,7 @@ def run_log(domain: str, *, observed_at: datetime | None = None) -> Iterator[dic
         )
         run_id = cur.fetchone()[0]
 
-    stats: dict[str, int] = {
+    stats: dict[str, Any] = {
         "run_id": run_id,
         "rows_upserted": 0,
         "rows_inserted": 0,
@@ -64,7 +68,11 @@ def run_log(domain: str, *, observed_at: datetime | None = None) -> Iterator[dic
     except Exception as exc:
         _finalize(run_id, started, "failed", stats, error=str(exc))
         raise
-    _finalize(run_id, started, "ok", stats)
+    partial_reason = stats.get("partial_reason")
+    if partial_reason:
+        _finalize(run_id, started, "partial", stats, error=str(partial_reason))
+    else:
+        _finalize(run_id, started, "ok", stats)
 
 
 def _reap(where_sql: str, params: tuple, reason: str, label: str) -> int:
@@ -111,7 +119,7 @@ def _finalize(
     run_id: int,
     started: datetime,
     status: str,
-    stats: dict[str, int],
+    stats: dict[str, Any],
     error: str | None = None,
 ) -> None:
     finished = datetime.now(timezone.utc)

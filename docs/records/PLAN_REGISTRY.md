@@ -222,15 +222,15 @@ do not open competing blueprints for the same work.
 ## PLAN-019 — Data pipeline correctness and source-record retention (PLAN-017 follow-up)
 
 - Scope: Fix PLAN-017's confirmed acquisition, publication and retention defects in order: F07 contract, F01 receipt, F02 cap detection and bounded continuation, F03 enqueue order, F09 all-source daily presence (assess first), U04 generation fence with F06 stage map, F08 separate sites scope, and the ADR 0045 first-observed anchor and significant-change trail
-- Status: ready
+- Status: active
 - Defined: 2026-10-26
-- Started: —
+- Started: 2026-10-26
 - Completed: —
-- Blueprint: —
+- Blueprint: BLUEPRINT.md
 - Source: docs/plans/PLAN-019-data-pipeline-correctness-and-retention.md
 - Section: PLAN-019 — Data pipeline correctness and source-record retention (PLAN-017 follow-up)
 - Resume gate: Executing this plan or any step requires separate explicit user approval. Coordinates with PLAN-002/005/007, which keep their own statuses and gates; F04 stays with PLAN-012.
-- Last checked: 2026-10-26 (registered at the user's approval from PLAN-017 Phase 5; no implementation started).
+- Last checked: 2026-10-26 (user approved execution; Step 1 F07, F01, F02 detection and F03 implemented and tested; F09 estimate and Step 2 approved next).
 
 ## PLAN-020 — Operations entity links in tables
 

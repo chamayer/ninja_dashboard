@@ -5,9 +5,18 @@ global reference entities: software is not owned, so they carry no tenant and
 live outside `operations.entities` (ADR-0012 s5 as amended 2026-08-10).
 
 This is a **projector** in the `docs/glossary.md` sense -- deterministic,
-rebuildable, sole writer, and safe to re-run. Drop the catalog and this
-rebuilds it identically from the installations. It makes no identity decision
-that a later run cannot correct.
+sole writer, and safe to re-run **in place**: a rerun over the existing
+catalog keeps every product and version UUID and relinks cleared
+installations to the same rows. It makes no identity decision that a later
+run cannot correct.
+
+It is **not** a supported clean rebuild. Dropping the catalog and rerunning
+does not reproduce it: products whose installations have since vanished are
+not recreated, and surviving products get new UUIDs, so authored state keyed
+by the old UUIDs would dangle (PLAN-017 F07, reproduced 2026-10-26). The
+current design assumption is that catalog rows are retained anchors that
+authored state depends on; treat deleting them as a data migration, not a
+refresh.
 
 Publisher normalization goes through `operations.publisher_aliases`, matched
 with ILIKE -- the operator migration 0088 uses, since `raw_pattern` is a
