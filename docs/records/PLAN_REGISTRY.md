@@ -272,3 +272,16 @@ do not open competing blueprints for the same work.
 - Section: PLAN-022 — Legacy data and code cleanup
 - Resume gate: User approved immediate execution (2026-10-26). Three separately approved pushes: migration 0349; the code; then the drop migrations 0350, 0351, 117 and 118 after the archive is copied off-host and verified.
 - Last checked: 2026-10-26 (Wave A deployed: 0.129.0 and 0.129.1; database 62.4 GB → 28 GB; one five-minute Operations outage from the first 0351, fixed by 0.129.1; Wave B items need their own design and approval).
+
+## PLAN-023 — Software installations layout repair
+
+- Scope: Align and compact installation filters and bound long install paths within the table; template-only UI changes.
+- Status: completed
+- Defined: 2026-10-27
+- Started: 2026-10-27
+- Completed: 2026-10-27
+- Blueprint: operations/BLUEPRINT.md
+- Source: operations/BLUEPRINT.md
+- Section: PLAN-023 — Software installations layout repair
+- Resume gate: Local implementation complete. Independent of other active plans; no shared view, data, schema, or identity changes. Commit and deployment require separate approval.
+- Last checked: 2026-10-27 (four existing tests, Django checks, synthetic Edge layout/interaction checks at four viewport widths, registry, governance and whitespace pass; live deployment unverified).

@@ -14,7 +14,8 @@
 
 # PLAN-017 — Consolidated data architecture review
 
-**Completed 2026-10-26.** See the [registry](docs/records/PLAN_REGISTRY.md) and [Phase 5 triage](docs/records/PLAN-017-phase-5-triage.md). Follow-up: PLAN-019, now active (above). No PLAN-017 work remains open here.
+Done 2026-10-26; [registry](docs/records/PLAN_REGISTRY.md),
+[triage](docs/records/PLAN-017-phase-5-triage.md). Next: PLAN-019.
 
 # PLAN-012 — Computers inventory read model
 
@@ -82,3 +83,5 @@ to its authority. Define the read model, its refresh owner and
 `refresh_derived()` hook, its tenant boundary, staleness behavior, and
 parity checks before implementation. Then move the Dashboard and
 software-capability requirement copies to the stored verdicts.
+
+PLAN-023: see `operations/BLUEPRINT.md`.

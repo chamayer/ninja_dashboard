@@ -2,6 +2,14 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.129.2] — 2026-10-27 — Software installations layout
+
+### Fixed
+
+- Software installation filters use aligned, compact searchable selections.
+- Install path is the last column, with an ellipsis for long values and the
+  complete path in a hover tooltip. Long paths no longer widen the page.
+
 ## [0.129.1] — 2026-10-26 — Retired Job configuration migration
 
 ### Fixed

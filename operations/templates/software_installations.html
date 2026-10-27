@@ -4,6 +4,36 @@
 
 {% block content %}
 {% include "_sw_style.html" %}
+<style>
+  .installation-filters { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .85rem 1rem; }
+  .installation-field { min-width: 0; display: flex; flex-direction: column; gap: .35rem; }
+  .installation-field > label { font-size: .8rem; font-weight: 600; color: var(--muted); }
+  .installation-field input, .installation-field select, .installation-picker > summary {
+    width: 100%; min-width: 0; padding: .5rem .65rem; border: 1px solid var(--border);
+    border-radius: 4px; background: var(--surface); color: inherit; font: inherit; font-size: .85rem;
+  }
+  .installation-field input, .installation-field select:not([multiple]), .installation-picker > summary { height: 2.35rem; }
+  .installation-picker { position: relative; min-width: 0; }
+  .installation-picker > summary { cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .installation-picker[open] > summary { border-color: var(--accent); }
+  .installation-picker-panel {
+    position: absolute; top: calc(100% + .3rem); left: 0; right: 0; z-index: 10;
+    display: grid; gap: .5rem; padding: .65rem; background: var(--surface);
+    border: 1px solid var(--border); border-radius: 4px; box-shadow: 0 6px 18px #0002;
+  }
+  .installation-picker-panel select { height: 10rem; }
+  .installation-picker-panel small { color: var(--muted); }
+  .installation-filter-actions { grid-column: 1 / -1; display: flex; align-items: center; gap: .8rem; }
+  .installation-filter-actions button { padding: .5rem 1rem; border: 1px solid var(--accent); border-radius: 4px; background: var(--accent); color: #fff; font: inherit; cursor: pointer; }
+  .installation-table-wrap { overflow-x: auto; }
+  .installation-table { table-layout: fixed; min-width: 58rem; }
+  .installation-table th, .installation-table td { overflow-wrap: anywhere; vertical-align: top; }
+  .installation-path { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  @media (max-width: 700px) {
+    .installation-filters { grid-template-columns: minmax(0, 1fr); }
+    .installation-picker-panel { position: static; margin-top: .3rem; }
+  }
+</style>
 <div class="sw-page-header">
   <div>
     <h1>Installations</h1>
@@ -13,15 +43,47 @@
 </div>
 
 <div class="card">
-  <form method="get" style="display:flex; gap:.7rem; align-items:end; flex-wrap:wrap;">
-    <label>Client<br><select name="client"><option value="">All clients</option>{% for c in clients %}<option value="{{ c.slug }}"{% if filters.client == c.slug %} selected{% endif %}>{{ c.display_name }}</option>{% endfor %}</select></label>
-    <label>Search<br><input name="q" value="{{ filters.q }}" placeholder="Program or computer name"></label>
-    <label>Decision<br><select name="decision"><option value="">Any</option>{% for value, label in decision_choices %}<option value="{{ value }}"{% if filters.decision == value %} selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
-    <label>Product<br><input type="search" data-option-search="product-options" placeholder="Search products"><br><select id="product-options" name="product" multiple size="5" aria-label="Products">{% for product in products %}<option value="{{ product }}"{% if product in filters.product %} selected{% endif %}>{{ product }}</option>{% endfor %}</select></label>
-    <label>Publisher<br><input type="search" data-option-search="publisher-options" placeholder="Search publishers"><br><select id="publisher-options" name="publisher" multiple size="5" aria-label="Publishers">{% for publisher in publishers %}<option value="{{ publisher }}"{% if publisher in filters.publisher %} selected{% endif %}>{{ publisher }}</option>{% endfor %}</select></label>
-    <label>Computer<br><input type="search" data-option-search="computer-options" placeholder="Search Computers"><br><select id="computer-options" name="computer" multiple size="5" aria-label="Computers">{% for computer in computers %}<option value="{{ computer.id }}"{% if computer.id in filters.computer %} selected{% endif %}>{{ computer.label }}</option>{% endfor %}</select></label>
-    <button type="submit">Filter</button>
-    {% if page_query %}<a href="{% url 'software_installations' %}">Clear</a>{% endif %}
+  <form method="get" class="installation-filters">
+    <div class="installation-field"><label for="installation-client">Client</label><select id="installation-client" name="client"><option value="">All clients</option>{% for c in clients %}<option value="{{ c.slug }}"{% if filters.client == c.slug %} selected{% endif %}>{{ c.display_name }}</option>{% endfor %}</select></div>
+    <div class="installation-field"><label for="installation-search">Search</label><input id="installation-search" type="search" name="q" value="{{ filters.q }}" placeholder="Program or computer name"></div>
+    <div class="installation-field"><label for="installation-decision">Decision</label><select id="installation-decision" name="decision"><option value="">Any decision</option>{% for value, label in decision_choices %}<option value="{{ value }}"{% if filters.decision == value %} selected{% endif %}>{{ label }}</option>{% endfor %}</select></div>
+    <div class="installation-field">
+      <label id="product-filter-label">Product</label>
+      <details class="installation-picker">
+        <summary aria-labelledby="product-filter-label product-filter-value"><span id="product-filter-value" data-picker-value data-empty-label="All products">{% if filters.product %}{{ filters.product|length }} selected{% else %}All products{% endif %}</span></summary>
+        <div class="installation-picker-panel">
+          <input type="search" data-option-search="product-options" placeholder="Search products" aria-label="Search products">
+          <select id="product-options" name="product" multiple size="5" aria-label="Products">{% for product in products %}<option value="{{ product }}"{% if product in filters.product %} selected{% endif %}>{{ product }}</option>{% endfor %}</select>
+          <small>Hold Ctrl (Windows) or Command (Mac) to select multiple.</small>
+        </div>
+      </details>
+    </div>
+    <div class="installation-field">
+      <label id="publisher-filter-label">Publisher</label>
+      <details class="installation-picker">
+        <summary aria-labelledby="publisher-filter-label publisher-filter-value"><span id="publisher-filter-value" data-picker-value data-empty-label="All publishers">{% if filters.publisher %}{{ filters.publisher|length }} selected{% else %}All publishers{% endif %}</span></summary>
+        <div class="installation-picker-panel">
+          <input type="search" data-option-search="publisher-options" placeholder="Search publishers" aria-label="Search publishers">
+          <select id="publisher-options" name="publisher" multiple size="5" aria-label="Publishers">{% for publisher in publishers %}<option value="{{ publisher }}"{% if publisher in filters.publisher %} selected{% endif %}>{{ publisher }}</option>{% endfor %}</select>
+          <small>Hold Ctrl (Windows) or Command (Mac) to select multiple.</small>
+        </div>
+      </details>
+    </div>
+    <div class="installation-field">
+      <label id="computer-filter-label">Computer</label>
+      <details class="installation-picker">
+        <summary aria-labelledby="computer-filter-label computer-filter-value"><span id="computer-filter-value" data-picker-value data-empty-label="All Computers">{% if filters.computer %}{{ filters.computer|length }} selected{% else %}All Computers{% endif %}</span></summary>
+        <div class="installation-picker-panel">
+          <input type="search" data-option-search="computer-options" placeholder="Search Computers" aria-label="Search Computers">
+          <select id="computer-options" name="computer" multiple size="5" aria-label="Computers">{% for computer in computers %}<option value="{{ computer.id }}"{% if computer.id in filters.computer %} selected{% endif %}>{{ computer.label }}</option>{% endfor %}</select>
+          <small>Hold Ctrl (Windows) or Command (Mac) to select multiple.</small>
+        </div>
+      </details>
+    </div>
+    <div class="installation-filter-actions">
+      <button type="submit">Filter</button>
+      {% if page_query %}<a href="{% url 'software_installations' %}">Clear</a>{% endif %}
+    </div>
   </form>
 </div>
 <script>
@@ -34,12 +96,32 @@
       }
     });
   });
+  const installationPickers = document.querySelectorAll(".installation-picker");
+  installationPickers.forEach((picker) => {
+    const select = picker.querySelector("select");
+    const value = picker.querySelector("[data-picker-value]");
+    select.addEventListener("change", () => {
+      const count = select.selectedOptions.length;
+      value.textContent = count ? `${count} selected` : value.dataset.emptyLabel;
+    });
+    picker.addEventListener("toggle", () => {
+      if (picker.open) installationPickers.forEach((other) => { if (other !== picker) other.open = false; });
+    });
+    picker.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") { picker.open = false; picker.querySelector("summary").focus(); }
+    });
+  });
+  document.addEventListener("click", (event) => {
+    installationPickers.forEach((picker) => { if (!picker.contains(event.target)) picker.open = false; });
+  });
 </script>
 
 <div class="card">
   <p class="muted" style="margin:0 0 .4rem; font-size:.85rem;">Column sorting orders this page only; use the filters above to search every installation. The CSV has every matching installation.</p>
-  <table class="ops-table" data-sortable data-server-table>
-    <thead><tr><th>Client</th><th>Computer</th><th>Program</th><th>Publisher</th><th>Version</th><th>Install path</th><th>Installed</th><th>Last seen</th><th>Decision</th></tr></thead>
+  <div class="installation-table-wrap" role="region" aria-label="Software installations" tabindex="0">
+  <table class="ops-table installation-table" data-sortable data-server-table>
+    <colgroup><col style="width:10%"><col style="width:11%"><col style="width:16%"><col style="width:11%"><col style="width:9%"><col style="width:10%"><col style="width:10%"><col style="width:9%"><col style="width:14%"></colgroup>
+    <thead><tr><th>Client</th><th>Computer</th><th>Program</th><th>Publisher</th><th>Version</th><th>Installed</th><th>Last seen</th><th>Decision</th><th>Install path</th></tr></thead>
     <tbody>
     {% for row in rows %}
       <tr>
@@ -48,16 +130,17 @@
         <td><a href="{% url 'software_detail' name=row.product %}">{{ row.product }}</a></td>
         <td>{{ row.publisher }}</td>
         <td>{{ row.version }}</td>
-        <td title="{{ row.install_location }}">{{ row.install_location|truncatechars:100 }}</td>
         <td>{{ row.install_date|default:"" }}</td>
         <td>{{ row.last_seen|date:"Y-m-d H:i" }}</td>
         <td>{% if row.decision %}{{ row.decision }}{% else %}<span class="muted">No decision</span>{% endif %}</td>
+        <td><span class="installation-path" title="{{ row.install_location }}">{{ row.install_location }}</span></td>
       </tr>
     {% empty %}
       <tr><td colspan="9" class="muted">No installations match these filters.</td></tr>
     {% endfor %}
     </tbody>
   </table>
+  </div>
   <p class="muted" style="margin:.5rem 0 0;">Page {{ page }} of {{ num_pages }}
     {% if page > 1 %} · <a href="?{% if page_query %}{{ page_query }}&amp;{% endif %}page=1">First</a> · <a href="?{% if page_query %}{{ page_query }}&amp;{% endif %}page={{ page|add:-1 }}">Previous</a>{% endif %}
     {% if page < num_pages %} · <a href="?{% if page_query %}{{ page_query }}&amp;{% endif %}page={{ page|add:1 }}">Next</a> · <a href="?{% if page_query %}{{ page_query }}&amp;{% endif %}page={{ num_pages }}">Last</a>{% endif %}

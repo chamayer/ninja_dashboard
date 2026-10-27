@@ -736,3 +736,33 @@ After the migrations applied and the container became healthy, `/` returned
 500 because the client patching rollup sent `{current_computer_sql()}` as
 literal SQL. The query now uses an f-string locally. Python compilation and
 `git diff --check` pass; this code-only follow-up has no schema change.
+
+## PLAN-023 — Software installations layout repair
+
+**Status:** Complete locally (2026-10-27). **Goal:** make installation filters compact and
+aligned, and prevent long paths from expanding the page.
+**Scope/files:** `templates/software_installations.html`, this checkpoint and
+the root registry/router only. Preserve query parameters, multi-selection,
+CSV, sorting and pagination; no view, schema or dependency changes.
+**Steps:** add a responsive filter grid with expandable searchable selections;
+bound table columns with Install path last and full paths in hover tooltips; validate existing
+tests, template loading, browser layout/interaction with synthetic data,
+Django checks, registry and whitespace.
+**Decision:** page-scoped styles and native disclosure controls keep the change
+isolated and keyboard accessible. Preserve all pre-existing dirty work.
+**Checkpoint/validation:** implemented the responsive grid and compact searchable
+multi-select disclosures; constrained the table and path column. Four existing
+installation tests pass; Django system check and template rendering pass.
+Headless Edge checks at 1440/1024/768/390px pass for page overflow, equal filter
+widths, path position/tooltip, selection preservation, submission values,
+Escape and outside-click dismissal. Synthetic data only; no live validation.
+Registry, governance and whitespace checks pass; governance notes the existing
+stale current-state document. Dockerfile already copies the edited template.
+**Release checkpoint:** user approved commit and push on 2026-10-27. Both
+remotes match HEAD before release; deployed read-only migration checks show no
+pending Django migrations and ingest versions 001–118 applied. Release 0.129.2
+adds no migrations. The runbook's manual-redeploy instruction conflicts with
+AGENTS.md; follow AGENTS.md and rely on the push-triggered deployment only.
+**Next action:** commit the isolated UI/release/checkpoint changes, push origin
+then the secondary mirror, and verify the published commit. Live UI validation
+remains separate from local synthetic browser validation.
