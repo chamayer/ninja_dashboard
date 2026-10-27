@@ -82,3 +82,9 @@ that have gone quiet.
 Supersedes the presence-established and "not evaluated" behavior of
 migration 0320. Amends ADR-0035: `not_evaluated` is replaced by `os_unknown`
 and `pending_cleanup`.
+
+Amended 2026-10-27 by [ADR-0047](0047-requirement-lifecycle-reconciliation.md):
+an explicit valid confirmation that a cleanup Computer is still in use
+restores requirement checks while preserving OS applicability and safety
+guards. This is an accepted policy amendment; implementation remains pending.
+Cleanup status alone does not establish an offline condition.

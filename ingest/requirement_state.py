@@ -13,6 +13,64 @@ from typing import Any
 log = logging.getLogger(__name__)
 
 
+def summarize_state(cur: Any, tenant_id: int = 1) -> list:
+    """Read-only explanation counts; raw drift and its history remain untouched.
+
+    Only a current assessment written by requirement reconciliation can explain
+    deliberate retention. Unknown lifecycle evidence and arbitrary blocked rows
+    are not silently accepted. Source/identity issues still need their normal
+    operational review; this report does not authorize repairs or closure.
+    """
+    cur.execute(
+        """
+        WITH observed AS (
+            SELECT n.device_id,n.entity_type,n.platform,n.disagreement,
+                   EXISTS (
+                       SELECT 1 FROM operations.condition_assessments a
+                       JOIN operations.condition_policy_versions p
+                         ON p.active AND p.version=a.policy_version
+                        AND p.digest=a.policy_digest
+                        WHERE a.tenant_id=%s AND a.row_kind='entity'
+                          AND a.finding_id=n.finding_id
+                          AND a.participant_kind='device'
+                          AND a.participant_id=n.device_id
+                          AND a.participant_role='affected'
+                          AND a.reevaluation_key LIKE 'requirement-reconcile:%%'
+                          AND a.assessed_at >= now() -
+                              (p.policy->>'freshness_hours')::integer * interval '1 hour'
+                          AND (a.response->>'may_clear')::boolean IS FALSE
+                          AND a.response->>'disposition' IN ('blocked','suppressed')
+                          AND NOT (COALESCE(a.response->'blockers','[]'::jsonb)
+                                   ? 'lifecycle:unmeasured')
+                          AND (
+                              a.response->'reasons' ? 'existing_operator_suppression'
+                              OR a.response->'reasons' ? 'offline:extended_absence'
+                              OR a.response->'reasons' ? 'identity:unsettled_group'
+                              OR EXISTS (
+                                  SELECT 1 FROM operations.admin_findings root
+                                  WHERE root.tenant_id=a.tenant_id
+                                    AND root.status IN ('open','acknowledged','investigating')
+                                    AND a.response->'blockers' ? root.condition_key
+                                    AND root.condition_key LIKE 'source_failure:binding:%%'
+                              )
+                          )
+                   ) AS guarded
+              FROM operations.device_requirement_state_disagreements(%s) n
+        ), entries AS (
+            SELECT device_id,entity_type,platform,disagreement,bool_and(guarded) AS guarded
+              FROM observed GROUP BY device_id,entity_type,platform,disagreement
+        )
+        SELECT disagreement,
+               CASE WHEN guarded THEN 'retained_by_current_guard'
+                    ELSE 'requires_review' END AS explanation,
+               count(*) AS entries
+          FROM entries GROUP BY disagreement,guarded ORDER BY disagreement,guarded
+        """,
+        (tenant_id, tenant_id),
+    )
+    return cur.fetchall()
+
+
 def check_state(cur: Any, tenant_id: int = 1) -> int:
     """Record every disagreement between verdicts and open findings; return the open count.
 

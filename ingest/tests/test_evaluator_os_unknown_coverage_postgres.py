@@ -25,6 +25,7 @@ ALTER TABLE operations.devices
     ADD COLUMN canonical_hostname varchar(255) NOT NULL DEFAULT '',
     ADD COLUMN device_role varchar(16) NOT NULL DEFAULT 'unknown',
     ADD COLUMN os_group varchar(16) NOT NULL DEFAULT 'Unknown';
+ALTER TABLE operations.entity_observation_current ADD COLUMN entity_key text NOT NULL DEFAULT '';
 CREATE TABLE operations.agents (
     id smallint PRIMARY KEY, name varchar(80) NOT NULL, entity_type varchar(80) NOT NULL,
     supported_os_groups jsonb NOT NULL
@@ -77,7 +78,9 @@ CREATE TABLE operations.device_operator_decisions (
 );
 CREATE TABLE operations.v_device_source_record_lifecycle_current (
     tenant_id bigint, device_id uuid, entity_type varchar(80), platform varchar(80),
-    source_record_current boolean, record_lifecycle varchar(24)
+    source_record_current boolean, record_lifecycle varchar(24),
+    observation_id uuid, source_name text, last_seen_at timestamptz,
+    counts_as_current_computer_evidence boolean
 );
 INSERT INTO operations.finding_types (id, name, default_severity, finding_class, auto_resolvable, category_id)
 VALUES (90, 'missing_required_platform', 'high', 'entity', true, 1),
@@ -85,6 +88,21 @@ VALUES (90, 'missing_required_platform', 'high', 'entity', true, 1),
        (92, 'os_unknown_coverage', 'medium', 'entity', true, 1)
 ON CONFLICT DO NOTHING;
 """
+
+
+def lifecycle_record(conn, device, entity, platform, observed, *, lifecycle="active"):
+    observation = uuid.uuid4()
+    conn.execute(
+        "INSERT INTO operations.entity_observation_current "
+        "(observation_id,tenant_id,device_id,entity_type,platform,active,observed_at,canonical_data) "
+        "VALUES (%s,1,%s,%s,%s,true,%s,'{}')",
+        (observation, device, entity, platform, observed),
+    )
+    conn.execute(
+        "INSERT INTO operations.v_device_source_record_lifecycle_current "
+        "VALUES (1,%s,%s,%s,true,%s,%s,%s,%s,%s)",
+        (device, entity, platform, lifecycle, observation, platform, observed, entity.startswith("agent.")),
+    )
 
 
 @pytest.fixture(scope="module")
@@ -130,6 +148,7 @@ def _computer(conn, *, os_group="Unknown", role="unknown", presence=()):
         (device, CLIENT, os_group, role),
     )
     for entity_type, platform in presence:
+        lifecycle_record(conn, device, entity_type, platform, NOW)
         conn.execute(
             "INSERT INTO operations.device_agent_presence_current VALUES (1, %s, %s, %s, %s, %s, NULL, true)",
             (device, entity_type, platform, NOW - timedelta(hours=1), NOW),
@@ -138,7 +157,7 @@ def _computer(conn, *, os_group="Unknown", role="unknown", presence=()):
 
 
 def test_unknown_os_applies_no_os_limited_requirement_and_raises_one_finding(conn, captured):
-    writes, resolved = captured
+    writes, _resolved = captured
     # ADR-0036: positive on the OS. LogMeIn is present, but with the OS unknown
     # neither Ninja nor LogMeIn applies; one os_unknown_coverage finding lists both.
     listing = _computer(conn, presence=[("agent.remote_access", "LogMeIn")])
@@ -156,7 +175,6 @@ def test_unknown_os_applies_no_os_limited_requirement_and_raises_one_finding(con
         ]}),
     ]
     assert [ft for ft, _d in by_device[windows]] == [90]
-    assert resolved == [(92, [listing])]
 
 
 def test_a_seen_agent_does_not_make_an_unknown_os_requirement_apply(conn, captured):

@@ -309,7 +309,7 @@ def _render_coverage_context(monkeypatch, query: str, cursor: _Cursor | None = N
 
 
 def test_requirements_not_applied_show_n_a_with_the_reason(monkeypatch):
-    # ADR-0036: os_unknown -> "N/A — OS unknown", pending_cleanup -> "N/A — Offline",
+    # ADR-0036: os_unknown -> "N/A — OS unknown", pending_cleanup -> "N/A — Cleanup",
     # outside_coverage -> "No agents"; none of them counts as required.
     cursor = _Cursor()
     first = cursor._results[0][0]
@@ -336,12 +336,12 @@ def test_requirements_not_applied_show_n_a_with_the_reason(monkeypatch):
     assert row["agent_cells"][0]["rule_label"] == "N/A — OS unknown"
     cards = {card["platform"]: card for card in context["platform_cards"]}
     assert cards["Ninja"]["missing_total"] == 0
-    for label in ("N/A — OS unknown", "N/A — Offline", "No agents"):
+    for label in ("N/A — OS unknown", "N/A — Cleanup", "No agents"):
         assert label in context["agent_filter_requirements"]
     assert "Not evaluated" not in context["agent_filter_requirements"]
     statement = cursor.queries[1][0]
     assert "WHEN 'os_unknown' THEN 'N/A — OS unknown'" in statement
-    assert "WHEN 'pending_cleanup' THEN 'N/A — Offline'" in statement
+    assert "WHEN 'pending_cleanup' THEN 'N/A — Cleanup'" in statement
     assert "ELSE 'No agents'" in statement
 
 
@@ -814,3 +814,9 @@ def test_sources_column_has_a_source_record_requirement_header():
     assert "<summary>Agents</summary>" not in template
     assert template.count("<summary>Sources</summary>") == 2
     assert '<span>Source</span><span>Record</span><span>Requirement</span>' in template
+
+
+def test_legacy_offline_requirement_filters_map_to_cleanup_without_changing_record_offline():
+    assert views._requirement_status_alias("Ninja|N/A — Offline") == "Ninja|N/A — Cleanup"
+    assert views._requirement_status_alias("N/A — Offline") == "N/A — Cleanup"
+    assert views._requirement_status_alias("Ninja|Offline") == "Ninja|Offline"

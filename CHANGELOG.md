@@ -2,6 +2,31 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.129.3] — 2026-10-27 — Requirement and lifecycle reconciliation
+
+### Fixed
+
+- Lifecycle, requirement guards, offline findings and cleanup findings use one
+  qualified lifecycle result; polling a contactless record no longer implies
+  recent device contact. Cleanup reasons remain distinct from offline evidence.
+- Explicit confirmation that a cleanup Computer is still in use restores
+  eligible requirement checks while preserving OS support and safety guards.
+- Requirement finding recovery consumes current verdicts and fresh assessments
+  instead of re-deriving profiles or using a fixed 48-hour recovery window.
+- Full and single-Computer evaluations share scoped offline recovery, with
+  tenant serialization and consistent evaluation snapshots.
+- Migration `0356` corrects full entity/platform/episode matching and SQL NULL
+  handling in the requirement drift checker without rewriting finding history.
+- Computers show `N/A — Cleanup`; historical requirement-filter URLs remain valid.
+
+### Release notes
+
+- Expanded runtime validation is deferred at the user's direction. Syntax,
+  packaging and diff checks do not establish production acceptance.
+- This version also records previously deployed software display-name
+  preservation (`1cc7b93`, migration `0354`) and audited candidate withdrawal
+  (`6add50f`, migration `0355`), which did not update VERSION/CHANGELOG.
+
 ## [0.129.2] — 2026-10-27 — Software installations layout
 
 ### Fixed

@@ -15453,7 +15453,16 @@ _SEV_RANK = (
     "CASE severity WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END"
 )
 # Requirements the evaluator does not apply (ADR-0036), with the reason.
-_NOT_APPLIED_STATES = ("N/A — OS unknown", "N/A — Offline", "No agents")
+_NOT_APPLIED_STATES = ("N/A — OS unknown", "N/A — Cleanup", "No agents")
+
+
+def _requirement_status_alias(value: str) -> str:
+    """Keep historical requirement-filter URLs after the cleanup label correction."""
+    prefix, separator, status = value.rpartition("|")
+    if (status if separator else value) == "N/A — Offline":
+        return prefix + separator + "N/A — Cleanup" if separator else "N/A — Cleanup"
+    return value
+
 # Record statuses renamed on the page; old bookmarked filter values still work.
 _LEGACY_RECORD_STATUSES = {"No status reported": "No status"}
 _COVERAGE_STATES = ("Online", "Offline", "Stale", "Missing", *_NOT_APPLIED_STATES)
@@ -15543,9 +15552,9 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
         dict.fromkeys(value for value in request.GET.getlist("online_in") if value)
     )
     requested_coverage_sources = request.GET.getlist("coverage_source")
-    requested_coverage_statuses = request.GET.getlist("coverage_status")
+    requested_coverage_statuses = [_requirement_status_alias(value) for value in request.GET.getlist("coverage_status")]
     any_platform_filters = [
-        value for value in request.GET.getlist("any_platform_status") if value in _COVERAGE_STATES
+        value for value in [_requirement_status_alias(value) for value in request.GET.getlist("any_platform_status")] if value in _COVERAGE_STATES
     ]
     any_platform_selected = request.GET.get("any_platform") == "1"
     no_platform_selected = request.GET.get("no_platform") == "1"
@@ -15569,7 +15578,7 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
         )
     )
     requested_record_status_filters = request.GET.getlist("record_status")
-    requested_rule_status_filters = request.GET.getlist("rule_status")
+    requested_rule_status_filters = [_requirement_status_alias(value) for value in request.GET.getlist("rule_status")]
     hudu_filters = list(
         dict.fromkeys(
             value for value in request.GET.getlist("hudu") if value in {"in_hudu", "not_in_hudu"}
@@ -15616,7 +15625,7 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
         dict.fromkeys(value for value in request.GET.getlist("device_role") if value)
     )
     state_filters = [value for value in request.GET.getlist("state") if value in _COVERAGE_STATES]
-    requested_platform_status_filters = request.GET.getlist("platform_status")
+    requested_platform_status_filters = [_requirement_status_alias(value) for value in request.GET.getlist("platform_status")]
 
     with transaction.atomic():  # noqa: SIM117 -- tenant GUC must remain local
         with connection.cursor() as cur:
@@ -15657,7 +15666,7 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
                                CASE WHEN COALESCE(presence.online, FALSE) THEN 'Online'
                                     ELSE 'Offline' END
                            WHEN 'os_unknown' THEN 'N/A — OS unknown'
-                           WHEN 'pending_cleanup' THEN 'N/A — Offline'
+                           WHEN 'pending_cleanup' THEN 'N/A — Cleanup'
                            ELSE 'No agents'
                        END AS status,
                        FALSE AS hudu_present,
@@ -15916,7 +15925,7 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
         "Missing": 0,
         "Stale": 1,
         "N/A — OS unknown": 2,
-        "N/A — Offline": 2,
+        "N/A — Cleanup": 2,
         "No agents": 2,
         "Offline": 3,
         "Online": 4,
@@ -16019,7 +16028,7 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
         ]
         requirements = [
             value
-            for value in request.GET.getlist(f"agent_requirement_{index}")
+            for value in (_requirement_status_alias(raw) for raw in request.GET.getlist(f"agent_requirement_{index}"))
             if value in allowed_rule_statuses
         ]
         if agent not in platforms or not (states or requirements):
@@ -16228,9 +16237,9 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
                 f"{platform} is not applied: no source reports this Computer's operating "
                 "system, and the requirement is limited to particular operating systems."
             ),
-            "N/A — Offline": (
-                f"{platform} is not applied: this Computer has been offline past the "
-                "retire-review threshold and is awaiting cleanup in Lifecycle."
+            "N/A — Cleanup": (
+                f"{platform} is not applied: this Computer is awaiting cleanup in Lifecycle. "
+                "An explicit still-in-use confirmation restores eligible requirement checks."
             ),
             "No agents": (
                 f"{platform} is not applied: this Computer has no agent records; it is "

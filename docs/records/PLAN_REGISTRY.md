@@ -189,8 +189,10 @@ do not open competing blueprints for the same work.
 - Blueprint: ingest/BLUEPRINT.md
 - Source: ingest/BLUEPRINT.md
 - Section: PLAN-014 — Requirement applicability
-- Resume gate: After deployment, run platform-evaluate and compare covered counts and requirement-state drift with the measured impact; then mark complete.
-- Last checked: 2026-10-21 (implemented with migration 0333 and ADR-0036; local validation passed; deployment pending).
+- Design: docs/plans/PLAN-014-requirement-reconciliation.md. Built locally; the user then deferred broader validation. Explicit confirmed use restores requirement checks in cleanup, with OS and safety guards retained (ADR-0047). Current implementation, pending migration 0356 and deferred acceptance are recorded in docs/records/PLAN-014-build-2026-10-27.md. Uncommitted, undeployed; plan remains active until separately authorized production acceptance.
+- Execution order: PLAN-014 repairs evaluator requirement reconciliation before PLAN-003 changes shared finding persistence/relationships. PLAN-003 retains that shared redesign. PLAN-012's ADR-0035 resolution-reader follow-up is handled here only for requirement finding resolution; page readers remain PLAN-012.
+- Resume gate: Migration 0333 is applied and `platform-evaluate` completed on 2026-10-27. Do not mark complete until the 659 distinct open requirement-state drift entries are explained or cleared and the 2,232 covered findings are reconciled against current source state and the original approximate impact estimate.
+- Last checked: 2026-10-27 (latest completed evaluator run 20:05 UTC, 4,728 rows touched. Aggregate: 875 missing and 1,357 stale open findings covered; 101 open unknown-OS findings need action, within the original 91–183 estimate. Drift table: 617 `finding_without_verdict`, 42 `stale_without_finding`. Production validation used tenant-scoped, read-only queries; no production data changed.)
 
 ## PLAN-017 — Consolidated data architecture review and target design
 

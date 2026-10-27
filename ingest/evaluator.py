@@ -33,6 +33,8 @@ import hashlib
 import json
 import logging
 import uuid
+from contextlib import contextmanager
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -84,6 +86,135 @@ def _apply_requirement_overrides(baseline: list[tuple], overrides: list[tuple]) 
     return list(effective.values())
 
 
+@contextmanager
+def _evaluation_transaction(tenant_id: int):
+    """Serialize before taking the repeatable-read evaluation snapshot.
+
+    A session lock survives the short acquisition transaction. Taking a
+    transaction lock inside repeatable read would freeze a snapshot *before*
+    waiting for the preceding evaluator to finish. Always release the lock
+    before returning the connection to the pool, including on rollback.
+    """
+    lock = int.from_bytes(hashlib.sha256(f"platform-evaluate:{tenant_id}".encode()).digest()[:8],
+                          "big", signed=True)
+    with db.pool.connection() as conn:
+        try:
+            with conn.transaction(), conn.cursor() as cur:
+                cur.execute("SELECT pg_advisory_lock(%s)", (lock,))
+            with conn.transaction(), conn.cursor() as cur:
+                cur.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ")
+                cur.execute("SELECT set_config('operations.tenant_id', %s, true)", (str(tenant_id),))
+                yield cur
+        finally:
+            with conn.transaction(), conn.cursor() as cur:
+                cur.execute("SELECT pg_advisory_unlock(%s)", (lock,))
+
+
+@dataclass(frozen=True)
+class LifecycleResult:
+    listing: computer_listing.Listing
+    target: str
+    reason: str
+    evidence: dict[str, Any] | None
+    known: bool
+    offline: bool
+    offline_since: datetime | None
+    blockers: tuple[str, ...]
+    evaluated_at: datetime
+    offline_after_days: int
+    review_after_days: int
+
+    @property
+    def excludes_requirements(self) -> bool:
+        return self.target == "pending_cleanup" and not self.listing.in_use_confirmed
+
+
+def _load_lifecycle_results(cur, tenant_id, now, device_id, source_problems):
+    offline_days, review_days = device_status_settings.load(cur, tenant_id)
+    overrides = device_status_settings.client_overrides(cur, tenant_id)
+    listings = computer_listing.load(cur, tenant_id, now, device_id)
+    devices = _load_lifecycle_evidence(
+        cur, tenant_id, [item.device_id for item in listings], include_retired=True
+    )
+    results = {}
+    for item in listings:
+        state = item.state(now, review_days)
+        device = devices.get(item.device_id, {"rows": [], "client_id": item.client_id})
+        evidence, conflict = _select_lifecycle_evidence(device["rows"])
+        platforms = {row["platform"] for row in device["rows"]}
+        blockers = tuple(dict.fromkeys(
+            key for platform in platforms
+            for key in blockers_for_platform(source_problems, platform, item.client_id)
+        ))
+        if state in computer_listing.REVIEW_STATES or state == "retire":
+            # Absence across sources requires all relevant collection to be
+            # complete; no presence row is not proof a failed source is empty.
+            blockers = tuple(dict.fromkeys((*blockers, *(
+                problem.condition_key for problem in source_problems
+                if problem.client_id is None or problem.client_id == item.client_id
+            ))))
+        known = not conflict and not blockers
+        if any(
+            row["mode"] in _LIFECYCLE_REPORTED_MODES
+            and _reported_lifecycle_state(
+                row["last_power_state"], row["has_power_state"],
+                row["reported_online"], row["has_reported_online_state"],
+            )[1]
+            and (evidence is None or row["last_observed_at"] > evidence["at"])
+            for row in device["rows"]
+        ):
+            known = False
+        target = item.lifecycle_status
+        reason = state
+        offline = False
+        offline_since = None
+        if item.lifecycle_status == "retired" and not item.reporting:
+            reason = "retired"
+        elif state == "retire":
+            target = "retired" if known else target
+        elif state in computer_listing.REVIEW_STATES:
+            target = "pending_cleanup" if known else target
+        elif evidence is None or conflict:
+            known = False
+            reason = "conflict" if conflict else "unmeasured"
+        else:
+            reason = "contact_policy"
+            if known:
+                target = _device_lifecycle_target(
+                    device, evidence, now, offline_days, review_days, overrides
+                )
+                offline = target in {"offline_aging", "pending_cleanup"}
+                threshold = overrides.get(str(item.client_id), offline_days)
+                # The time of a fresh negative report is not an invented
+                # historical contact. Duration must be independently known.
+                positive = [row["last_contact_at"] for row in device["rows"]
+                            if row["mode"] in _LIFECYCLE_DIRECT_MODES
+                            and row["last_contact_at"] is not None]
+                since = max(positive) if positive else evidence["at"]
+                if offline and since < now - timedelta(days=threshold):
+                    offline_since = since
+        results[item.device_id] = LifecycleResult(
+            item, target, reason, evidence, known, offline, offline_since, blockers,
+            now, overrides.get(str(item.client_id), offline_days),
+            max(review_days, overrides.get(str(item.client_id), offline_days) + 1),
+        )
+    return results, devices
+
+
+def _apply_lifecycle_results(cur, tenant_id, now, run_id, results):
+    affected = 0
+    for result in results.values():
+        item = result.listing
+        if item.in_use_confirmed and item.reporting and result.known and result.target == "active":
+            _clear_in_use_confirmation(cur, tenant_id, item.device_id)
+        if result.known and item.lifecycle_status != result.target:
+            affected += _transition_lifecycle(
+                cur, tenant_id, item, item.lifecycle_status, result.target,
+                result.reason, result.evidence, now, run_id,
+            )
+    return affected
+
+
 def evaluate(tenant_id: int, device_id: uuid.UUID | None = None) -> int:
     """Evaluate coverage gaps and lifecycle events for a tenant.
 
@@ -98,39 +229,43 @@ def evaluate(tenant_id: int, device_id: uuid.UUID | None = None) -> int:
     source_problems: list[SourceCollectionProblem] = []
 
     try:
-        with db.pool.connection() as conn:
-            with conn.cursor() as cur:
-                cur.execute(f"SET LOCAL operations.tenant_id = {tenant_id}")
-                source_problems = _source_failure_guard(cur, tenant_id, now)
-                listing_owned: set[uuid.UUID] = set()
-                affected += _sync_source_withdrawal_lifecycle(
-                    cur, tenant_id, now, evaluator_run_id, device_id, listing_owned
-                )
-                if device_id is None:
-                    affected += _sync_device_roles(cur, tenant_id, now)
-                    affected += _sync_lifecycle_status(
-                        cur, tenant_id, now, evaluator_run_id, skip=listing_owned
-                    )
-                    affected += _evaluate_unknown_entities(cur, tenant_id, now)
-                    affected += _evaluate_change_history_registry(cur, tenant_id, now)
-                    affected += _evaluate_source_name_kinds(cur, tenant_id, now)
-                    affected += _evaluate_duplicate_records(cur, tenant_id, now)
-                    affected += identity_findings.evaluate(cur, tenant_id, now)
-                corroborated = _load_corroborated_devices(cur, tenant_id)
-                affected += _evaluate_coverage(
-                    cur, tenant_id, device_id, now, source_problems, corroborated
-                )
-                affected += _evaluate_unenrolled(cur, tenant_id, device_id, now)
-                affected += _evaluate_device_lifecycle(
-                    cur, tenant_id, device_id, now, source_problems
-                )
-                affected += sync_windows_servicing(
-                    cur, tenant_id, device_id, now=now
-                )
-                # cross_client_conflict emitter removed 2026-07-14 — see
-                # BLUEPRINT §1.7 for design rationale. Existing findings
-                # closed in migration 0034.
-                affected += _auto_resolve(cur, tenant_id, device_id, now)
+        with _evaluation_transaction(tenant_id) as cur:
+            now = datetime.now(timezone.utc)
+            cur.execute(f"SET LOCAL operations.tenant_id = {tenant_id}")
+            source_problems = _source_failure_guard(cur, tenant_id, now)
+            lifecycle, lifecycle_devices = _load_lifecycle_results(
+                cur, tenant_id, now, device_id, source_problems
+            )
+            affected += _apply_lifecycle_results(
+                cur, tenant_id, now, evaluator_run_id, lifecycle
+            )
+            affected += _sync_lifecycle_status(
+                cur, tenant_id, now, evaluator_run_id, skip=set(lifecycle),
+                per_device={subject: item for subject, item in lifecycle_devices.items()
+                            if lifecycle[subject].target != "retired"}, device_id=device_id,
+            )
+            if device_id is None:
+                affected += _sync_device_roles(cur, tenant_id, now)
+                affected += _evaluate_unknown_entities(cur, tenant_id, now)
+                affected += _evaluate_change_history_registry(cur, tenant_id, now)
+                affected += _evaluate_source_name_kinds(cur, tenant_id, now)
+                affected += _evaluate_duplicate_records(cur, tenant_id, now)
+                affected += identity_findings.evaluate(cur, tenant_id, now)
+            corroborated = _load_corroborated_devices(cur, tenant_id)
+            affected += _evaluate_coverage(
+                cur, tenant_id, device_id, now, source_problems, corroborated, lifecycle
+            )
+            affected += _evaluate_unenrolled(cur, tenant_id, device_id, now)
+            affected += _evaluate_device_lifecycle(
+                cur, tenant_id, device_id, now, source_problems, lifecycle
+            )
+            affected += sync_windows_servicing(
+                cur, tenant_id, device_id, now=now
+            )
+            # cross_client_conflict emitter removed 2026-07-14 — see
+            # BLUEPRINT §1.7 for design rationale. Existing findings
+            # closed in migration 0034.
+            affected += _auto_resolve(cur, tenant_id, device_id, now)
     except Exception as exc:
         error_msg = str(exc)[:2000]
         raise
@@ -568,6 +703,8 @@ def _load_lifecycle_evidence(
                  FROM operations.entity_observation_current current_observation
                 WHERE current_observation.tenant_id = d.tenant_id
                   AND current_observation.device_id = d.id
+                  AND current_observation.entity_type = apc.entity_type
+                  AND current_observation.platform = apc.platform
                   AND current_observation.active
            )
         """,
@@ -630,7 +767,7 @@ def _resolve_lifecycle_findings_absent(
               FROM operations.findings
              WHERE tenant_id = %s
                AND finding_type_id = %s
-               AND status IN ('open', 'acknowledged')
+               AND status IN ('open', 'acknowledged', 'investigating', 'suppressed')
                AND (%s::uuid IS NULL OR subject_id = %s)
                AND NOT (condition_key = ANY(%s))
             """,
@@ -654,7 +791,7 @@ def _resolve_lifecycle_findings_absent(
                SET status = 'resolved', last_seen_at = %s
              WHERE tenant_id = %s
                AND finding_type_id = %s
-               AND status IN ('open', 'acknowledged')
+               AND status IN ('open', 'acknowledged', 'investigating', 'suppressed')
                AND (%s::uuid IS NULL OR subject_id = %s)
                AND NOT (condition_key = ANY(%s))
                AND EXISTS (
@@ -679,7 +816,7 @@ def _resolve_lifecycle_findings_absent(
                SET status = 'resolved', last_seen_at = %s
              WHERE tenant_id = %s
                AND finding_type_id = %s
-               AND status IN ('open', 'acknowledged')
+               AND status IN ('open', 'acknowledged', 'investigating', 'suppressed')
                AND (%s::uuid IS NULL OR subject_id = %s)
                AND EXISTS (
                    SELECT 1
@@ -847,73 +984,11 @@ def _sync_source_withdrawal_lifecycle(
     device_id: uuid.UUID | None,
     owned: set[uuid.UUID] | None = None,
 ) -> int:
-    """Set each Computer's lifecycle from what lists it now (ADR-0032).
-
-    ``computer_listing`` decides the state. A Computer something reports for
-    (or whose agents are only silent) gets the state the contact policy
-    selects, in one transition. A Computer only documentation, a stopped VM or
-    archived documentation still lists goes to review (``pending_cleanup``);
-    one nothing lists any more is retired, and a retired Computer that reports
-    again is restored. The ids whose lifecycle this step decided are added to
-    ``owned``, so the contact policy later in the run leaves them alone (it
-    would otherwise move a stopped VM straight back out of review).
-    """
-    offline_after_days, retire_review_days = device_status_settings.load(cur, tenant_id)
-    client_offline_days = device_status_settings.client_overrides(cur, tenant_id)
-    listings = computer_listing.load(cur, tenant_id, now, device_id)
-    states = {item.device_id: item.state(now, retire_review_days) for item in listings}
-    contact_ids = [
-        item.device_id
-        for item in listings
-        if states[item.device_id] in computer_listing.CONTACT_POLICY_STATES
-        and item.lifecycle_status != "active"
-        and (item.lifecycle_status != "retired" or item.reporting)
-    ]
-    contact_evidence = (
-        _load_lifecycle_evidence(cur, tenant_id, contact_ids, include_retired=True)
-        if contact_ids
-        else {}
-    )
-
-    affected = 0
-    for item in listings:
-        state = states[item.device_id]
-        previous = item.lifecycle_status
-        evidence = None
-        if state == "retire":
-            target = "retired"
-        elif state in computer_listing.REVIEW_STATES:
-            target = "pending_cleanup"
-        elif previous == "retired" and not item.reporting:
-            # A source lists it again but it does not report: stays retired.
-            continue
-        else:
-            target = "active"
-            device = contact_evidence.get(item.device_id)
-            if device is not None:
-                selected, has_conflict = _select_lifecycle_evidence(device["rows"])
-                if selected is not None and not has_conflict:
-                    evidence = selected
-                    target = _device_lifecycle_target(
-                        device,
-                        selected,
-                        now,
-                        offline_after_days,
-                        retire_review_days,
-                        client_offline_days,
-                    )
-        if item.in_use_confirmed and item.reporting:
-            _clear_in_use_confirmation(cur, tenant_id, item.device_id)
-        if owned is not None and (state not in computer_listing.CONTACT_POLICY_STATES
-                                  or previous == "retired"):
-            owned.add(item.device_id)
-        if target == previous:
-            continue
-        if _transition_lifecycle(
-            cur, tenant_id, item, previous, target, state, evidence, now, evaluator_run_id
-        ):
-            affected += 1
-    return affected
+    """Compatibility entrypoint using the same scoped lifecycle result/writer."""
+    results, _ = _load_lifecycle_results(cur, tenant_id, now, device_id, [])
+    if owned is not None:
+        owned.update(results)
+    return _apply_lifecycle_results(cur, tenant_id, now, evaluator_run_id, results)
 
 
 def _clear_in_use_confirmation(cur: Any, tenant_id: int, device_id: uuid.UUID) -> None:
@@ -1055,6 +1130,8 @@ def _sync_lifecycle_status(
     now: datetime,
     evaluator_run_id: uuid.UUID,
     skip: set[uuid.UUID] | None = None,
+    per_device: dict | None = None,
+    device_id: uuid.UUID | None = None,
 ) -> int:  # noqa: PLR0912 - policy branches map to explicit approved outcomes.
     """Apply explicit lifecycle policy and append transition audit events.
 
@@ -1065,7 +1142,8 @@ def _sync_lifecycle_status(
     """
     offline_after_days, retire_review_days = device_status_settings.load(cur, tenant_id)
     client_offline_days = device_status_settings.client_overrides(cur, tenant_id)
-    per_device = _load_lifecycle_evidence(cur, tenant_id)
+    if per_device is None:
+        per_device = _load_lifecycle_evidence(cur, tenant_id, [device_id] if device_id else None)
 
     affected = 0
     unknown_keys: set[str] = set()
@@ -1212,11 +1290,11 @@ def _sync_lifecycle_status(
 
     if unknown_type_id is not None:
         _resolve_lifecycle_findings_absent(
-            cur, tenant_id, unknown_type_id, unknown_keys, now
+            cur, tenant_id, unknown_type_id, unknown_keys, now, device_id
         )
     if conflict_type_id is not None:
         _resolve_lifecycle_findings_absent(
-            cur, tenant_id, conflict_type_id, conflict_keys, now
+            cur, tenant_id, conflict_type_id, conflict_keys, now, device_id
         )
     if affected:
         log.info("lifecycle sync: %d transitions or findings updated", affected)
@@ -1567,6 +1645,7 @@ def _evaluate_coverage(
     now: datetime,
     source_problems: list[SourceCollectionProblem],
     corroborated: set[uuid.UUID],
+    lifecycle_results: dict[uuid.UUID, LifecycleResult] | None = None,
 ) -> int:
     """Emit coverage findings from baseline requirements plus client overrides.
 
@@ -1644,10 +1723,6 @@ def _evaluate_coverage(
     )
     client_profile: dict[Any, Any] = {row[0]: row[1] for row in cur.fetchall()}
 
-    if not profile_rows and not client_override_rows:
-        _write_requirement_state(cur, tenant_id, device_id, [])
-        return 0
-
     def resolve_tier(dev_client_id, dev_role: str) -> list[tuple]:
         profile_id = client_profile.get(dev_client_id)
         scopes = profile_tiers.get(profile_id, {})
@@ -1668,34 +1743,14 @@ def _evaluate_coverage(
     if missing_ft is None:
         log.warning("evaluator: finding_type 'missing_required_platform' not found")
         return 0
-    offline_after_days, _retire_review_days = device_status_settings.load(cur, tenant_id)
-    client_days = device_status_settings.override_expression(cur, "c")
     identity_blocked = _identity_blocked_devices(cur, tenant_id)
-
-    # Pre-compute devices that are fully offline (last contact across
-    # ALL agents older than the device_offline threshold). Per
-    # BLUEPRINT §1.8, `stale_required_platform` should NOT fire on
-    # such devices — the device-level `device_offline` finding covers
-    # them, and per-agent stale is redundant noise when the whole
-    # device is silent. `missing_required_platform` STILL fires on
-    # offline devices (the agent was never installed, that's a real
-    # gap regardless of current online state).
-    cur.execute(
-        f"""
-        SELECT apc.device_id
-        FROM operations.device_agent_presence_current apc
-        JOIN operations.devices dv
-          ON dv.id = apc.device_id AND dv.tenant_id = apc.tenant_id
-        LEFT JOIN operations.clients c ON c.id = dv.client_id
-        WHERE apc.tenant_id = %s
-          AND apc.entity_type LIKE 'agent.%%'
-        GROUP BY apc.device_id, {client_days}
-        HAVING MAX(COALESCE(apc.last_contact_at, apc.last_observed_at))
-             < NOW() - make_interval(days => COALESCE({client_days}, %s))
-        """,
-        (tenant_id, offline_after_days),
-    )
-    fully_offline_devices = {r[0] for r in cur.fetchall()}
+    if lifecycle_results is None:
+        lifecycle_results, _ = _load_lifecycle_results(
+            cur, tenant_id, now, device_id, source_problems
+        )
+    fully_offline_devices = {
+        subject for subject, result in lifecycle_results.items() if result.known and result.offline
+    }
 
     # Pull every device + agent-universe flag once. Exemptions come from
     # device_operator_decisions (Track O batch O3 — polymorphic operator
@@ -1714,7 +1769,11 @@ def _evaluate_coverage(
                           WHERE dec.tenant_id = d.tenant_id AND dec.device_id = d.id
                             AND dec.dimension = 'in_use_confirmed'
                             AND dec.value = 'true'::jsonb)) AS in_agent_universe,
-               d.lifecycle_status
+               d.lifecycle_status,
+               EXISTS(SELECT 1 FROM operations.device_operator_decisions confirmed
+                       WHERE confirmed.tenant_id = d.tenant_id AND confirmed.device_id = d.id
+                         AND confirmed.dimension = 'in_use_confirmed'
+                         AND confirmed.value = 'true'::jsonb) AS in_use_confirmed
         FROM operations.devices d
         LEFT JOIN operations.device_operator_decisions op
           ON op.tenant_id = d.tenant_id
@@ -1776,23 +1835,18 @@ def _evaluate_coverage(
         os_group,
         in_universe,
         lifecycle_status,
+        in_use_confirmed,
     ) in devices:
         exemptions = exemptions or {}
         not_applied: list[dict[str, str]] = []
         tier_rows = resolve_tier(dev_client_id, dev_role or "all")
-        # BLUEPRINT E.6: coverage evaluates against entity types. A device
-        # with zero agent.* observations is not in the coverage universe —
-        # it's a hypervisor / NMS tracking record. Skipped here; picked up
-        # by _evaluate_unenrolled instead. Its requirements are recorded as
-        # outside coverage, never as missing.
+        # Cleanup is a lifecycle exclusion, including no-agent Computers.
+        # ADR-0047: only an explicit valid decision bypasses that exclusion.
+        if lifecycle_status == "pending_cleanup" and not in_use_confirmed:
+            record_all(dev_id, tier_rows, exemptions, os_group, "pending_cleanup")
+            continue
         if not in_universe:
             record_all(dev_id, tier_rows, exemptions, os_group, "outside_coverage")
-            continue
-        # ADR-0036: a Computer offline past the retire-review threshold is
-        # decided by lifecycle, not by agent findings. Its earlier findings
-        # stay open and are covered by device_offline.
-        if lifecycle_status == "pending_cleanup":
-            record_all(dev_id, tier_rows, exemptions, os_group, "pending_cleanup")
             continue
         for (
             _rid,
@@ -1841,9 +1895,13 @@ def _evaluate_coverage(
                 (tenant_id, dev_id, entity_type, platform, platform),
             )
             (last_observed,) = cur.fetchone()
-            collection_blockers = blockers_for_platform(
+            collection_blockers = _requirement_collection_blockers(
                 source_problems, platform, dev_client_id
             )
+            result = lifecycle_results.get(dev_id)
+            if result is None or not result.known:
+                collection_blockers += (("lifecycle:unmeasured",) if result is None
+                                        else result.blockers or ("lifecycle:unmeasured",))
 
             # BLUEPRINT 1.4 split:
             #   MISSING (last_observed IS NULL) → emit immediately.
@@ -1947,14 +2005,126 @@ def _evaluate_coverage(
                 ),
             )
 
-    # A complete run (all Computers) clears the condition where the OS became
-    # known, the Computer reached pending_cleanup, or it left coverage.
-    if device_id is None and os_unknown_ft is not None:
-        _resolve_findings_absent(
-            cur, tenant_id, os_unknown_ft, os_unknown_subjects, now,
-            assessment_required=True, empty_result_verified=True,
-        )
     _write_requirement_state(cur, tenant_id, device_id, verdicts)
+    count += _reconcile_requirement_findings(
+        cur, tenant_id, device_id, now, verdicts, os_unknown_subjects,
+        source_problems, identity_blocked, fully_offline_devices, lifecycle_results,
+    )
+    return count
+
+
+def _requirement_collection_blockers(
+    problems: list[SourceCollectionProblem], platform: str, client_id: Any
+) -> tuple[str, ...]:
+    # An 'any' requirement cannot establish complete absence if a candidate
+    # source in its client scope failed. Exact platforms keep their own scope.
+    if platform == "any":
+        return tuple(
+            problem.condition_key for problem in problems
+            if problem.client_id is None or problem.client_id == client_id
+        )
+    return blockers_for_platform(problems, platform, client_id)
+
+
+def _reconcile_requirement_findings(
+    cur: Any,
+    tenant_id: int,
+    device_id: uuid.UUID | None,
+    now: datetime,
+    verdicts: list[dict[str, Any]],
+    os_unknown_subjects: list[uuid.UUID],
+    source_problems: list[SourceCollectionProblem],
+    identity_blocked: set[uuid.UUID],
+    fully_offline_devices: set[uuid.UUID],
+    lifecycle_results: dict[uuid.UUID, LifecycleResult],
+) -> int:
+    """Reconcile old episodes from this successful coverage pass, never a second rule.
+
+    Conditions that disappeared need a current assessment too. Failure-only
+    assessment writes left satisfied, excluded and superseded findings stuck
+    behind their previous blocked response. Unknown-OS/cleanup requirements
+    keep their covered history (ADR-0036), even if clearing becomes permitted.
+    Other obsolete episodes close only through a newly measured may_clear.
+    """
+    current = {
+        (row["device_id"], row["entity_type"], row["platform"]): row for row in verdicts
+    }
+    unknown = set(os_unknown_subjects)
+    cur.execute(
+        """
+        SELECT f.id, f.subject_id, f.condition_key, ft.name,
+               f.finding_details, f.status,
+               d.id, d.client_id, d.lifecycle_status
+          FROM operations.findings f
+          JOIN operations.finding_types ft ON ft.id = f.finding_type_id
+          LEFT JOIN operations.devices d
+            ON d.tenant_id = f.tenant_id AND d.id = f.subject_id
+         WHERE f.tenant_id = %s AND f.subject_type = 'device'
+           AND ft.name IN ('missing_required_platform', 'stale_required_platform',
+                           'os_unknown_coverage')
+           AND f.status IN ('open', 'acknowledged', 'investigating', 'suppressed')
+           AND (%s::uuid IS NULL OR f.subject_id = %s)
+         ORDER BY f.id
+         FOR UPDATE OF f
+        """,
+        (tenant_id, device_id, device_id),
+    )
+    count = 0
+    for fid, subject, key, type_name, details, status, existing, client, lifecycle in cur.fetchall():
+        if existing is None:
+            # A dangling subject cannot establish a valid participant scope.
+            # Leave it visible to the audit instead of aborting the whole pass.
+            log.warning("requirement reconciliation: missing tenant-owned Computer")
+            continue
+        platform = details.get("platform", "")
+        row = current.get((str(subject), details.get("entity_type", ""), platform))
+        if type_name == "os_unknown_coverage":
+            if subject in unknown and key == _condition_key(
+                tenant_id, client, subject, type_name, ""
+            ):
+                continue
+            # This condition ends when OS becomes known or coverage/lifecycle
+            # excludes the Computer; the child requirement episodes stay covered.
+            retain = False
+        else:
+            expected = "missing" if type_name == "missing_required_platform" else "stale"
+            if row and row["verdict"] == expected and row.get("condition_key") == key:
+                continue
+            result = lifecycle_results.get(subject)
+            retain = (result is not None and result.excludes_requirements) or (
+                row is not None and row["verdict"] in {"os_unknown", "pending_cleanup"}
+            )
+        blockers = _requirement_collection_blockers(source_problems, platform, client)
+        result = lifecycle_results.get(subject)
+        if result is None or not result.known:
+            blockers += (("lifecycle:unmeasured",) if result is None
+                         else result.blockers or ("lifecycle:unmeasured",))
+        participant = Participant("device", str(subject), "affected", tenant_id)
+        condition = Condition(
+            tenant_id, "entity", str(fid), type_name, key, status, (participant,)
+        )
+        response = record_assessment(
+            cur, condition,
+            _device_condition_signals(
+                tenant_id, subject, identity_blocked,
+                offline=subject in fully_offline_devices,
+                collection_skipped=bool(blockers), collection_blockers=blockers,
+            ),
+            EvaluationCoverage(
+                existing is not None, not blockers, not blockers, existing is not None
+            ),
+            now=now, reevaluation_key=f"requirement-reconcile:{key}:{now.isoformat()}",
+            participant=participant,
+        )
+        if not retain and response["may_clear"]:
+            cur.execute(
+                """UPDATE operations.findings
+                      SET status = 'resolved', last_seen_at = %s
+                    WHERE tenant_id = %s AND id = %s
+                      AND status IN ('open', 'acknowledged', 'investigating', 'suppressed')""",
+                (now, tenant_id, fid),
+            )
+            count += cur.rowcount
     return count
 
 
@@ -2100,9 +2270,12 @@ def _evaluate_device_lifecycle(
     device_id: uuid.UUID | None,
     now: datetime,
     source_problems: list[SourceCollectionProblem],
+    lifecycle_results: dict[uuid.UUID, LifecycleResult] | None = None,
 ) -> int:
     """Cleanup, archived-but-reporting, offline and stale-data findings."""
     count = 0
+    if lifecycle_results is None:
+        lifecycle_results, _ = _load_lifecycle_results(cur, tenant_id, now, device_id, source_problems)
 
     # device_source_record_withdrawn was retired (migration 0316): a withdrawn
     # record is History; missing agents, cleanup and retirement have their
@@ -2116,9 +2289,17 @@ def _evaluate_device_lifecycle(
     no_current_evidence_keys: set[str] = set()
     archived_keys: set[str] = set()
     if missing_type_id or archived_type_id:
-        _offline_days, review_days = device_status_settings.load(cur, tenant_id)
-        for item in computer_listing.load(cur, tenant_id, now, device_id):
-            state = item.state(now, review_days)
+        for result in lifecycle_results.values():
+            item = result.listing
+            if not result.known:
+                no_current_evidence_keys.add(_condition_key(
+                    tenant_id, item.client_id, item.device_id, "device_missing_from_source", ""
+                ))
+                archived_keys.add(_condition_key(
+                    tenant_id, item.client_id, item.device_id, "archived_but_reporting", ""
+                ))
+                continue
+            state = result.reason
             details = {
                 "last_source": item.last_source,
                 "last_seen_at": item.last_seen_at.isoformat() if item.last_seen_at else None,
@@ -2152,109 +2333,53 @@ def _evaluate_device_lifecycle(
             cur, tenant_id, archived_type_id, archived_keys, now, device_id
         )
 
+    count += _evaluate_device_offline(cur, tenant_id, now, lifecycle_results, device_id)
     if device_id is None:
-        count += _evaluate_device_offline(cur, tenant_id, now)
         count += _evaluate_stale_data(cur, tenant_id, now, source_problems)
     return count
 
 
-def _evaluate_device_offline(cur: Any, tenant_id: int, now: datetime) -> int:
-    """Device is unreachable via EVERY agent source (BLUEPRINT §1.8).
-
-    Fires when a device has agent presence rows but the most recent
-    platform last-contact across ALL agents is older than the threshold
-    — i.e., no source is hearing the device.
-
-    This is device-level truth. A device where one agent (say Ninja)
-    stopped talking while others (S1/LMI) are still in contact is NOT
-    "offline" — it's a per-source staleness case handled by
-    `stale_required_platform` with `platform=<source>` in details.
-    """
+def _evaluate_device_offline(cur, tenant_id, now, lifecycle_results=None, device_id=None):
+    """Project qualified lifecycle absence; never substitute polling for contact."""
+    if lifecycle_results is None:
+        lifecycle_results, _ = _load_lifecycle_results(cur, tenant_id, now, device_id, [])
     ft_id = _get_finding_type_id(cur, "device_offline")
     if ft_id is None:
         return 0
-    offline_after_days, _retire_review_days = device_status_settings.load(cur, tenant_id)
-    client_days = device_status_settings.override_expression(cur, "c")
     identity_blocked = _identity_blocked_devices(cur, tenant_id)
-    # Per-platform last-seen is preserved as evidence on the finding
-    # so operators triaging a fully-offline device can see the exact
-    # timeline ("went dark on Ninja 7/10 → SentinelOne 7/12 →
-    # ScreenConnect 7/14 → fully offline since 7/14") without
-    # having to click through to the device detail Sources tab.
-    cur.execute(
-        f"""
-        WITH per_platform AS (
-            SELECT tenant_id, device_id, platform,
-                   MAX(COALESCE(last_contact_at, last_observed_at)) AS last_seen
-            FROM operations.device_agent_presence_current
-            WHERE tenant_id = %s
-              AND entity_type LIKE 'agent.%%'
-            GROUP BY tenant_id, device_id, platform
-        )
-        SELECT pp.device_id, d.client_id, d.canonical_hostname,
-               MAX(pp.last_seen) AS overall_last,
-               jsonb_object_agg(pp.platform, pp.last_seen) AS per_source
-        FROM per_platform pp
-        JOIN operations.devices d
-             ON d.id = pp.device_id AND d.tenant_id = pp.tenant_id
-        LEFT JOIN operations.clients c ON c.id = d.client_id
-        WHERE d.deleted_at IS NULL
-          AND d.lifecycle_status <> 'retired'
-        GROUP BY pp.device_id, d.client_id, d.canonical_hostname, {client_days}
-        HAVING MAX(pp.last_seen) < NOW() - make_interval(days => COALESCE({client_days}, %s))
-        """,
-        (tenant_id, offline_after_days),
-    )
+    active_keys = set()
     count = 0
-    offenders: list[uuid.UUID] = []
-    for dev_id, client_id, hostname, overall_last, per_source in cur.fetchall():
-        offenders.append(dev_id)
-        # per_source is a dict {platform: iso_ts_string}; identify the
-        # source that held on longest (== overall_last).
-        last_seen_source = None
-        if isinstance(per_source, dict) and per_source:
-            last_seen_source = max(per_source, key=lambda k: per_source[k] or "")
-        ckey = _condition_key(tenant_id, client_id, dev_id, "device_offline", "")
+    for subject, result in lifecycle_results.items():
+        key = _condition_key(tenant_id, result.listing.client_id, subject, "device_offline", "")
+        if not result.known:
+            # Preserve the episode until complete evidence can establish recovery.
+            active_keys.add(key)
+            continue
+        if (result.offline and result.offline_since is None) or (
+            result.reason == "confirmed_in_use" and result.evidence is None
+        ):
+            # Neither an unmeasured duration nor an operator's use decision
+            # establishes recovery from an already recorded offline episode.
+            active_keys.add(key)
+            continue
+        if result.reason != "contact_policy" or result.offline_since is None:
+            continue
+        active_keys.add(key)
         count += _upsert_finding(
-            cur,
-            tenant_id,
-            ft_id,
-            client_id,
-            dev_id,
-            ckey,
-            "medium",
-            "confirmed",
-            now,
-            {
-                "hostname": hostname,
-                "last_contact_at": overall_last.isoformat() if overall_last else None,
-                "fully_offline_since": overall_last.isoformat() if overall_last else None,
-                "source_last_seen": per_source or {},
-                "last_seen_source": last_seen_source,
-            },
+            cur, tenant_id, ft_id, result.listing.client_id, subject, key,
+            "medium", "confirmed", now,
+            {"last_contact_at": result.offline_since.isoformat(),
+             "fully_offline_since": result.offline_since.isoformat(),
+             "evidence_kind": result.evidence["kind"],
+             "evidence_platform": result.evidence["platform"],
+             "lifecycle_reason": result.reason},
             assessment=(
-                (
-                    Signal(
-                        "identity",
-                        Participant("device", str(dev_id), "affected", tenant_id),
-                        Readiness.BLOCKED if dev_id in identity_blocked else Readiness.UNKNOWN,
-                        "identity:unsettled_group"
-                        if dev_id in identity_blocked
-                        else "identity:readiness_not_established",
-                    ),
-                    Signal(
-                        "offline",
-                        Participant("device", str(dev_id), "affected", tenant_id),
-                        Readiness.BLOCKED,
-                        "offline:extended_absence",
-                    ),
-                ),
+                _device_condition_signals(tenant_id, subject, identity_blocked,
+                                          offline=True, collection_skipped=False),
                 EvaluationCoverage(True, True, True, True),
             ),
         )
-    _resolve_findings_absent(
-        cur, tenant_id, ft_id, offenders, now, assessment_required=True
-    )
+    _resolve_lifecycle_findings_absent(cur, tenant_id, ft_id, active_keys, now, device_id)
     return count
 
 
@@ -2428,148 +2553,9 @@ def _auto_resolve(
                          (policy.policy->>'freshness_hours')::integer * interval '1 hour'
               )"""
 
-    # Resolve coverage findings whose (entity_type, platform) is no longer
-    # required. Client-scoped rows are sparse overrides: disabled suppresses
-    # the inherited service and enabled adds it. This mirrors the evaluator's
-    # explicit-profile → tenant-default precedence.
-    for ft_name in ("missing_required_platform", "stale_required_platform"):
-        ft_id = _get_finding_type_id(cur, ft_name)
-        if not ft_id:
-            continue
-        cur.execute(
-            f"""
-            WITH required_for_device AS (
-                -- A client inherits its explicit profile, or the tenant
-                -- default when no override is assigned.
-                SELECT d.id AS device_id, rpi.entity_type, rpi.platform
-                FROM operations.devices d
-                JOIN operations.clients c ON c.id = d.client_id
-                JOIN operations.requirement_profiles default_profile
-                  ON default_profile.tenant_id = c.tenant_id
-                 AND default_profile.is_tenant_default
-                JOIN operations.requirement_profile_items rpi
-                  ON rpi.tenant_id = c.tenant_id
-                 AND rpi.profile_id = COALESCE(c.requirement_profile_id, default_profile.id)
-                 AND (rpi.device_scope = d.device_role OR (
-                      rpi.device_scope = 'all' AND NOT EXISTS (
-                          SELECT 1
-                          FROM operations.requirement_profile_items role_item
-                          WHERE role_item.tenant_id = c.tenant_id
-                            AND role_item.profile_id = rpi.profile_id
-                            AND role_item.device_scope = d.device_role
-                      )
-                 ))
-                WHERE d.tenant_id = %s AND d.deleted_at IS NULL
-                  AND NOT EXISTS (
-                      SELECT 1
-                      FROM operations.coverage_requirements o
-                      WHERE o.tenant_id = d.tenant_id
-                        AND o.client_id = d.client_id
-                        AND o.enabled = FALSE
-                        AND (o.device_scope = 'all' OR o.device_scope = d.device_role)
-                        AND (
-                            (o.agent_id IS NOT NULL AND o.agent_id = rpi.agent_id)
-                            OR (o.agent_id IS NULL
-                                AND o.entity_type = rpi.entity_type
-                                AND o.platform = rpi.platform)
-                        )
-                  )
-                UNION
-
-                -- Explicit required rows add a client-specific service.
-                SELECT d.id AS device_id, o.entity_type, o.platform
-                FROM operations.devices d
-                JOIN operations.coverage_requirements o
-                  ON o.tenant_id = d.tenant_id
-                 AND o.client_id = d.client_id
-                 AND o.enabled = TRUE
-                 AND (o.device_scope = 'all' OR o.device_scope = d.device_role)
-                WHERE d.tenant_id = %s AND d.deleted_at IS NULL
-            )
-            UPDATE operations.findings f
-            SET status = 'resolved', last_seen_at = %s
-            WHERE f.tenant_id = %s
-              AND f.finding_type_id = %s
-              AND f.status IN ('open', 'acknowledged')
-              AND (%s::uuid IS NULL OR f.subject_id = %s)
-              AND NOT EXISTS (
-                  SELECT 1 FROM required_for_device r
-                  WHERE r.device_id = f.subject_id
-                    AND r.entity_type = (f.finding_details->>'entity_type')
-                    AND r.platform    = (f.finding_details->>'platform')
-              )
-            {clear_assessment}
-            """,
-            (tenant_id, tenant_id, now, tenant_id, ft_id, device_id, device_id),
-        )
-        count += cur.rowcount or 0
-
-    # Resolve missing/stale_required_platform when the platform has
-    # observed the device again recently.
-    for ft_name in ("missing_required_platform", "stale_required_platform"):
-        ft_id = _get_finding_type_id(cur, ft_name)
-        if not ft_id:
-            continue
-        cur.execute(
-            f"""
-            UPDATE operations.findings f
-            SET status = 'resolved',
-                last_seen_at = %s
-            WHERE f.tenant_id = %s
-              AND f.finding_type_id = %s
-              AND f.status IN ('open', 'acknowledged')
-              AND (%s::uuid IS NULL OR f.subject_id = %s)
-              AND EXISTS (
-                  SELECT 1 FROM operations.device_agent_presence_current apc
-                  WHERE apc.tenant_id = f.tenant_id
-                    AND apc.device_id = f.subject_id
-                    AND apc.entity_type = (f.finding_details->>'entity_type')
-                    AND apc.platform = (f.finding_details->>'platform')
-                    AND COALESCE(apc.last_contact_at, apc.last_observed_at) > now() - INTERVAL '48 hours'
-                    {_PRESENCE_SATISFIES}
-              )
-            {clear_assessment}
-            """,
-            (now, tenant_id, ft_id, device_id, device_id),
-        )
-        count += cur.rowcount or 0
-
-    # Stale and missing findings on an offline Computer are covered by
-    # device_offline (finding_types.covered_by, migration 0333), not resolved:
-    # the offline signal blocks may_clear, so a resolve rule here could never
-    # pass its own clearing check (ADR-0036).
-
-    # Close any missing/stale_required_platform finding whose device left
-    # the agent universe (no agent.* observation exists anymore). New
-    # emission is already gated by the universe filter in
-    # _evaluate_coverage; this closes legacy rows so they don't linger.
-    for ft_name in ("missing_required_platform", "stale_required_platform"):
-        ft_id = _get_finding_type_id(cur, ft_name)
-        if not ft_id:
-            continue
-        cur.execute(
-            f"""
-            UPDATE operations.findings f
-            SET status = 'resolved', last_seen_at = %s
-            WHERE f.tenant_id = %s AND f.finding_type_id = %s
-              AND f.status IN ('open', 'acknowledged')
-              AND (%s::uuid IS NULL OR f.subject_id = %s)
-              AND NOT EXISTS (
-                  SELECT 1 FROM operations.device_agent_presence_current apc
-                  WHERE apc.tenant_id = f.tenant_id
-                    AND apc.device_id = f.subject_id
-                    AND apc.entity_type LIKE 'agent.%%'
-              )
-              AND NOT EXISTS (
-                  SELECT 1 FROM operations.device_operator_decisions dec
-                  WHERE dec.tenant_id = f.tenant_id AND dec.device_id = f.subject_id
-                    AND dec.dimension = 'in_use_confirmed' AND dec.value = 'true'::jsonb
-              )
-            {clear_assessment}
-            """,
-            (now, tenant_id, ft_id, device_id, device_id),
-        )
-        count += cur.rowcount or 0
+    # Requirement episodes are reconciled from the coverage pass's verdicts
+    # in _reconcile_requirement_findings, with fresh assessments and the
+    # same transaction. Do not re-derive profiles or use a fixed age here.
 
     # Resolve device_unenrolled when the device joins the agent universe
     # (any agent.* observation appears).

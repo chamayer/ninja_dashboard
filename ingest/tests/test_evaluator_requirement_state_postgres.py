@@ -16,17 +16,18 @@ import pytest
 
 from ingest import evaluator
 from ingest.tests.test_evaluator_lifecycle_postgres import _prepare_track_a_schema
-from ingest.tests.test_evaluator_os_unknown_coverage_postgres import CLIENT, EXTRA
+from ingest.tests.test_evaluator_os_unknown_coverage_postgres import CLIENT, EXTRA, lifecycle_record
 
 NOW = datetime(2026, 10, 18, 12, tzinfo=UTC)
 
 HUDU = """
 INSERT INTO operations.agents VALUES
     (9, 'Hudu', 'cmdb.asset', '["Windows", "macOS", "Linux", "Other", "Unknown"]');
-INSERT INTO operations.coverage_requirements
-    (agent_id, entity_type, platform, device_scope, severity, gap_after_hours,
-     confidence_probable, confidence_confirmed, enabled, tenant_id)
-VALUES (9, 'cmdb.asset', 'Hudu', 'all', 'medium', 720, 1440, 2160, true, 1);
+INSERT INTO operations.requirement_profile_items
+    (profile_id, agent_id, entity_type, platform, device_scope, severity, gap_after_hours,
+     confidence_probable, confidence_confirmed, tenant_id)
+VALUES ('00000000-0000-4000-8000-0000000000d1',
+        9, 'cmdb.asset', 'Hudu', 'all', 'medium', 720, 1440, 2160, 1);
 """
 
 
@@ -87,6 +88,7 @@ def _computer(
         (device, CLIENT, lifecycle, os_group),
     )
     for entity_type, platform, age in presence:
+        lifecycle_record(conn, device, entity_type, platform, NOW)
         conn.execute(
             "INSERT INTO operations.device_agent_presence_current VALUES (1, %s, %s, %s, %s, %s, NULL, true)",
             (device, entity_type, platform, NOW - age, NOW),
@@ -96,10 +98,8 @@ def _computer(
             "INSERT INTO operations.device_agent_presence_current VALUES (1, %s, 'cmdb.asset', 'Hudu', NULL, %s, NULL, NULL)",
             (device, NOW - timedelta(hours=2)),
         )
-        conn.execute(
-            "INSERT INTO operations.v_device_source_record_lifecycle_current VALUES (1, %s, 'cmdb.asset', 'Hudu', true, %s)",
-            (device, hudu),
-        )
+        lifecycle_record(conn, device, "cmdb.asset", "Hudu", NOW,
+                         lifecycle="documentation" if hudu == "active" else hudu)
     if exemptions:
         conn.execute(
             "INSERT INTO operations.device_operator_decisions VALUES (1, %s, 'exemptions', %s::jsonb)",
