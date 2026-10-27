@@ -73,7 +73,7 @@
                 </td>
                 <td class="primary-cell">
                     {% if r.canonical_name %}
-                        <a href="{% url 'software_detail' name=r.canonical_name %}"><strong>{{ r.canonical_name|title }}</strong></a>
+                        <a href="{% url 'software_detail' name=r.canonical_name %}"><strong>{{ r.display_name }}</strong></a>
                     {% elif r.publisher %}
                         Publisher — <a href="{% url 'software_publisher_detail' publisher=r.publisher %}"><strong>{{ r.publisher|title }}</strong></a>
                     {% else %}

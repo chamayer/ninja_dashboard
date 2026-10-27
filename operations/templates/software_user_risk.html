@@ -81,7 +81,7 @@
         <div class="ur-items">
             {% for item in d.items %}
             <span class="ur-item">
-                <a href="{% url 'software_detail' name=item.canonical_name %}">{{ item.canonical_name }}</a>
+                <a href="{% url 'software_detail' name=item.canonical_name %}">{{ item.display_name }}</a>
                 <span class="muted">· {{ item.kind|humanize_label|default:item.kind }}{% if item.category %} · {{ item.category }}{% endif %}</span>
             </span>
             {% endfor %}

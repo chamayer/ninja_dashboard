@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% load human_labels %}
 
-{% block title %}{{ canonical_name }} — Software{% endblock %}
+{% block title %}{{ display_name }} — Software{% endblock %}
 
 {% block content %}
 {% include "_decision_comment_script.html" %}
@@ -61,10 +61,10 @@
 <div class="sd-header">
     <div class="sd-crumbs">
         <a href="{% url 'software_page' %}">Software</a> ›
-        <span>{{ canonical_name }}</span>
+        <span>{{ display_name }}</span>
     </div>
     <div class="sd-title">
-        <h1>{{ canonical_name }}</h1>
+        <h1>{{ display_name }}</h1>
     </div>
     <div class="sd-meta">
         {% if publishers %}Publisher{{ publishers|length|pluralize }}:

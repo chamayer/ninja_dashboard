@@ -154,6 +154,7 @@ from .models import (
 )
 from .remote_access_approval import approve_remote_access
 from .software_decision_actions import decide_software, decision_for
+from .software_display import preferred_software_display_names
 from .templatetags.human_labels import client_conflict_summary, humanize_label
 
 
@@ -2958,6 +2959,13 @@ def device_detail(request: HttpRequest, org_slug: str, device_id: str) -> HttpRe
         .select_related("finding_type")
         .order_by("severity", "-last_seen_at")[:50]
     )
+    device_finding_names = preferred_software_display_names(
+        (finding.finding_details or {}).get("canonical_name", "")
+        for finding in active_findings
+    )
+    for finding in active_findings:
+        canonical = (finding.finding_details or {}).get("canonical_name") or ""
+        finding.software_display_name = device_finding_names.get(canonical.lower(), canonical)
     response_ids = _condition_response_ids(finding.id for finding in active_findings)
     for finding in active_findings:
         finding.condition_response = next(
@@ -3043,7 +3051,8 @@ def device_detail(request: HttpRequest, org_slug: str, device_id: str) -> HttpRe
             # Programs Ninja no longer lists for this computer, newest first.
             cur.execute(
                 """
-                SELECT canonical_name, publisher, version, stale_since, stale_reason
+                SELECT canonical_name, COALESCE(NULLIF(display_name, ''), canonical_name),
+                       publisher, version, stale_since, stale_reason
                   FROM operations.software_installations_current
                  WHERE tenant_id = %s AND device_id = %s
                    AND deleted_at IS NULL AND stale_since IS NOT NULL
@@ -3053,8 +3062,8 @@ def device_detail(request: HttpRequest, org_slug: str, device_id: str) -> HttpRe
                 [1, str(device.id)],
             )
             removed_software = [
-                {"name": r[0], "publisher": r[1], "version": r[2], "removed_at": r[3],
-                 "reason": _software_removal_reason(r[4])}
+                {"name": r[1], "publisher": r[2], "version": r[3], "removed_at": r[4],
+                 "reason": _software_removal_reason(r[5])}
                 for r in cur.fetchall()
             ]
 
@@ -3446,6 +3455,7 @@ def device_detail(request: HttpRequest, org_slug: str, device_id: str) -> HttpRe
     # Software decisions map — key by canonical_name, prefer per-client
     # over global.
     software_titles = [row[0] for row in software_rows]
+    software_display_names = preferred_software_display_names(software_titles)
     software_publishers = [row[1] for row in software_rows if row[1]]
     decisions_map: dict = {}
     if software_titles:
@@ -3519,7 +3529,7 @@ def device_detail(request: HttpRequest, org_slug: str, device_id: str) -> HttpRe
 
     software_view = [
         {
-            "name": r[0],
+            "name": software_display_names.get(r[0].lower(), r[0]),
             "publisher": r[1],
             "version": r[2],
             "install_date": r[3],
@@ -5045,6 +5055,12 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
     # Freshness is deliberately separate from this state and remains available
     # on the device detail surface.
     all_display_findings = findings
+    finding_title_names = preferred_software_display_names(
+        (finding.finding_details or {}).get("canonical_name", "") for finding in findings
+    )
+    for finding in findings:
+        canonical = (finding.finding_details or {}).get("canonical_name") or ""
+        finding.software_display_name = finding_title_names.get(canonical.lower(), canonical)
     subject_ids = [f.subject_id for f in all_display_findings if f.subject_id]
     online_map: dict[str, list[str]] = {}
     if subject_ids:
@@ -5066,7 +5082,9 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
     _DAYS_KEYS = ("days_since_last_seen", "days_offline")
 
     def _detail_string(finding: Finding) -> str:
-        d = finding.finding_details or {}
+        d = dict(finding.finding_details or {})
+        if display_name := getattr(finding, "software_display_name", ""):
+            d["software_display_name"] = display_name
         name = finding.finding_type.name
         if name == "missing_required_platform":
             return f"missing {d.get('platform', '?')}"
@@ -5142,7 +5160,7 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
             "install_path_suspicious",
             "eol_runtime",
         ):
-            cn = d.get("canonical_name") or ""
+            cn = d.get("software_display_name") or d.get("canonical_name") or ""
             pub = d.get("publisher") or ""
             pieces = [cn]
             if pub:
@@ -5279,7 +5297,11 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
     }
 
     def _display_row(f: Finding) -> dict:
-        details = f.finding_details or {}
+        details = dict(f.finding_details or {})
+        canonical_name = details.get("canonical_name") or ""
+        software_display_name = getattr(f, "software_display_name", canonical_name)
+        if canonical_name:
+            details["software_display_name"] = software_display_name
         device_context = _device_context(f)
         online_sources = online_map.get(str(f.subject_id)) if f.subject_id else None
         subject_label = ""
@@ -5357,9 +5379,9 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
             Finding.SubjectType.SOFTWARE_PRODUCT,
             Finding.SubjectType.SOFTWARE_VERSION,
         ):
-            subject_label = details.get("canonical_name") or "(unnamed software)"
-            if subject_label and subject_label != "(unnamed software)":
-                subject_url = reverse("software_detail", kwargs={"name": subject_label})
+            subject_label = software_display_name or "(unnamed software)"
+            if canonical_name:
+                subject_url = reverse("software_detail", kwargs={"name": canonical_name})
             if publisher := details.get("publisher"):
                 context_parts.append(publisher)
             context_parts.append(
@@ -5460,6 +5482,7 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
             "archive_action": (f.finding_type.name == "cmdb_asset_stale" and may_archive_hudu),
             "context": " · ".join(context_parts),
             "canonical_name": details.get("canonical_name", ""),
+            "software_display_name": software_display_name,
             "publisher": details.get("publisher", ""),
             "fleet_device_count": software_coverage.prompt_devices(details),
             "threshold": details.get("threshold"),
@@ -6310,7 +6333,10 @@ def _suggestion_label_sql() -> str:
 def _software_review_context(details: dict) -> str:
     """Issues context line for undecided software; mirrors the SQL branch above."""
     labels = dict(SoftwareSuggestionRule.Suggestion.choices)
-    pieces = [details.get("canonical_name") or "", details.get("publisher") or ""]
+    pieces = [
+        details.get("software_display_name") or details.get("canonical_name") or "",
+        details.get("publisher") or "",
+    ]
     # A prompt is about its uncovered installations; the fleet total is context.
     devices = software_coverage.prompt_devices(details)
     if devices is not None:
@@ -6584,6 +6610,12 @@ def finding_review(request: HttpRequest, finding_id: str) -> HttpResponse:
         tenant_id=1,
     )
     details = finding.finding_details or {}
+    canonical_title = details.get("canonical_name") or ""
+    if canonical_title:
+        display_names = preferred_software_display_names([canonical_title])
+        finding.software_display_name = display_names.get(
+            canonical_title.lower(), canonical_title
+        )
     subject_label = finding.get_subject_type_display()
     subject_url = ""
     review_links: list[dict[str, str]] = []
@@ -6621,7 +6653,8 @@ def finding_review(request: HttpRequest, finding_id: str) -> HttpResponse:
     }:
         canonical_name = details.get("canonical_name") or ""
         if canonical_name:
-            subject_label = canonical_name
+            display_names = preferred_software_display_names([canonical_name])
+            subject_label = display_names.get(canonical_name.lower(), canonical_name)
             subject_url = reverse("software_detail", kwargs={"name": canonical_name})
             review_links.append({"label": "Open software details", "url": subject_url})
 
@@ -7815,6 +7848,7 @@ def _software_page_data(request: HttpRequest) -> dict:
         titles.append(
             {
                 "canonical_name": canonical,
+                "display_name": canonical,
                 "publisher": row[1] or "",
                 "device_count": row[2],
                 "client_count": row[3],
@@ -7829,6 +7863,23 @@ def _software_page_data(request: HttpRequest) -> dict:
                 "safety_osint_hits": safety.get("osint_hits", 0),
             }
         )
+
+    display_names = preferred_software_display_names(
+        [title["canonical_name"] for title in titles]
+        + [row[0] for row in recent_installs]
+        + ([this_week["top_new_product"]["name"]] if this_week["top_new_product"] else [])
+    )
+    for title in titles:
+        title["display_name"] = display_names.get(
+            title["canonical_name"].lower(), title["canonical_name"]
+        )
+    recent_installs = [
+        (name, display_names.get(name.lower(), name), publisher, client, first_seen)
+        for name, publisher, client, first_seen in recent_installs
+    ]
+    if this_week["top_new_product"]:
+        product = this_week["top_new_product"]
+        product["display_name"] = display_names.get(product["name"].lower(), product["name"])
 
     return {
         "installations": installations,
@@ -7990,7 +8041,8 @@ def _installation_csv(clauses: list[str], params: list) -> StreamingHttpResponse
     decision_joins = software_coverage.EFFECTIVE_DECISION_JOINS
     sql = f"""
         WITH matching AS MATERIALIZED (
-            SELECT i.client_id, i.device_id, i.canonical_name, i.publisher, i.version,
+            SELECT i.client_id, i.device_id, i.canonical_name, i.display_name,
+                   i.publisher, i.version,
                    i.install_date, i.install_location, i.last_observed_at,
                    {software_coverage.TITLE_DECISION} AS title_decision,
                    {software_coverage.PUBLISHER_DECISION} AS publisher_decision
@@ -7998,7 +8050,8 @@ def _installation_csv(clauses: list[str], params: list) -> StreamingHttpResponse
             {decision_joins}
              WHERE {" AND ".join(clauses)}
         )
-        SELECT c.display_name, d.canonical_hostname, d.canonical_serial, m.canonical_name,
+        SELECT c.display_name, d.canonical_hostname, d.canonical_serial,
+               COALESCE(NULLIF(m.display_name, ''), m.canonical_name),
                m.publisher, m.version, m.install_date, m.install_location, m.last_observed_at,
                m.title_decision, m.publisher_decision, d.device_id
           FROM matching m
@@ -8070,21 +8123,24 @@ def software_installations(request: HttpRequest) -> HttpResponse:
         cur.execute(
             f"""
             WITH page AS (
-                SELECT i.tenant_id, i.client_id, i.device_id, i.canonical_name, i.publisher,
+                SELECT i.tenant_id, i.client_id, i.device_id, i.canonical_name,
+                       COALESCE(NULLIF(i.display_name, ''), i.canonical_name)
+                           AS product_display_name, i.publisher,
                        i.version, i.install_date, i.install_location, i.last_observed_at,
-                       c.display_name, c.slug, d.canonical_hostname
+                       c.display_name AS client_display_name, c.slug, d.canonical_hostname
                 {_INSTALLATION_FROM}
                 {filter_joins}
                  WHERE {where_sql}
                  ORDER BY c.display_name, d.canonical_hostname, i.canonical_name
                  LIMIT %s OFFSET %s
             )
-            SELECT i.display_name, i.slug, i.device_id, i.canonical_hostname, i.canonical_name,
-                   i.publisher, i.version, i.install_date, i.install_location, i.last_observed_at,
+            SELECT i.client_display_name, i.slug, i.device_id, i.canonical_hostname,
+                   i.canonical_name, i.product_display_name, i.publisher, i.version,
+                   i.install_date, i.install_location, i.last_observed_at,
                    {software_coverage.TITLE_DECISION}, {software_coverage.PUBLISHER_DECISION}
               FROM page i
               {software_coverage.EFFECTIVE_DECISION_JOINS}
-             ORDER BY i.display_name, i.canonical_hostname, i.canonical_name
+             ORDER BY i.client_display_name, i.canonical_hostname, i.canonical_name
             """,
             [*params, _INSTALLATION_PAGE_SIZE, (page - 1) * _INSTALLATION_PAGE_SIZE],
         )
@@ -8095,12 +8151,13 @@ def software_installations(request: HttpRequest) -> HttpResponse:
                 "device_id": r[2],
                 "hostname": r[3] or "",
                 "product": r[4],
-                "publisher": r[5] or "",
-                "version": r[6] or "",
-                "install_date": r[7],
-                "install_location": r[8] or "",
-                "last_seen": r[9],
-                "decision": _installation_decision_label(r[10], r[11]),
+                "product_display_name": r[5] or r[4],
+                "publisher": r[6] or "",
+                "version": r[7] or "",
+                "install_date": r[8],
+                "install_location": r[9] or "",
+                "last_seen": r[10],
+                "decision": _installation_decision_label(r[11], r[12]),
             }
             for r in cur.fetchall()
         ]
@@ -8109,8 +8166,11 @@ def software_installations(request: HttpRequest) -> HttpResponse:
     query.extend((key, value) for key in ("product", "publisher", "computer") for value in filters[key])
     with transaction.atomic(), connection.cursor() as cur:
         cur.execute("SET LOCAL operations.tenant_id = 1")
-        cur.execute(f"SELECT DISTINCT i.canonical_name {_INSTALLATION_FROM} WHERE i.tenant_id = 1 AND i.deleted_at IS NULL AND i.stale_since IS NULL AND {current_computer_sql('d')} ORDER BY 1")
-        products = [r[0] for r in cur.fetchall()]
+        cur.execute(f"SELECT DISTINCT ON (i.canonical_name) i.canonical_name, COALESCE(NULLIF(i.display_name, ''), i.canonical_name) {_INSTALLATION_FROM} WHERE i.tenant_id = 1 AND i.deleted_at IS NULL AND i.stale_since IS NULL AND {current_computer_sql('d')} ORDER BY i.canonical_name, i.last_observed_at DESC, i.display_name")
+        products = [
+            {"canonical_name": r[0], "display_name": r[1] or r[0]}
+            for r in cur.fetchall()
+        ]
         cur.execute(f"SELECT DISTINCT i.publisher {_INSTALLATION_FROM} WHERE i.tenant_id = 1 AND i.deleted_at IS NULL AND i.stale_since IS NULL AND {current_computer_sql('d')} AND i.publisher IS NOT NULL AND i.publisher <> '' ORDER BY 1")
         publishers = [r[0] for r in cur.fetchall()]
         cur.execute(f"SELECT DISTINCT d.device_id::text, d.canonical_hostname, c.display_name {_INSTALLATION_FROM} WHERE i.tenant_id = 1 AND i.deleted_at IS NULL AND i.stale_since IS NULL AND {current_computer_sql('d')} ORDER BY c.display_name, d.canonical_hostname, d.device_id::text")
@@ -8145,7 +8205,7 @@ def software_products(request: HttpRequest) -> HttpResponse:
         return csv_response(
             ctx["titles"],
             columns=[
-                ("Product", "canonical_name"),
+                ("Product", "display_name"),
                 ("Publisher", "publisher"),
                 ("Devices", "device_count"),
                 ("Clients", "client_count"),
@@ -8573,12 +8633,15 @@ def software_detail(request: HttpRequest, name: str) -> HttpResponse:
         .select_related("finding_type", "client")
         .order_by("-last_detected_at", "-last_seen_at")[:50]
     )
+    display_names = preferred_software_display_names([canonical_name])
+    software_display_name = display_names.get(canonical_name.lower(), canonical_name)
 
     return render(
         request,
         "software_detail.html",
         {
             "canonical_name": canonical_name,
+            "display_name": software_display_name,
             "catalog_entry": catalog_entry,
             "installations": installations,
             "device_count": devices,
@@ -9082,6 +9145,7 @@ def software_publisher_detail(request: HttpRequest, publisher: str) -> HttpRespo
         ]
 
     canonical_names = [row[0] for row in title_rows_raw]
+    display_names = preferred_software_display_names(canonical_names)
     title_decisions = {
         d.canonical_name.lower(): d
         for d in SoftwareDecision.objects.filter(
@@ -9094,6 +9158,7 @@ def software_publisher_detail(request: HttpRequest, publisher: str) -> HttpRespo
     title_rows = [
         {
             "canonical_name": row[0],
+            "display_name": display_names.get(row[0].lower(), row[0]),
             "installs": row[1],
             "devices": row[2],
             "clients": row[3],
@@ -9429,6 +9494,19 @@ def software_user_risk(request: HttpRequest) -> HttpResponse:
         users.append(entry)
     users.sort(key=lambda u: (-u["item_count"], u["last_user"]))
 
+    user_titles = [
+        item["canonical_name"]
+        for user in users
+        for device in user["device_list"]
+        for item in device["items"]
+    ]
+    display_names = preferred_software_display_names(user_titles)
+    for user in users:
+        for device in user["device_list"]:
+            for item in device["items"]:
+                canonical = item["canonical_name"]
+                item["display_name"] = display_names.get(canonical.lower(), canonical)
+
     clients = Client.objects.filter(tenant_id=1, deleted_at__isnull=True).order_by("display_name")
 
     if is_csv:
@@ -9441,7 +9519,7 @@ def software_user_risk(request: HttpRequest) -> HttpResponse:
                             "user": u["last_user"],
                             "client": d["client_name"],
                             "hostname": d["hostname"],
-                            "canonical_name": item["canonical_name"],
+                            "display_name": item["display_name"],
                             "kind": item["kind"],
                         }
                     )
@@ -9451,7 +9529,7 @@ def software_user_risk(request: HttpRequest) -> HttpResponse:
                 ("Last logged-in user", "user"),
                 ("Client", "client"),
                 ("Device", "hostname"),
-                ("Title", "canonical_name"),
+                ("Title", "display_name"),
                 ("Reason kind", "kind"),
             ],
             filename_stem="user_risk",
@@ -11634,9 +11712,12 @@ def software_tech_checklist(request: HttpRequest) -> HttpResponse:
         if all_canonicals
         else {}
     )
+    display_names = preferred_software_display_names(all_canonicals)
     for entry in devices:
         for item in entry["items"]:
             item["category"] = catalog_cats.get((item["canonical_name"] or "").lower(), "")
+            canonical = item["canonical_name"]
+            item["display_name"] = display_names.get(canonical.lower(), canonical)
 
     clients = Client.objects.filter(tenant_id=1, deleted_at__isnull=True).order_by("display_name")
 
@@ -11648,7 +11729,7 @@ def software_tech_checklist(request: HttpRequest) -> HttpResponse:
                     {
                         "client": entry["client_name"],
                         "hostname": entry["hostname"],
-                        "canonical_name": item["canonical_name"],
+                        "display_name": item["display_name"],
                         "publisher": item["publisher"],
                         "finding_type": item["finding_type"],
                         "reason": item["reason"],
@@ -11660,7 +11741,7 @@ def software_tech_checklist(request: HttpRequest) -> HttpResponse:
             columns=[
                 ("Client", "client"),
                 ("Device", "hostname"),
-                ("Title", "canonical_name"),
+                ("Title", "display_name"),
                 ("Publisher", "publisher"),
                 ("Reason kind", "finding_type"),
                 ("Reason", "reason"),
@@ -12059,6 +12140,13 @@ def devices_page(request: HttpRequest) -> HttpResponse:
             "active_lifecycle": lifecycle_filter,
             "active_client": client_filter,
             "active_software": software_filter,
+            "active_software_display_name": (
+                preferred_software_display_names([software_filter]).get(
+                    software_filter.lower(), software_filter
+                )
+                if software_filter
+                else ""
+            ),
             "active_version": version_filter,
             "active_software_publisher": software_publisher_filter,
             "agent_reporting_issues": agent_reporting_issues,
@@ -12141,6 +12229,13 @@ def software_clients(request: HttpRequest) -> HttpResponse:
             "clients": clients,
             "total_devices": sum(c["device_count"] for c in clients),
             "active_software": software_filter,
+            "active_software_display_name": (
+                preferred_software_display_names([software_filter]).get(
+                    software_filter.lower(), software_filter
+                )
+                if software_filter
+                else ""
+            ),
             "active_version": version_filter,
             "active_software_publisher": software_publisher_filter,
         },
@@ -15182,7 +15277,16 @@ def org_software(request: HttpRequest, org_slug: str) -> HttpResponse:
                 (client.id, canonical_names),
             )
             findings_map = {name: count for name, count in cur2.fetchall()}
-    rows = [row + (decisions_map.get(row[0], ""), findings_map.get(row[0], 0)) for row in rows]
+    display_names = preferred_software_display_names(row[0] for row in rows)
+    rows = [
+        row
+        + (
+            decisions_map.get(row[0], ""),
+            findings_map.get(row[0], 0),
+            display_names.get(row[0].lower(), row[0]),
+        )
+        for row in rows
+    ]
 
     num_pages = max(1, (total + _SW_PAGE_SIZE - 1) // _SW_PAGE_SIZE)
 
@@ -15195,14 +15299,15 @@ def org_software(request: HttpRequest, org_slug: str) -> HttpResponse:
         return csv_response(
             rows,
             columns=[
-                ("Canonical name", lambda r: r[0]),
+                ("Product", lambda r: r[9]),
                 ("Publisher", lambda r: r[1] or ""),
-                ("Device count", lambda r: r[2]),
-                ("First installed", lambda r: r[3]),
-                ("Last seen", lambda r: r[4]),
-                ("Locations", lambda r: r[5] or ""),
-                ("Decision", lambda r: r[6]),
-                ("Open findings", lambda r: r[7]),
+                ("Versions", lambda r: r[2] or ""),
+                ("Device count", lambda r: r[3]),
+                ("First installed", lambda r: r[4]),
+                ("Last seen", lambda r: r[5]),
+                ("Locations", lambda r: r[6] or ""),
+                ("Decision", lambda r: r[7]),
+                ("Open findings", lambda r: r[8]),
             ],
             filename_stem=f"{org_slug}_software",
         )
@@ -15238,6 +15343,9 @@ def org_software_devices(request: HttpRequest, org_slug: str) -> HttpResponse:
     sw_publisher = request.GET.get("publisher", "").strip()
     if not sw_name:
         return redirect("org_software", org_slug=org_slug)
+    software_display_name = preferred_software_display_names([sw_name]).get(
+        sw_name.lower(), sw_name
+    )
 
     with transaction.atomic():
         with connection.cursor() as cur:
@@ -15280,7 +15388,7 @@ def org_software_devices(request: HttpRequest, org_slug: str) -> HttpResponse:
                 ("Install path", lambda r: r[6] or ""),
                 ("Last observed", lambda r: r[7]),
             ],
-            filename_stem=f"{org_slug}_{sw_name}_devices",
+            filename_stem=f"{org_slug}_{software_display_name}_devices",
         )
 
     return render(
@@ -15288,7 +15396,7 @@ def org_software_devices(request: HttpRequest, org_slug: str) -> HttpResponse:
         "org_software_devices.html",
         {
             "client": client,
-            "sw_name": sw_name,
+            "sw_name": software_display_name,
             "sw_publisher": sw_publisher,
             "device_rows": device_rows,
         },
@@ -18412,6 +18520,16 @@ def software_decisions_queue(request: HttpRequest) -> HttpResponse:
             sort_key,
             sort_dir,
         )
+        review_titles = [title for group in groups for title in group["titles"]]
+        display_names = preferred_software_display_names(
+            title["title"] for title in review_titles if title.get("title")
+        )
+        for title in review_titles:
+            canonical = title.get("title") or ""
+            title["display_name"] = display_names.get(canonical.lower(), canonical)
+        for title in all_titles:
+            canonical = title.get("title") or ""
+            title["display_name"] = display_names.get(canonical.lower(), canonical)
         if wants_csv(request):
             return csv_response(
                 all_titles if view_mode == "table" else [
@@ -18420,7 +18538,7 @@ def software_decisions_queue(request: HttpRequest) -> HttpResponse:
                     for title in group["titles"]
                 ],
                 columns=[
-                    ("Title", "title"),
+                    ("Title", "display_name"),
                     ("Publisher", "publisher"),
                     ("Publisher status", "publisher_status_label"),
                     ("Type", "type_label"),
@@ -18591,6 +18709,17 @@ def software_decision_log(request: HttpRequest) -> HttpResponse:
         }
         for d in qs
     ]
+    display_names = preferred_software_display_names(
+        row["canonical_name"] for row in rows if row["canonical_name"]
+    )
+    for row in rows:
+        if row["canonical_name"]:
+            row["display_name"] = display_names.get(
+                row["canonical_name"].lower(), row["canonical_name"]
+            )
+            row["target_label"] = row["display_name"]
+        else:
+            row["display_name"] = ""
 
     if wants_csv(request):
         return csv_response(
@@ -18598,7 +18727,7 @@ def software_decision_log(request: HttpRequest) -> HttpResponse:
             columns=[
                 ("Decided at", "decided_at"),
                 ("Decision", "decision"),
-                ("Product", "canonical_name"),
+                ("Product", "display_name"),
                 ("Publisher", "publisher"),
                 ("Scope", "scope_label"),
                 ("Client", "client"),

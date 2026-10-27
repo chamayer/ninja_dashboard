@@ -6,6 +6,7 @@ import json
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin
 from django.db import connection, transaction
+from django.db.models.expressions import RawSQL
 from django.shortcuts import render
 from django.urls import reverse
 from django.utils import timezone
@@ -723,9 +724,34 @@ class DeadLetterObservationAdmin(admin.ModelAdmin):
     readonly_fields = ("id", "received_at")
 
 
+class SoftwareDisplayAdminMixin:
+    """Show Ninja's preferred spelling in software administration lists."""
+
+    def get_queryset(self, request):
+        queryset = super().get_queryset(request)
+        table = connection.ops.quote_name(self.model._meta.db_table)
+        canonical = f"{table}.canonical_name"
+        return queryset.annotate(
+            _software_display_name=RawSQL(
+                f"""COALESCE((
+                    SELECT NULLIF(sic.display_name, '')
+                      FROM operations.software_installations_current sic
+                     WHERE lower(sic.canonical_name) = lower({canonical})
+                     ORDER BY sic.last_observed_at DESC, sic.display_name, sic.device_id
+                     LIMIT 1
+                ), {canonical})""",
+                (),
+            )
+        )
+
+    @admin.display(description="Software", ordering="_software_display_name")
+    def software_display_name(self, obj):
+        return obj._software_display_name or getattr(obj, "publisher", "")
+
+
 @admin.register(SoftwareCatalog)
-class SoftwareCatalogAdmin(admin.ModelAdmin):
-    list_display = ("canonical_name", "tenant", "publisher_hint", "eol_date")
+class SoftwareCatalogAdmin(SoftwareDisplayAdminMixin, admin.ModelAdmin):
+    list_display = ("software_display_name", "tenant", "publisher_hint", "eol_date")
     list_filter = ("tenant", "eol_date")
     search_fields = ("canonical_name", "publisher_hint", "notes")
 
@@ -832,10 +858,10 @@ class IdentityValueRejectionAdmin(admin.ModelAdmin):
 
 
 @admin.register(SoftwareDecision)
-class SoftwareDecisionAdmin(admin.ModelAdmin):
+class SoftwareDecisionAdmin(SoftwareDisplayAdminMixin, admin.ModelAdmin):
     list_display = (
         "client",
-        "canonical_name",
+        "software_display_name",
         "decision",
         "decided_by",
         "decided_at",

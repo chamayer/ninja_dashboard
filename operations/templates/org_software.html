@@ -140,9 +140,9 @@
         </tr>
     </thead>
     <tbody id="sw-tbody">
-        {% for name, publisher, versions, device_count, first_installed, last_seen, locations, decision, findings_count in rows %}
+        {% for name, publisher, versions, device_count, first_installed, last_seen, locations, decision, findings_count, display_name in rows %}
         <tr class="sw-row" data-name="{{ name|lower }}" data-pub="{{ publisher|lower|default:'' }}">
-            <td><a href="{% url 'software_detail' name=name %}">{{ name }}</a></td>
+            <td><a href="{% url 'software_detail' name=name %}">{{ display_name }}</a></td>
             <td class="muted">{{ publisher|default:"—" }}</td>
             <td style="text-align: right;">
                 <a href="{% url 'software_installations' %}?client={{ client.slug|urlencode }}&amp;product={{ name|urlencode }}{% if publisher %}&amp;publisher={{ publisher|urlencode }}{% endif %}">{{ device_count }}</a>

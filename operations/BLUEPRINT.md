@@ -1,3 +1,40 @@
+## PLAN-024 — Preserve Ninja software display names
+
+**Status:** Complete locally (2026-10-27; user authorized and expanded scope
+2026-10-27).
+Goal: show the original Ninja program name wherever a human sees a software
+product in Operations while keeping lowercase `canonical_name` as the stable
+key for matching, decisions, filters, and URLs. Scope includes the existing
+ingest/migration work and every human-facing Operations software UI and export
+that renders product names. Existing rows display `canonical_name` as a
+fallback until the next Ninja inventory refresh. Commit authorized
+2026-10-27; origin push requires explicit migration 0354 and auto-deployment
+approval.
+
+**Steps:** add an additive current-installation display column; carry the
+trimmed source name through the inventory staging/upsert without including it
+in material-change hashing; audit every human-facing product label and wire a
+consistent source-name lookup while retaining canonical values for matching
+and links; validate the changed paths and whitespace.
+
+**Decision:** source names may vary in case per installation, so preserve the
+Ninja title per current installation rather than inventing title case or
+changing canonical identity. `software_installation_history` remains unchanged
+because this page lists current installations.
+
+**Checkpoint:** migration 0354 adds the current-row column with an empty
+default and no fleet-wide backfill. Reads fall back to `canonical_name`, and
+ingest writes the trimmed Ninja name on every inventory apply, including
+casing-only changes that do not alter material history. The shared resolver
+is wired through product/installations pages, details, review and decision
+surfaces, findings, client/Computer views, exports, and software admin lists.
+Canonical values remain matching, decision, filter, and URL keys. Python
+compilation, focused Ruff, plan registry validation, and `git diff --check`
+pass. Django checks/template rendering are unavailable because Django is not
+installed; tests and live behavior have not been verified. Commit authorized
+2026-10-27. Push authorization must explicitly include migration 0354 and its
+automatic Portainer deployment.
+
 ## PLAN-020 — Operations entity links in tables
 
 **Status:** Complete locally (2026-10-26); plan registry entry added

@@ -53,7 +53,7 @@
         <summary aria-labelledby="product-filter-label product-filter-value"><span id="product-filter-value" data-picker-value data-empty-label="All products">{% if filters.product %}{{ filters.product|length }} selected{% else %}All products{% endif %}</span></summary>
         <div class="installation-picker-panel">
           <input type="search" data-option-search="product-options" placeholder="Search products" aria-label="Search products">
-          <select id="product-options" name="product" multiple size="5" aria-label="Products">{% for product in products %}<option value="{{ product }}"{% if product in filters.product %} selected{% endif %}>{{ product }}</option>{% endfor %}</select>
+          <select id="product-options" name="product" multiple size="5" aria-label="Products">{% for product in products %}<option value="{{ product.canonical_name }}"{% if product.canonical_name in filters.product %} selected{% endif %}>{{ product.display_name }}</option>{% endfor %}</select>
           <small>Hold Ctrl (Windows) or Command (Mac) to select multiple.</small>
         </div>
       </details>
@@ -127,7 +127,7 @@
       <tr>
         <td><a href="?{% if filters.q %}q={{ filters.q|urlencode }}&amp;{% endif %}client={{ row.client_slug }}">{{ row.client_name }}</a> <a class="muted" href="{% url 'org_index' org_slug=row.client_slug %}" title="Open client details">Details</a></td>
         <td><a href="{% url 'device_detail' org_slug=row.client_slug device_id=row.device_id %}">{{ row.hostname|default:"Unnamed Computer" }}</a></td>
-        <td><a href="{% url 'software_detail' name=row.product %}">{{ row.product }}</a></td>
+        <td><a href="{% url 'software_detail' name=row.product %}">{{ row.product_display_name }}</a></td>
         <td>{{ row.publisher }}</td>
         <td>{{ row.version }}</td>
         <td>{{ row.install_date|default:"" }}</td>

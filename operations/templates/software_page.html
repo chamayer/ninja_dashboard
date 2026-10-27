@@ -274,7 +274,7 @@
         {% if this_week.top_new_product %}
             <div class="tile-value" style="font-size:1rem; margin-top:0.3rem;">
                 <a href="{% url 'software_detail' name=this_week.top_new_product.name %}">
-                    {{ this_week.top_new_product.name|title }}
+                    {{ this_week.top_new_product.display_name }}
                 </a>
             </div>
             <div class="tile-note">on {{ this_week.top_new_product.devices }} device{{ this_week.top_new_product.devices|pluralize }}</div>
@@ -380,9 +380,9 @@
         </h2>
         {% if recent_installs %}
         <ul class="side-list">
-            {% for name, publisher, client, first_seen in recent_installs %}
+            {% for name, display_name, publisher, client, first_seen in recent_installs %}
             <li>
-                <a href="{% url 'software_detail' name=name %}"><strong>{{ name|title }}</strong></a>
+                <a href="{% url 'software_detail' name=name %}"><strong>{{ display_name }}</strong></a>
                 {% if publisher %}<span class="muted">· {{ publisher|title }}</span>{% endif %}
                 <span class="muted">· {{ client }}</span>
                 <span class="side-time">{{ first_seen|date:"H:i" }}</span>

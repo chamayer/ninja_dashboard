@@ -237,7 +237,9 @@ def finding_detail_text(finding):
     the same information for the same finding type without each
     template inventing its own copy.
     """
-    d = getattr(finding, "finding_details", None) or {}
+    d = dict(getattr(finding, "finding_details", None) or {})
+    if display_name := getattr(finding, "software_display_name", ""):
+        d["software_display_name"] = display_name
     name = getattr(getattr(finding, "finding_type", None), "name", None) or ""
 
     if name == "missing_required_platform":
@@ -343,7 +345,7 @@ def finding_detail_text(finding):
         "unauthorized_av", "unauthorized_rmm", "unauthorized_remote_access",
         "suspicious_name", "install_path_suspicious", "eol_runtime",
     ):
-        cn = d.get("canonical_name") or ""
+        cn = d.get("software_display_name") or d.get("canonical_name") or ""
         pub = d.get("publisher") or ""
         pieces = [cn]
         if pub:
@@ -361,7 +363,7 @@ def finding_detail_text(finding):
         if n is None:
             n = d.get("machine_count")
         days = d.get("first_seen_days")
-        cn = d.get("canonical_name") or ""
+        cn = d.get("software_display_name") or d.get("canonical_name") or ""
         pieces = [cn] if cn else []
         if n is not None:
             pieces.append(f"on {n} machine{'s' if n != 1 else ''}")

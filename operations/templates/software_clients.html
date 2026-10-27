@@ -1,14 +1,14 @@
 {% extends "base.html" %}
 {% load human_labels %}
 
-{% block title %}Clients — {{ active_software|default:active_software_publisher }} — Software{% endblock %}
+{% block title %}Clients — {{ active_software_display_name|default:active_software_publisher }} — Software{% endblock %}
 
 {% block content %}
 <div class="card">
     <div style="display:flex; align-items:center; justify-content:space-between; gap:1rem;">
         <h1 style="margin:0;">Clients running
           <span class="muted" style="font-weight:400;">
-            {{ active_software|default:active_software_publisher|title }}{% if active_version %} {{ active_version }}{% endif %}{% if active_software and active_software_publisher %} · {{ active_software_publisher|title }}{% endif %}
+            {{ active_software_display_name|default:active_software_publisher }}{% if active_version %} {{ active_version }}{% endif %}{% if active_software and active_software_publisher %} · {{ active_software_publisher|title }}{% endif %}
           </span>
         </h1>
         {% include "_csv_download.html" %}

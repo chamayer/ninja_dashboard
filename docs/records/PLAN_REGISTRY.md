@@ -285,3 +285,17 @@ do not open competing blueprints for the same work.
 - Section: PLAN-023 — Software installations layout repair
 - Resume gate: Local implementation complete. Independent of other active plans; no shared view, data, schema, or identity changes. Commit and deployment require separate approval.
 - Last checked: 2026-10-27 (four existing tests, Django checks, synthetic Edge layout/interaction checks at four viewport widths, registry, governance and whitespace pass; live deployment unverified).
+
+## PLAN-024 — Preserve Ninja software display names
+
+- Scope: Preserve the original Ninja software `name` alongside the lowercase canonical matching key, and use that source spelling wherever a human sees a software product name across the Operations UI and exports. Canonical values remain the matching, decision, filter, and URL keys. Existing rows fall back to their current canonical spelling until refreshed.
+- Status: completed
+- Defined: 2026-10-27
+- Started: 2026-10-27
+- Completed: 2026-10-27
+- Reopened: 2026-10-27 (user expanded scope to all human-visible software names)
+- Blueprint: operations/BLUEPRINT.md
+- Source: operations/BLUEPRINT.md
+- Section: PLAN-024 — Preserve Ninja software display names
+- Resume gate: Local implementation is complete. Python compilation, focused Ruff, registry validation, and `git diff --check` pass. Django/template checks and live behavior remain unverified because Django is not installed locally. Commit authorized 2026-10-27. Origin push approval must explicitly include pending migration 0354 and its automatic Portainer deployment; push origin before the required secondary mirror.
+- Last checked: 2026-10-27 (Ninja spelling is wired across human-facing Operations product labels, findings, approvals/review, client/Computer views, exports, and software admin lists; canonical values remain keys).

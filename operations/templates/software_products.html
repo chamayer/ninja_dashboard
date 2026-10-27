@@ -155,7 +155,7 @@
             <tr>
                 <td class="primary-cell">
                     <a href="{% url 'software_detail' name=t.canonical_name %}">
-                        <strong>{{ t.canonical_name|title }}</strong>
+                        <strong>{{ t.display_name }}</strong>
                     </a>
                     {% if t.publisher %}
                     <div class="secondary">

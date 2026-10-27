@@ -61,6 +61,7 @@ LISTING_COLUMNS = (
     "client_id",
     "device_id",
     "canonical_name",
+    "display_name",
     "publisher",
     "version",
     "install_location",
@@ -74,6 +75,7 @@ _LISTING_TYPES = (
     "int8",
     "uuid",
     "uuid",
+    "text",
     "text",
     "text",
     "text",
@@ -240,6 +242,7 @@ def normalize(item: Mapping[str, Any]) -> dict[str, Any] | None:
     install_date = material["install_date"]
     return {
         "canonical_name": name.lower(),
+        "display_name": name,
         "publisher": material["publisher"],
         "version": material["version"],
         "install_location": material["location"],
@@ -433,16 +436,17 @@ SELECT gen_random_uuid(), %(tenant_id)s, %(binding)s, d.client_id, d.device_id,
 
 CURRENT_SQL = """
 INSERT INTO operations.software_installations_current AS c (
-    tenant_id, client_id, device_id, canonical_name, publisher, version,
+    tenant_id, client_id, device_id, canonical_name, display_name, publisher, version,
     install_location, install_date, product_code, size_bytes, is_system_component,
     first_observed_at, last_observed_at, refreshed_at, stale_since, stale_reason,
     material_hash, hash_algorithm_version)
-SELECT %(tenant_id)s, d.client_id, d.device_id, d.canonical_name, d.publisher,
+SELECT %(tenant_id)s, d.client_id, d.device_id, d.canonical_name, d.display_name, d.publisher,
        d.version, d.install_location, d.install_date::date,
        d.product_code, d.size_bytes, d.is_system_component,
        %(at)s, %(at)s, %(at)s, NULL, '', d.material_hash, %(hash_version)s
   FROM inventory_delta d
 ON CONFLICT (tenant_id, client_id, device_id, canonical_name) DO UPDATE SET
+    display_name = EXCLUDED.display_name,
     publisher = EXCLUDED.publisher,
     version = EXCLUDED.version,
     install_location = EXCLUDED.install_location,
@@ -592,7 +596,7 @@ def apply(
         cfg = _load_settings(cur)
         cur.execute(
             "CREATE TEMP TABLE inventory_raw (seq bigint, client_id uuid, device_id uuid, "
-            "canonical_name text, publisher text, version text, install_location text, "
+            "canonical_name text, display_name text, publisher text, version text, install_location text, "
             "install_date text, product_code text, size_bytes bigint, "
             "is_system_component boolean, material_hash bytea) ON COMMIT DROP"
         )
