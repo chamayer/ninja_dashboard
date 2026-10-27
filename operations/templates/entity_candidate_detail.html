@@ -19,7 +19,7 @@
   </dl>
 </div>
 
-{% if can_decide and candidate.status != "attached" %}
+{% if can_decide and candidate.status != "attached" and candidate.status != "withdrawn" %}
 <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(300px,1fr)); gap:1rem; margin-bottom:1rem;">
   <div class="card">
     <h2 style="margin-top:0;">Attach to an entity</h2>

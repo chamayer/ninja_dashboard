@@ -17,11 +17,12 @@ def project_all(batch_size: int = 5000, max_batches: int = 100) -> dict[str, Any
         "created": 0,
         "reopened": 0,
         "attached": 0,
+        "withdrawn": 0,
     }
     with db.transaction() as cur:
         cur.execute(
             "SELECT to_regprocedure("
-            "'operations.sync_entity_candidates(integer)'"
+            "'operations.sync_entity_candidates_v2(integer)'"
             ") IS NOT NULL"
         )
         if not cur.fetchone()[0]:
@@ -31,17 +32,23 @@ def project_all(batch_size: int = 5000, max_batches: int = 100) -> dict[str, Any
     for _ in range(max_batches):
         with db.transaction() as cur:
             cur.execute(
-                "SELECT * FROM operations.sync_entity_candidates(%s)",
+                "SELECT * FROM operations.sync_entity_candidates_v2(%s)",
                 (batch_size,),
             )
-            created, reopened, attached = cur.fetchone()
-        changed = int(created or 0) + int(reopened or 0) + int(attached or 0)
+            created, reopened, attached, withdrawn = cur.fetchone()
+        changed = (
+            int(created or 0)
+            + int(reopened or 0)
+            + int(attached or 0)
+            + int(withdrawn or 0)
+        )
         if changed == 0:
             break
         totals["batches"] += 1
         totals["created"] += int(created or 0)
         totals["reopened"] += int(reopened or 0)
         totals["attached"] += int(attached or 0)
+        totals["withdrawn"] += int(withdrawn or 0)
     else:
         totals["status"] = "batch_limit"
 

@@ -14,6 +14,7 @@
       <option value="observed_only" {% if status_filter == "observed_only" %}selected{% endif %}>Observed only ({{ status_counts.observed_only|default:0 }})</option>
       <option value="rejected" {% if status_filter == "rejected" %}selected{% endif %}>Rejected ({{ status_counts.rejected|default:0 }})</option>
       <option value="attached" {% if status_filter == "attached" %}selected{% endif %}>Attached ({{ status_counts.attached|default:0 }})</option>
+      <option value="withdrawn" {% if status_filter == "withdrawn" %}selected{% endif %}>Withdrawn ({{ status_counts.withdrawn|default:0 }})</option>
       <option value="all" {% if status_filter == "all" %}selected{% endif %}>All</option>
     </select></label>
     <label>Class<br><input name="class" value="{{ entity_class_filter }}" placeholder="All classes"></label>

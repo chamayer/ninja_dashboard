@@ -1544,6 +1544,7 @@ class EntityCandidate(UUIDTenantScopedModel):
         PENDING = "pending", "Pending"
         ATTACHED = "attached", "Attached"
         REJECTED = "rejected", "Rejected"
+        WITHDRAWN = "withdrawn", "Withdrawn"
 
     source_instance = models.ForeignKey(
         SourceInstance, on_delete=models.PROTECT, related_name="entity_candidates"

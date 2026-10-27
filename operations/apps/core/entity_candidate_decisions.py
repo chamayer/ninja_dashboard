@@ -40,6 +40,11 @@ def _authorize(actor: User, candidate: EntityCandidate) -> None:
         raise PermissionDenied("The operator cannot write decisions.")
 
 
+def _ensure_not_withdrawn(candidate: EntityCandidate) -> None:
+    if candidate.status == EntityCandidate.Status.WITHDRAWN:
+        raise ValidationError("A withdrawn candidate cannot receive a decision.")
+
+
 def _record_decision(
     *,
     candidate: EntityCandidate,
@@ -85,6 +90,7 @@ def reject_candidate(*, actor: User, candidate: EntityCandidate, reason: str) ->
         tenant_id=candidate.tenant_id,
         id=candidate.id,
     )
+    _ensure_not_withdrawn(locked)
     if locked.status == EntityCandidate.Status.ATTACHED:
         raise ValidationError("An attached candidate cannot be rejected.")
     before_status = locked.status
@@ -199,6 +205,7 @@ def promote_candidate(
         tenant_id=candidate.tenant_id,
         id=candidate.id,
     )
+    _ensure_not_withdrawn(locked)
     if locked.status == EntityCandidate.Status.ATTACHED:
         raise ValidationError("An attached candidate is already anchored.")
     if locked.status == EntityCandidate.Status.REJECTED:
@@ -250,6 +257,7 @@ def attach_candidate(
         tenant_id=candidate.tenant_id,
         id=candidate.id,
     )
+    _ensure_not_withdrawn(locked)
     if entity.tenant_id != locked.tenant_id:
         raise ValidationError("The candidate and target entity must share a tenant.")
     if entity.entity_class_id != locked.proposed_entity_class_id:

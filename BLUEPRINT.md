@@ -85,3 +85,22 @@ parity checks before implementation. Then move the Dashboard and
 software-capability requirement copies to the stored verdicts.
 
 PLAN-023: see `operations/BLUEPRINT.md`.
+
+## PLAN-021 — Generic entity candidate lifecycle reconciliation
+
+**Status:** Active. Scope and current review: [PLAN-021](operations/docs/plans/PLAN-021-entity-candidate-lifecycle.md)
+and [2026-10-27 aggregate review](docs/records/PLAN-021-candidate-review-2026-10-27/review.md).
+The fresh read-only check found 77 linked, non-attached proposals whose active
+observation hashes match but whose proposed class conflicts with the linked
+entity class. Local implementation is in migration 0355 and the versioned
+ingest projector; the legacy three-column wrapper remains compatible across
+service startup. Stale proposals receive audited withdrawal, matching links
+attach by class, and reactivated unlinked evidence reopens. Attached
+identity/history and rejected decisions are preserved. The focused
+candidate/admin run produced 24 passes with one unrelated existing admin test
+excluded; five passing cases use isolated PostgreSQL. Django system check,
+migration autodetection, Ruff, registry validation, and `git diff --check`
+pass. The excluded test expects missing `ConditionPolicyActivationForm`. No
+production migration, data mutation, or deployment was run. **Next:** local
+commit is authorized. Any `origin` push needs explicit approval for automatic
+deployment and migration 0355, followed by the approved secondary mirror push.

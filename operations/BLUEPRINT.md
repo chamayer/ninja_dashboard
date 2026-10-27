@@ -803,3 +803,32 @@ AGENTS.md; follow AGENTS.md and rely on the push-triggered deployment only.
 **Next action:** commit the isolated UI/release/checkpoint changes, push origin
 then the secondary mirror, and verify the published commit. Live UI validation
 remains separate from local synthetic browser validation.
+
+## PLAN-021 — Generic entity candidate lifecycle reconciliation
+
+**Status:** Active; cross-service checkpoint is in root [BLUEPRINT.md](../BLUEPRINT.md).
+The reviewed production population has 77 linked candidates whose proposed
+entity class conflicts with the authoritative link. Local implementation adds
+audited withdrawal for inactive unlinked proposals and linked class conflicts,
+class-safe attachment, reactivation for explicitly active unlinked evidence,
+and queue/history visibility. Attached links/history and rejected decisions
+remain intact.
+
+**Checkpoint:** migration 0355 adds the withdrawn status and versioned
+`sync_entity_candidates_v2` function. Ingest waits for the new function before
+calling it, and the old three-column function remains a wrapper, so startup
+and rollback do not depend on which service finishes its migration first.
+Projector withdrawals have explicit event reasons; rejected
+and attached states stay untouched; matching-class links attach; inactive
+unlinked candidates withdraw; active unlinked withdrawals reopen. The focused
+candidate/admin run produced 24 passes with one unrelated existing admin test
+excluded; the passing set includes five isolated PostgreSQL lifecycle/security
+tests. Django system check,
+migration autodetection, targeted Ruff, plan registry, Python compilation,
+formatting, and whitespace validation pass. The excluded test expects missing
+`ConditionPolicyActivationForm`. No production
+migration or data change has run.
+
+**Next:** local commit is authorized. Any `origin` push needs explicit approval
+for automatic Portainer deployment and migration 0355, followed by the approved
+secondary mirror push.

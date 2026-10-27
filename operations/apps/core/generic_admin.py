@@ -427,7 +427,7 @@ def _entity_candidates_legacy_queue(request: HttpRequest) -> HttpResponse:
     clauses = ["tenant_id = %s"]
     params: list[object] = [tenant_id]
     if status != "all":
-        allowed = {"pending", "observed_only", "rejected", "attached"}
+        allowed = {"pending", "observed_only", "rejected", "attached", "withdrawn"}
         if status not in allowed:
             status = "pending"
         clauses.append("status = %s")

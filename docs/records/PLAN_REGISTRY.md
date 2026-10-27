@@ -249,16 +249,16 @@ do not open competing blueprints for the same work.
 ## PLAN-021 — Generic entity candidate lifecycle reconciliation
 
 - Scope: Reconcile generic entity candidates with current source-observation activity and entity source links, including an auditable withdrawal state and verification/backfill for existing stale candidates.
-- Status: ready
+- Status: active
 - Defined: 2026-10-26
-- Started: —
+- Started: 2026-10-27
 - Completed: —
-- Blueprint: —
+- Blueprint: BLUEPRINT.md
 - Source: operations/docs/plans/PLAN-021-entity-candidate-lifecycle.md
 - Section: Generic entity candidate lifecycle reconciliation
 - Related plan: PLAN-004 covers client resolver findings; PLAN-021 concerns the separate generic `entity_candidates` projection and state machine.
-- Resume gate: Review the measured stale candidate population and verify the 74 observed-only candidates with source links. Approve implementation separately before changing candidate state, schema, or production data. Preserve attached identity/history and rejected decisions; withdrawal must be auditable and idempotent.
-- Last checked: 2026-10-26 (read-only production measurement: 576 pending and 12 observed-only candidates matched inactive observations without source links; 19 pending and 3,878 observed-only candidates matched active observations; 74 observed-only candidates had source links but were not attached. No active observation lacked either a candidate or source link. The 74 require freshness verification.)
+- Resume gate: Local implementation and validation are complete. A push to `origin` must be separately approved and explicitly include automatic Portainer deployment and pending migration 0355; push the same approved commit to the secondary mirror afterward.
+- Last checked: 2026-10-27 (read-only verification found 77 linked, non-attached observed-only candidates; all had active observations, matching material hashes, and source-link classes that differ from the candidate's proposed class. Seventy-six observations were newer than the candidate snapshot. Review evidence is aggregate-only in `docs/records/PLAN-021-candidate-review-2026-10-27/`.)
 
 ## PLAN-022 — Legacy data and code cleanup
 
