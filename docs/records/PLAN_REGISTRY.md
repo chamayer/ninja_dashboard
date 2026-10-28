@@ -83,6 +83,7 @@ do not open competing blueprints for the same work.
 
 ## PLAN-004 — Computer identity, history, and naming
 
+- Scoped repair: operations/docs/plans/PLAN-004-source-record-status.md — per-record status/contact is complete locally; scoped commit approved, push/deployment remain gated.
 - Scope: Operations identity lifecycle
 - Status: verify
 - Defined: 2026-10-16

@@ -19181,23 +19181,15 @@ def _device_source_records(cur, device_ids) -> dict[str, list[tuple]]:
                    ELSE hudu.source_url
                END AS source_url,
                evidence.observation_active, evidence.observation_last_seen_at,
-               presence.reported_online, presence.last_contact_at,
+               metadata.reported_online, metadata.reported_last_contact_at,
                lifecycle.record_lifecycle
           FROM operations.v_device_observation_current evidence
           LEFT JOIN operations.v_device_source_record_lifecycle_current lifecycle
             ON lifecycle.tenant_id = evidence.tenant_id
            AND lifecycle.observation_id = evidence.observation_id
-          LEFT JOIN LATERAL (
-              SELECT presence.reported_online, presence.last_contact_at
-                FROM operations.device_agent_presence_current presence
-               WHERE presence.tenant_id = evidence.tenant_id
-                 AND presence.device_id = evidence.device_id
-                 AND presence.platform = evidence.source_name
-                 AND presence.entity_type = evidence.entity_type
-               ORDER BY COALESCE(presence.last_contact_at, presence.last_observed_at)
-                   DESC NULLS LAST
-               LIMIT 1
-          ) presence ON TRUE
+          LEFT JOIN operations.v_entity_observation_admin_metadata metadata
+            ON metadata.tenant_id = evidence.tenant_id
+           AND metadata.observation_id = evidence.observation_id
           LEFT JOIN operations.v_cmdb_inventory_evidence_current hudu
             ON hudu.tenant_id = evidence.tenant_id
            AND hudu.observation_id = evidence.observation_id
