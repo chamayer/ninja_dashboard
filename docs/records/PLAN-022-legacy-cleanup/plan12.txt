@@ -1,0 +1,8 @@
+captured_utc=2026-10-28T23:18:16.650078+00:00
+query L23 from queries.sql
+
+executing_role,server_version_num,transaction_read_only,tenant_context,executing_search_path,rolsuper,rolbypassrls
+operations_migrate,160014,on,1,pg_catalog,t,t
+QUERY PLAN
+Limit  (cost=0.15..0.43 rows=5 width=60)
+  ->  Index Scan Backward using django_migrations_pkey on django_migrations  (cost=0.15..21.94 rows=386 width=60)

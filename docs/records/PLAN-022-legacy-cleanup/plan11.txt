@@ -1,0 +1,21 @@
+captured_utc=2026-10-28T23:18:00.234703+00:00
+query L22 from queries.sql
+
+executing_role,server_version_num,transaction_read_only,tenant_context,executing_search_path,rolsuper,rolbypassrls
+operations_migrate,160014,on,1,pg_catalog,t,t
+QUERY PLAN
+Sort  (cost=20.13..20.14 rows=5 width=96)
+"  Sort Key: ('migration'::text), django_migrations.name"
+  ->  Append  (cost=0.00..20.07 rows=5 width=96)
+        ->  Seq Scan on django_migrations  (cost=0.00..10.79 rows=1 width=98)
+"              Filter: (((name)::text = ANY ('{0358_drop_parity_report_and_legacy_job_key,0359_drop_metabase_ro_role}'::text[])) AND ((app)::text = 'core'::text))"
+        ->  Result  (cost=0.00..0.01 rows=1 width=96)
+        ->  Aggregate  (cost=1.19..1.20 rows=1 width=96)
+              ->  Seq Scan on pg_authid  (cost=0.00..1.19 rows=1 width=0)
+                    Filter: (rolname = 'metabase_ro'::name)
+        ->  Aggregate  (cost=1.06..1.08 rows=1 width=96)
+              ->  Seq Scan on source_instances  (cost=0.00..1.06 rows=1 width=0)
+                    Filter: (config ? 'legacy_job_key'::text)
+        ->  Aggregate  (cost=6.94..6.96 rows=1 width=96)
+              ->  Seq Scan on change_history_registry  (cost=0.00..6.94 rows=1 width=0)
+                    Filter: (table_name = 'parity_report'::text)

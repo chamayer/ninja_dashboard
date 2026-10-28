@@ -1,0 +1,11 @@
+captured_utc=2026-10-28T23:18:18.091258+00:00
+query L23 from queries.sql
+
+executing_role,server_version_num,transaction_read_only,tenant_context,executing_search_path,rolsuper,rolbypassrls
+operations_migrate,160014,on,1,pg_catalog,t,t
+app,name,applied
+operations,0360_source_record_reported_state,2026-10-28 21:27:41.483115+00
+operations,0359_drop_metabase_ro_role,2026-10-28 21:27:41.424764+00
+operations,0358_drop_parity_report_and_legacy_job_key,2026-10-28 21:27:41.073339+00
+operations,0357_lifecycle_reported_state_fallback,2026-10-28 13:05:49.560401+00
+operations,0356_requirement_episode_identity,2026-10-27 21:39:25.517615+00

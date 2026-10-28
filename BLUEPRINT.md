@@ -1,13 +1,5 @@
 - **PLAN-031 — active.** Next: validate the source-record reported-state migration and page. See the [Operations handoff](operations/BLUEPRINT.md#plan-031--source-record-and-reported-states).
 
-# PLAN-022 — Legacy data and code cleanup
-
-**Active; Wave A deployed 2026-10-26; Wave B built 2026-10-28.** Detail: [PLAN-022](docs/plans/PLAN-022-legacy-data-cleanup.md).
-
-- **Deployed:** 0.129.0 and 0.129.1. Database 62.4 GB → 28 GB; archive in `/amr-ch-01_data/ninja-dashboard/backups/operations/legacy-2026-10-26/` and a local copy.
-- **Wave B (0.130.0, not deployed):** `0358` drops `parity_report` and `legacy_job_key`; `0359` drops `metabase_ro`. The 8 Metabase-era views are kept (capability gaps on the backlog). Live items went to PLAN-005, PLAN-007 and the backlog.
-- **Next:** an approved push naming `0358` and `0359` (no `parity_report` export, by user decision); verify, then mark PLAN-022 complete. Host `.env` notification keys after the rollback window (TODO).
-
 # PLAN-019 — Data pipeline correctness and source-record retention
 
 **Active.** Detail: [PLAN-019](docs/plans/PLAN-019-data-pipeline-correctness-and-retention.md). Step 1 and Step 2 (U04, `0349`) deployed in 0.129.0; F09 decided (no daily presence for any source).

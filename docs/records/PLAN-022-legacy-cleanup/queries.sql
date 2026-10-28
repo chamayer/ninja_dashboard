@@ -263,3 +263,20 @@ SELECT n.nspname || '.' || c.relname AS name, c.relkind::text AS kind,
        ('ninja_core', 'v_location_custom_fields'),
        ('ninja_core', 'v_organization_custom_fields'))
  ORDER BY 1;
+-- L22: Wave B post-deploy check: table, role, key and registry row gone. Its migration filter used app 'core'; the label is 'operations', so L23 supplies the migration rows.
+SELECT 'migration' AS kind, name AS item, applied::text AS detail
+  FROM operations.django_migrations
+ WHERE app = 'core' AND name IN ('0358_drop_parity_report_and_legacy_job_key', '0359_drop_metabase_ro_role')
+UNION ALL
+SELECT 'parity_report_exists', 'operations.parity_report', (to_regclass('operations.parity_report') IS NOT NULL)::text
+UNION ALL
+SELECT 'metabase_ro_roles', 'pg_roles', count(*)::text FROM pg_catalog.pg_roles WHERE rolname = 'metabase_ro'
+UNION ALL
+SELECT 'legacy_job_key_sources', 'source_instances', count(*)::text
+  FROM operations.source_instances WHERE config ? 'legacy_job_key'
+UNION ALL
+SELECT 'parity_registry_rows', 'change_history_registry', count(*)::text
+  FROM operations.change_history_registry WHERE table_name = 'parity_report'
+ ORDER BY 1, 2;
+-- L23: the five most recently applied Django migrations (names and times only).
+SELECT app, name, applied FROM operations.django_migrations ORDER BY id DESC LIMIT 5;

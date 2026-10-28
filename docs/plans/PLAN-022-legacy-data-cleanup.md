@@ -1,5 +1,7 @@
 # PLAN-022 — Legacy data and code cleanup
 
+**Completed 2026-10-28.**
+
 Registered and approved for immediate execution by the user on 2026-10-26
 ("write up a cleanup plan to be executed immediately"). Absorbs PLAN-006
 (legacy agent-compliance retirement) and the F09 decision of PLAN-019.
@@ -114,8 +116,8 @@ helper now refuses Python sent as command text). The user approved B1–B3 on
 
 | Step | Change | Evidence | Status |
 | --- | --- | --- | --- |
-| B1 | Drop `operations.parity_report` (the agent-compliance cutover gate; no writes since 2026-10-07, 0.5 MB) and remove `legacy_job_key`, the "Previous schedule" fallback on the Sources and Jobs pages (all 10 reference feeds have completed under source-refresh; last legacy run 2026-10-08). The old runs stay in `operator_job_runs`. Migration `0358` | L17, L18 | built |
-| B2 | Drop the `metabase_ro` role: NOLOGIN, no members, owns nothing, and only this database depends on it (269 relation grants, 6 default privileges, 5 schema grants). Migration `0359` runs `DROP OWNED` then `DROP ROLE`; a test rejects the role in any later migration. ADR 0005 amended | L20 | built |
+| B1 | Drop `operations.parity_report` (the agent-compliance cutover gate; no writes since 2026-10-07, 0.5 MB) and remove `legacy_job_key`, the "Previous schedule" fallback on the Sources and Jobs pages (all 10 reference feeds have completed under source-refresh; last legacy run 2026-10-08). The old runs stay in `operator_job_runs`. Migration `0358` | L17, L18; deployed L22, L23 | deployed 2026-10-28 |
+| B2 | Drop the `metabase_ro` role: NOLOGIN, no members, owns nothing, and only this database depends on it (269 relation grants, 6 default privileges, 5 schema grants). Migration `0359` runs `DROP OWNED` then `DROP ROLE`; a test rejects the role in any later migration. ADR 0005 amended | L20; deployed L22, L23 | deployed 2026-10-28 |
 | B3 | Review the 8 Metabase-era ingest views for purpose and replacement. Result: keep all eight. Patch warnings, reboot and activity-failure trends, MANUAL age and Ninja device health are not shown in Operations, so these are backlog gaps. The parity audit is corrected | [review](../records/PLAN-022-legacy-cleanup/metabase-view-capability-review.md), L21 | done |
 | B4 | Hand off items that are live data or redesigns, not cleanup (below) | | done |
 
@@ -134,7 +136,13 @@ comparison counts for a cutover that is complete.
   defers them). `inventory-scripts/` stays: it is local, git-ignored and
   referenced by ADR 0015. `archive/` retention → root backlog.
 
-PLAN-022 completes once B1 and B2 are deployed and verified.
+### Outcome (2026-10-28)
+
+B1 and B2 shipped in 0.130.0 (`912ee58`, records `f28b59e`). Production
+applied `0358` and `0359` at 21:27 UTC (L23). Read-only check (L22):
+`parity_report` is gone, no `metabase_ro` role, no source carries
+`legacy_job_key`, and no change-history registry row remains. Operations,
+the Jobs worker and Postgres report healthy. PLAN-022 is complete.
 
 ## Outcome (2026-10-26)
 

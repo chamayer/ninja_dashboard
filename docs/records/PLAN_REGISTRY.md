@@ -298,15 +298,15 @@ do not open competing blueprints for the same work.
 ## PLAN-022 — Legacy data and code cleanup
 
 - Scope: Export and remove legacy tables, schemas, views, Jobs and code no current workflow reads: Ninja daily presence, legacy Ninja snapshots, agent compliance (absorbs PLAN-006) and the inventory schema; Wave B items need their own design.
-- Status: active
+- Status: completed
 - Defined: 2026-10-26
 - Started: 2026-10-26
-- Completed: —
+- Completed: 2026-10-28
 - Blueprint: BLUEPRINT.md
 - Source: docs/plans/PLAN-022-legacy-data-cleanup.md
 - Section: PLAN-022 — Legacy data and code cleanup
 - Resume gate: User approved immediate execution (2026-10-26). Three separately approved pushes: migration 0349; the code; then the drop migrations 0350, 0351, 117 and 118 after the archive is copied off-host and verified.
-- Last checked: 2026-10-28 (Wave B built: `0358` drops `parity_report` and `legacy_job_key`, `0359` drops `metabase_ro`; the review of the 8 Metabase-era views keeps all of them and records the gaps; live items handed to PLAN-005, PLAN-007 and the backlog. Completes after B1/B2 are deployed and verified).
+- Last checked: 2026-10-28 (Wave B built: `0358` drops `parity_report` and `legacy_job_key`, `0359` drops `metabase_ro`; the review of the 8 Metabase-era views keeps all of them and records the gaps; live items handed to PLAN-005, PLAN-007 and the backlog. Deployed in 0.130.0; `0358`/`0359` applied and verified read-only on production).
 
 ## PLAN-023 — Software installations layout repair
 
