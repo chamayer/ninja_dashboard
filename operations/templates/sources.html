@@ -112,7 +112,7 @@
         </details>
     </div>
     {% endif %}
-    {% if s.source_kind != "reference" %}<div class="source-stat"><a href="{% url 'client_mappings' %}?source={{ s.name|urlencode }}">Client mappings for {{ s.name }} →</a></div>{% endif %}
+    {% if s.source_kind != "reference" %}<div class="source-stat"><a href="{% url 'client_mappings' %}?source={{ s.catalog_name|urlencode }}">Client mappings for {{ s.name }} →</a></div>{% endif %}
 </div>
 {% endfor %}
 </div>

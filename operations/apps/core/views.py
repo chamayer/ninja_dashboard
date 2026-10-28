@@ -16905,7 +16905,10 @@ def sources_status(request: HttpRequest) -> HttpResponse:
             )
             cur.execute(
                 """
-                SELECT health.id, health.source_name, health.client_display_name, health.enabled, health.run_platform,
+                SELECT health.id,
+                       COALESCE(NULLIF(instance.config->>'source_name', ''), health.source_name) AS source_name,
+                       health.source_name AS catalog_source_name,
+                       health.client_display_name, health.enabled, health.run_platform,
                        last_observed_at, current_record_count, active_record_count,
                        last_run_ok, last_run_ended_at, last_run_rows,
                        last_run_error, last_success_at, last_success_rows,
@@ -16919,7 +16922,7 @@ def sources_status(request: HttpRequest) -> HttpResponse:
                   JOIN operations.sources source ON source.id = instance.source_id
                   LEFT JOIN operations.entity_types entity_type ON entity_type.name = source.entity_type
                  WHERE health.tenant_id = %s
-                 ORDER BY health.source_name, health.client_display_name NULLS FIRST, health.id
+                 ORDER BY source_name, health.client_display_name NULLS FIRST, health.id
                 """,
                 (tenant_id,),
             )
@@ -16978,7 +16981,8 @@ def sources_status(request: HttpRequest) -> HttpResponse:
             # Source-refresh runs are the authoritative operational history.
             cur.execute(
                 """
-                SELECT source.name, run.status, run.started_at, run.completed_at,
+                SELECT COALESCE(NULLIF(instance.config->>'source_name', ''), source.name),
+                       run.status, run.started_at, run.completed_at,
                        run.rows_touched, run.error
                   FROM operations.operator_job_runs run
                   JOIN operations.source_bindings binding
@@ -17010,6 +17014,7 @@ def sources_status(request: HttpRequest) -> HttpResponse:
         (
             source_instance_id,
             source_name,
+            catalog_source_name,
             client_display_name,
             enabled,
             run_platform,
@@ -17041,6 +17046,7 @@ def sources_status(request: HttpRequest) -> HttpResponse:
             {
                 "id": source_instance_id,
                 "name": source_name,
+                "catalog_name": catalog_source_name,
                 "client_name": client_display_name,
                 "enabled": enabled,
                 "run_platform": run_platform,
