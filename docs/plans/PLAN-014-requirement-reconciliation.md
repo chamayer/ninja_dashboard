@@ -1,9 +1,13 @@
 # PLAN-014 — Requirement and lifecycle reconciliation design
 
-Status: built locally; expanded validation deferred by the user's "go light
-on testing; just build it" instruction. The explicit-confirmed-use policy was
-accepted on 2026-10-27. Earlier test results do not validate this expanded build.
-Current handoff/evidence: [build checkpoint](../records/PLAN-014-build-2026-10-27.md).
+Status: baseline deployed as `0af8aac` (release 0.129.3); acceptance resumed at
+the user's request to finish PLAN-014. The explicit-confirmed-use policy was
+accepted on 2026-10-27. Current diagnosis and validation are in the
+[acceptance record](../records/PLAN-014-acceptance-2026-10-27.md). The user approved
+preparing the reported-state fallback for the remaining contactless Computers;
+the candidate and migration 0357 are locally validated, not deployed. Earlier
+test results do not establish production acceptance of this candidate.
+Deployment provenance: [build checkpoint](../records/PLAN-014-build-2026-10-27.md).
 
 Registry: [PLAN-014](../records/PLAN_REGISTRY.md). Active handoff:
 [`ingest/BLUEPRINT.md`](../../ingest/BLUEPRINT.md). Prior local evidence:
@@ -47,6 +51,30 @@ cleanup Computers, not all historical subjects.
 This specifically amends ADR-0036's unconditional cleanup exclusion and
 reconciles it with ADR-0032. It is an operator decision, not the rejected
 automatic "alive elsewhere" exception.
+
+## Accepted continuation: contactless explicit-state fallback
+
+The user approved preparing this change on 2026-10-27 after the read-only
+diagnosis identified 45 review entries on 20 Computers. Add the registered
+`direct_contact_state_fallback` mode for `agent.remote_access` and
+`agent.monitoring`, keeping the single `entity_types` capability authority.
+Use it only when no source supplies qualified direct contact for the Computer.
+Existing modes, including the hybrid VM-host mode, retain their selection rules.
+
+Recognized positive state can support recovery. A negative fallback establishes
+current offline state with unknown duration: it cannot infer old contact,
+contact-aging cleanup or a new extended-offline finding, and it preserves an
+existing offline episode until recovery is positively established. Requirement
+assessments use `offline:reported_without_duration` rather than asserting
+extended absence. Source-health, identity, operator, OS and retirement guards
+remain enforced. Missing, null, unknown and conflicting state remain uncertain.
+
+Migration 0357 extends the existing constraint and Django choices, changes only
+the two reviewed type registrations under an audited change action, and refuses
+unexpected starting policy. It does not rewrite observations, verdicts or
+finding history. Its reverse restores contact-only registration/constraint;
+rollback does not undo lifecycle transitions or their audit history. Release,
+production migration, recalculation and rollback require separate approval.
 
 ## One shared lifecycle evaluation result
 
@@ -146,7 +174,7 @@ Use the same scoped pipeline for a full tenant pass and a single Computer:
    check through its existing separate recording transaction.
 
 Implemented mechanism: serialize overlapping evaluations per tenant with a
-transaction-scoped advisory lock and use a repeatable-read input snapshot.
+session advisory lock and use a repeatable-read input snapshot.
 Acquire the evaluation lock before any finding/assessment row locks and before
 establishing the evaluation snapshot; the concrete connection/transaction
 sequence acquires a session advisory lock in a short acquisition transaction,
@@ -226,8 +254,8 @@ with real runtime roles, verdict/assessment writers and live cover triggers:
 
 Measure bounded query/work costs on a representative synthetic fleet and
 review Docker packaging. Previously reported 148 checks describe the earlier
-patch only. Further test execution is deferred at the user's direction;
-syntax and diff checks are the current build checks.
+patch only. Testing resumed at the user's request to finish the plan; the
+acceptance record identifies the executed checks and remaining limits.
 Commit, push/deployment, pending migrations and production recalculation retain
 their separate explicit approval boundaries. PLAN-014 remains active until
 production acceptance is authorized and obtained.

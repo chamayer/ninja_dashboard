@@ -2,6 +2,25 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.129.4] — 2026-10-28 — Reported-state lifecycle fallback
+
+### Fixed
+
+- Remote-access and monitoring agents may use explicit online/offline state
+  when no source has qualified direct contact; direct contact retains priority.
+- Contactless offline reports no longer imply offline duration, cleanup, or
+  retirement, and cannot clear an existing offline episode without recovery.
+- Requirement-state diagnostics explain retained cleanup findings only when
+  current lifecycle evidence and the exact live offline cover support them.
+- Migration `0357` registers the reviewed fallback policy without rewriting
+  observations, requirement verdicts, or finding history.
+
+### Release notes
+
+- The contactless policy preview covered 102 Computers in the then-current
+  fleet. Post-deployment evaluation and zero-unexplained-drift acceptance remain
+  pending; PLAN-014 remains active until verified.
+
 ## [0.129.3] — 2026-10-27 — Requirement and lifecycle reconciliation
 
 ### Fixed

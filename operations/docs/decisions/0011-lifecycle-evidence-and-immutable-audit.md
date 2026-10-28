@@ -48,6 +48,12 @@ capability. Its allowed values are:
 - `reported_state`; and
 - `direct_then_reported_state`.
 
+ADR-0047 adds `direct_contact_state_fallback` for the reviewed remote-access
+and monitoring agent types. That mode accepts reported state only when the
+Computer has no qualified direct contact; its negative reports do not measure
+offline duration. The selection rules below continue to govern the original
+four modes.
+
 The non-null database default is `none`. Classification, identity authority,
 license consumption, and coverage eligibility cannot substitute for this
 capability.

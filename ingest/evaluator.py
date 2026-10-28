@@ -128,6 +128,11 @@ class LifecycleResult:
     def excludes_requirements(self) -> bool:
         return self.target == "pending_cleanup" and not self.listing.in_use_confirmed
 
+    @property
+    def offline_reason(self) -> str:
+        return ("offline:reported_without_duration" if self.offline_since is None
+                else "offline:extended_absence")
+
 
 def _load_lifecycle_results(cur, tenant_id, now, device_id, source_problems):
     offline_days, review_days = device_status_settings.load(cur, tenant_id)
@@ -155,13 +160,12 @@ def _load_lifecycle_results(cur, tenant_id, now, device_id, source_problems):
             ))))
         known = not conflict and not blockers
         if any(
-            row["mode"] in _LIFECYCLE_REPORTED_MODES
-            and _reported_lifecycle_state(
+            _reported_lifecycle_state(
                 row["last_power_state"], row["has_power_state"],
                 row["reported_online"], row["has_reported_online_state"],
             )[1]
             and (evidence is None or row["last_observed_at"] > evidence["at"])
-            for row in device["rows"]
+            for row in _reported_lifecycle_rows(device["rows"])
         ):
             known = False
         target = item.lifecycle_status
@@ -191,7 +195,8 @@ def _load_lifecycle_results(cur, tenant_id, now, device_id, source_problems):
                             if row["mode"] in _LIFECYCLE_DIRECT_MODES
                             and row["last_contact_at"] is not None]
                 since = max(positive) if positive else evidence["at"]
-                if offline and since < now - timedelta(days=threshold):
+                if (offline and not evidence.get("duration_unknown", False)
+                        and since < now - timedelta(days=threshold)):
                     offline_since = since
         results[item.device_id] = LifecycleResult(
             item, target, reason, evidence, known, offline, offline_since, blockers,
@@ -522,11 +527,22 @@ def _sync_device_roles(cur: Any, tenant_id: int, now: datetime) -> int:
 # --------------------------------------------------------------------------
 
 
-_LIFECYCLE_POLICY_VERSION = "lifecycle-evidence-v1"
-_LIFECYCLE_DIRECT_MODES = {"direct_contact", "direct_then_reported_state"}
+_LIFECYCLE_POLICY_VERSION = "lifecycle-evidence-v2"
+_LIFECYCLE_FALLBACK_MODE = "direct_contact_state_fallback"
+_LIFECYCLE_DIRECT_MODES = {
+    "direct_contact", "direct_then_reported_state", _LIFECYCLE_FALLBACK_MODE,
+}
 _LIFECYCLE_REPORTED_MODES = {"reported_state", "direct_then_reported_state"}
 _LIFECYCLE_POSITIVE_POWER_STATES = {"poweredon"}
 _LIFECYCLE_NEGATIVE_POWER_STATES = {"poweredoff", "suspended"}
+
+
+def _reported_lifecycle_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Fallback reports cannot outrank qualified direct contact on the Computer."""
+    direct = any(row["mode"] in _LIFECYCLE_DIRECT_MODES
+                 and row["last_contact_at"] is not None for row in rows)
+    return [row for row in rows if row["mode"] in _LIFECYCLE_REPORTED_MODES
+            or (row["mode"] == _LIFECYCLE_FALLBACK_MODE and not direct)]
 
 
 def _reported_lifecycle_state(
@@ -581,23 +597,24 @@ def _select_lifecycle_evidence(
                     "platform": row["platform"],
                 }
             )
-        if mode in _LIFECYCLE_REPORTED_MODES:
-            status, _ = _reported_lifecycle_state(
-                row["last_power_state"],
-                row["has_power_state"],
-                row["reported_online"],
-                row["has_reported_online_state"],
-            )
-            if status is not None:
-                candidates.append(
-                    {
-                        "kind": "reported_state",
-                        "status": status,
-                        "at": row["last_observed_at"],
-                        "entity_type": row["entity_type"],
-                        "platform": row["platform"],
-                    }
-                )
+    for row in _reported_lifecycle_rows(rows):
+        status, _ = _reported_lifecycle_state(
+            row["last_power_state"],
+            row["has_power_state"],
+            row["reported_online"],
+            row["has_reported_online_state"],
+        )
+        if status is not None:
+            candidate = {
+                "kind": "reported_state",
+                "status": status,
+                "at": row["last_observed_at"],
+                "entity_type": row["entity_type"],
+                "platform": row["platform"],
+            }
+            if row["mode"] == _LIFECYCLE_FALLBACK_MODE and status == "offline_aging":
+                candidate["duration_unknown"] = True
+            candidates.append(candidate)
 
     if not candidates:
         return None, False
@@ -626,6 +643,8 @@ def _lifecycle_target(
 
     The two thresholds are the tenant's Device status settings, not constants.
     """
+    if evidence.get("duration_unknown", False):
+        return "offline_aging"
     if evidence["at"] < now - timedelta(days=retire_review_days):
         return "pending_cleanup"
     if evidence["status"] == "offline_aging" or evidence["at"] < now - timedelta(
@@ -1152,9 +1171,7 @@ def _sync_lifecycle_status(
     conflict_type_id = _get_finding_type_id(cur, "lifecycle_reported_state_conflict")
 
     for device_id, device in per_device.items():
-        for row in device["rows"]:
-            if row["mode"] not in _LIFECYCLE_REPORTED_MODES:
-                continue
+        for row in _reported_lifecycle_rows(device["rows"]):
             _, is_unknown = _reported_lifecycle_state(
                 row["last_power_state"],
                 row["has_power_state"],
@@ -1972,6 +1989,7 @@ def _evaluate_coverage(
                         dev_id,
                         identity_blocked,
                         offline=offline_downgrade,
+                        offline_reason=result.offline_reason if result else "offline:unmeasured",
                         collection_skipped=bool(collection_blockers),
                         collection_blockers=collection_blockers,
                     ),
@@ -2108,6 +2126,7 @@ def _reconcile_requirement_findings(
             _device_condition_signals(
                 tenant_id, subject, identity_blocked,
                 offline=subject in fully_offline_devices,
+                offline_reason=result.offline_reason if result else "offline:unmeasured",
                 collection_skipped=bool(blockers), collection_blockers=blockers,
             ),
             EvaluationCoverage(
@@ -2412,6 +2431,7 @@ def _device_condition_signals(
     offline: bool,
     collection_skipped: bool,
     collection_blockers: tuple[str, ...] = (),
+    offline_reason: str = "offline:extended_absence",
 ) -> tuple[Signal, ...]:
     participant = Participant("device", str(device_id), "affected", tenant_id)
     return (
@@ -2436,7 +2456,7 @@ def _device_condition_signals(
             "offline",
             participant,
             Readiness.BLOCKED if offline else Readiness.READY,
-            "offline:extended_absence" if offline else "offline:contact_current",
+            offline_reason if offline else "offline:contact_current",
         ),
     )
 

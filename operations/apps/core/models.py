@@ -205,6 +205,9 @@ class EntityType(models.Model):
         DIRECT_CONTACT = "direct_contact", "Direct contact"
         REPORTED_STATE = "reported_state", "Reported state"
         DIRECT_THEN_REPORTED_STATE = "direct_then_reported_state", "Direct then reported state"
+        DIRECT_CONTACT_STATE_FALLBACK = (
+            "direct_contact_state_fallback", "Direct contact with reported state fallback"
+        )
 
     name = models.CharField(max_length=80, primary_key=True)
     entity_class = models.ForeignKey(

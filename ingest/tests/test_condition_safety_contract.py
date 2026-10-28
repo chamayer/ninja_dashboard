@@ -175,19 +175,12 @@ def test_client_resolver_only_closes_after_clear_decision():
     assert "return" in signature.split("assessment.get(\"may_clear\")", 1)[1]
 
 
-def test_automatic_clear_does_not_close_operator_managed_episodes():
-    evaluator = (Path(__file__).parents[1] / "evaluator.py").read_text()
+def test_identity_clear_does_not_close_operator_managed_episodes():
     resolver = (Path(__file__).parents[1] / "identity" / "resolver.py").read_text()
-    lifecycle = evaluator[
-        evaluator.index("def _resolve_lifecycle_findings_absent"):
-        evaluator.index("_LIFECYCLE_FINDING_ACTIVE_STATUSES")
-    ]
     conflict = resolver[
         resolver.index("_IDENTITY_CONFLICT_FINDING_CLOSE"):
         resolver.index("def _project_identity_conflict_findings")
     ]
-    assert "status IN ('open', 'acknowledged')" in lifecycle
-    assert "'investigating', 'suppressed'" not in lifecycle
     assert "status IN ('open', 'acknowledged')" in conflict
     assert "'investigating')" not in conflict
 

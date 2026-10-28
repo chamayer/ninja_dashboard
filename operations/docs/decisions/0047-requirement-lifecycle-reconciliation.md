@@ -1,7 +1,8 @@
 # 0047 — Explicit confirmed use and shared lifecycle evidence
 
-Status: Accepted; implemented locally under PLAN-014. Expanded validation and
-deployment remain pending at the user's direction.
+Status: Accepted. Baseline deployed as `0af8aac`; the reported-state fallback
+amendment is implemented locally under PLAN-014 and awaits release approval
+and production acceptance.
 Date: 2026-10-27
 
 ## Context
@@ -31,17 +32,33 @@ for confirmed use while preserving OS applicability and safety guards.
 4. Requirement verdicts and desired episodes are computed together. Resolution
    consumes those decisions and reassesses disappeared conditions instead of
    applying another profile calculation or a fixed 48-hour recovery window.
+5. On 2026-10-27 the user approved preparing explicit reported-state fallback
+   when contact time is absent. The registered mode
+   `direct_contact_state_fallback` opts in `agent.remote_access` and
+   `agent.monitoring`. It uses recognized state only when the Computer has no
+   qualified direct contact from any source. This keeps aged contact from being
+   displaced by a contactless poll. Existing reported-state and hybrid/VM modes
+   keep their selection rules. A fallback negative report establishes current
+   offline state, without measuring offline duration or granting retirement,
+   cleanup, a new extended-offline episode, or recovery of an existing offline
+   episode. Its requirement guard says `offline:reported_without_duration`.
+   Positive fallback can support normal recovery; source completeness,
+   identity, tenant, retirement and operator guards still apply.
 
 ## Enforcement and status
 
-The proposed enforcement is defined in
+The enforcement is defined in
 [PLAN-014's design](../../../docs/plans/PLAN-014-requirement-reconciliation.md):
 one scoped lifecycle result, a single requirement gate with explicit operator
 precedence, current-assessment closure and exact-identity auditing in the same
 evaluation transaction. Synthetic PostgreSQL, runtime-role, cover, concurrency
-and recovery acceptance is specified there. The implementation is present
-locally; its expanded validation was deferred by the user. Production
-enforcement is not claimed before deployment and acceptance.
+and recovery acceptance is specified there. The baseline is deployed; the
+fallback candidate adds migration 0357's constrained registry/choice update,
+shared evidence-selection support and matching data-quality checks. The
+read-only summary recognizes qualified cleanup cover and preserves raw drift.
+Current evidence, tests and the 102-Computer aggregate impact preview are in
+the [acceptance record](../../../docs/records/PLAN-014-acceptance-2026-10-27.md).
+No fallback production enforcement is claimed before approved deployment.
 
 PLAN-003 retains shared ledger/relationship redesign. Its proposed changes to
 independent missing-installation cover are not silently implemented here.
@@ -52,3 +69,5 @@ No production migration or recalculation is authorized by accepting this ADR.
 Amends ADR-0036's unconditional cleanup exclusion with the explicit-confirmed-use
 exception, preserves ADR-0032's operator action, and completes ADR-0035's
 single-authority direction for requirement episode resolution under PLAN-014.
+Extends ADR-0010/0011's evidence modes with the explicitly opted-in fallback;
+their existing four modes retain their behavior.

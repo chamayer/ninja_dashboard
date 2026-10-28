@@ -2,61 +2,62 @@
 
 ## Status, goal and scope
 
-Release 0.129.3 prepared; commit authorized, push pending explicit reviewed
-migration/deployment approval. The user requested finishing the
-build with light checks and deferring broader validation. PLAN-014 stays active
-until separately authorized production acceptance shows zero unexplained drift.
-Preserve unrelated worktree edits; no release bump or production writes.
+Active; release 0.129.4 is approved for a scoped commit and push, including
+migration 0357 and automatic origin deployment. Baseline `0af8aac` is deployed;
+both remotes matched it when checked. Preserve unrelated work. Keep PLAN-014
+open until deployed acceptance records zero unexplained drift.
 
-One lifecycle result supplies reason/evidence/currentness to lifecycle updates,
-offline/cleanup findings and requirement guards. Requirements and recovery use
-one coverage verdict calculation, retaining historical episodes and safety
-guards. Explicit confirmed use restores checks in cleanup without asserting
-liveness or bypassing OS policy, retirement, source or clearing safeguards.
+Goal: reconcile lifecycle, stored requirement verdicts, findings, recovery and
+honest audit explanations without deleting retained history or bypassing guards.
+PLAN-014 precedes PLAN-003's overlapping persistence redesign. PLAN-012 keeps
+inventory readers; identity policy stays with PLAN-004/015/021.
 
-## Authorities and coordination
+## Decisions and affected files
 
-- [Design](../docs/plans/PLAN-014-requirement-reconciliation.md).
-- [Current build and retained baseline](../docs/records/PLAN-014-build-2026-10-27.md).
-- [Earlier validation](../docs/records/PLAN-014-validation-2026-10-27.md) describes
-  earlier code and does not validate this expanded build.
-- ADR-0035/0036 and accepted ADR-0047 own verdicts and explicit confirmed use.
-  OS/cleanup exclusion retains covered history; there is no clearing bypass.
-- PLAN-014 precedes PLAN-003 in overlapping evaluator paths. PLAN-003 retains
-  ledger/relationship redesign; PLAN-012 keeps inventory readers while its
-  narrow resolution-reader follow-up is handled here. Identity work stays
-  with PLAN-004/015/021.
+- ADR-0047 retains explicit confirmed-use checking and one shared lifecycle
+  result. Registered fallback now permits recognized state for remote-access
+  and monitoring agents only when no source supplies qualified direct contact.
+  Existing hybrid/VM modes remain unchanged. Collection time is never contact.
+- Negative fallback has unknown duration: no inferred contact-aging cleanup or
+  new extended-offline root; preserve existing roots until positive recovery.
+  Requirement guards explicitly say `offline:reported_without_duration`.
+- Summary recognizes qualified current cleanup cover without changing raw drift.
+  Migration 0357 extends the existing registry constraint/choices and audits
+  only two type updates; it refuses unexpected policy and has reverse SQL.
+- Affected: evaluator, requirement-state diagnostics, EntityType choices,
+  migration 0357, focused ingest tests, ADR-0010/0011/0047, design, evidence and
+  registry. Docker directory copies include all runtime files. No dependency,
+  Compose, entrypoint, port or release-metadata change.
 
-## Confirmed build and affected files
+## Confirmed checkpoint and validation
 
-`ingest/evaluator.py`, `ingest/requirement_state.py`, focused ingest tests,
-Operations coverage labels/tests, new migration `0356_requirement_episode_identity`,
-ADR-0047/0036 amendment, design and registry.
+Read-only tenant-1 evidence: 109 distinct disagreements across 114 findings,
+matching recorded drift. No missing/stale-without-finding remains. The candidate
+summary explains 64 entries and leaves 45 lacking registered contact evidence.
+Those 45 affect 20 Computers: 12 ScreenConnect and eight R-U-ON. The read-only
+fallback preview qualifies all 45 (30 associated with online state, 15 with
+offline state of unknown duration). Across the fleet, 102 Computers gain state:
+62 online and 40 offline; qualified-contact Computers are unchanged. This is a
+preview, not proof of production reconciliation.
 
-The evaluator serializes per tenant before a repeatable-read snapshot, shares
-qualified lifecycle results and reconciles obsolete episodes with fresh
-assessments. Full/single-Computer runs share offline recovery. Documentation
-and stopped-VM cleanup do not become fabricated offline conditions; uncertainty
-cannot grant clearing. Confirmation alone does not restore silent retirement.
+Final ingest batch: 135 passed on synthetic PostgreSQL 16 with real assessment,
+verdict and cover functions, runtime roles, repeat runs, full/single scope,
+retirement/source guards, migration reversal/precondition and snapshot/lock
+rollback. Final PostgreSQL batch used JIT off for disposable test execution.
+Operations: 43 coverage/migration tests pass. Django checks, migration-state
+consistency and focused Ruff pass. Full-stack/browser, stress and production
+candidate acceptance remain unverified. See the evidence record for earlier
+fixture failures, exact limits and remaining governance checks.
 
-Migration 0356 corrects exact entity/platform/episode matching and SQL NULL
-handling without deleting history or changing the function signature/grants.
-The read-only summary preserves raw counts and distinguishes guarded retention
-from review. UI uses `N/A — Cleanup`; historical filter URLs remain accepted.
-Existing Dockerfile directory copies include the changes; no dependencies,
-ports or entrypoints changed. VERSION/CHANGELOG prepare release 0.129.3.
+## Next action
 
-## Validation and next action
+Current checkpoint: release files include VERSION/CHANGELOG; stage only PLAN-014
+hunks in the shared registry. Commit the scoped files and push origin, then the
+mirror. Origin push triggers deployment; no separate redeploy. Recommend a fresh
+session for post-deployment verification of both runtimes, migration 0357 and
+current evaluation/drift. Obtain separate approval for recalculation if needed.
+Require zero unexplained drift before closing; preserve uncertainty and history.
 
-Syntax parsing and `git diff --check` pass. Running scoped tests were stopped
-at the user's request. Integrated tests are prepared; no final PostgreSQL,
-Django, migration, rendering, concurrency or performance acceptance is claimed.
-Earlier passing batches do not establish acceptance of this expanded build.
-
-Next action: present the local build, then run the design's integrated matrix
-when requested, using disposable synthetic PostgreSQL data and real roles/cover
-triggers. Include rollback, full/single scope, snapshot serialization,
-confirmation on/off, uncertainty and recovery. Review migration 0356 and the
-unrelated oversized root blueprint before release. Separate commit and push
-approvals must cover pending migrations/automatic deployment; production
-recalculation has its own approval. No production change or completion claimed.
+Authorities: [design](../docs/plans/PLAN-014-requirement-reconciliation.md),
+[current acceptance](../docs/records/PLAN-014-acceptance-2026-10-27.md),
+[baseline build](../docs/records/PLAN-014-build-2026-10-27.md).

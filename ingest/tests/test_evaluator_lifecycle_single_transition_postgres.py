@@ -11,6 +11,7 @@ automatic retirement when nothing lists the machine, and restore.
 
 from __future__ import annotations
 
+import json
 import os
 import uuid
 from datetime import UTC, datetime, timedelta
@@ -113,9 +114,9 @@ def _add_computer(
         cur.execute(
             """
             INSERT INTO operations.device_agent_presence_current VALUES
-                (1, %s, %s, 'ScreenConnect', %s, %s, NULL, false)
+                (1, %s, %s, 'ScreenConnect', %s, %s, %s, false)
             """,
-            (device_id, entity_type, last_contact, NOW),
+            (device_id, entity_type, last_contact, NOW, json.loads(data).get("power_state")),
         )
     return device_id
 
@@ -184,8 +185,8 @@ def test_real_changes_write_exactly_one_transition(postgres_connection) -> None:
         _run(cur)
         assert _transitions(cur, back) == [("pending_cleanup", "active")]
         assert _transitions(cur, gone) == [("active", "pending_cleanup")]
-        # An evidence record without qualified contact evidence leaves review for active.
-        assert _transitions(cur, listed) == [("pending_cleanup", "active")]
+        # A listed record alone cannot establish recovery from cleanup.
+        assert _transitions(cur, listed) == []
         assert _transitions(cur, stale) == [("active", "pending_cleanup")]
         cur.execute(
             """
@@ -195,7 +196,7 @@ def test_real_changes_write_exactly_one_transition(postgres_connection) -> None:
             (back,),
         )
         after = cur.fetchone()[0]
-        assert after["evidence_kind"] == "reporting"
+        assert after["evidence_kind"] == "contact_policy"
         assert after["contact_evidence_kind"] == "direct_contact"
         assert after["evidence_platform"] == "ScreenConnect"
 

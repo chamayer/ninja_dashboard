@@ -143,8 +143,10 @@ source-instance override, then source default, then `unknown` plus a finding.
 Classification never grants authority by itself.
 
 `lifecycle_evidence_mode` is the single normalized lifecycle capability. Its
-allowed values are `none`, `direct_contact`, `reported_state`, and
-`direct_then_reported_state`; the non-null database default is deny-by-default
+original values are `none`, `direct_contact`, `reported_state`, and
+`direct_then_reported_state`. ADR-0047 adds the explicitly opted-in
+`direct_contact_state_fallback` with direct-contact priority and no inferred
+offline duration. The non-null database default remains deny-by-default
 `none`. A new or unknown type therefore cannot influence lifecycle until a
 deployment-controlled policy explicitly classifies it. Direct agent contact is
 higher-fidelity evidence of guest-OS liveness. Hypervisor-reported VM power
