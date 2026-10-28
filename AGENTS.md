@@ -65,6 +65,19 @@ Select checks based on the changed area:
 - `git diff --check` before proposing a commit.
 - For approved external or deployment validation, use the workspace helper at
   `..\Scripts\Invoke-DevTool.ps1`; read `docs/operations.md` for safe usage.
+- Remote Python execution must use either a reviewed `.py` file copied to the
+  target and invoked by path, or an existing packaged module/management
+  command invoked with `python -m`. Never inject Python source through a remote
+  command string or standard input. This prohibits `python -c`, `python -`,
+  shell pipes or redirection that supply source to Python, and encoded or
+  decoded forms such as `exec(bytes.fromhex(...))` and
+  `exec(base64.b64decode(...))`. These forms can trigger SentinelOne's Python
+  Decode And Execute detection. For SQL-only work, send SQL directly to `psql`.
+- The shared `Invoke-DevTool.ps1` SSH helper enforces the invocation shape by
+  rejecting recognized Python commands unless they name a `.py` file or use
+  `-m module`. This guard applies only when using that helper; it cannot prove
+  that a script file was reviewed or copied from a trusted source, and it does
+  not control direct SSH or other tools. Review the script before copying it.
 
 Report any check that cannot run locally.
 

@@ -140,3 +140,14 @@ secret values remain in its referenced untracked environment files. Never
 print or copy those values. Helper availability is not authorization: use
 read-only checks only when relevant to the task, and obtain explicit approval
 for POST, PUT, DELETE, redeploy, migration, or any other state-changing action.
+
+### Remote script execution
+
+Never inject Python source through a remote command string or standard input.
+This includes `python -c`, `python -`, shell pipes into Python, and encoded or
+decoded variants; SentinelOne may report these as Python Decode And Execute.
+The shared SSH helper allows Python only as a `.py` file invocation or a
+`python -m module` invocation. For repeatable work, add a reviewed module or
+management command to the image. For a one-off diagnostic, copy a reviewed
+`.py` file to the target and invoke it by path. For SQL-only diagnostics, pass
+SQL to `psql` directly. Keep scripts readable for review before execution.
