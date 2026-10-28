@@ -20,36 +20,11 @@ Read Inbox at the start of every session.
       days no Ninja daily presence was written at all (2026-10-24 among
       them), which suggests days without a successful Ninja collection.
       Investigate in the run history.
-- [ ] **Rename notification delivery settings on the host (PLAN-022):** the
-      host `.env` still carries `AGENT_COMPLIANCE_SMTP_PORT`, `_SMTP_STARTTLS`,
-      `_ZENDESK_URL` and `_ZENDESK_REQUESTER_NAME`, which code no longer
-      reads. Before switching notifications on: copy them to `NOTIFY_*`,
-      verify, then remove every `AGENT_COMPLIANCE_*` key. Keep them until the
-      PLAN-022 rollback window closes.
-- [ ] **Patch warning analysis (PLAN-022 view review, 2026-10-28):**
-      Metabase showed patch warnings by category and day, top devices by
-      warnings and a "with warnings" filter; Operations shows only raw
-      events. Data: `ninja_activities.activities` (`PATCH_MANAGEMENT_MESSAGE`,
-      `SOFTWARE_PATCH_MANAGEMENT_MESSAGE`), currently categorized by
-      `ninja_activities.patch_warning_events_recent`. Feature work; not approved.
-- [ ] **Reboot, activity-failure and MANUAL-age trends (PLAN-022 view review):**
-      `/patching/trends/` lacks system reboots per day, operational failures
-      per day (`PATCH_MANAGEMENT_FAILURE` events) and MANUAL patches by age.
-      Feature work; not approved.
-- [ ] **Ninja device health display (PLAN-022 view review):** threats,
-      vulnerability counts, alerts, health status and the pending-reboot
-      reason are collected (`ingest/core/device_health.py`) but no page or
-      condition shows them. Decide what operators need. Afterwards the 8
-      Metabase-era views (see the review record) can be dropped.
-- [ ] **Activity retention (from PLAN-022):** `ninja_activities.activities`
-      holds 774k rows (7.0 GB) and is live. Choose a retention period; it
-      affects the device timeline and the trends above.
-- [ ] **SQL migration track (from PLAN-022):** two migration tracks
-      (`sql/migrations` with `ninja_core.schema_migrations`, and Django).
-      Decide whether to consolidate. Design item.
-- [ ] **`archive/` retention (from PLAN-022):** the git-ignored `archive/`
-      folder holds the Metabase and PLAN-022 rollback archives. Decide how
-      long to keep them.
+- [ ] **PLAN-033 — Patching and device-health reporting gaps:** `deferred`
+      (docs/plans/PLAN-033-patching-and-device-health-reporting.md).
+- [ ] **PLAN-034 — Post-cleanup housekeeping:** `deferred`
+      (docs/plans/PLAN-034-post-cleanup-housekeeping.md): notification
+      `.env` keys and rollback-archive retention.
 - [ ] **F05 purge measurement (from PLAN-017):** measure observation and
       software history purge duration and lock waits before choosing
       batching or a job bound; R08 (PLAN-006 is superseded by PLAN-022).

@@ -1,5 +1,45 @@
 # Plan registry
 
+## PLAN-034 — Post-cleanup housekeeping: notification settings and rollback archives
+
+- Scope: Rename the host `.env` `AGENT_COMPLIANCE_*` notification delivery keys to `NOTIFY_*`, and decide retention for the PLAN-022 and Metabase rollback archives.
+- Status: deferred
+- Defined: 2026-10-28
+- Started: —
+- Completed: —
+- Blueprint: —
+- Source: docs/plans/PLAN-034-post-cleanup-housekeeping.md
+- Section: PLAN-034 — Post-cleanup housekeeping: notification settings and rollback archives
+- Resume gate: Each step needs user approval; the host `.env` change is a production write, and deleting an archive is destructive.
+- Last checked: 2026-10-28 (registered from the backlog; no work started).
+
+## PLAN-033 — Patching and device-health reporting gaps
+
+- Scope: Show patch warning analysis, reboot, operational-failure and MANUAL-age trends, and Ninja device health in Operations; then retire the 8 Metabase-era ingest views that back them.
+- Status: deferred
+- Defined: 2026-10-28
+- Started: —
+- Completed: —
+- Blueprint: —
+- Source: docs/plans/PLAN-033-patching-and-device-health-reporting.md
+- Section: PLAN-033 — Patching and device-health reporting gaps
+- Resume gate: The user decides what operators need (Step 1) and approves each build step. Feature work; not approved.
+- Last checked: 2026-10-28 (registered from the backlog; gaps found by the PLAN-022 view review).
+
+## PLAN-032 — Per-instance source display titles
+
+- Scope: Display the configured source-instance name on the Sources page while retaining the catalog name for shared source-mapping identity.
+- Status: active
+- Defined: 2026-10-28
+- Started: 2026-10-28
+- Completed: —
+- Blueprint: operations/BLUEPRINT.md
+- Source: operations/BLUEPRINT.md
+- Section: PLAN-032 — Per-instance source display titles
+- Related plans: PLAN-025 established the ScreenConnect source contract; PLAN-026 remains the separate source-creation UI plan. This label correction is independent of PLAN-030 bulk candidate acceptance.
+- Resume gate: Local implementation is authorized. AMROSE config `source_name` is updated to `AMROSE ScreenConnect` with a named change action. Commit and `origin` push require separate approval; the push automatically deploys through Portainer, with no migration pending.
+- Last checked: 2026-10-28. The Sources page view uses `source_instances.config.source_name`, and the client-mapping link retains the catalog name. Python compilation, registry validation, and scoped whitespace checks pass; tests were not run. The production GUI still runs the previous code until an approved push/deployment.
+
 ## PLAN-031 — Source record and reported states
 
 - Scope: Distinguish source-record presence from each record's reported online state in Operations.
@@ -13,6 +53,77 @@
 - Related plans: PLAN-012 owns broader source-record reads and performance; this change appends one safe metadata field and preserves its existing query contract.
 - Resume gate: Implement the approved view migration and page; production migration, commit, and deployment require separate authorization.
 
+
+## PLAN-030 — Bulk accept discovered client candidates
+
+- Scope: Let Operations users create new clients from a selected set of open source-client candidates in one reviewed, audited action.
+- Status: active
+- Defined: 2026-10-28
+- Started: 2026-10-28
+- Completed: —
+- Blueprint: operations/BLUEPRINT.md
+- Source: operations/BLUEPRINT.md
+- Section: PLAN-030 — Bulk accept discovered client candidates
+- Related plans: PLAN-004 retains identity matching policy; PLAN-029 surfaced the local first-ingest candidate backlog. This plan only batches the existing operator-approved accept-as-new action and does not change matching or mapping rules.
+- Resume gate: Implementation is authorized. Keep the action scoped to explicitly selected open candidates; preview before acceptance; use the existing client creation, source attachment, and audit behavior. No production deployment, commit, or push is authorized.
+- Last checked: 2026-10-28. Local refresh was approved; Operations now runs bulk acceptance from Inventory → Clients and Client mappings at port 3003. Migrations 0358/0359 applied to the isolated dev database; Operations, Postgres, ingest, and Jobs worker are healthy/running; login HTTP 200 and Django system check pass. No candidate acceptance or source collection ran; manual UI review is pending.
+
+## PLAN-029 — Jobs readiness and first ingest
+
+- Scope: Keep scheduler health current with scheduled work disabled and satisfy Ninja reference-data prerequisites before manual device ingestion.
+- Status: active
+- Defined: 2026-10-28
+- Started: 2026-10-28
+- Completed: —
+- Blueprint: BLUEPRINT.md
+- Source: docs/plans/PLAN-029-jobs-readiness-and-first-ingest.md
+- Section: PLAN-029 — Jobs readiness and first ingest
+- Related plans: PLAN-027 provides isolated local services; PLAN-028 keeps local configuration full parity except scheduled Jobs.
+- Resume gate: Implementation is authorized. Do not rerun source collections or notification jobs during validation.
+- Last checked: 2026-10-28. Diagnosis confirmed stale scheduler heartbeat with schedule gate off and missing Ninja location reference during device upsert.
+
+## PLAN-028 — Local production configuration parity
+
+- Scope: Use production-equivalent source and notification configuration locally while preserving local database credentials and disabling scheduled Jobs.
+- Status: completed
+- Defined: 2026-10-28
+- Started: 2026-10-28
+- Completed: 2026-10-28
+- Blueprint: —
+- Source: docs/plans/PLAN-028-local-prod-config-parity.md
+- Section: PLAN-028 — Local production configuration parity
+- Related plans: PLAN-027 provides the isolated local Compose stack. Preserve its local database, login, port, and volume isolation.
+- Resume gate: Configuration work is complete. Preserve local database/admin credentials and `SCHEDULED_JOBS_ENABLED=false`; use the documented merge before local manual source/jobs runs. Manual runs may access production endpoints and send configured notifications.
+- Last checked: 2026-10-28. Compose rendering and registry validation passed at completion. Local Operations, ingest, and Jobs worker were up; login and Django checks passed; scheduled Jobs were disabled. No source or notification jobs ran during this configuration work. The separate ScreenConnect activation and collection belong to PLAN-025.
+
+## PLAN-027 — Isolated local development stack
+
+- Scope: Provide a complete local Compose stack with isolated storage and credentials, manual source collection, and local migration validation before production deployment.
+- Status: completed
+- Defined: 2026-10-28
+- Started: 2026-10-28
+- Completed: 2026-10-28
+- Reopened: 2026-10-28 (dev `/orgs/all/` request failed because `operations_app` lacked `USAGE` on `ninja_core`)
+- Blueprint: BLUEPRINT.md
+- Source: docs/plans/PLAN-027-local-development-stack.md
+- Section: PLAN-027 — Isolated local development stack
+- Related plans: PLAN-026 owns a future source-configuration UI; local source bindings must use the existing supported configuration path and must not expand that UI plan.
+- Resume gate: Dev-only grant repair is authorized. Production reads/writes, collection, commits, pushes, and deployment are outside scope and retain separate approval requirements.
+- Last checked: 2026-10-28. Dev Compose startup completed; grant service exited 0, exact directory query passed under `operations_app`, and Operations logged authenticated `/orgs/all/` HTTP 200. Django system check and Compose rendering pass. Production files and migrations are unchanged.
+
+## PLAN-026 — Source configuration UI
+
+- Scope: Add an administrator UI to create supported source instances and collector bindings with safe defaults.
+- Status: active
+- Defined: 2026-10-28
+- Started: —
+- Completed: —
+- Blueprint: BLUEPRINT.md
+- Source: docs/plans/PLAN-026-source-configuration-ui.md
+- Section: PLAN-026 — Source configuration UI
+- Related plans: PLAN-025 supplies the shared ScreenConnect configuration contract; source UI work must preserve its connector and grouping behavior without reopening its discovery scope.
+- Resume gate: Begin implementation after explicit user approval. First reconcile PLAN-025's current registry/checkpoint and Git state, then confirm the supported source allowlist and existing schema/runtime requirements. Production source/binding writes, activation, first collection, commit, and deployment remain separately authorized.
+- Last checked: 2026-10-28. Planning only. Existing models cover source instances and collector bindings; `/sources/` supports refresh and schedule controls but no create flow. No application code or schema changed for this plan. PLAN-025 created and activated the AMROSE source, completed its first source refresh, and the user later set its schedule to every four hours through `/sources/`.
 
 ## PLAN-025 — Shared ScreenConnect and Operations inventory summary
 
@@ -137,6 +248,9 @@ do not open competing blueprints for the same work.
   tables (`devices` at 1.5 GB, policies, custom fields, `software_activity_queue`,
   `ingest_state`) and the `*_shadow` compatibility views. They are still read,
   so they retire as their readers move, not by cleanup.
+- Received from the backlog (2026-10-28, from PLAN-022): the two migration
+  tracks (`sql/migrations` with `ninja_core.schema_migrations`, and Django).
+  Decide whether to consolidate. Design item; not approved.
 
 ## PLAN-008 — Metabase retirement
 
@@ -228,6 +342,32 @@ do not open competing blueprints for the same work.
 - Resume gate: User approved the scoped 0.129.4 commit and push, including migration 0357 and automatic origin deployment. Push origin before the mirror; do not trigger a separate redeploy. Start post-deployment acceptance in a fresh session. Production recalculation retains its own approval. Complete only after current zero-unexplained-drift evidence, preserving guarded history.
 - Last checked: 2026-10-27 (read-only diagnosis and local candidate validation). Current and recorded drift agree on 109 entries; candidate summary explains 64 and leaves 45 contactless entries on 20 Computers. User approved preparing reported-state fallback. Its read-only preview qualifies all 45 and affects 102 Computers fleet-wide (62 online, 40 offline with unknown duration). Final ingest batch: 135 passed; Operations coverage/migration tests: 43 passed. Django/migration-state checks and focused Ruff pass. Candidate and migration 0357 are locally validated; production acceptance remains pending. Evidence: docs/records/PLAN-014-acceptance-2026-10-27.md.
 
+## PLAN-015 — One-time source-record identity reconciliation
+
+- Scope: Read-only fleet preview of which existing source records the current resolver would attach to a different Computer, then separately reviewed and approved repairs.
+- Status: active
+- Defined: 2026-10-21
+- Started: 2026-10-21
+- Completed: —
+- Blueprint: —
+- Source: operations/docs/plans/PLAN-015-identity-reconciliation.md
+- Section: PLAN-015 — One-time source-record identity reconciliation
+- Resume gate: The preview is read-only; any reattachment, merge or derived-data refresh needs its own approval. Coordinates shared identity code with PLAN-004.
+- Last checked: 2026-10-28 (registered from its plan doc, which was untracked; the status is the doc's as of 2026-10-21 and was not re-verified. The doc's next action: review the 110 guard-aware candidates).
+
+## PLAN-016 — Admin read-only SQL explorer
+
+- Scope: Admin-only Operations page for bounded read-only SQL (READ ONLY transaction, tenant 1 forced, short timeout, result limit), with the identity reattachment-candidate query saved.
+- Status: active
+- Defined: 2026-10-21
+- Started: 2026-10-21
+- Completed: —
+- Blueprint: —
+- Source: operations/docs/plans/PLAN-016-admin-sql-explorer.md
+- Section: PLAN-016 — Admin read-only SQL explorer
+- Resume gate: Implementation and deployment need user approval.
+- Last checked: 2026-10-28 (registered from its plan doc, which was untracked; the status is the doc's as of 2026-10-21 and was not re-verified. No implementation found in the repository).
+
 ## PLAN-017 — Consolidated data architecture review and target design
 
 - Scope: Adopted consolidated architecture, lifecycle, retention, recovery, efficiency, index/view, and A1–A10 review from acquisition through operator results and expiry; assessment and proposed design only, no remediation
@@ -268,6 +408,10 @@ do not open competing blueprints for the same work.
 - Section: PLAN-019 — Data pipeline correctness and source-record retention (PLAN-017 follow-up)
 - Resume gate: Executing this plan or any step requires separate explicit user approval. Coordinates with PLAN-002/005/007, which keep their own statuses and gates; F04 stays with PLAN-012.
 - Last checked: 2026-10-26 (Step 1 and Step 2 (U04, migration 0349) deployed in 0.129.0; F09 decided: no daily presence; next is Step 3 with its own approval).
+- Received from the backlog (2026-10-28, from PLAN-022): retention for
+  `ninja_activities.activities` (774k rows, 7.0 GB, live). Choose a period;
+  it affects the device timeline and any activity trends. Outside the
+  approved steps; needs its own approval.
 
 ## PLAN-020 — Operations entity links in tables
 
