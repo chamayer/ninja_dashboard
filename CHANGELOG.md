@@ -2,6 +2,18 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.130.1] — 2026-10-28 — Per-record source status and contact
+
+### Fixed
+
+- Computer and merge-review source-record rows show each record's reported
+  online/offline state and last contact instead of borrowing platform-level
+  values from another session. Missing or invalid contact stays blank;
+  collection time remains separate as Last updated.
+- Migration `0361` adds a guarded contact timestamp to the restricted metadata
+  view, preserving tenant and layout restrictions and runtime read-only access.
+  No stored observations, attachments, matching rules, or findings are changed.
+
 ## [0.130.0] — 2026-10-28 — Legacy cleanup Wave B
 
 ### Removed
