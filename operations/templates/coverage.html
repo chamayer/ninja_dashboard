@@ -122,6 +122,19 @@
     <p>These counts are not changed by the filters below. {% if requirements_evaluated_at %}Requirements were last evaluated {{ requirements_evaluated_at|timesince }} ago ({{ requirements_evaluated_at|date:"M j, H:i" }}).{% else %}Requirement results are not available yet; they appear after the next evaluator run.{% endif %}</p>
 </div>
 <div class="coverage-cards">
+    <section class="coverage-card" aria-label="Operations Computer statuses">
+        <h2>Operations</h2>
+        <div class="coverage-record-total">Across all sources</div>
+        <div class="coverage-computer-label"><a href="{{ operations_card.total_url }}">Computers ({{ operations_card.computer_total }})</a></div>
+        <div class="coverage-counts">
+            {% for count in operations_card.counts %}
+            <a class="coverage-count coverage-{{ count.name|slugify }}{% if not count.count %} is-zero{% endif %}" href="{{ count.url }}">
+                <span>{{ count.name }}</span><strong>{{ count.count }}</strong>
+            </a>
+            {% endfor %}
+        </div>
+        <p class="muted" style="margin:0.45rem 0 0; font-size:0.75rem;">Each Computer counts once. Online in any source; otherwise offline with contact in the last {{ active_device_days }} days, or stale.</p>
+    </section>
     {% for card in platform_cards %}
     <section class="coverage-card">
         <h2>{{ card.platform }}</h2>

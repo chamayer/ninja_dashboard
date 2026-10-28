@@ -53,6 +53,8 @@ class SourceConfig:
     # Legacy platform_sources.source_id, carried through migration 0022 so
     # fetcher rows stay compatible with the legacy AC matrix until Track 6.
     source_id: int = 0
+    # Shared ScreenConnect instances explicitly select their customer property.
+    screenconnect_group_field: str | None = None
 
 
 def _secret(ref: str | None) -> str | None:
@@ -163,6 +165,7 @@ def load_sources() -> list[SourceConfig]:
                 client_id=client_id,
                 client_name=client_name,
                 source_id=int(cfg.get("legacy_source_id") or 0),
+                screenconnect_group_field=cfg.get("screenconnect_group_field"),
             )
         )
     return configs

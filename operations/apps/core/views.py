@@ -15533,6 +15533,15 @@ def _coverage_filter_url(**filters: str) -> str:
     return "?" + urlencode({key: value for key, value in filters.items() if value}) + "#filtered-results"
 
 
+def _computer_reporting_scope(row: dict, active_since: datetime) -> str:
+    """Use the same mutually exclusive status for fleet counts and drill-throughs."""
+    if row["is_online_any"]:
+        return "online_anywhere"
+    if row["last_contact_at"] is not None and row["last_contact_at"] >= active_since:
+        return "offline_recent"
+    return "not_reporting"
+
+
 @login_required
 def fleet_coverage(request: HttpRequest) -> HttpResponse:
     """Show every known Computer with its product records and required state."""
@@ -16331,19 +16340,10 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
                 "any_offline": any(
                     cell["record_status"] == "Offline" for cell in named_products.values()
                 ),
-                "online_anywhere": row["is_online_any"],
-                "offline_recent": (
-                    not row["is_online_any"]
-                    and row["last_contact_at"] is not None
-                    and row["last_contact_at"] >= active_since
-                ),
-                "not_reporting": (
-                    not row["is_online_any"]
-                    and (
-                        row["last_contact_at"] is None
-                        or row["last_contact_at"] < active_since
-                    )
-                ),
+                **{
+                    scope: _computer_reporting_scope(row, active_since) == scope
+                    for scope in ("online_anywhere", "offline_recent", "not_reporting")
+                },
                 "no_product_records": not has_named_record,
                 "no_current_records": (not has_current_record and row["hudu_current_count"] == 0),
                 "missing_required": any(
@@ -16408,6 +16408,26 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
         return all(agent_condition_matches(row, condition) for condition in all_agent_conditions)
 
     device_rows = [row for row in inventory_rows if matches(row)]
+    operations_statuses = (
+        ("Online", "online_anywhere"),
+        ("Offline", "offline_recent"),
+        ("Stale", "not_reporting"),
+    )
+    operations_counts = dict.fromkeys((scope for _, scope in operations_statuses), 0)
+    for inventory_row in inventory_rows:
+        operations_counts[_computer_reporting_scope(inventory_row, active_since)] += 1
+    operations_card = {
+        "computer_total": len(inventory_rows),
+        "total_url": _coverage_filter_url(),
+        "counts": [
+            {
+                "name": label,
+                "count": operations_counts[scope],
+                "url": _coverage_filter_url(computer_scope=scope),
+            }
+            for label, scope in operations_statuses
+        ],
+    }
     record_status_order = (
         "Online",
         "Offline",
@@ -16865,6 +16885,8 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
             "paginator": paginator,
             "page_query": page_query,
             "platform_cards": platform_cards,
+            "operations_card": operations_card,
+            "active_device_days": active_device_days,
             "hudu_card": hudu_card,
             "computer_scope_labels": _COMPUTER_SCOPE_LABELS,
             "filtered_summary": filtered_summary,

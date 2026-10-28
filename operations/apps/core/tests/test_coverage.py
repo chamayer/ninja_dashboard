@@ -308,6 +308,50 @@ def _render_coverage_context(monkeypatch, query: str, cursor: _Cursor | None = N
     return captured["context"]
 
 
+def test_operations_card_counts_each_computer_once_and_links_to_matching_results(monkeypatch):
+    from datetime import timedelta
+    from urllib.parse import urlsplit
+
+    monkeypatch.setattr(views.timezone, "now", lambda: EVALUATED_AT)
+
+    def cursor():
+        result = _Cursor()
+        # Multiple source rows and verdicts already exist for device-1. Add
+        # offline, stale and no-contact Computers without requirement verdicts.
+        base = result._results[2][1]
+        recent = EVALUATED_AT - timedelta(days=7)
+        old = recent - timedelta(seconds=1)
+        result._results[2][1] = (*base[:10], False, recent)
+        result._results[2].extend([
+            ("device-3", *base[1:4], "host-3", *base[5:10], False, old),
+            ("device-4", *base[1:4], "host-4", *base[5:10], None, None),
+        ])
+        return result
+
+    context = _render_coverage_context(monkeypatch, "client=acme", cursor())
+    card = context["operations_card"]
+    assert card["computer_total"] == 4
+    assert [(row["name"], row["count"]) for row in card["counts"]] == [
+        ("Online", 1), ("Offline", 1), ("Stale", 2),
+    ]
+    assert sum(row["count"] for row in card["counts"]) == card["computer_total"]
+    assert len(context["device_rows"]) == 1  # Card remains fleet-wide.
+    for row in card["counts"]:
+        target = _render_coverage_context(monkeypatch, urlsplit(row["url"]).query, cursor())
+        assert len(target["device_rows"]) == row["count"]
+    all_rows = _render_coverage_context(monkeypatch, "", cursor())
+    assert len(all_rows["device_rows"]) == card["computer_total"]
+    from django.template.loader import render_to_string
+
+    # Request fixtures use descriptive IDs rather than URL-valid UUIDs; render
+    # the summary without synthetic detail links.
+    html = render_to_string("coverage.html", {**context, "device_rows": []})
+    assert '<h2>Operations</h2>' in html
+    assert 'Computers (4)' in html
+    assert 'last 7 days' in html
+    assert html.index('<h2>Operations</h2>') < html.index('<h2>Ninja</h2>')
+
+
 def test_requirements_not_applied_show_n_a_with_the_reason(monkeypatch):
     # ADR-0036: os_unknown -> "N/A — OS unknown", pending_cleanup -> "N/A — Cleanup",
     # outside_coverage -> "No agents"; none of them counts as required.

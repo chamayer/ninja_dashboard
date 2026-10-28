@@ -1,3 +1,63 @@
+## PLAN-025 — Shared ScreenConnect and Operations inventory summary
+
+**Status/goal:** Active. Bring restored shared ScreenConnect group evidence into
+the existing source pipeline and add a deduplicated Operations inventory card.
+**Scope/files:** `ingest/sources.py`, `ingest/connectors/screenconnect.py`, focused collector tests,
+`apps/core/views.py`, `templates/coverage.html`, focused coverage tests, and
+root/module checkpoints and registry. Preserve the pre-existing dirty worktree.
+**Decisions:** Reuse current Computer membership/reporting filters (PLAN-012).
+Operations counts Online/Offline/Stale once per Computer, independent of filters,
+with the same classifier for its drill-throughs. Preserve scoped ScreenConnect
+`source-instance/self` identities. Shared mode explicitly selects a customer
+custom property, rejects client-scoped configuration, and retains ungrouped
+evidence; existing resolvers own mappings. Operational contract:
+[`screenconnect-source.md`](../docs/reference/screenconnect-source.md).
+**Validation:** 39 collector/observation tests and 40 coverage/Computer-read tests
+pass; Django system/template checks, Python compilation, collector/config lint,
+Operations fatal lint, registry validation and whitespace pass. New collector/test
+files pass formatting; existing config/view/test files retain prior formatting.
+Dockerfiles already copy every changed runtime file. Live shared collection and
+browser behavior are unverified. Root blueprint already exceeds its 4,000-byte
+governance limit; unrelated checkpoint reconciliation is outside this scope.
+**Checkpoint:** Local implementation complete; no migrations, commits, deployment,
+or production writes. The shared connector explicitly selects a customer
+`CustomProperty1`–`CustomProperty8`, preserves unassigned sessions, and keeps
+scoped ScreenConnect identity unchanged. The Operations Computer summary card is
+already present in the local worktree; preserve it and the unrelated dirty work.
+On 2026-10-28, the user-provided `https://support.amrose.it/` returned HTTP 200
+and its published labels identify Company=CustomProperty1, Site=2,
+Department=3, Device Type=4. The user added the AMROSE GUID/key to the private
+ingest runtime. A read-only request then succeeded with 4,511 Access sessions,
+of which 4,506 were active host sessions. CustomProperty1 was populated on
+4,422 active sessions and had 125 distinct values; 83 values matched Ninja
+organization names case-insensitively, and 85 matched after punctuation-
+insensitive normalization (78 Ninja organizations). CustomProperty2 had 90
+distinct values with 7 case-insensitive matches; CustomProperty3/4/5/8 had
+substantially less or no overlap. The response exposed no explicit
+`Group`/`SessionGroup`-named field. A direct read-only `GetSessionGroups` call
+to the RESTful API Manager endpoint returned HTTP 500 without group
+definitions. Company/CustomProperty1 is supported as customer metadata, but
+this does not establish ScreenConnect's separate Host-page container/group
+membership; 40 distinct Company values still have no normalized Ninja-name
+match. Of 4,506 active hosts, 84 have no Company value. These sessions must
+remain source evidence without an empty-name org/container or client mapping.
+The existing identity resolver may still associate a session to a client when
+it matches a known Computer; otherwise it remains unassigned.
+Read-only inspection through the private ingest-host profile found one enabled
+ScreenConnect source, assigned to a client, with a different base URL. Do not
+use its credential pair against the shared URL. The local connector tests pass
+(8); Operations test startup is unavailable on this workstation because the
+`shared` Python package imported by `operations/apps/core/admin.py` is absent.
+Prior focused Operations checks are recorded above. No shared source
+configuration or collection has been performed. The proposed disabled-instance
+shape and secret-reference guidance are in
+[`screenconnect-source.md`](../docs/reference/screenconnect-source.md).
+**Next action:** Identify a supported read path for ScreenConnect Host-page
+group definitions and membership; the current RESTful extension did not return
+them through `GetSessionGroups`. Review unmatched Company values and group
+semantics before requesting authorization for a separate, initially disabled
+shared source/binding. Collection remains separately gated.
+
 ## PLAN-024 — Preserve Ninja software display names
 
 **Status:** Complete locally (2026-10-27; user authorized and expanded scope

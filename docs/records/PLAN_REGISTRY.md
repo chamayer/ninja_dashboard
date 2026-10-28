@@ -1,5 +1,19 @@
 # Plan registry
 
+## PLAN-025 — Shared ScreenConnect and Operations inventory summary
+
+- Scope: Identify the restored ScreenConnect customer-group contract, support shared-instance group evidence, and show deduplicated Operations Computer statuses with matching drill-throughs.
+- Status: completed
+- Defined: 2026-10-27
+- Started: 2026-10-27
+- Completed: 2026-10-28
+- Blueprint: operations/BLUEPRINT.md
+- Source: operations/BLUEPRINT.md
+- Section: PLAN-025 — Shared ScreenConnect and Operations inventory summary
+- Related plans: PLAN-012 owns broader inventory semantics; this bounded addition reuses its current Computer population and status filters without resuming its gated redesign. PLAN-004/007/019 retain identity, writer, and pipeline policy; preserve their contracts and existing dirty edits.
+- Resume gate: Implement and validate locally after read-only discovery. Source configuration writes, migrations, commits, pushes, and deployment retain separate approval.
+- Last checked: 2026-10-28. Shared custom-property support and Operations card remain local; 8 focused ScreenConnect tests pass. A read-only request returned 4,511 Access sessions (4,506 active hosts). CustomProperty1 had 125 distinct values; 83 matched Ninja organization names case-insensitively and 85 after punctuation-insensitive normalization (78 Ninja organizations). CustomProperty2 had 7 case-insensitive matches across 90 values; other populated properties had little/no overlap. User notes Company appears to drive ScreenConnect's customer containers. Session payloads expose no explicit group-named field, and a direct read-only `GetSessionGroups` call to the RESTful API Manager endpoint returned HTTP 500 without definitions. Of 4,506 active hosts, 84 lack Company; preserve those sessions as source evidence without an empty-name org/container or group-based client mapping. Existing identity resolution may still associate an observation to a client when it matches a known Computer. Company/CustomProperty1 remains the best-supported customer grouping field; the container definitions themselves are not yet retrieved. No shared source record exists. Operations tests cannot start locally because the `shared` Python package imported by `operations/apps/core/admin.py` is absent. No production source configuration, collection, or migration was performed. Find a supported group-definition read path and review unmatched Company values before requesting shared source configuration or collection.
+
 This is the repository authority for the status of substantial work. Archive
 files preserve their detailed reasoning and evidence; they are current only
 when an entry below names them. `BLUEPRINT.md` is required only while an
