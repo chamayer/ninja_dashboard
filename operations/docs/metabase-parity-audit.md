@@ -5,6 +5,12 @@ deployed, and all 20 formerly active Metabase dashboards are archived after a
 verified local recovery archive was created. This remains the evidence
 inventory for that completed cutover.
 
+**Correction, 2026-10-28 (PLAN-022 Wave B):** a code check found that the
+patch warning, reboot-trend, operational-failure-trend and MANUAL-age cards
+were marked Displayed or Consolidated but are not shown on the named pages.
+Those cards are split out below as **Missing**; see
+`docs/records/PLAN-022-legacy-cleanup/metabase-view-capability-review.md`.
+
 ## Scope and method
 
 This audit covers every card on the live Patching, Agent Compliance, and
@@ -32,17 +38,20 @@ This follows root [ADR-0005](../../docs/decisions/0005-operations-first-metabase
 | Live dashboard | Card(s) and operator intent | Operations surface | Outcome |
 |---|---|---|---|
 | Ninja — Command Center | Fleet Approved Windows Devices; Fleet Active Windows Devices; Fleet Included Devices; Stalled Devices; Never-Patched Devices; Included Devices Actively Patching; Devices Awaiting Reboot; Recent Patch Activity (Fleet) — current fleet patch posture | [`/patching/`](/patching/) | Displayed |
-| Ninja — Command Center | Approved Patches; Patches Awaiting Manual Approval; Delayed Patches; Patch Failures; OS Patch Warnings (24h); OS Patch Failures (24h); Failed Patch Devices; Manual or Delayed Patch Devices — work that needs attention | [`/patching/`](/patching/) and [`/findings/?category=patching`](/findings/?category=patching) | Consolidated |
+| Ninja — Command Center | Approved Patches; Patches Awaiting Manual Approval; Delayed Patches; Patch Failures; OS Patch Failures (24h); Failed Patch Devices; Manual or Delayed Patch Devices — work that needs attention | [`/patching/`](/patching/) and [`/findings/?category=patching`](/findings/?category=patching) | Consolidated |
 | Ninja — Command Center | Data Freshness; Ingest Pipeline Status — whether the underlying Ninja evidence is current | [`/sources/`](/sources/) | Displayed |
 | Ninja — Command Center | Clients Needing Attention — which clients require patch follow-up | [`/patching/`](/patching/) client posture table | Displayed |
 | Ninja — Client Patch Review | Approved Windows Devices; Active Windows Devices; Included Devices; Devices Scanned Successfully (30d); Devices Installed Recently (30d); Devices Needing Action; Patch Failures; Approved Patches; Patches Awaiting Manual Approval; Delayed Patches; Stalled Devices; Never-Patched Devices; Patching Devices; Current Patch State; Devices Needing Reboot — one client's current patch posture | [`/patching/?client=<client-slug>`](/patching/) | Displayed |
-| Ninja — Client Patch Review | Client Patch Status; Failed Patch Devices; Manual or Delayed Patch Devices; Warnings (30d); Failures (30d); Top Problem Devices — client triage summary | [`/patching/?client=<client-slug>`](/patching/) plus [`/findings/?category=patching&client=<client-slug>`](/findings/?category=patching) | Consolidated |
+| Ninja — Client Patch Review | Client Patch Status; Failed Patch Devices; Manual or Delayed Patch Devices; Failures (30d); Top Problem Devices — client triage summary | [`/patching/?client=<client-slug>`](/patching/) plus [`/findings/?category=patching&client=<client-slug>`](/findings/?category=patching) | Consolidated |
 | Ninja — Client Patch Review | Fully patched % (patching devices) by Device Type; Fully patched % (patching devices) by Operating System — percentage breakdowns for a client | [`/patching/?client=<client-slug>`](/patching/) client-only fully-patched breakdowns with device drill-through | Displayed |
-| Ninja — Device Detail | Device Summary; Current Patch State; Install Results Over Time; Recent Patch & Reboot Activity; Patch State History; Install History; Recent OS Patch Warnings (30d); Recent OS Patch Failures (30d) — one device's patch evidence and history | [`/orgs/<client>/devices/<device>/` patching tab](/devices/) | Displayed |
-| Ninja — Device Work Queue | Devices Needing Action; Never Patched; Stalled; Offline; Failed Installs; Reboot Pending; With Warnings; With Failures; Device Work Queue; Devices Needing Action by Client; Devices Needing Action by Problem; Scan Gaps; Devices Blocked by Reboot; Devices Blocked by Approval; Stalled or Never Patched — triage queue and reason | [`/patching/`](/patching/) | Displayed |
-| Ninja — Device Work Queue | Warnings by Category (30d); Top Devices by Warnings (30d); Top Devices by Failures (30d); Failures by Error Code (30d); Devices Matching Warning Category (30d); Devices Matching Failure Error Type (30d) — filterable problem analysis | [`/patching/`](/patching/) and [`/patching/activity/`](/patching/activity/) | Consolidated |
+| Ninja — Device Detail | Device Summary; Current Patch State; Install Results Over Time; Recent Patch & Reboot Activity; Patch State History; Install History; Recent OS Patch Failures (30d) — one device's patch evidence and history | [`/orgs/<client>/devices/<device>/` patching tab](/devices/) | Displayed |
+| Ninja — Device Work Queue | Devices Needing Action; Never Patched; Stalled; Offline; Failed Installs; Reboot Pending; With Failures; Device Work Queue; Devices Needing Action by Client; Devices Needing Action by Problem; Scan Gaps; Devices Blocked by Reboot; Devices Blocked by Approval; Stalled or Never Patched — triage queue and reason | [`/patching/`](/patching/) | Displayed |
+| Ninja — Device Work Queue | Top Devices by Failures (30d); Failures by Error Code (30d); Devices Matching Failure Error Type (30d) — filterable problem analysis | [`/patching/`](/patching/) and [`/patching/activity/`](/patching/activity/) | Consolidated |
 | Ninja — Patch Evidence | Patch State; Patch Severity; Devices with Matching Patches; KBs with Matching Patches; Patch Install Results Over Time; All Devices with Matching Patches; All Matching KBs; Matching Patch Rows; Patch Evidence Table (top 500); Patch Types — filtered device/KB evidence | [`/patching/evidence/`](/patching/evidence/) | Displayed |
-| Ninja — Patch Trends | Patch Installs per Day; Failed Install Attempts per Day; System Reboots per Day; Patching Devices per Day; Currently-MANUAL Patches by Age; OS Patch Warnings per Day; OS Patch Operational Failures per Day — trend and age analysis | [`/patching/trends/`](/patching/trends/) | Displayed |
+| Ninja — Patch Trends | Patch Installs per Day; Failed Install Attempts per Day; Patching Devices per Day — install trend | [`/patching/trends/`](/patching/trends/) | Displayed |
+| Ninja — Patch Trends | System Reboots per Day; OS Patch Warnings per Day; OS Patch Operational Failures per Day; Currently-MANUAL Patches by Age — activity trends and approval age (corrected 2026-10-28) | none; `/patching/trends/` shows install outcomes only | Missing |
+| Ninja — Command Center, Client Patch Review, Device Work Queue | OS Patch Warnings (24h); Warnings (30d); With Warnings; Warnings by Category (30d); Top Devices by Warnings (30d); Devices Matching Warning Category (30d) — patch warning analysis (corrected 2026-10-28) | none; `/patching/` has no warning tile or filter, and Activity search is free text only | Missing |
+| Ninja — Device Detail | Recent OS Patch Warnings (30d) — one device's warnings (corrected 2026-10-28) | Device timeline lists the device's latest 100 Ninja events, warnings included, without a warning filter | Consolidated |
 | Ninja — Activity Search | Activity Search — find individual patch/install activity | [`/patching/activity/`](/patching/activity/) | Displayed |
 
 ### Patching conclusion

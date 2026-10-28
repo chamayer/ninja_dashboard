@@ -93,6 +93,7 @@ do not open competing blueprints for the same work.
 - Section: Jobs observability and maintenance cadence (2026-10-19); Schedule retirement authority (2026-10-19)
 - Resume gate: Verify the remaining health/schedule follow-ups against current Jobs behavior before treating them as open work.
 - Last checked: 2026-10-20 (live). All 24 enabled schedules have no overdue next run; durable Jobs had 4,117 completed, 109 failed, and 38 stalled runs in seven days, so the plan remains unresolved.
+- Received from PLAN-022 (2026-10-28): the two run logs, `ninja_core.run_log` and `operations.run_log`. Both are still written, so this is a design question (one run authority), not a cleanup.
 
 ## PLAN-006 — Legacy agent-compliance retirement
 
@@ -117,6 +118,10 @@ do not open competing blueprints for the same work.
 - Source: docs/archive/workspace-cleanup-2026-10-20/backlog.md
 - Section: Ingest domain separation
 - Resume gate: Approve extraction of shared scheduler/bootstrap ownership.
+- Received from PLAN-022 (2026-10-28): the remaining `ninja_core` staging
+  tables (`devices` at 1.5 GB, policies, custom fields, `software_activity_queue`,
+  `ingest_state`) and the `*_shadow` compatibility views. They are still read,
+  so they retire as their readers move, not by cleanup.
 
 ## PLAN-008 — Metabase retirement
 
@@ -287,7 +292,7 @@ do not open competing blueprints for the same work.
 - Source: docs/plans/PLAN-022-legacy-data-cleanup.md
 - Section: PLAN-022 — Legacy data and code cleanup
 - Resume gate: User approved immediate execution (2026-10-26). Three separately approved pushes: migration 0349; the code; then the drop migrations 0350, 0351, 117 and 118 after the archive is copied off-host and verified.
-- Last checked: 2026-10-26 (Wave A deployed: 0.129.0 and 0.129.1; database 62.4 GB → 28 GB; one five-minute Operations outage from the first 0351, fixed by 0.129.1; Wave B items need their own design and approval).
+- Last checked: 2026-10-28 (Wave B built: `0358` drops `parity_report` and `legacy_job_key`, `0359` drops `metabase_ro`; the review of the 8 Metabase-era views keeps all of them and records the gaps; live items handed to PLAN-005, PLAN-007 and the backlog. Completes after B1/B2 are deployed and verified).
 
 ## PLAN-023 — Software installations layout repair
 

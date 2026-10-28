@@ -105,17 +105,36 @@ Residual risk, accepted by the user: the restore rehearsal was waived, so
 the archive's table of contents and hashes show it is complete and intact,
 not that it restores.
 
-## Wave B — needs design before execution
+## Wave B — 2026-10-28
 
-Each item gets its own approval:
+Measured read-only (L17–L21; the 2026-10-28 run sends SQL straight to
+`psql` inside the same read-only, rolled-back wrapper, because the shared
+helper now refuses Python sent as command text). The user approved B1–B3 on
+2026-10-28 and closed the Metabase rollback window.
 
-- `ninja_core.devices` compatibility row (1.5 GB, still read heavily) and the
-  remaining `*_shadow` compatibility views, which still have readers.
-- Two run logs (`ninja_core.run_log` and `operations.run_log`).
-- `legacy_job_key` "previous schedule" history on the Sources page.
-- `ninja_activities.activities` retention (6.6 GB, live).
-- The SQL migration track and `ninja_core.schema_migrations`.
-- Root `TODO.md` historical sections, `archive/`, `inventory-scripts/`.
+| Step | Change | Evidence | Status |
+| --- | --- | --- | --- |
+| B1 | Drop `operations.parity_report` (the agent-compliance cutover gate; no writes since 2026-10-07, 0.5 MB) and remove `legacy_job_key`, the "Previous schedule" fallback on the Sources and Jobs pages (all 10 reference feeds have completed under source-refresh; last legacy run 2026-10-08). The old runs stay in `operator_job_runs`. Migration `0358` | L17, L18 | built |
+| B2 | Drop the `metabase_ro` role: NOLOGIN, no members, owns nothing, and only this database depends on it (269 relation grants, 6 default privileges, 5 schema grants). Migration `0359` runs `DROP OWNED` then `DROP ROLE`; a test rejects the role in any later migration. ADR 0005 amended | L20 | built |
+| B3 | Review the 8 Metabase-era ingest views for purpose and replacement. Result: keep all eight. Patch warnings, reboot and activity-failure trends, MANUAL age and Ninja device health are not shown in Operations, so these are backlog gaps. The parity audit is corrected | [review](../records/PLAN-022-legacy-cleanup/metabase-view-capability-review.md), L21 | done |
+| B4 | Hand off items that are live data or redesigns, not cleanup (below) | | done |
+
+`parity_report` is not exported (user, 2026-10-28): it held only legacy-versus-Operations
+comparison counts for a cutover that is complete.
+
+### Handed off (2026-10-28)
+
+- `ninja_core` staging tables (`devices` and the rest) and the `*_shadow`
+  compatibility views, which are still read → PLAN-007.
+- `ninja_core.run_log` and `operations.run_log` → PLAN-005.
+- `ninja_activities.activities` retention (7.0 GB, 774k rows, live) → root
+  backlog.
+- The SQL migration track and `ninja_core.schema_migrations` → root backlog.
+- Root `TODO.md` historical sections → root backlog (its header already
+  defers them). `inventory-scripts/` stays: it is local, git-ignored and
+  referenced by ADR 0015. `archive/` retention → root backlog.
+
+PLAN-022 completes once B1 and B2 are deployed and verified.
 
 ## Outcome (2026-10-26)
 

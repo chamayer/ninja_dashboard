@@ -1,0 +1,21 @@
+captured_utc=2026-10-28T17:19:03.474769+00:00
+queries_sha256 L20/L21 from queries.sql
+
+executing_role,server_version_num,transaction_read_only,tenant_context,executing_search_path,rolsuper,rolbypassrls
+operations_migrate,160014,on,1,pg_catalog,t,t
+kind,name,detail,n
+database,ninja,,
+database,postgres,,
+role,metabase_ro,inherit,
+shdepend,ninja,a:pg_class,269
+shdepend,ninja,a:pg_default_acl,6
+shdepend,ninja,a:pg_namespace,5
+name,kind,bytes,est_rows
+ninja_activities.device_activity_signal,m,1851392,4722
+ninja_activities.patch_warning_events_recent,m,25591808,39588
+ninja_activities.system_reboot_events_recent,m,8691712,96662
+ninja_core.device_troubleshooting_signal,m,90112,-1
+ninja_core.latest_device_health,m,6029312,5629
+ninja_core.v_device_custom_fields,v,0,-1
+ninja_core.v_location_custom_fields,v,0,-1
+ninja_core.v_organization_custom_fields,v,0,-1

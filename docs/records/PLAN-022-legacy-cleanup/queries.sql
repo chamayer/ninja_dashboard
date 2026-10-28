@@ -197,3 +197,69 @@ SELECT d.classid::regclass::text AS dependent_class,
    AND pg_catalog.pg_describe_object(d.classid, d.objid, d.objsubid)
        !~ '(ninja_agent_compliance|ninja_inventory)\.'
  LIMIT 50;
+-- L17: parity_report and the metabase_ro role: size, last write, grants, live sessions.
+SELECT 'parity_report' AS item, pg_catalog.pg_total_relation_size('operations.parity_report') AS bytes,
+       (SELECT max(run_at)::text FROM operations.parity_report) AS last_write
+UNION ALL
+SELECT 'metabase_ro grants', count(*), NULL FROM information_schema.role_table_grants WHERE grantee = 'metabase_ro'
+UNION ALL
+SELECT 'metabase_ro sessions', count(*), NULL FROM pg_catalog.pg_stat_activity WHERE usename = 'metabase_ro'
+UNION ALL
+SELECT 'metabase_ro role exists', count(*), NULL FROM pg_catalog.pg_roles WHERE rolname = 'metabase_ro';
+-- L18: sources with a legacy_job_key, and whether each has completed under its source-managed schedule.
+SELECT instance.config->>'legacy_job_key' AS legacy_job_key,
+       EXISTS (SELECT 1 FROM operations.operator_job_runs run
+                WHERE run.tenant_id = binding.tenant_id AND run.job_key = 'source-refresh'
+                  AND run.scope_identity = 'source-binding:' || binding.id::text
+                  AND run.status = 'completed') AS completed_under_source_schedule,
+       (SELECT max(run.requested_at)::date::text FROM operations.operator_job_runs run
+         WHERE run.tenant_id = binding.tenant_id AND run.job_key = instance.config->>'legacy_job_key') AS last_legacy_run
+  FROM operations.source_bindings binding
+  JOIN operations.source_instances instance ON instance.id = binding.source_instance_id
+ WHERE binding.tenant_id = 1 AND COALESCE(instance.config->>'legacy_job_key', '') <> ''
+ ORDER BY 1;
+-- L19: activity store volume and age (estimates and indexed bounds only).
+SELECT c.reltuples::bigint AS est_rows, pg_catalog.pg_total_relation_size(c.oid) AS bytes,
+       (SELECT min(id) FROM ninja_activities.activities) AS min_id,
+       (SELECT max(id) FROM ninja_activities.activities) AS max_id
+  FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+ WHERE n.nspname = 'ninja_activities' AND c.relname = 'activities';
+-- L20: metabase_ro role attributes and every shared dependency on it, per database.
+SELECT 'role' AS kind, r.rolname AS name,
+       concat_ws(',', CASE WHEN r.rolcanlogin THEN 'login' END, CASE WHEN r.rolsuper THEN 'super' END,
+                 CASE WHEN r.rolinherit THEN 'inherit' END) AS detail, NULL::bigint AS n
+  FROM pg_catalog.pg_roles r WHERE r.rolname = 'metabase_ro'
+UNION ALL
+SELECT 'shdepend', coalesce(d.datname, '(shared)'), s.deptype::text || ':' || s.classid::regclass::text, count(*)
+  FROM pg_catalog.pg_shdepend s
+  LEFT JOIN pg_catalog.pg_database d ON d.oid = s.dbid
+ WHERE s.refclassid = 'pg_catalog.pg_authid'::regclass
+   AND s.refobjid = (SELECT oid FROM pg_catalog.pg_roles WHERE rolname = 'metabase_ro')
+ GROUP BY 2, 3
+UNION ALL
+SELECT 'member_of', g.rolname, NULL, NULL
+  FROM pg_catalog.pg_auth_members m
+  JOIN pg_catalog.pg_roles g ON g.oid = m.roleid
+ WHERE m.member = (SELECT oid FROM pg_catalog.pg_roles WHERE rolname = 'metabase_ro')
+UNION ALL
+SELECT 'has_member', u.rolname, NULL, NULL
+  FROM pg_catalog.pg_auth_members m
+  JOIN pg_catalog.pg_roles u ON u.oid = m.member
+ WHERE m.roleid = (SELECT oid FROM pg_catalog.pg_roles WHERE rolname = 'metabase_ro')
+UNION ALL
+SELECT 'database', datname, NULL, NULL FROM pg_catalog.pg_database WHERE NOT datistemplate
+ ORDER BY 1, 2, 3;
+-- L21: the eight Metabase-era views: kind and size.
+SELECT n.nspname || '.' || c.relname AS name, c.relkind::text AS kind,
+       pg_catalog.pg_total_relation_size(c.oid) AS bytes, c.reltuples::bigint AS est_rows
+  FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+ WHERE (n.nspname, c.relname) IN (
+       ('ninja_activities', 'patch_warning_events_recent'),
+       ('ninja_activities', 'system_reboot_events_recent'),
+       ('ninja_activities', 'device_activity_signal'),
+       ('ninja_core', 'device_troubleshooting_signal'),
+       ('ninja_core', 'latest_device_health'),
+       ('ninja_core', 'v_device_custom_fields'),
+       ('ninja_core', 'v_location_custom_fields'),
+       ('ninja_core', 'v_organization_custom_fields'))
+ ORDER BY 1;

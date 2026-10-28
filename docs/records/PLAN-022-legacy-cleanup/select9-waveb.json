@@ -1,0 +1,144 @@
+{
+  "captured_at_utc": "2026-10-26T21:19:43.455869+00:00",
+  "wall_seconds": 0.689,
+  "stop_reason": null,
+  "results": [
+    {
+      "query": "L17",
+      "mode": "metadata_or_aggregate",
+      "preflight": {
+        "executing_role": "operations_migrate",
+        "server_version_num": "160014",
+        "transaction_read_only": "on",
+        "tenant_context": "1",
+        "executing_search_path": "pg_catalog",
+        "rolsuper": "t",
+        "rolbypassrls": "t"
+      },
+      "exit_code": 0,
+      "returned_rows": 4,
+      "rows": [
+        {
+          "item": "parity_report",
+          "bytes": "524288",
+          "last_write": "2026-10-07 22:29:46.63698+00"
+        },
+        {
+          "item": "metabase_ro grants",
+          "bytes": "237",
+          "last_write": ""
+        },
+        {
+          "item": "metabase_ro sessions",
+          "bytes": "0",
+          "last_write": ""
+        },
+        {
+          "item": "metabase_ro role exists",
+          "bytes": "1",
+          "last_write": ""
+        }
+      ],
+      "status": "ok",
+      "wall_seconds": 0.249
+    },
+    {
+      "query": "L18",
+      "mode": "metadata_or_aggregate",
+      "preflight": {
+        "executing_role": "operations_migrate",
+        "server_version_num": "160014",
+        "transaction_read_only": "on",
+        "tenant_context": "1",
+        "executing_search_path": "pg_catalog",
+        "rolsuper": "t",
+        "rolbypassrls": "t"
+      },
+      "exit_code": 0,
+      "returned_rows": 10,
+      "rows": [
+        {
+          "legacy_job_key": "intel-abusech",
+          "completed_under_source_schedule": "t",
+          "last_legacy_run": "2026-10-08"
+        },
+        {
+          "legacy_job_key": "intel-chocolatey",
+          "completed_under_source_schedule": "t",
+          "last_legacy_run": "2026-10-08"
+        },
+        {
+          "legacy_job_key": "intel-cpe-dict",
+          "completed_under_source_schedule": "t",
+          "last_legacy_run": "2026-10-08"
+        },
+        {
+          "legacy_job_key": "intel-endoflife",
+          "completed_under_source_schedule": "t",
+          "last_legacy_run": "2026-10-08"
+        },
+        {
+          "legacy_job_key": "intel-epss",
+          "completed_under_source_schedule": "t",
+          "last_legacy_run": "2026-10-08"
+        },
+        {
+          "legacy_job_key": "intel-kev",
+          "completed_under_source_schedule": "t",
+          "last_legacy_run": "2026-10-08"
+        },
+        {
+          "legacy_job_key": "intel-lolrmm",
+          "completed_under_source_schedule": "t",
+          "last_legacy_run": "2026-10-08"
+        },
+        {
+          "legacy_job_key": "intel-nvd",
+          "completed_under_source_schedule": "t",
+          "last_legacy_run": "2026-10-08"
+        },
+        {
+          "legacy_job_key": "intel-otx",
+          "completed_under_source_schedule": "t",
+          "last_legacy_run": "2026-10-08"
+        },
+        {
+          "legacy_job_key": "intel-winget",
+          "completed_under_source_schedule": "t",
+          "last_legacy_run": "2026-10-08"
+        }
+      ],
+      "status": "ok",
+      "wall_seconds": 0.257
+    },
+    {
+      "query": "L19",
+      "mode": "metadata_or_aggregate",
+      "preflight": {
+        "executing_role": "operations_migrate",
+        "server_version_num": "160014",
+        "transaction_read_only": "on",
+        "tenant_context": "1",
+        "executing_search_path": "pg_catalog",
+        "rolsuper": "t",
+        "rolbypassrls": "t"
+      },
+      "exit_code": 0,
+      "returned_rows": 1,
+      "rows": [
+        {
+          "est_rows": "774353",
+          "bytes": "7054123008",
+          "min_id": "68066704",
+          "max_id": "81753675"
+        }
+      ],
+      "status": "ok",
+      "wall_seconds": 0.182
+    }
+  ],
+  "label": "select9-waveb",
+  "client_wall_seconds": 2.578,
+  "queries_sha256": "fb26d28c9b35eeda0a3ad8f6dbf60fe6beb689d439387a65f61c0fba94bac2e1",
+  "captured_by_client_utc": "2026-10-26T21:19:41.244615+00:00"
+}
