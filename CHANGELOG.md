@@ -2,6 +2,29 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.130.0] — 2026-10-28 — Legacy cleanup Wave B
+
+### Removed
+
+- Migration `0358` drops `operations.parity_report`, the agent-compliance
+  cutover table (no writes since 2026-10-07), and the `legacy_job_key`
+  pointer from reference-feed sources. The Sources page no longer shows a
+  "History" column or "(previous schedule)" results, and the Jobs page uses
+  only source-refresh runs. Pre-migration runs stay in the Jobs history.
+- Migration `0359` drops the `metabase_ro` role with its grants and default
+  privileges (ADR 0005 amended): the Metabase rollback window is closed. A
+  test rejects the role in any later migration.
+
+### Documentation
+
+- A review of the 8 Metabase-era ingest views keeps all of them: patch
+  warnings, reboot and activity-failure trends, MANUAL age and Ninja device
+  health are not yet shown in Operations. The Metabase parity audit is
+  corrected, and the gaps are on the backlog.
+- PLAN-022's live items are handed to PLAN-005 (run logs), PLAN-007
+  (`ninja_core` staging tables and shadow views) and the backlog (activity
+  retention, migration tracks, `archive/` retention).
+
 ## [0.129.4] — 2026-10-28 — Reported-state lifecycle fallback
 
 ### Fixed

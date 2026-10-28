@@ -9772,8 +9772,7 @@ def _source_job_rows() -> list[dict]:
                    latest.wait_category, latest.wait_reason, latest.stage,
                    latest.stage_detail,
                    terminal.status, terminal.completed_at, terminal.rows_touched,
-                   terminal.error,
-                   (native_latest.id IS NULL AND legacy_terminal.id IS NOT NULL)
+                   terminal.error
               FROM operations.source_bindings binding
               JOIN operations.source_instances instance
                 ON instance.id = binding.source_instance_id
@@ -9791,20 +9790,7 @@ def _source_job_rows() -> list[dict]:
                       AND run.scope_identity = 'source-binding:' || binding.id::text
                     ORDER BY run.requested_at DESC, run.id DESC
                     LIMIT 1
-                   ) native_latest ON TRUE
-         LEFT JOIN LATERAL (
-                   SELECT run.id, run.status, run.requested_at, run.started_at,
-                          run.completed_at, run.rows_touched, run.error,
-                          run.wait_category, run.wait_reason, run.stage,
-                          run.stage_detail
-                     FROM operations.operator_job_runs run
-                    WHERE run.tenant_id = binding.tenant_id
-                      AND run.job_key = instance.config->>'legacy_job_key'
-                      AND run.status IN ('completed', 'failed', 'stalled', 'cancelled')
-                    ORDER BY COALESCE(run.completed_at, run.started_at, run.requested_at) DESC,
-                             run.id DESC
-                    LIMIT 1
-                   ) legacy_terminal ON TRUE
+                   ) latest ON TRUE
          LEFT JOIN LATERAL (
                    SELECT run.status, run.completed_at, run.rows_touched, run.error
                      FROM operations.operator_job_runs run
@@ -9814,40 +9800,6 @@ def _source_job_rows() -> list[dict]:
                       AND run.status IN ('completed', 'failed', 'stalled', 'cancelled')
                     ORDER BY run.completed_at DESC NULLS LAST, run.requested_at DESC, run.id DESC
                     LIMIT 1
-                   ) native_terminal ON TRUE
-         LEFT JOIN LATERAL (
-                   SELECT CASE WHEN native_latest.id IS NOT NULL
-                               THEN native_latest.id ELSE legacy_terminal.id END AS id,
-                          CASE WHEN native_latest.id IS NOT NULL
-                               THEN native_latest.status ELSE legacy_terminal.status END AS status,
-                          CASE WHEN native_latest.id IS NOT NULL
-                               THEN native_latest.requested_at
-                               ELSE legacy_terminal.requested_at END AS requested_at,
-                          CASE WHEN native_latest.id IS NOT NULL
-                               THEN native_latest.started_at
-                               ELSE legacy_terminal.started_at END AS started_at,
-                          CASE WHEN native_latest.id IS NOT NULL
-                               THEN native_latest.completed_at
-                               ELSE legacy_terminal.completed_at END AS completed_at,
-                          CASE WHEN native_latest.id IS NOT NULL
-                               THEN native_latest.rows_touched
-                               ELSE legacy_terminal.rows_touched END AS rows_touched,
-                          CASE WHEN native_latest.id IS NOT NULL
-                               THEN native_latest.error ELSE legacy_terminal.error END AS error,
-                          native_latest.wait_category, native_latest.wait_reason,
-                          native_latest.stage, native_latest.stage_detail
-                   ) latest ON TRUE
-         LEFT JOIN LATERAL (
-                   SELECT CASE WHEN native_terminal.status IS NOT NULL
-                               THEN native_terminal.status ELSE legacy_terminal.status END AS status,
-                          CASE WHEN native_terminal.status IS NOT NULL
-                               THEN native_terminal.completed_at
-                               ELSE legacy_terminal.completed_at END AS completed_at,
-                          CASE WHEN native_terminal.status IS NOT NULL
-                               THEN native_terminal.rows_touched
-                               ELSE legacy_terminal.rows_touched END AS rows_touched,
-                          CASE WHEN native_terminal.status IS NOT NULL
-                               THEN native_terminal.error ELSE legacy_terminal.error END AS error
                    ) terminal ON TRUE
              WHERE binding.tenant_id = 1 AND binding.enabled AND instance.enabled
              ORDER BY source.name, client.display_name NULLS FIRST, binding.id
@@ -9878,7 +9830,6 @@ def _source_job_rows() -> list[dict]:
             terminal_at,
             terminal_rows,
             _terminal_error,
-            previous_result,
         ) = row
         active = status in {"queued", "running"}
         if status == "queued":
@@ -9969,7 +9920,6 @@ def _source_job_rows() -> list[dict]:
                 "is_source": True,
                 "binding_id": binding_id,
                 "detail_url": f"{reverse('sources_status')}?{urlencode({'source': source_name})}",
-                "previous_result": bool(previous_result),
                 "is_stale": bool(
                     terminal_status == "completed"
                     and terminal_at
@@ -17025,100 +16975,22 @@ def sources_status(request: HttpRequest) -> HttpResponse:
             )
             latest_refresh = {row[0]: row[1:] for row in cur.fetchall()}
 
-            # Reference feeds were previously run under individual Job keys.
-            # Keep their verified terminal results visible until the first
-            # source-managed refresh completes; this is transition history,
-            # not a second live lifecycle.
-            cur.execute(
-                """
-                SELECT binding.id,
-                       latest.status, latest.completed_at, latest.started_at,
-                       latest.requested_at, latest.rows_touched, latest.error,
-                       success.status, success.completed_at, success.started_at,
-                       success.requested_at, success.rows_touched, success.error
-                  FROM operations.source_bindings binding
-                  JOIN operations.source_instances instance
-                    ON instance.id = binding.source_instance_id
-                  LEFT JOIN LATERAL (
-                    SELECT run.status, run.completed_at, run.started_at,
-                           run.requested_at, run.rows_touched, run.error
-                      FROM operations.operator_job_runs run
-                     WHERE run.tenant_id = binding.tenant_id
-                       AND run.job_key = instance.config->>'legacy_job_key'
-                       AND run.status IN ('completed', 'failed', 'stalled', 'cancelled')
-                     ORDER BY COALESCE(run.completed_at, run.started_at, run.requested_at) DESC,
-                              run.id DESC
-                     LIMIT 1
-                  ) latest ON TRUE
-                  LEFT JOIN LATERAL (
-                    SELECT run.status, run.completed_at, run.started_at,
-                           run.requested_at, run.rows_touched, run.error
-                      FROM operations.operator_job_runs run
-                     WHERE run.tenant_id = binding.tenant_id
-                       AND run.job_key = instance.config->>'legacy_job_key'
-                       AND run.status = 'completed'
-                     ORDER BY COALESCE(run.completed_at, run.started_at, run.requested_at) DESC,
-                              run.id DESC
-                     LIMIT 1
-                  ) success ON TRUE
-                 WHERE binding.tenant_id = %s
-                   AND COALESCE(instance.config->>'legacy_job_key', '') <> ''
-                """,
-                (tenant_id,),
-            )
-            legacy_refresh: dict = {}
-            legacy_success: dict = {}
-            for row in cur.fetchall():
-                binding_id, *values = row
-                latest, success = values[:6], values[6:]
-                if latest[0] is not None:
-                    legacy_refresh[binding_id] = tuple(latest)
-                if success[0] is not None:
-                    legacy_success[binding_id] = tuple(success)
-
             # Source-refresh runs are the authoritative operational history.
-            # The former reference-feed runs remain visible only while a
-            # source has not yet completed under its source-managed schedule.
             cur.execute(
                 """
-                SELECT source, status, started_at, completed_at, rows_touched, error, history_kind
-                  FROM (
-                    SELECT source.name AS source, run.status, run.started_at, run.completed_at,
-                           run.rows_touched, run.error, 'current' AS history_kind,
-                           run.requested_at
-                      FROM operations.operator_job_runs run
-                      JOIN operations.source_bindings binding
-                        ON binding.id = substring(run.scope_identity FROM 16)::uuid
-                       AND binding.tenant_id = run.tenant_id
-                      JOIN operations.source_instances instance ON instance.id = binding.source_instance_id
-                      JOIN operations.sources source ON source.id = instance.source_id
-                     WHERE run.tenant_id = %s AND run.job_key = 'source-refresh'
-                    UNION ALL
-                    SELECT source.name AS source, run.status, run.started_at, run.completed_at,
-                           run.rows_touched, run.error, 'previous' AS history_kind,
-                           run.requested_at
-                      FROM operations.operator_job_runs run
-                      JOIN operations.source_bindings binding
-                        ON binding.tenant_id = run.tenant_id
-                      JOIN operations.source_instances instance
-                        ON instance.id = binding.source_instance_id
-                       AND run.job_key = instance.config->>'legacy_job_key'
-                      JOIN operations.sources source ON source.id = instance.source_id
-                     WHERE run.tenant_id = %s
-                       AND COALESCE(instance.config->>'legacy_job_key', '') <> ''
-                       AND NOT EXISTS (
-                           SELECT 1
-                             FROM operations.operator_job_runs current_run
-                            WHERE current_run.tenant_id = binding.tenant_id
-                              AND current_run.job_key = 'source-refresh'
-                              AND current_run.scope_identity = 'source-binding:' || binding.id::text
-                              AND current_run.status = 'completed'
-                       )
-                  ) AS source_history
-                 ORDER BY COALESCE(completed_at, started_at, requested_at) DESC NULLS LAST
+                SELECT source.name, run.status, run.started_at, run.completed_at,
+                       run.rows_touched, run.error
+                  FROM operations.operator_job_runs run
+                  JOIN operations.source_bindings binding
+                    ON binding.id = substring(run.scope_identity FROM 16)::uuid
+                   AND binding.tenant_id = run.tenant_id
+                  JOIN operations.source_instances instance ON instance.id = binding.source_instance_id
+                  JOIN operations.sources source ON source.id = instance.source_id
+                 WHERE run.tenant_id = %s AND run.job_key = 'source-refresh'
+                 ORDER BY COALESCE(run.completed_at, run.started_at, run.requested_at) DESC NULLS LAST
                  LIMIT 30
             """,
-                (tenant_id, tenant_id),
+                (tenant_id,),
             )
             recent_runs = [
                 {
@@ -17128,7 +17000,6 @@ def sources_status(request: HttpRequest) -> HttpResponse:
                     "completed_at": r[3],
                     "rows_seen": r[4],
                     "error": r[5] or None,
-                    "history_kind": r[6],
                 }
                 for r in cur.fetchall()
             ]
@@ -17155,7 +17026,6 @@ def sources_status(request: HttpRequest) -> HttpResponse:
         ) = row
         act = active.get(binding_id)
         latest = latest_refresh.get(binding_id)
-        previous_result = False
         if latest and latest[0] in {"completed", "failed", "stalled", "cancelled"}:
             terminal_at = latest[1] or latest[2] or latest[3]
             last_success = terminal_at if latest[0] == "completed" else last_success
@@ -17165,16 +17035,6 @@ def sources_status(request: HttpRequest) -> HttpResponse:
         else:
             last_fail = last_run_ended_at if last_run_ok is False else None
             last_error = (last_run_error or None) if last_run_ok is False else None
-        if not (latest and latest[0] in {"completed", "failed", "stalled", "cancelled"}):
-            legacy_latest = legacy_refresh.get(binding_id)
-            legacy_last_success = legacy_success.get(binding_id)
-            if legacy_last_success:
-                last_success = legacy_last_success[1] or legacy_last_success[2] or legacy_last_success[3]
-                last_success_rows = legacy_last_success[4]
-                previous_result = True
-            if legacy_latest and legacy_latest[0] in {"failed", "stalled"}:
-                last_fail = legacy_latest[1] or legacy_latest[2] or legacy_latest[3]
-                last_error = legacy_latest[5] or None
         schedule_minutes = _source_schedule_minutes(schedule or "")
         is_stale = _source_is_stale(last_success, schedule_minutes, now)
         sources.append(
@@ -17203,7 +17063,6 @@ def sources_status(request: HttpRequest) -> HttpResponse:
                     else ""
                 ),
                 "last_success": last_success,
-                "last_result_is_previous": previous_result,
                 "last_failure": last_fail,
                 "last_rows": last_success_rows if last_success_rows is not None else last_run_rows,
                 "last_error": last_error,

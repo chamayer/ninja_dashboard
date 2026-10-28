@@ -71,7 +71,6 @@
         Last completed:
         {% if s.last_success %}
         <strong>{{ s.last_success|date:"Y-m-d H:i" }}</strong>
-        {% if s.last_result_is_previous %}<span class="muted">(previous schedule)</span>{% endif %}
         {% else %}
         <span style="color:#9ca3af;">never</span>
         {% endif %}
@@ -128,7 +127,6 @@
             <tr>
                 <th>Source</th>
                 <th>Status</th>
-                <th>History</th>
                 <th>Started</th>
                 <th>Completed</th>
                 <th class="num">Rows</th>
@@ -150,7 +148,6 @@
                     <span class="badge">{{ run.status }}</span>
                     {% endif %}
                 </td>
-                <td class="muted">{% if run.history_kind == "previous" %}Previous schedule{% else %}Current schedule{% endif %}</td>
                 <td class="muted">{{ run.started_at|date:"Y-m-d H:i"|default:"—" }}</td>
                 <td class="muted">{{ run.completed_at|date:"Y-m-d H:i"|default:"—" }}</td>
                 <td class="num muted">{{ run.rows_seen|default:"—" }}</td>

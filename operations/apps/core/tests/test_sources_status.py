@@ -12,9 +12,13 @@ def test_source_staleness_respects_each_configured_cadence():
     assert _source_is_stale(now - timedelta(hours=8, minutes=1), 60, now)
 
 
-def test_sources_template_labels_transition_history_clearly():
+def test_sources_page_shows_only_source_managed_history():
+    from pathlib import Path
+
     from django.template.loader import get_template
 
-    template = get_template("sources.html")
-    assert "previous schedule" in template.template.source
-    assert "Current schedule" in template.template.source
+    from apps.core import views
+
+    template = get_template("sources.html").template.source
+    assert "previous schedule" not in template.lower()
+    assert "legacy_job_key" not in Path(views.__file__).read_text(encoding="utf-8")

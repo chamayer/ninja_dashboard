@@ -101,6 +101,15 @@ This amendment does not authorize deletion of historical reporting schemas,
 materialized views, or the `metabase_ro` compatibility role. Those remain
 separate, future operational decisions.
 
+**Amendment, 2026-10-28 (PLAN-022 Wave B):** the owner closed the Metabase
+rollback window. Migration `0359` drops the `metabase_ro` role together with
+its grants and default privileges; a Metabase restore must now recreate the
+role first. Migrations after `0359` must not name the role (a test enforces
+this). The eight Metabase-era ingest views stay for now: a capability review
+found that Operations does not yet show patch warnings, reboot and
+activity-failure trends, MANUAL patch age or Ninja device health
+(`docs/records/PLAN-022-legacy-cleanup/metabase-view-capability-review.md`).
+
 ## Supersedes or superseded by
 
 Supersedes decision 0002.
