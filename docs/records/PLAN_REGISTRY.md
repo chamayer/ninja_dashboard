@@ -1,5 +1,19 @@
 # Plan registry
 
+## PLAN-031 — Source record and reported states
+
+- Scope: Distinguish source-record presence from each record's reported online state in Operations.
+- Status: active
+- Defined: 2026-10-28
+- Started: 2026-10-28
+- Completed: —
+- Blueprint: operations/BLUEPRINT.md
+- Source: operations/BLUEPRINT.md
+- Section: PLAN-031 — Source record and reported states
+- Related plans: PLAN-012 owns broader source-record reads and performance; this change appends one safe metadata field and preserves its existing query contract.
+- Resume gate: Implement the approved view migration and page; production migration, commit, and deployment require separate authorization.
+
+
 ## PLAN-025 — Shared ScreenConnect and Operations inventory summary
 
 - Scope: Identify the restored ScreenConnect customer-group contract, support shared-instance group evidence, and show deduplicated Operations Computer statuses with matching drill-throughs.

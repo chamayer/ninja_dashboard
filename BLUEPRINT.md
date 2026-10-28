@@ -1,3 +1,5 @@
+- **PLAN-031 — active.** Next: validate the source-record reported-state migration and page. See the [Operations handoff](operations/BLUEPRINT.md#plan-031--source-record-and-reported-states).
+
 # PLAN-022 — Legacy data and code cleanup
 
 **Active; Wave A deployed 2026-10-26; Wave B built 2026-10-28.** Detail: [PLAN-022](docs/plans/PLAN-022-legacy-data-cleanup.md).

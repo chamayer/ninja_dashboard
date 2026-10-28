@@ -892,3 +892,11 @@ migration or data change has run.
 **Next:** local commit is authorized. Any `origin` push needs explicit approval
 for automatic Portainer deployment and migration 0355, followed by the approved
 secondary mirror push.
+
+## PLAN-031 — Source record and reported states
+
+**Status/goal:** Active; distinguish record presence from the individual source's reported online state.
+**Scope:** Safe metadata view migration, Source Records reader, HTML and CSV; retain tenant and restricted-layout protections.
+**Decision:** Display Present/Withdrawn separately from Online/Offline/—; unknown values stay unknown. Read the individual record, not a Computer-level aggregate.
+**Validation:** Python compilation, migration Ruff check, and scoped whitespace check passed. Django is unavailable locally; database migration and browser checks remain pending. Registry validation reports a pre-existing PLAN-028 root-blueprint mismatch. Production execution is not authorized.
+**Checkpoint:** Migration 0360 appends a restricted-safe nullable record state; HTML and CSV use it. Next: review and validate the migration and rendered page in an authorized environment.
