@@ -3,6 +3,11 @@
 {% block title %}Search{% endblock %}
 
 {% block content %}
+<style>
+    .search-records-scroll { max-width: 100%; overflow-x: auto; }
+    .search-records-table { table-layout: fixed; min-width: 72rem; }
+    .search-records-table th, .search-records-table td { overflow-wrap: anywhere; vertical-align: top; }
+</style>
 <div class="card">
     <h1>Search</h1>
     {% if q %}
@@ -22,9 +27,10 @@
     {% if source_records %}
     <div class="card">
         <h2>Source records ({{ source_records|length }}{% if source_records|length >= 100 %}+{% endif %})</h2>
-        <p class="muted">Source evidence may be attached to a Computer, attributed only to a client, or unlinked.</p>
-        <table data-sortable class="ops-table">
-            <thead><tr><th>Source</th><th>Record type</th><th>Source record</th><th>Record state</th><th>Reported state</th><th>Reported name</th><th>Computer</th><th>Client</th><th>Matched on</th></tr></thead>
+        <p class="muted">Source evidence may be attached to a Computer, attributed only to a client, or unlinked. Reported state is the last value received from that record; withdrawn records may retain an earlier Online or Offline report. Last contact is the contact time reported by the source.</p>
+        <div class="search-records-scroll" role="region" aria-label="Source record search results" tabindex="0">
+        <table data-sortable class="ops-table search-records-table">
+            <thead><tr><th>Source</th><th>Record type</th><th>Source record</th><th>Record state</th><th>Reported state</th><th>Last contact</th><th>Reported name</th><th>Computer</th><th>Client</th><th>Matched on</th></tr></thead>
             <tbody>{% for record in source_records %}
                 <tr>
                     <td>{{ record.source_name }}</td>
@@ -32,6 +38,7 @@
                     <td><a href="{% url 'inventory_source_records' %}?source={{ record.source_instance_id }}&amp;q={{ q|urlencode }}"><code>{{ record.external_id }}</code></a></td>
                     <td>{% if record.active %}<span class="badge badge-low">Present</span>{% else %}<span class="badge badge-high">Withdrawn</span>{% endif %}</td>
                     <td>{% if record.reported_online == True %}Online{% elif record.reported_online == False %}Offline{% else %}—{% endif %}</td>
+                    <td>{{ record.reported_last_contact_at|date:"Y-m-d H:i"|default:"—" }}</td>
                     <td>{% if record.reported_name %}{{ record.reported_name }}{% elif record.canonical_hostname and record.device_id and record.client_slug %}<a href="{% url 'device_detail' org_slug=record.client_slug device_id=record.device_id %}">{{ record.canonical_hostname }}</a>{% elif record.canonical_hostname %}{{ record.canonical_hostname }}{% else %}<span class="muted">—</span>{% endif %}</td>
                     <td>{% if record.computer_hostname and record.client_slug %}<a href="{% url 'device_detail' org_slug=record.client_slug device_id=record.device_id %}"><code>{{ record.computer_hostname }}</code></a>{% elif record.computer_hostname %}<code>{{ record.computer_hostname }}</code>{% else %}<span class="muted">Unlinked</span>{% endif %}</td>
                     <td>{% if record.client_slug %}<a href="{% url 'org_index' org_slug=record.client_slug %}">{{ record.client_name }}</a>{% else %}<span class="muted">—</span>{% endif %}</td>
@@ -39,6 +46,7 @@
                 </tr>
             {% endfor %}</tbody>
         </table>
+        </div>
     </div>
     {% endif %}
 
