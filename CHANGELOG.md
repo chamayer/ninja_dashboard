@@ -2,6 +2,14 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.132.1] — 2026-10-29 — Contract check for active findings only
+
+### Fixed
+
+- Migration `0368` checks finding state only for active findings. Closed findings
+  older than finding state never had a state row, so the 0.132.0 check stopped
+  Operations at startup. Migrations `0364`–`0367` were already applied.
+
 ## [0.132.0] — 2026-10-29 — One findings ledger with guarded writers
 
 ### Changed

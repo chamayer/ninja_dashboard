@@ -5,7 +5,7 @@ whole artifact rolls back; only then does the database accept contract-4
 writers. Processes built for another contract fail at their first findings write.
 
 * The admin view returns exactly the retained legacy rows.
-* Every finding has a state row; every assessment and participant belongs to a
+* Every active finding has a state row; every assessment and participant belongs to a
   finding of its own namespace and tenant.
 * No active condition key is duplicated within a namespace.
 * Cover rules match ``finding_types.covered_by`` one to one.
@@ -38,10 +38,13 @@ BEGIN
         RAISE EXCEPTION 'M4: % admin rows differ between the view and the legacy ledger', v;
     END IF;
 
+    -- Closed findings older than finding_state (0301) never had a state row; only
+    -- active findings need one.
     SELECT count(*) INTO v FROM operations.findings f
-     WHERE NOT EXISTS (SELECT 1 FROM operations.finding_state s WHERE s.finding_id = f.id);
+     WHERE f.status IN ('open', 'acknowledged', 'investigating', 'suppressed')
+       AND NOT EXISTS (SELECT 1 FROM operations.finding_state s WHERE s.finding_id = f.id);
     IF v > 0 THEN
-        RAISE EXCEPTION 'M4: % findings have no state row', v;
+        RAISE EXCEPTION 'M4: % active findings have no state row', v;
     END IF;
 
     SELECT count(*) INTO v FROM (
