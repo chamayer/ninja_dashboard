@@ -60,6 +60,9 @@ export OPERATIONS_DB_USER="$migrate_db_user"
 export OPERATIONS_DB_PASSWORD="$migrate_db_password"
 python manage.py migrate --noinput
 
+echo "[operations] checking the findings writer contract..."
+python manage.py check_findings_contract
+
 echo "[operations] setting initial admin password from env (if provided)..."
 python manage.py set_initial_admin_password
 

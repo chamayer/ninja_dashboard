@@ -716,7 +716,7 @@ def _upsert(
                 gen_random_uuid(), 1, %s, %s, %s, 'device', %s, '', %s::jsonb,
                 %s, %s, 'confirmed', 'open', %s, %s, %s
             )
-            ON CONFLICT (tenant_id, condition_key)
+            ON CONFLICT (tenant_id, condition_namespace, condition_key)
                 WHERE condition_key > '' AND status IN ('open', 'acknowledged', 'investigating', 'suppressed')
             DO UPDATE SET
                 subject_id       = EXCLUDED.subject_id,

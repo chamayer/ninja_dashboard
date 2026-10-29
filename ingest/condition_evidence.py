@@ -136,26 +136,77 @@ def successful_run_available(
     return cur.fetchone() is not None
 
 
+_NAMESPACES = {"findings": "entity", "admin_findings": "admin"}
+
+# Upserts an admin-namespace condition into the common findings ledger. The
+# subject is normalized by the same database function the M2 conversion used,
+# and the producer's subject reference is kept as ``legacy_ref``. Append
+# ``RETURNING id`` when the caller needs the finding ID.
+ADMIN_FINDING_UPSERT_SQL = """
+    INSERT INTO operations.findings (
+        id, version, tenant_id, finding_type_id, condition_key, severity, status,
+        subject_type, subject_id, client_id, subject_ref, finding_details,
+        first_seen_at, last_seen_at, last_detected_at, confidence, condition_namespace
+    )
+    SELECT gen_random_uuid(), 1, %(tenant)s, %(finding_type)s, %(key)s, %(severity)s, 'open',
+           s.subject_type, s.subject_id, s.client_id, s.subject_ref, %(details)s::jsonb,
+           %(now)s, %(now)s, %(now)s, '', 'admin'
+      FROM operations.normalize_admin_subject(%(tenant)s, %(ref)s::jsonb, %(details)s::jsonb) s
+    ON CONFLICT (tenant_id, condition_namespace, condition_key)
+        WHERE condition_key > ''
+          AND status IN ('open', 'acknowledged', 'investigating', 'suppressed')
+    DO UPDATE SET
+        last_detected_at = EXCLUDED.last_detected_at,
+        last_seen_at = EXCLUDED.last_seen_at,
+        finding_details = EXCLUDED.finding_details,
+        subject_type = EXCLUDED.subject_type,
+        subject_id = EXCLUDED.subject_id,
+        client_id = EXCLUDED.client_id,
+        subject_ref = EXCLUDED.subject_ref,
+        severity = EXCLUDED.severity
+"""
+
+
+def admin_finding_upsert_params(
+    tenant_id: int,
+    finding_type_id: int,
+    condition_key: str,
+    severity: str,
+    subject_ref: dict[str, Any],
+    details: dict[str, Any],
+    now: datetime,
+) -> dict[str, Any]:
+    return {
+        "tenant": tenant_id,
+        "finding_type": finding_type_id,
+        "key": condition_key,
+        "severity": severity,
+        "ref": json.dumps(subject_ref),
+        "details": json.dumps(details),
+        "now": now,
+    }
+
+
 def preserve_operator_episode(
     cur: Any, table: str, tenant_id: int, condition_key: str, now: datetime,
     details: dict[str, Any],
 ) -> str | None:
-    """Refresh an operator-managed episode instead of creating a duplicate."""
-    if table not in {"findings", "admin_findings"}:
+    """Refresh an operator-managed episode instead of creating a duplicate.
+
+    ``table`` names the legacy ledger, which is now the finding's namespace in
+    the common findings ledger.
+    """
+    if table not in _NAMESPACES:
         raise ValueError("Unsupported condition table")
-    details_column = "finding_details" if table == "findings" else "details"
-    timestamps = "last_seen_at = %s, last_detected_at = %s" if table == "findings" else "last_detected_at = %s"
-    timestamp_values = (now, now) if table == "findings" else (now,)
     cur.execute(
-        f"""
-        UPDATE operations.{table}
-           SET {details_column} = %s::jsonb,
-               {timestamps}
-         WHERE tenant_id = %s AND condition_key = %s
+        """
+        UPDATE operations.findings
+           SET finding_details = %s::jsonb, last_seen_at = %s, last_detected_at = %s
+         WHERE tenant_id = %s AND condition_namespace = %s AND condition_key = %s
            AND status IN ('investigating', 'suppressed')
         RETURNING id
         """,
-        (json.dumps(details), *timestamp_values, tenant_id, condition_key),
+        (json.dumps(details), now, now, tenant_id, _NAMESPACES[table], condition_key),
     )
     row = cur.fetchone()
     return str(row[0]) if row else None

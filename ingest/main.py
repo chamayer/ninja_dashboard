@@ -999,6 +999,7 @@ def main() -> None:
 
     log.info("Applying pending migrations")
     migrations.apply_pending()
+    db.wait_for_findings_contract()
     operator_job_queue.register_definition_snapshots()
     operator_job_queue.reconcile_schedule_catalog()
     operator_job_queue.record_runtime_heartbeat(

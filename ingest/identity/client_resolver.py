@@ -45,6 +45,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
+from ingest.condition_evidence import ADMIN_FINDING_UPSERT_SQL, admin_finding_upsert_params
 from ingest.conditions import record_assessment
 from shared import client_evidence
 from shared.conditions.contracts import Condition, EvaluationCoverage, Participant, Signal, Readiness
@@ -64,8 +65,7 @@ def drain_client_resolution() -> int:
     from ingest import db
 
     attached = 0
-    with db.transaction() as cur:
-        cur.execute(f"SET LOCAL operations.tenant_id = {_TENANT_ID}")
+    with db.findings_transaction(_TENANT_ID) as cur:
         cur.execute(
             "SELECT pg_advisory_xact_lock(hashtext('operations.client_resolver'))"
         )
@@ -688,7 +688,7 @@ def _emit_unnamed_source_group_finding(
             'critical', 'confirmed', 'open',
             %s, %s, %s
         )
-        ON CONFLICT (tenant_id, condition_key)
+        ON CONFLICT (tenant_id, condition_namespace, condition_key)
         WHERE condition_key > '' AND status IN ('open', 'acknowledged', 'investigating', 'suppressed')
         DO UPDATE SET
             last_seen_at = NOW(),
@@ -726,28 +726,9 @@ def _emit_finding(
         return
     now = datetime.now(timezone.utc)
     if admin:
-        cur.execute(
-            """
-            INSERT INTO operations.admin_findings (
-                id, version, tenant_id, finding_type_id, condition_key, severity,
-                status, subject_ref, details, first_detected_at, last_detected_at
-            ) VALUES (
-                gen_random_uuid(), 1, %s, %s, %s, %s, 'open',
-                %s::jsonb, %s::jsonb, %s, %s
-            )
-            ON CONFLICT (tenant_id, condition_key)
-                WHERE status IN ('open', 'acknowledged', 'investigating', 'suppressed')
-            DO UPDATE SET
-                last_detected_at = EXCLUDED.last_detected_at,
-                details          = EXCLUDED.details,
-                subject_ref      = EXCLUDED.subject_ref,
-                severity         = EXCLUDED.severity
-            """,
-            (
-                _TENANT_ID, ft_id, condition_key, severity,
-                json.dumps(subject_ref), json.dumps(details), now, now,
-            ),
-        )
+        cur.execute(ADMIN_FINDING_UPSERT_SQL, admin_finding_upsert_params(
+            _TENANT_ID, ft_id, condition_key, severity, subject_ref, details, now
+        ))
         _record_resolver_assessment(cur, type_name, condition_key, subject_ref, now)
     else:
         # Entity finding — subject_type='client', subject_id=client_id.
@@ -766,7 +747,7 @@ def _emit_finding(
                 %s, %s, 'confirmed', 'open',
                 %s, %s, %s
             )
-            ON CONFLICT (tenant_id, condition_key)
+            ON CONFLICT (tenant_id, condition_namespace, condition_key)
                 WHERE condition_key > '' AND status IN ('open', 'acknowledged', 'investigating', 'suppressed')
             DO UPDATE SET
                 last_seen_at     = EXCLUDED.last_seen_at,
@@ -808,9 +789,9 @@ def _resolve_finding(cur, type_name: str, condition_key: str) -> None:
         return
     cur.execute(
         """
-        UPDATE operations.admin_findings
-        SET status = 'resolved', resolved_at = NOW()
-        WHERE tenant_id = %s AND finding_type_id = %s
+        UPDATE operations.findings
+        SET status = 'resolved', closed_at = NOW()
+        WHERE tenant_id = %s AND condition_namespace = 'admin' AND finding_type_id = %s
           AND condition_key = %s
           AND status IN ('open', 'acknowledged')
         """,
@@ -874,9 +855,9 @@ def _retire_client_name_conflicts(cur) -> None:
         return
     cur.execute(
         """
-        UPDATE operations.admin_findings
-           SET status = 'resolved', resolved_at = NOW()
-         WHERE tenant_id = %s
+        UPDATE operations.findings
+           SET status = 'resolved', closed_at = NOW()
+         WHERE tenant_id = %s AND condition_namespace = 'admin'
            AND finding_type_id = %s
            AND status IN ('open', 'acknowledged', 'investigating', 'suppressed')
         """,
@@ -893,7 +874,7 @@ def _resolve_entity_finding(cur, type_name: str, condition_key: str) -> None:
         """
         UPDATE operations.findings
            SET status = 'resolved', closed_at = NOW()
-         WHERE tenant_id = %s
+         WHERE tenant_id = %s AND condition_namespace = 'entity'
            AND finding_type_id = %s
            AND condition_key = %s
            AND status IN ('open', 'acknowledged', 'investigating', 'suppressed')
@@ -1108,7 +1089,7 @@ def _resolve_unseen_client_name_conflicts(cur, active_conditions: set[str]) -> N
         f"""
         UPDATE operations.findings
            SET status = 'resolved', closed_at = NOW()
-         WHERE tenant_id = %s
+         WHERE tenant_id = %s AND condition_namespace = 'entity'
            AND finding_type_id = %s
            AND status IN ('open', 'acknowledged', 'investigating', 'suppressed')
            {where}
@@ -1203,11 +1184,11 @@ def _resolve_unseen_topology_findings(
         params.append(list(active_conditions))
     cur.execute(
         f"""
-        UPDATE operations.admin_findings
-           SET status = 'resolved', resolved_at = NOW()
-         WHERE tenant_id = %s
+        UPDATE operations.findings
+           SET status = 'resolved', closed_at = NOW()
+         WHERE tenant_id = %s AND condition_namespace = 'admin'
            AND finding_type_id = %s
-           AND details ->> 'topology' = %s
+           AND finding_details ->> 'topology' = %s
            AND status IN ('open', 'acknowledged', 'investigating', 'suppressed')
            {where}
         """,

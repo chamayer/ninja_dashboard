@@ -1399,16 +1399,14 @@ def _run(
             count(done, len(to_reconcile), "finding types")
         finding_type = ctx.types[type_name]
         stage("Reconciling findings", report.labels.get(type_name, type_name.replace("_", " ")))
-        with db.transaction() as cur:
-            cur.execute(f"SET LOCAL operations.tenant_id = {int(tenant_id)}")
+        with db.findings_transaction(int(tenant_id)) as cur:
             reconcile_type(cur, ctx, finding_type, desired.get(type_name, []), report, titles)
         reconciled.append(finding_type.id)
     if count is not None:
         count(len(to_reconcile), len(to_reconcile), "finding types")
 
     stage("Recording condition assessments", f"{len(reconciled)} finding types.")
-    with db.transaction() as cur:
-        cur.execute(f"SET LOCAL operations.tenant_id = {int(tenant_id)}")
+    with db.findings_transaction(int(tenant_id)) as cur:
         written = write_assessments(cur, ctx, reconciled, profile, titles)
     log.info("software_reconcile: %s assessments=%d", report.as_result(), written)
     return report

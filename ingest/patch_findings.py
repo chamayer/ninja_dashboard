@@ -87,8 +87,7 @@ def classify(tenant_id: int = _TENANT_ID, *, incremental: bool = True) -> int:
     error: str | None = None
     affected = 0
     try:
-        with db.pool.connection() as conn, conn.cursor() as cur:
-            cur.execute(f"SET LOCAL operations.tenant_id = {tenant_id}")
+        with db.findings_transaction(tenant_id) as cur:
             full_due = incremental and _full_reconciliation_due(cur, tenant_id, now)
             incremental = incremental and not full_due
             scoped = _prepare_evaluation_scope(cur, tenant_id, incremental=incremental)
@@ -571,7 +570,7 @@ def _upsert(
             %s, %s, 'confirmed', 'open',
             %s, %s, %s
         )
-        ON CONFLICT (tenant_id, condition_key)
+        ON CONFLICT (tenant_id, condition_namespace, condition_key)
             WHERE condition_key > '' AND status IN ('open', 'acknowledged', 'investigating', 'suppressed')
         DO UPDATE SET
             client_id        = EXCLUDED.client_id,

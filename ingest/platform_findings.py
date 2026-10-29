@@ -24,7 +24,6 @@ Default is dry-run: nothing is written unless `dry_run=False` is passed.
 
 from __future__ import annotations
 
-import json
 import logging
 import uuid
 from datetime import UTC, datetime
@@ -45,7 +44,11 @@ from ingest.cmdb_findings import (
     TENANT_ID,
     _finding_type_id,
 )
-from ingest.condition_evidence import preserve_operator_episode
+from ingest.condition_evidence import (
+    ADMIN_FINDING_UPSERT_SQL,
+    admin_finding_upsert_params,
+    preserve_operator_episode,
+)
 from ingest.conditions import record_assessment
 from ingest.source_health import collection_problems
 
@@ -81,34 +84,9 @@ def _upsert_admin_finding(
     )
     if preserved is not None:
         return uuid.UUID(preserved)
-    cur.execute(
-        """
-        INSERT INTO operations.admin_findings (
-            id, version, tenant_id, finding_type_id, condition_key, severity,
-            status, subject_ref, details, first_detected_at, last_detected_at
-        ) VALUES (
-            gen_random_uuid(), 1, %s, %s, %s, %s, 'open', %s::jsonb, %s::jsonb, %s, %s
-        )
-        ON CONFLICT (tenant_id, condition_key)
-            WHERE status IN ('open', 'acknowledged', 'investigating', 'suppressed')
-        DO UPDATE SET
-            last_detected_at = EXCLUDED.last_detected_at,
-            details = EXCLUDED.details,
-            subject_ref = EXCLUDED.subject_ref,
-            severity = EXCLUDED.severity
-        RETURNING id
-        """,
-        (
-            TENANT_ID,
-            finding_type_id,
-            condition_key,
-            severity,
-            json.dumps(subject_ref),
-            json.dumps(details),
-            now,
-            now,
-        ),
-    )
+    cur.execute(ADMIN_FINDING_UPSERT_SQL + " RETURNING id", admin_finding_upsert_params(
+        TENANT_ID, finding_type_id, condition_key, severity, subject_ref, details, now
+    ))
     row = cur.fetchone()
     if row is None:
         raise RuntimeError("Admin finding upsert did not return a finding ID")
@@ -132,8 +110,7 @@ def evaluate(*, dry_run: bool = True) -> dict[str, int]:
         "software_inventory_held": 0,
     }
 
-    with db.transaction() as cur:
-        cur.execute("SELECT set_config('operations.tenant_id', %s, TRUE)", (str(TENANT_ID),))
+    with db.findings_transaction(TENANT_ID) as cur:
         ft_failure = _finding_type_id(cur, "source_failure")
         ft_queue = _finding_type_id(cur, "software_queue_stalled")
         jobs_types = {
@@ -196,9 +173,10 @@ def _resolve_admin_absent(
         return
     cur.execute(
         """
-        UPDATE operations.admin_findings finding
-           SET status = 'resolved', resolved_at = %s
+        UPDATE operations.findings finding
+           SET status = 'resolved', closed_at = %s
          WHERE finding.tenant_id = %s
+           AND finding.condition_namespace = 'admin'
            AND finding.finding_type_id = %s
            AND finding.status IN ('open', 'acknowledged')
            AND NOT (finding.condition_key = ANY(%s::text[]))
@@ -228,13 +206,14 @@ def _resolve_retired_operator_jobs_queue(
         return
     cur.execute(
         """
-        UPDATE operations.admin_findings finding
-           SET status = 'resolved', resolved_at = %s,
-               details = finding.details || jsonb_build_object(
+        UPDATE operations.findings finding
+           SET status = 'resolved', closed_at = %s,
+               finding_details = finding.finding_details || jsonb_build_object(
                    'resolution_reason', 'superseded_by_jobs_health_findings',
                    'resolution_recorded_at', %s::text
                )
          WHERE finding.tenant_id = %s
+           AND finding.condition_namespace = 'admin'
            AND finding.finding_type_id = %s
            AND finding.condition_key = 'software_queue_stalled:operator.jobs'
            AND finding.status IN ('open', 'acknowledged', 'investigating')
@@ -775,15 +754,16 @@ def _eval_jobs_unmet_dependencies(
             if not dry_run:
                 cur.execute(
                     """
-                    UPDATE operations.admin_findings
-                       SET status = 'resolved', resolved_at = %s,
-                           details = details || jsonb_build_object(
+                    UPDATE operations.findings
+                       SET status = 'resolved', closed_at = %s,
+                           finding_details = finding_details || jsonb_build_object(
                                'resolution_reason', 'covered_by_upstream_job_failure',
                                'covered_by_condition_key', %s,
                                'covered_by_finding_type', %s,
                                'resolution_recorded_at', %s::text
                            )
-                     WHERE tenant_id = %s AND condition_key = %s
+                     WHERE tenant_id = %s AND condition_namespace = 'admin'
+                       AND condition_key = %s
                        AND status IN ('open', 'acknowledged', 'investigating')
                     """,
                     (now, parent[0], parent[1], now.isoformat(), TENANT_ID, key),

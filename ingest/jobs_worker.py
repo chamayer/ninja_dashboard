@@ -191,6 +191,7 @@ def run() -> int:
     _READY_PATH.unlink(missing_ok=True)
 
     db.init(settings.postgres_dsn)
+    db.wait_for_findings_contract()
     operator_job_queue.register_definition_snapshots()
     operator_job_queue.register_recovery_policies()
     operator_job_queue.reconcile_replay_safe_containment()

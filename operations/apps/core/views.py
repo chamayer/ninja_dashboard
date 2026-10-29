@@ -116,6 +116,7 @@ from .finding_actions import (
 )
 from .forms import ClientPolicyForm
 from .identity_actions import run_identity_action
+from .findings_guard import guard_findings
 from .models import (
     AdminFinding,
     Agent,
@@ -6722,6 +6723,7 @@ def finding_review(request: HttpRequest, finding_id: str) -> HttpResponse:
 @require_POST
 def finding_acknowledge(request: HttpRequest, finding_id: str) -> HttpResponse:
     """Acknowledge an entity finding."""
+    guard_findings()
     finding = get_object_or_404(
         Finding.objects.select_related("finding_type"), id=finding_id, tenant_id=1
     )
@@ -6740,6 +6742,7 @@ def finding_acknowledge(request: HttpRequest, finding_id: str) -> HttpResponse:
 @login_required
 @require_POST
 def finding_resolve(request: HttpRequest, finding_id: str) -> HttpResponse:
+    guard_findings()
     finding = get_object_or_404(
         Finding.objects.select_related("finding_type"), id=finding_id, tenant_id=1
     )
@@ -6762,6 +6765,7 @@ def finding_resolve(request: HttpRequest, finding_id: str) -> HttpResponse:
 @require_POST
 def finding_snooze(request: HttpRequest, finding_id: str) -> HttpResponse:
     """Snooze an issue for N days (default 7)."""
+    guard_findings()
     finding = get_object_or_404(
         Finding.objects.select_related("finding_type"), id=finding_id, tenant_id=1
     )
@@ -6782,6 +6786,7 @@ def finding_snooze(request: HttpRequest, finding_id: str) -> HttpResponse:
 @require_POST
 def finding_suppress(request: HttpRequest, finding_id: str) -> HttpResponse:
     """Create a SuppressionRule matching this finding's subject."""
+    guard_findings()
     finding = get_object_or_404(
         Finding.objects.select_related("finding_type"),
         id=finding_id,
@@ -6830,6 +6835,7 @@ def finding_suppress(request: HttpRequest, finding_id: str) -> HttpResponse:
 @require_POST
 def findings_bulk_action(request: HttpRequest) -> HttpResponse:
     """Apply one action across multiple selected findings."""
+    guard_findings()
     ids = list(dict.fromkeys(request.POST.getlist("ids")))
     action = (request.POST.get("action") or "").strip()
     if not ids:
@@ -14291,10 +14297,16 @@ def _condition_coverage_summary(profile) -> list[dict]:
 @require_POST
 def admin_finding_acknowledge(request: HttpRequest, finding_id: str) -> HttpResponse:
     """Acknowledge an admin finding."""
+    guard_findings()
     finding = get_object_or_404(AdminFinding, id=finding_id, tenant_id=1)
     if finding.status == "open":
-        finding.status = "acknowledged"
-        finding.save(update_fields=["status"])
+        with connection.cursor() as cur:
+            cur.execute(
+                """UPDATE operations.findings SET status = 'acknowledged'
+                    WHERE id = %s AND tenant_id = 1 AND condition_namespace = 'admin'
+                      AND status = 'open'""",
+                [finding.id],
+            )
     return redirect("findings_admin_health")
 
 
@@ -14313,6 +14325,7 @@ def admin_finding_apply_client_rename(request: HttpRequest, finding_id: str) -> 
     it too, because the slug is in operator-facing URLs and churning it breaks
     saved links.
     """
+    guard_findings()
     finding = get_object_or_404(AdminFinding, id=finding_id, tenant_id=1)
     if finding.finding_type.name != "client_name_conflict":
         messages.error(request, "That action only applies to client rename findings.")
@@ -14362,9 +14375,12 @@ def admin_finding_apply_client_rename(request: HttpRequest, finding_id: str) -> 
 
     # The next resolver pass would resolve this itself once the names agree;
     # closing it here keeps the queue honest in the meantime.
-    finding.status = "resolved"
-    finding.resolved_at = timezone.now()
-    finding.save(update_fields=["status", "resolved_at"])
+    with connection.cursor() as cur:
+        cur.execute(
+            """UPDATE operations.findings SET status = 'resolved', closed_at = %s
+                WHERE id = %s AND tenant_id = 1 AND condition_namespace = 'admin'""",
+            [timezone.now(), finding.id],
+        )
     return redirect("findings_admin_health")
 
 
@@ -18065,8 +18081,8 @@ def _attach_group_to_client(
         ckey = hashlib.sha256(raw.encode()).hexdigest()[:64]
         cur.execute(
             """
-            UPDATE operations.admin_findings af
-            SET status = 'resolved', resolved_at = NOW()
+            UPDATE operations.findings af
+            SET status = 'resolved', closed_at = NOW()
             FROM operations.finding_types ft,
                  operations.condition_assessments assessment,
                  operations.condition_policy_versions policy
@@ -18078,7 +18094,7 @@ def _attach_group_to_client(
               AND policy.active
               AND af.finding_type_id = ft.id
               AND ft.name = 'client_unattached_group'
-              AND af.tenant_id = 1
+              AND af.tenant_id = 1 AND af.condition_namespace = 'admin'
               AND af.condition_key = %s
               AND af.status IN ('open', 'acknowledged')
               AND assessment.assessed_at >= NOW() -
@@ -18096,8 +18112,8 @@ def _resolve_finding_for_group(cur, source_binding_id, external_id: str) -> None
     condition_key = hashlib.sha256(raw.encode()).hexdigest()[:64]
     cur.execute(
         """
-        UPDATE operations.admin_findings af
-        SET status = 'resolved', resolved_at = NOW()
+        UPDATE operations.findings af
+        SET status = 'resolved', closed_at = NOW()
         FROM operations.finding_types ft,
              operations.condition_assessments assessment,
              operations.condition_policy_versions policy
@@ -18109,7 +18125,7 @@ def _resolve_finding_for_group(cur, source_binding_id, external_id: str) -> None
           AND policy.active
           AND af.finding_type_id = ft.id
           AND ft.name = 'client_unattached_group'
-          AND af.tenant_id = 1
+          AND af.tenant_id = 1 AND af.condition_namespace = 'admin'
           AND af.condition_key = %s
           AND af.status IN ('open', 'acknowledged')
           AND assessment.assessed_at >= NOW() -
@@ -18169,6 +18185,7 @@ def client_candidate_accept(request, candidate_id) -> HttpResponse:
     """Create a new client from the candidate, attach every contributing
     source group, mint an alias row, and instantiate the requirement
     profile as per-client coverage_requirements."""
+    guard_findings()
     candidate = get_object_or_404(
         ClientCandidate,
         id=candidate_id,
@@ -18242,6 +18259,7 @@ def client_candidate_accept(request, candidate_id) -> HttpResponse:
 @transaction.atomic
 def client_candidate_map(request, candidate_id) -> HttpResponse:
     """Map candidate's source groups to an existing client."""
+    guard_findings()
     candidate = get_object_or_404(
         ClientCandidate,
         id=candidate_id,
@@ -18677,6 +18695,7 @@ def software_decision_bulk(request: HttpRequest) -> HttpResponse:
                           ``software_decision_create`` for those.
       * next           — return URL
     """
+    guard_findings()
     decision = (request.POST.get("decision") or "").strip()
     if decision not in dict(SoftwareDecision.Decision.choices):
         messages.error(request, "Pick a decision before applying.")
@@ -18820,6 +18839,7 @@ def software_decision_create(request: HttpRequest) -> HttpResponse:
     (global / per-client / per-device). Match key is either a
     canonical_name (title-scope) or a publisher (publisher-scope, applies
     to every title from that publisher). Audited."""
+    guard_findings()
     canonical_name = (request.POST.get("canonical_name") or "").strip()
     publisher = (request.POST.get("publisher") or "").strip()
     decision = (request.POST.get("decision") or "").strip()
@@ -19007,6 +19027,7 @@ def computer_merge_split(request: HttpRequest, merge_id: str) -> HttpResponse:
 
     The automatic merge pass never merges a pair an operator split again.
     """
+    guard_findings()
     if not can_manage_lifecycle(request.user):
         raise PermissionDenied
     back = _safe_next(request, "home")
@@ -19319,6 +19340,7 @@ def merge_candidate_group_review(request: HttpRequest, candidate_id) -> HttpResp
         return redirect("merge_candidates_queue")
 
     if request.method == "POST":
+        guard_findings()
         if request.POST.get("confirmation") != "same_computer_group":
             messages.error(request, "Confirm that all records describe the same computer.")
             return redirect("merge_candidate_group_review", candidate_id=candidate.id)
@@ -19412,6 +19434,7 @@ def device_merge(
         return redirect("device_detail", org_slug=org_slug, device_id=device_id)
 
     if request.method == "POST":
+        guard_findings()
         if request.POST.get("confirmation") != "same_computer":
             messages.error(request, "Confirm that these are the same computer.")
             return redirect(

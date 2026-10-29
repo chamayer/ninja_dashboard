@@ -422,7 +422,7 @@ def _sync_findings(
                 'device', %s, '', %s::jsonb,
                 %s, %s, 'confirmed', 'open', %s, %s, %s
             )
-            ON CONFLICT (tenant_id, condition_key)
+            ON CONFLICT (tenant_id, condition_namespace, condition_key)
                 WHERE condition_key > '' AND status IN ('open', 'acknowledged', 'investigating', 'suppressed')
             DO UPDATE SET
                 client_id = EXCLUDED.client_id,
@@ -592,8 +592,7 @@ def project_and_evaluate(
     device_id: uuid.UUID | None = None,
 ) -> int:
     """Transactional entry point for corpus-refresh orchestration."""
-    with db.transaction() as cur:
-        cur.execute(f"SET LOCAL operations.tenant_id = {int(tenant_id)}")
+    with db.findings_transaction(int(tenant_id)) as cur:
         return sync(cur, tenant_id, device_id)
 
 

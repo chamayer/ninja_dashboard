@@ -73,8 +73,7 @@ def drain_resolution(batch_size: int = 200, *, refresh_current: bool = True) -> 
     """
     resolved_count = 0
     touched: set = set()
-    with db.transaction() as cur:
-        cur.execute(f"SET LOCAL operations.tenant_id = {TENANT_ID}")
+    with db.findings_transaction(TENANT_ID) as cur:
         load_identity_value_rejections(cur)
         identity_policies = load_identity_match_policies(cur, TENANT_ID)
         refresh_roaming_records(cur)
@@ -159,16 +158,14 @@ def drain_resolution(batch_size: int = 200, *, refresh_current: bool = True) -> 
 
     promoted_count = 0
     try:
-        with db.transaction() as cur:
-            cur.execute(f"SET LOCAL operations.tenant_id = {TENANT_ID}")
+        with db.findings_transaction(TENANT_ID) as cur:
             promoted_count = _promote_unmatched_clusters(cur, identity_policies)
     except Exception:
         log.exception("resolver: device promotion failed — continuing")
 
     merged_count = 0
     try:
-        with db.transaction() as cur:
-            cur.execute(f"SET LOCAL operations.tenant_id = {TENANT_ID}")
+        with db.findings_transaction(TENANT_ID) as cur:
             merged_count = merge_proven_splits(cur)
     except Exception:
         log.exception("resolver: automatic merge of proven splits failed — continuing")
@@ -187,8 +184,7 @@ def drain_resolution(batch_size: int = 200, *, refresh_current: bool = True) -> 
         log.exception("resolver: device cache projection failed — continuing")
 
     try:
-        with db.transaction() as cur:
-            cur.execute(f"SET LOCAL operations.tenant_id = {TENANT_ID}")
+        with db.findings_transaction(TENANT_ID) as cur:
             _sync_device_attributes(cur)
     except Exception:
         log.exception("resolver: layer propagation failed — continuing")
@@ -198,8 +194,7 @@ def drain_resolution(batch_size: int = 200, *, refresh_current: bool = True) -> 
 
     # After promotion and projection have settled the device rows this reads.
     try:
-        with db.transaction() as cur:
-            cur.execute(f"SET LOCAL operations.tenant_id = {TENANT_ID}")
+        with db.findings_transaction(TENANT_ID) as cur:
             counts = project_merge_candidates(cur)
         log.info("resolver: merge candidates %s", counts)
     except Exception:
@@ -372,7 +367,7 @@ def _maybe_create_candidate(
                 'device', %s, '', NULL, %s, %s,
                 'high', 'confirmed', 'open', NOW(), NOW(), NOW()
             )
-            ON CONFLICT (tenant_id, condition_key)
+            ON CONFLICT (tenant_id, condition_namespace, condition_key)
             WHERE condition_key > '' AND status IN ('open', 'acknowledged', 'investigating', 'suppressed')
             DO UPDATE SET
                 client_id = EXCLUDED.client_id,
@@ -663,7 +658,7 @@ SELECT gen_random_uuid(), 1, %s, %s, c.client_id,
        c.condition_key,
        'medium', c.confidence, 'open', NOW(), NOW(), NOW()
   FROM collisions c
-ON CONFLICT (tenant_id, condition_key)
+ON CONFLICT (tenant_id, condition_namespace, condition_key)
 WHERE condition_key > '' AND status IN ('open', 'acknowledged', 'investigating', 'suppressed')
 DO UPDATE SET
     client_id = EXCLUDED.client_id,
@@ -682,7 +677,7 @@ _IDENTITY_CONFLICT_FINDING_CLOSE = (
     + """
 UPDATE operations.findings finding
    SET status = 'resolved', closed_at = NOW(), last_seen_at = NOW()
- WHERE finding.tenant_id = %s
+ WHERE finding.tenant_id = %s AND finding.condition_namespace = 'entity'
    AND finding.finding_type_id = %s
    AND finding.status IN ('open', 'acknowledged')
    AND finding.condition_key LIKE 'identity_conflict:%%'
@@ -1782,7 +1777,7 @@ def _upsert_shared_serial_findings(cur, finding_type_id: int) -> int:
             GROUP BY tenant_id, client_id, serial_key
             HAVING COUNT(DISTINCT id) > 1
         ) sub
-        ON CONFLICT (tenant_id, condition_key)
+        ON CONFLICT (tenant_id, condition_namespace, condition_key)
         WHERE condition_key > '' AND status IN ('open', 'acknowledged', 'investigating', 'suppressed')
         DO UPDATE SET
             client_id = EXCLUDED.client_id,
@@ -2028,7 +2023,7 @@ def _sync_device_attributes(cur) -> None:
                       BTRIM(d.canonical_serial), LEFT(BTRIM(d.canonical_serial), 1), ''
                   )) = 0
               )
-            ON CONFLICT (tenant_id, condition_key)
+            ON CONFLICT (tenant_id, condition_namespace, condition_key)
             WHERE condition_key > '' AND status IN ('open', 'acknowledged', 'investigating', 'suppressed')
             DO UPDATE SET
                 client_id = EXCLUDED.client_id,
@@ -2088,7 +2083,8 @@ def _sync_device_attributes(cur) -> None:
             """
             UPDATE operations.findings f
                SET status = 'resolved', closed_at = NOW()
-             WHERE f.tenant_id = %s AND f.finding_type_id = %s
+             WHERE f.tenant_id = %s AND f.condition_namespace = 'entity'
+               AND f.finding_type_id = %s
                AND f.status IN ('open', 'acknowledged', 'investigating')
                AND NOT EXISTS (
                    SELECT 1 FROM operations.unmatched_source_groups u
@@ -2122,7 +2118,7 @@ def _sync_device_attributes(cur) -> None:
                 u.first_seen_at, u.last_seen_at, NOW()
             FROM operations.unmatched_source_groups u
             WHERE u.tenant_id = %s AND u.status = 'pending'
-            ON CONFLICT (tenant_id, condition_key)
+            ON CONFLICT (tenant_id, condition_namespace, condition_key)
             WHERE condition_key > '' AND status IN ('open', 'acknowledged', 'investigating', 'suppressed')
             DO UPDATE SET
                 client_id = EXCLUDED.client_id,
@@ -2190,7 +2186,7 @@ def _sync_device_attributes(cur) -> None:
             JOIN operations.devices d
               ON d.id = sub.device_id AND d.tenant_id = sub.tenant_id
             WHERE d.deleted_at IS NULL
-            ON CONFLICT (tenant_id, condition_key)
+            ON CONFLICT (tenant_id, condition_namespace, condition_key)
             WHERE condition_key > '' AND status IN ('open', 'acknowledged', 'investigating', 'suppressed')
             DO UPDATE SET
                 client_id = EXCLUDED.client_id,

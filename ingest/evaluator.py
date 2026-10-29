@@ -38,13 +38,15 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from ingest import db
-from ingest.condition_evidence import preserve_operator_episode
-from ingest import computer_listing, device_status_settings
+from ingest import computer_listing, db, device_status_settings, normalize
+from ingest.condition_evidence import (
+    ADMIN_FINDING_UPSERT_SQL,
+    admin_finding_upsert_params,
+    preserve_operator_episode,
+)
 from ingest.conditions import record_assessment
 from ingest.identity import findings as identity_findings
 from ingest.intel.windows_servicing import sync as sync_windows_servicing
-from ingest import normalize
 from ingest.normalize import is_usable_serial, load_identity_value_rejections
 from ingest.source_health import (
     SourceCollectionProblem,
@@ -57,6 +59,11 @@ from shared.conditions.contracts import (
     Participant,
     Readiness,
     Signal,
+)
+from shared.findings_contract import (
+    declare_findings_contract,
+    lock_tenant_session,
+    unlock_tenant_session,
 )
 
 log = logging.getLogger(__name__)
@@ -101,12 +108,15 @@ def _evaluation_transaction(tenant_id: int):
         try:
             with conn.transaction(), conn.cursor() as cur:
                 cur.execute("SELECT pg_advisory_lock(%s)", (lock,))
+                # The findings tenant guard, held for the session for the same reason.
+                lock_tenant_session(cur, tenant_id)
             with conn.transaction(), conn.cursor() as cur:
                 cur.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ")
-                cur.execute("SELECT set_config('operations.tenant_id', %s, true)", (str(tenant_id),))
+                declare_findings_contract(cur, tenant_id)
                 yield cur
         finally:
             with conn.transaction(), conn.cursor() as cur:
+                unlock_tenant_session(cur, tenant_id)
                 cur.execute("SELECT pg_advisory_unlock(%s)", (lock,))
 
 
@@ -349,9 +359,9 @@ def _source_failure_guard(
             )
         cur.execute(
             """
-            UPDATE operations.admin_findings
-               SET status = 'resolved', resolved_at = %s
-             WHERE tenant_id = %s
+            UPDATE operations.findings
+               SET status = 'resolved', closed_at = %s
+             WHERE tenant_id = %s AND condition_namespace = 'admin'
                AND condition_key LIKE 'source_failure:binding:%%'
                AND status IN ('open', 'acknowledged', 'investigating')
                AND NOT (condition_key = ANY(%s::text[]))
@@ -359,9 +369,9 @@ def _source_failure_guard(
                    SELECT 1 FROM operations.condition_assessments assessment
                    JOIN operations.condition_policy_versions policy
                      ON policy.version = assessment.policy_version AND policy.active
-                  WHERE assessment.tenant_id = operations.admin_findings.tenant_id
+                  WHERE assessment.tenant_id = operations.findings.tenant_id
                     AND assessment.row_kind = 'admin'
-                    AND assessment.finding_id = operations.admin_findings.id
+                    AND assessment.finding_id = operations.findings.id
                     AND (assessment.response->>'may_clear')::boolean IS TRUE
                     AND assessment.assessed_at >= now() -
                         (policy.policy->>'freshness_hours')::integer * interval '1 hour'
@@ -388,34 +398,9 @@ def _upsert_admin_finding(
     if preserved is not None:
         finding_id = uuid.UUID(preserved)
     else:
-        cur.execute(
-        """
-        INSERT INTO operations.admin_findings (
-            id, version, tenant_id, finding_type_id, condition_key, severity,
-            status, subject_ref, details, first_detected_at, last_detected_at
-        ) VALUES (
-            gen_random_uuid(), 1, %s, %s, %s, %s, 'open', %s::jsonb, %s::jsonb, %s, %s
-        )
-        ON CONFLICT (tenant_id, condition_key)
-            WHERE status IN ('open', 'acknowledged', 'investigating', 'suppressed')
-        DO UPDATE SET
-            last_detected_at = EXCLUDED.last_detected_at,
-            details          = EXCLUDED.details,
-            subject_ref      = EXCLUDED.subject_ref,
-            severity         = EXCLUDED.severity
-        RETURNING id
-        """,
-        (
-            tenant_id,
-            finding_type_id,
-            condition_key,
-            severity,
-            json.dumps(subject_ref),
-            json.dumps(details),
-            now,
-            now,
-        ),
-    )
+        cur.execute(ADMIN_FINDING_UPSERT_SQL + " RETURNING id", admin_finding_upsert_params(
+            tenant_id, finding_type_id, condition_key, severity, subject_ref, details, now
+        ))
         row = cur.fetchone()
         if row is None:
             return
@@ -808,7 +793,7 @@ def _resolve_lifecycle_findings_absent(
             """
             UPDATE operations.findings
                SET status = 'resolved', last_seen_at = %s
-             WHERE tenant_id = %s
+             WHERE tenant_id = %s AND condition_namespace = 'entity'
                AND finding_type_id = %s
                AND status IN ('open', 'acknowledged', 'investigating', 'suppressed')
                AND (%s::uuid IS NULL OR subject_id = %s)
@@ -833,7 +818,7 @@ def _resolve_lifecycle_findings_absent(
             """
             UPDATE operations.findings
                SET status = 'resolved', last_seen_at = %s
-             WHERE tenant_id = %s
+             WHERE tenant_id = %s AND condition_namespace = 'entity'
                AND finding_type_id = %s
                AND status IN ('open', 'acknowledged', 'investigating', 'suppressed')
                AND (%s::uuid IS NULL OR subject_id = %s)
@@ -890,7 +875,7 @@ def _upsert_lifecycle_finding(
                finding_details = %s::jsonb,
                last_seen_at = %s,
                last_detected_at = %s
-         WHERE tenant_id = %s
+         WHERE tenant_id = %s AND condition_namespace = 'entity'
            AND condition_key = %s
            AND status = ANY(%s)
         """,
@@ -1359,16 +1344,16 @@ def _evaluate_unknown_entities(cur: Any, tenant_id: int, now: datetime) -> int:
         count += 1
     cur.execute(
         """
-        UPDATE operations.admin_findings
-        SET status = 'resolved', resolved_at = %s
-        WHERE tenant_id = %s AND finding_type_id = %s
+        UPDATE operations.findings
+        SET status = 'resolved', closed_at = %s
+        WHERE tenant_id = %s AND condition_namespace = 'admin' AND finding_type_id = %s
           AND status IN ('open', 'acknowledged')
           AND NOT (condition_key = ANY(%s))
           AND EXISTS (
               SELECT 1 FROM operations.condition_assessments a
-               WHERE a.tenant_id = operations.admin_findings.tenant_id
+               WHERE a.tenant_id = operations.findings.tenant_id
                  AND a.row_kind = 'admin'
-                 AND a.finding_id = operations.admin_findings.id
+                 AND a.finding_id = operations.findings.id
                  AND (a.response->>'may_clear')::boolean IS TRUE
                  AND a.policy_version = (SELECT version FROM operations.condition_policy_versions WHERE active ORDER BY version DESC LIMIT 1)
                  AND a.assessed_at >= now() - (SELECT (policy->>'freshness_hours')::integer * interval '1 hour' FROM operations.condition_policy_versions WHERE active ORDER BY version DESC LIMIT 1)
@@ -1411,16 +1396,16 @@ def _evaluate_change_history_registry(cur: Any, tenant_id: int, now: datetime) -
         )
     cur.execute(
         """
-        UPDATE operations.admin_findings
-        SET status = 'resolved', resolved_at = %s
-        WHERE tenant_id = %s AND finding_type_id = %s
+        UPDATE operations.findings
+        SET status = 'resolved', closed_at = %s
+        WHERE tenant_id = %s AND condition_namespace = 'admin' AND finding_type_id = %s
           AND status IN ('open', 'acknowledged')
           AND NOT (condition_key = ANY(%s))
           AND EXISTS (
               SELECT 1 FROM operations.condition_assessments a
-               WHERE a.tenant_id = operations.admin_findings.tenant_id
+               WHERE a.tenant_id = operations.findings.tenant_id
                  AND a.row_kind = 'admin'
-                 AND a.finding_id = operations.admin_findings.id
+                 AND a.finding_id = operations.findings.id
                  AND (a.response->>'may_clear')::boolean IS TRUE
                  AND a.policy_version = (SELECT version FROM operations.condition_policy_versions WHERE active ORDER BY version DESC LIMIT 1)
                  AND a.assessed_at >= now() - (SELECT (policy->>'freshness_hours')::integer * interval '1 hour' FROM operations.condition_policy_versions WHERE active ORDER BY version DESC LIMIT 1)
@@ -1460,16 +1445,16 @@ def _evaluate_source_name_kinds(cur: Any, tenant_id: int, now: datetime) -> int:
         )
     cur.execute(
         """
-        UPDATE operations.admin_findings
-        SET status = 'resolved', resolved_at = %s
-        WHERE tenant_id = %s AND finding_type_id = %s
+        UPDATE operations.findings
+        SET status = 'resolved', closed_at = %s
+        WHERE tenant_id = %s AND condition_namespace = 'admin' AND finding_type_id = %s
           AND status IN ('open', 'acknowledged')
           AND NOT (condition_key = ANY(%s))
           AND EXISTS (
               SELECT 1 FROM operations.condition_assessments a
-               WHERE a.tenant_id = operations.admin_findings.tenant_id
+               WHERE a.tenant_id = operations.findings.tenant_id
                  AND a.row_kind = 'admin'
-                 AND a.finding_id = operations.admin_findings.id
+                 AND a.finding_id = operations.findings.id
                  AND (a.response->>'may_clear')::boolean IS TRUE
                  AND a.policy_version = (SELECT version FROM operations.condition_policy_versions WHERE active ORDER BY version DESC LIMIT 1)
                  AND a.assessed_at >= now() - (SELECT (policy->>'freshness_hours')::integer * interval '1 hour' FROM operations.condition_policy_versions WHERE active ORDER BY version DESC LIMIT 1)
@@ -1594,16 +1579,16 @@ def _evaluate_duplicate_records(cur: Any, tenant_id: int, now: datetime) -> int:
         count += 1
     cur.execute(
         """
-        UPDATE operations.admin_findings
-        SET status = 'resolved', resolved_at = %s
-        WHERE tenant_id = %s AND finding_type_id = %s
+        UPDATE operations.findings
+        SET status = 'resolved', closed_at = %s
+        WHERE tenant_id = %s AND condition_namespace = 'admin' AND finding_type_id = %s
           AND status IN ('open', 'acknowledged')
           AND NOT (condition_key = ANY(%s))
           AND EXISTS (
               SELECT 1 FROM operations.condition_assessments a
-               WHERE a.tenant_id = operations.admin_findings.tenant_id
+               WHERE a.tenant_id = operations.findings.tenant_id
                  AND a.row_kind = 'admin'
-                 AND a.finding_id = operations.admin_findings.id
+                 AND a.finding_id = operations.findings.id
                  AND (a.response->>'may_clear')::boolean IS TRUE
                  AND a.policy_version = (SELECT version FROM operations.condition_policy_versions WHERE active ORDER BY version DESC LIMIT 1)
                  AND a.assessed_at >= now() - (SELECT (policy->>'freshness_hours')::integer * interval '1 hour' FROM operations.condition_policy_versions WHERE active ORDER BY version DESC LIMIT 1)
@@ -2585,7 +2570,8 @@ def _auto_resolve(
             f"""
             UPDATE operations.findings f
             SET status = 'resolved', last_seen_at = %s
-            WHERE f.tenant_id = %s AND f.finding_type_id = %s
+            WHERE f.tenant_id = %s AND f.condition_namespace = 'entity'
+              AND f.finding_type_id = %s
               AND f.status IN ('open', 'acknowledged')
               AND (%s::uuid IS NULL OR f.subject_id = %s)
               AND EXISTS (
@@ -2646,7 +2632,7 @@ def _resolve_findings_absent(
         f"""
         UPDATE operations.findings
         SET status = 'resolved', last_seen_at = %s
-        WHERE tenant_id = %s
+        WHERE tenant_id = %s AND condition_namespace = 'entity'
           AND finding_type_id = %s
           AND status IN ('open', 'acknowledged')
           AND NOT (subject_id = ANY(%s::uuid[]))
@@ -2726,7 +2712,7 @@ def _upsert_finding(
             %s, %s, %s, 'open',
             %s, %s, %s
         )
-        ON CONFLICT (tenant_id, condition_key)
+        ON CONFLICT (tenant_id, condition_namespace, condition_key)
             WHERE condition_key > '' AND status IN ('open', 'acknowledged', 'investigating', 'suppressed')
         DO UPDATE SET
             client_id       = EXCLUDED.client_id,

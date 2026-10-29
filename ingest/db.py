@@ -9,6 +9,7 @@ prior state.
 from __future__ import annotations
 
 import logging
+import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from typing import Any
@@ -16,7 +17,11 @@ from typing import Any
 from psycopg import sql
 from psycopg_pool import ConnectionPool
 
-from shared.findings_contract import guard_findings_writes
+from shared.findings_contract import (
+    FINDING_CONTRACT,
+    database_findings_contract,
+    guard_findings_writes,
+)
 
 log = logging.getLogger(__name__)
 
@@ -54,6 +59,26 @@ def transaction() -> Iterator[Any]:
     with pool.connection() as conn:
         with conn.cursor() as cur:
             yield cur
+
+
+def wait_for_findings_contract(poll_seconds: float = 10.0) -> None:
+    """Block until the database accepts this build's findings contract.
+
+    Operations publishes the contract when it applies its migrations, which may
+    finish after this process starts. Until then no producer, Job or notifier
+    work is admitted; liveness stays up so the container is not restarted.
+    """
+    while True:
+        with transaction() as cur:
+            current = database_findings_contract(cur)
+        if current == FINDING_CONTRACT:
+            return
+        log.warning(
+            "Findings contract %s required, database has %s; waiting before admitting work",
+            FINDING_CONTRACT,
+            current,
+        )
+        time.sleep(poll_seconds)
 
 
 @contextmanager

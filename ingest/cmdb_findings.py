@@ -110,7 +110,7 @@ def _upsert(
             %s, %s, 'confirmed', 'open',
             %s, %s, %s
         )
-        ON CONFLICT (tenant_id, condition_key)
+        ON CONFLICT (tenant_id, condition_namespace, condition_key)
             WHERE condition_key > '' AND status IN ('open', 'acknowledged', 'investigating', 'suppressed')
         DO UPDATE SET
             client_id        = EXCLUDED.client_id,
@@ -317,8 +317,7 @@ def evaluate(*, dry_run: bool = True) -> dict[str, int]:
     now = datetime.now(UTC)
     counts: dict[str, int] = {}
 
-    with db.transaction() as cur:
-        cur.execute(f"SET LOCAL operations.tenant_id = {TENANT_ID}")
+    with db.findings_transaction(TENANT_ID) as cur:
 
         ft_stale = _finding_type_id(cur, "cmdb_asset_stale")
         ft_wrong = _finding_type_id(cur, "cmdb_link_incorrect")
