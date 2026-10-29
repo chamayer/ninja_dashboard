@@ -2,6 +2,27 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.131.0] — 2026-10-29 — Common-findings foundation (dormant)
+
+### Added
+
+- Migrations `0362`–`0363` (PLAN-003 R1) add dormant structures for one common
+  findings store: identity and structured-subject columns on findings with
+  defaults that leave existing writers unchanged, empty relationship, rule,
+  action-registry and legacy-reference tables (read-only to runtime roles), and
+  shared/exclusive tenant guard functions. Nothing uses them yet. `0362` builds
+  its index concurrently; `0363` briefly locks `findings` while adding columns.
+- `finding_state` and `source_action_requests` reject new rows that point at
+  another tenant's finding.
+- A local Compose stack builds a fresh development database through every SQL
+  and Django migration with the production role split.
+
+### Changed
+
+- Request handling puts the tenant scope around session loading and saving.
+- Search results keep the table within the page and show each source record's
+  last contact.
+
 ## [0.130.2] — 2026-10-29 — Search record states
 
 ### Fixed
