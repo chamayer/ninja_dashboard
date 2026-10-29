@@ -94,50 +94,70 @@ ALTER TABLE operations.findings ADD CONSTRAINT findings_structured_subject CHECK
     OR (subject_type IN ('source_group', 'source_group_set', 'legacy_context')
         AND subject_ref <> '{}'::jsonb));
 
--- Normalized subject for each admin row. A reference is used only when it
--- resolves to a row of the same tenant; otherwise the row keeps legacy context.
-CREATE TEMP TABLE m2_admin_subjects ON COMMIT DROP AS
-WITH parsed AS (
-    SELECT a.*,
-           t.name AS type_name,
-           CASE WHEN a.subject_ref->>'device_id' ~* '^[0-9a-f]{8}-([0-9a-f]{4}-){3}[0-9a-f]{12}$'
-                THEN (a.subject_ref->>'device_id')::uuid END AS ref_device,
-           CASE WHEN a.subject_ref->>'client_id' ~* '^[0-9a-f]{8}-([0-9a-f]{4}-){3}[0-9a-f]{12}$'
-                THEN (a.subject_ref->>'client_id')::uuid END AS ref_client,
-           CASE WHEN a.subject_ref->>'source_binding_id' ~* '^[0-9a-f]{8}-([0-9a-f]{4}-){3}[0-9a-f]{12}$'
-                THEN (a.subject_ref->>'source_binding_id')::uuid END AS ref_binding,
-           CASE WHEN a.subject_ref->>'signal_id' ~* '^[0-9a-f]{8}-([0-9a-f]{4}-){3}[0-9a-f]{12}$'
-                THEN (a.subject_ref->>'signal_id')::uuid END AS ref_signal
-      FROM operations.admin_findings a
-      JOIN operations.finding_types t ON t.id = a.finding_type_id
-), resolved AS (
-    SELECT p.*,
-           EXISTS (SELECT 1 FROM operations.devices d
-                    WHERE d.id = p.ref_device AND d.tenant_id = p.tenant_id) AS device_ok,
-           EXISTS (SELECT 1 FROM operations.clients c
-                    WHERE c.id = p.ref_client AND c.tenant_id = p.tenant_id) AS client_ok,
-           EXISTS (SELECT 1 FROM operations.source_bindings b
-                    WHERE b.id = p.ref_binding AND b.tenant_id = p.tenant_id) AS binding_ok
-      FROM parsed p
-)
-SELECT r.id,
-       CASE
-           WHEN r.ref_signal IS NOT NULL THEN 'platform_signal'
-           WHEN r.ref_binding IS NOT NULL AND r.binding_ok AND r.subject_ref ? 'external_id'
-               THEN 'source_group'
-           WHEN r.ref_binding IS NOT NULL AND r.binding_ok THEN 'source_binding'
-           WHEN r.ref_device IS NOT NULL AND r.device_ok THEN 'device'
-           WHEN r.ref_client IS NOT NULL AND r.client_ok THEN 'client'
-           WHEN r.subject_ref ? 'source_id' AND r.finding_details_external_ids IS NOT NULL
-               THEN 'source_group_set'
-           ELSE 'legacy_context'
-       END AS subject_type,
-       r.ref_signal, r.ref_binding, r.ref_device, r.ref_client,
-       r.binding_ok, r.device_ok, r.client_ok, r.finding_details_external_ids
-  FROM (SELECT resolved.*,
-               CASE WHEN jsonb_typeof(resolved.details->'external_ids') = 'array'
-                    THEN resolved.details->'external_ids' END AS finding_details_external_ids
-          FROM resolved) r;
+-- The normalized subject of an admin-style subject reference. A reference is used
+-- only when it resolves to a row of the same tenant; otherwise the finding keeps
+-- legacy context. The original reference is kept byte-for-byte as legacy_ref.
+-- Admin producers use this same function after the cutover.
+CREATE FUNCTION operations.normalize_admin_subject(p_tenant bigint, p_ref jsonb, p_details jsonb)
+RETURNS TABLE (subject_type text, subject_id uuid, client_id uuid, subject_ref jsonb)
+LANGUAGE sql STABLE SECURITY DEFINER
+SET search_path = pg_catalog, operations
+AS $fn$
+    WITH parsed AS (
+        SELECT CASE WHEN p_ref->>'device_id' ~* '^[0-9a-f]{8}-([0-9a-f]{4}-){3}[0-9a-f]{12}$'
+                    THEN (p_ref->>'device_id')::uuid END AS ref_device,
+               CASE WHEN p_ref->>'client_id' ~* '^[0-9a-f]{8}-([0-9a-f]{4}-){3}[0-9a-f]{12}$'
+                    THEN (p_ref->>'client_id')::uuid END AS ref_client,
+               CASE WHEN p_ref->>'source_binding_id' ~* '^[0-9a-f]{8}-([0-9a-f]{4}-){3}[0-9a-f]{12}$'
+                    THEN (p_ref->>'source_binding_id')::uuid END AS ref_binding,
+               CASE WHEN p_ref->>'signal_id' ~* '^[0-9a-f]{8}-([0-9a-f]{4}-){3}[0-9a-f]{12}$'
+                    THEN (p_ref->>'signal_id')::uuid END AS ref_signal,
+               CASE WHEN jsonb_typeof(p_details->'external_ids') = 'array'
+                    THEN p_details->'external_ids' END AS external_ids
+    ), resolved AS (
+        SELECT p.*,
+               EXISTS (SELECT 1 FROM operations.devices d
+                        WHERE d.id = p.ref_device AND d.tenant_id = p_tenant) AS device_ok,
+               EXISTS (SELECT 1 FROM operations.clients c
+                        WHERE c.id = p.ref_client AND c.tenant_id = p_tenant) AS client_ok,
+               EXISTS (SELECT 1 FROM operations.source_bindings b
+                        WHERE b.id = p.ref_binding AND b.tenant_id = p_tenant) AS binding_ok
+          FROM parsed p
+    ), kind AS (
+        SELECT r.*,
+               CASE
+                   WHEN r.ref_signal IS NOT NULL THEN 'platform_signal'
+                   WHEN r.ref_binding IS NOT NULL AND r.binding_ok AND p_ref ? 'external_id'
+                       THEN 'source_group'
+                   WHEN r.ref_binding IS NOT NULL AND r.binding_ok THEN 'source_binding'
+                   WHEN r.ref_device IS NOT NULL AND r.device_ok THEN 'device'
+                   WHEN r.ref_client IS NOT NULL AND r.client_ok THEN 'client'
+                   WHEN p_ref ? 'source_id' AND r.external_ids IS NOT NULL THEN 'source_group_set'
+                   ELSE 'legacy_context'
+               END AS subject_type
+          FROM resolved r
+    )
+    SELECT k.subject_type,
+           CASE k.subject_type
+               WHEN 'platform_signal' THEN k.ref_signal
+               WHEN 'source_binding' THEN k.ref_binding
+               WHEN 'device' THEN k.ref_device
+               WHEN 'client' THEN k.ref_client
+           END,
+           CASE WHEN k.client_ok THEN k.ref_client END,
+           jsonb_strip_nulls(jsonb_build_object(
+               'kind', k.subject_type,
+               'source_binding_id', CASE WHEN k.binding_ok THEN k.ref_binding::text END,
+               'source_id', p_ref->'source_id',
+               'external_id', p_ref->'external_id',
+               'external_ids', CASE WHEN k.subject_type = 'source_group_set' THEN k.external_ids END,
+               'signal_kind', p_ref->'signal_kind'))
+           || jsonb_build_object('legacy_ref', p_ref)
+      FROM kind k
+$fn$;
+REVOKE ALL ON FUNCTION operations.normalize_admin_subject(bigint, jsonb, jsonb) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION operations.normalize_admin_subject(bigint, jsonb, jsonb)
+    TO operations_app, ninja_ingest;
 
 INSERT INTO operations.findings (
     version, id, subject_type, subject_id, finding_details, severity, status,
@@ -145,31 +165,15 @@ INSERT INTO operations.findings (
     owner_id, tenant_id, client_id, condition_key, confidence, last_detected_at,
     snoozed_until, acknowledged_at, closed_at, subject_layer, subject_layer_entity_id,
     subject_ref, condition_namespace)
-SELECT a.version, a.id, s.subject_type,
-       CASE s.subject_type
-           WHEN 'platform_signal' THEN s.ref_signal
-           WHEN 'source_binding' THEN s.ref_binding
-           WHEN 'device' THEN s.ref_device
-           WHEN 'client' THEN s.ref_client
-       END,
+SELECT a.version, a.id, s.subject_type, s.subject_id,
        a.details, a.severity, a.status,
        NULL, a.first_detected_at, a.last_detected_at, NULL, a.finding_type_id,
-       NULL, a.tenant_id, CASE WHEN s.client_ok THEN s.ref_client END,
+       NULL, a.tenant_id, s.client_id,
        a.condition_key, '', a.last_detected_at,
        NULL, NULL, a.resolved_at, '', NULL,
-       jsonb_strip_nulls(jsonb_build_object(
-           'kind', s.subject_type,
-           'source_binding_id', CASE WHEN s.binding_ok THEN s.ref_binding::text END,
-           'source_id', a.subject_ref->'source_id',
-           'external_id', a.subject_ref->'external_id',
-           'external_ids', CASE WHEN s.subject_type = 'source_group_set'
-                                THEN s.finding_details_external_ids END,
-           'signal_kind', a.subject_ref->'signal_kind'))
-       || jsonb_build_object('legacy_ref', a.subject_ref),
-       'admin'
+       s.subject_ref, 'admin'
   FROM operations.admin_findings a
-  JOIN m2_admin_subjects s ON s.id = a.id;
-
+ CROSS JOIN LATERAL operations.normalize_admin_subject(a.tenant_id, a.subject_ref, a.details) s;
 INSERT INTO operations.finding_legacy_refs (tenant_id, legacy_kind, legacy_id, finding_id)
 SELECT a.tenant_id, 'admin_finding', a.id::text, a.id FROM operations.admin_findings a;
 -- Flush the findings FKs (deferred) before altering related tables.
@@ -222,6 +226,7 @@ ALTER TABLE operations.condition_participants
 ALTER TABLE operations.condition_assessments
     DROP CONSTRAINT IF EXISTS condition_assessments_tenant_finding_fkey;
 DROP INDEX operations.uq_findings_active_condition_key_scope;
+DROP FUNCTION IF EXISTS operations.normalize_admin_subject(bigint, jsonb, jsonb);
 DELETE FROM operations.finding_legacy_refs WHERE legacy_kind = 'admin_finding';
 DELETE FROM operations.finding_state s
  USING operations.findings f

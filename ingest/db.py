@@ -16,6 +16,8 @@ from typing import Any
 from psycopg import sql
 from psycopg_pool import ConnectionPool
 
+from shared.findings_contract import guard_findings_writes
+
 log = logging.getLogger(__name__)
 
 
@@ -51,6 +53,17 @@ def transaction() -> Iterator[Any]:
     rollback on exception (handled by the pool's connection context)."""
     with pool.connection() as conn:
         with conn.cursor() as cur:
+            yield cur
+
+
+@contextmanager
+def findings_transaction(tenant_id: int) -> Iterator[Any]:
+    """Like ``transaction`` for work that writes findings, assessments or
+    participants: the exclusive tenant guard and findings contract are taken
+    before anything else (PLAN-003 R2)."""
+    with pool.connection() as conn:
+        with conn.cursor() as cur:
+            guard_findings_writes(cur, tenant_id)
             yield cur
 
 
