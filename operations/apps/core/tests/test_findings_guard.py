@@ -86,9 +86,9 @@ def test_contract_command_refuses_a_mismatched_database():
             return_value=FINDING_CONTRACT - 1,
         ),
         mock.patch("apps.core.management.commands.check_findings_contract.connection"),
+        pytest.raises(CommandError, match="findings contract"),
     ):
-        with pytest.raises(CommandError, match="findings contract"):
-            call_command("check_findings_contract")
+        call_command("check_findings_contract")
 
 
 def test_database_contract_is_none_before_publication():
