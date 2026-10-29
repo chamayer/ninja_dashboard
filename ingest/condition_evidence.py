@@ -138,7 +138,8 @@ def successful_run_available(
 
 _NAMESPACES = {"findings": "entity", "admin_findings": "admin"}
 
-# Upserts an admin-namespace condition into the common findings ledger. The
+# Upserts an admin-namespace condition into the common findings ledger. Every
+# parameter is cast: in INSERT ... SELECT PostgreSQL cannot infer them. The
 # subject is normalized by the same database function the M2 conversion used,
 # and the producer's subject reference is kept as ``legacy_ref``. Append
 # ``RETURNING id`` when the caller needs the finding ID.
@@ -148,10 +149,12 @@ ADMIN_FINDING_UPSERT_SQL = """
         subject_type, subject_id, client_id, subject_ref, finding_details,
         first_seen_at, last_seen_at, last_detected_at, confidence, condition_namespace
     )
-    SELECT gen_random_uuid(), 1, %(tenant)s, %(finding_type)s, %(key)s, %(severity)s, 'open',
+    SELECT gen_random_uuid(), 1, %(tenant)s::bigint, %(finding_type)s::smallint,
+           %(key)s::varchar, %(severity)s::varchar, 'open',
            s.subject_type, s.subject_id, s.client_id, s.subject_ref, %(details)s::jsonb,
-           %(now)s, %(now)s, %(now)s, '', 'admin'
-      FROM operations.normalize_admin_subject(%(tenant)s, %(ref)s::jsonb, %(details)s::jsonb) s
+           %(now)s::timestamptz, %(now)s::timestamptz, %(now)s::timestamptz, '', 'admin'
+      FROM operations.normalize_admin_subject(
+               %(tenant)s::bigint, %(ref)s::jsonb, %(details)s::jsonb) s
     ON CONFLICT (tenant_id, condition_namespace, condition_key)
         WHERE condition_key > ''
           AND status IN ('open', 'acknowledged', 'investigating', 'suppressed')

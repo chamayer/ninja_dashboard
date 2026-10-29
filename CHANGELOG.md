@@ -2,6 +2,15 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.132.2] — 2026-10-29 — Admin finding upsert parameter types
+
+### Fixed
+
+- The shared admin finding upsert casts every parameter. PostgreSQL cannot infer
+  parameter types in `INSERT ... SELECT`, so in 0.132.0–0.132.1 platform-health,
+  evaluator and client-resolver admin findings failed to update (each run rolled
+  back; no data changed).
+
 ## [0.132.1] — 2026-10-29 — Contract check for active findings only
 
 ### Fixed
