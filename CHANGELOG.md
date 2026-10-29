@@ -2,6 +2,22 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.132.0] — 2026-10-29 — One findings ledger with guarded writers
+
+### Changed
+
+- Migrations `0364`–`0368` (PLAN-003 R2) move admin findings into the common
+  findings ledger with their IDs, history and original subject references.
+  `admin_findings` becomes a read-only view and the old table is kept as
+  `admin_findings_legacy`. Issue counts and pages show the same populations.
+- Every write to findings, condition assessments and participants now needs the
+  exclusive tenant guard and findings contract 4; database triggers reject any
+  other write, including from superuser connections. Finding state covers admin
+  findings, and cover rules are read from relationship rules kept in step with
+  the Finding types settings.
+- Ingest and the Jobs worker wait for contract 4 before starting work; Operations
+  refuses to serve if its database contract does not match.
+
 ## [0.131.0] — 2026-10-29 — Common-findings foundation (dormant)
 
 ### Added
