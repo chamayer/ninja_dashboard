@@ -4569,6 +4569,8 @@ class AdminFinding(VersionedTenantScopedModel):
     resolved_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
+        # PLAN-003 M4: a read-only view over admin-namespace rows of findings.
+        managed = False
         db_table = "admin_findings"
         constraints = (
             models.UniqueConstraint(
