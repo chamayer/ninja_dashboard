@@ -333,6 +333,7 @@ SELECT
     s1_exempt,
     ignored,
     evaluated_at,
+    false AS cross_client_conflict,
     COALESCE(
         ARRAY(
             SELECT DISTINCT match.value->>'platform'

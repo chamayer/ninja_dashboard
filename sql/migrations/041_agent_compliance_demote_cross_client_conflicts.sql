@@ -4,6 +4,8 @@
 -- promote them into the primary device workflow when a required platform is
 -- missing on the current customer and that same platform is observed under
 -- another customer with the same normalized device name.
+-- Keep added view columns at the end so CREATE OR REPLACE preserves the
+-- column positions established by prior migrations on a fresh database.
 
 CREATE OR REPLACE VIEW ninja_agent_compliance.v_device_work_queue AS
 WITH base AS (
@@ -117,7 +119,6 @@ SELECT
     source_failed_platforms,
     online_platforms,
     last_seen_anywhere,
-    cross_customer_actionable_platforms,
     issue,
     work_state,
     s1_exempt,
@@ -125,7 +126,8 @@ SELECT
     is_stale,
     cross_client_conflict,
     finding_signature,
-    evaluated_at
+    evaluated_at,
+    cross_customer_actionable_platforms
 FROM classified
 WHERE NOT ignored
   AND NOT is_unknown
@@ -222,7 +224,6 @@ SELECT
     source_failed_platforms,
     online_platforms,
     last_seen_anywhere,
-    cross_customer_actionable_platforms,
     CASE
         WHEN ignored THEN 'Ignored'
         WHEN cardinality(cross_customer_actionable_platforms) > 0 THEN 'Fix now'
@@ -249,7 +250,8 @@ SELECT
     END AS issue,
     s1_exempt,
     ignored,
+    evaluated_at,
     cross_client_conflict,
-    evaluated_at
+    cross_customer_actionable_platforms
 FROM prepared
 ORDER BY client_name, hostname;

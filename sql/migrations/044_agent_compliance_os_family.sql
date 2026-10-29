@@ -6,7 +6,7 @@
 -- compliance_matrix_current, so no extra column is needed for type.
 --
 -- CREATE OR REPLACE requires existing columns to stay in the same
--- order; os_family is appended at the very end of each SELECT list.
+-- order; preserve cross_client_conflict and append os_family.
 
 CREATE OR REPLACE VIEW ninja_agent_compliance.v_device_work_queue AS
 WITH base AS (
@@ -286,6 +286,7 @@ SELECT
     s1_exempt,
     ignored,
     evaluated_at,
+    cross_client_conflict,
     cross_customer_actionable_platforms,
     os_family
 FROM with_actionable

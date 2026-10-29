@@ -8,9 +8,10 @@
 -- under another customer, it is a Fix now item. The broader
 -- same-name-across-customers noise stays demoted.
 --
--- cross_customer_actionable_platforms is appended at the end of each
--- view (CREATE OR REPLACE requires preserving existing column order;
--- new columns must go at the end). The classified CTE is split into
+-- cross_client_conflict and cross_customer_actionable_platforms are
+-- appended at the end of v_all_devices_human; the latter is appended at
+-- the end of v_device_work_queue (CREATE OR REPLACE requires preserving
+-- existing column order; new columns must go at the end). The classified CTE is split into
 -- two stages so the work_state CASE can reference the new column
 -- without the SQL alias-self-reference error.
 
@@ -253,6 +254,7 @@ SELECT
     s1_exempt,
     ignored,
     evaluated_at,
+    cross_client_conflict,
     cross_customer_actionable_platforms
 FROM with_actionable
 ORDER BY client_name, hostname;

@@ -25,7 +25,9 @@ INSERT INTO intel.eol_managed_product_rules (
     rule_key, title_pattern, publisher_pattern, eol_product,
     version_pattern, eol_cycle, priority, notes
 )
-VALUES
+SELECT seed.rule_key, seed.title_pattern, seed.publisher_pattern, seed.eol_product,
+       seed.version_pattern, seed.eol_cycle, seed.priority, seed.notes
+FROM (VALUES
     -- Existing verified browser/editor/runtime coverage, now self-maintaining.
     ('chrome', 'google chrome', '', 'chrome', '', '', 10,
      'Exact Google Chrome product title.'),
@@ -88,6 +90,9 @@ VALUES
      'VMware vCenter Server family.'),
     ('libreoffice', 'libreoffice%', '', 'libreoffice', '', '', 90,
      'LibreOffice suite family.')
+) AS seed(rule_key, title_pattern, publisher_pattern, eol_product,
+          version_pattern, eol_cycle, priority, notes)
+JOIN intel.eol_products product ON product.name = seed.eol_product
 ON CONFLICT (rule_key) DO UPDATE SET
     title_pattern     = EXCLUDED.title_pattern,
     publisher_pattern = EXCLUDED.publisher_pattern,

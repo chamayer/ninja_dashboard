@@ -1,0 +1,260 @@
+services:
+  postgres:
+    build:
+      context: .
+      dockerfile: docker/postgres.Dockerfile
+    env_file:
+      - .env.dev
+    environment:
+      POSTGRES_DB: ninja_dev
+      POSTGRES_USER: ninja_dev
+      PGDATA: /var/lib/postgresql/data/pgdata
+    ports:
+      - "127.0.0.1:5433:5432"
+    volumes:
+      - ninja-dev-postgres-data:/var/lib/postgresql/data
+      - ./docker/dev-postgres-init/10_operations_roles.sh:/docker-entrypoint-initdb.d/10_operations_roles.sh:ro
+    healthcheck:
+      test: ["CMD", "pg_isready", "-h", "/var/run/postgresql", "-U", "ninja_dev", "-d", "ninja_dev"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  ingest-migrations:
+    build:
+      context: .
+      dockerfile: ingest/Dockerfile
+    command: ["python", "-m", "ingest.migrations", "--through", "072_intel_schema"]
+    env_file:
+      - .env.dev
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: ninja_dev
+      POSTGRES_USER: ninja_dev
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  operations-migrations-bootstrap:
+    build:
+      context: .
+      dockerfile: operations/Dockerfile
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >-
+        export OPERATIONS_DB_USER="$$OPERATIONS_MIGRATE_DB_USER";
+        export OPERATIONS_DB_PASSWORD="$$OPERATIONS_MIGRATE_DB_PASSWORD";
+        if python manage.py showmigrations operations | grep -q '\[X\] 0282_software_device_readiness'; then
+          echo 'Operations schema already bootstrapped';
+        else
+          python manage.py migrate operations 0133_finding_type_device_exposure --noinput;
+        fi
+    env_file:
+      - .env.dev
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      OPERATIONS_DB_NAME: ninja_dev
+      OPERATIONS_ENV_FILE: /app/envdir/.env
+      DJANGO_SETTINGS_MODULE: config.settings.dev
+    depends_on:
+      postgres:
+        condition: service_healthy
+      ingest-migrations:
+        condition: service_completed_successfully
+
+  ingest-schema-bootstrap:
+    build:
+      context: .
+      dockerfile: ingest/Dockerfile
+    command: ["python", "-m", "ingest.migrations", "--through", "084_exposure_only_actionable_types"]
+    env_file:
+      - .env.dev
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: ninja_dev
+      POSTGRES_USER: ninja_dev
+    depends_on:
+      postgres:
+        condition: service_healthy
+      operations-migrations-bootstrap:
+        condition: service_completed_successfully
+
+  dev-ninja-core-grants:
+    image: postgres:16-alpine
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >-
+        export PGPASSWORD="$$POSTGRES_PASSWORD";
+        psql --host postgres --username ninja_dev --dbname ninja_dev
+        --set=ON_ERROR_STOP=1
+        --file=/dev-bootstrap/grant_operations_ninja_core.sql
+    env_file:
+      - .env.dev
+    volumes:
+      - ./docker/dev-postgres-init/grant_operations_ninja_core.sql:/dev-bootstrap/grant_operations_ninja_core.sql:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      ingest-schema-bootstrap:
+        condition: service_completed_successfully
+
+  operations-jobs-bootstrap:
+    build:
+      context: .
+      dockerfile: operations/Dockerfile
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >-
+        export OPERATIONS_DB_USER="$$OPERATIONS_MIGRATE_DB_USER";
+        export OPERATIONS_DB_PASSWORD="$$OPERATIONS_MIGRATE_DB_PASSWORD";
+        if python manage.py showmigrations operations | grep -q '\[X\] 0282_software_device_readiness'; then
+          echo 'Jobs schema already bootstrapped';
+        else
+          python manage.py migrate operations 0184_jobs_admission_and_schedule_apis --noinput;
+        fi
+    env_file:
+      - .env.dev
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      OPERATIONS_DB_NAME: ninja_dev
+      OPERATIONS_ENV_FILE: /app/envdir/.env
+      DJANGO_SETTINGS_MODULE: config.settings.dev
+    depends_on:
+      postgres:
+        condition: service_healthy
+      ingest-schema-bootstrap:
+        condition: service_completed_successfully
+
+  job-definitions:
+    build:
+      context: .
+      dockerfile: ingest/Dockerfile
+    command: ["python", "-m", "ingest.register_job_definitions"]
+    env_file:
+      - .env.dev
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: ninja_dev
+      POSTGRES_USER: ninja_dev
+    depends_on:
+      postgres:
+        condition: service_healthy
+      ingest-migrations:
+        condition: service_completed_successfully
+      operations-jobs-bootstrap:
+        condition: service_completed_successfully
+
+  operations-readiness-bootstrap:
+    build:
+      context: .
+      dockerfile: operations/Dockerfile
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >-
+        export OPERATIONS_DB_USER="$$OPERATIONS_MIGRATE_DB_USER";
+        export OPERATIONS_DB_PASSWORD="$$OPERATIONS_MIGRATE_DB_PASSWORD";
+        if python manage.py showmigrations operations | grep -q '\[X\] 0282_software_device_readiness'; then
+          echo 'Readiness schema already bootstrapped';
+        else
+          python manage.py migrate operations 0282_software_device_readiness --noinput;
+        fi
+    env_file:
+      - .env.dev
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      OPERATIONS_DB_NAME: ninja_dev
+      OPERATIONS_ENV_FILE: /app/envdir/.env
+      DJANGO_SETTINGS_MODULE: config.settings.dev
+    depends_on:
+      postgres:
+        condition: service_healthy
+      job-definitions:
+        condition: service_completed_successfully
+
+  ingest:
+    build:
+      context: .
+      dockerfile: ingest/Dockerfile
+    env_file:
+      - .env.dev
+    restart: unless-stopped
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: ninja_dev
+      POSTGRES_USER: ninja_dev
+      SCHEDULED_JOBS_ENABLED: "false"
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8090/readyz')"
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 10s
+    depends_on:
+      postgres:
+        condition: service_healthy
+      operations-readiness-bootstrap:
+        condition: service_completed_successfully
+    ports:
+      - "127.0.0.1:8092:8090"
+
+  jobs-worker:
+    build:
+      context: .
+      dockerfile: ingest/Dockerfile
+    command: ["python", "-m", "ingest.jobs_worker"]
+    env_file:
+      - .env.dev
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: ninja_dev
+      POSTGRES_USER: ninja_dev
+    healthcheck:
+      disable: true
+    depends_on:
+      postgres:
+        condition: service_healthy
+      ingest:
+        condition: service_healthy
+      operations:
+        condition: service_healthy
+
+  operations:
+    build:
+      context: .
+      dockerfile: operations/Dockerfile
+    env_file:
+      - .env.dev
+    restart: unless-stopped
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      OPERATIONS_DB_NAME: ninja_dev
+      OPERATIONS_ENV_FILE: /app/envdir/.env
+      DJANGO_SETTINGS_MODULE: config.settings.dev
+    volumes:
+      - ./.env.dev:/app/envdir/.env:ro
+    ports:
+      - "127.0.0.1:3003:3002"
+      - "127.0.0.1:8093:8091"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      operations-readiness-bootstrap:
+        condition: service_completed_successfully
+      dev-ninja-core-grants:
+        condition: service_completed_successfully
+
+volumes:
+  ninja-dev-postgres-data:

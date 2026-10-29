@@ -1,0 +1,51 @@
+# Optional local-only build overlay for workstations whose HTTPS inspection
+# re-signs package-index traffic. Use with docker-compose.dev.yml.
+services:
+  operations-migrations-bootstrap:
+    build:
+      secrets:
+        - workstation_ca
+
+  ingest-schema-bootstrap:
+    build:
+      secrets:
+        - workstation_ca
+
+  operations-jobs-bootstrap:
+    build:
+      secrets:
+        - workstation_ca
+
+  job-definitions:
+    build:
+      secrets:
+        - workstation_ca
+
+  operations-readiness-bootstrap:
+    build:
+      secrets:
+        - workstation_ca
+
+  ingest-migrations:
+    build:
+      secrets:
+        - workstation_ca
+
+  ingest:
+    build:
+      secrets:
+        - workstation_ca
+
+  jobs-worker:
+    build:
+      secrets:
+        - workstation_ca
+
+  operations:
+    build:
+      secrets:
+        - workstation_ca
+
+secrets:
+  workstation_ca:
+    environment: NINJA_LOCAL_CA_PEM

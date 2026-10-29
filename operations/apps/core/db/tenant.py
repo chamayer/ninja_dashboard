@@ -64,7 +64,9 @@ class TenantGUCAssertionWrapper:
             return execute(sql, params, many, context)
 
         normalized = sql.strip().lower()
-        if normalized.startswith(("set ", "show ", "select current_setting")):
+        if normalized.startswith(("set ", "show ", "select current_setting")) or (
+            normalized == "select set_config('operations.tenant_id', %s, true)"
+        ):
             return execute(sql, params, many, context)
 
         with connection.cursor() as cursor:

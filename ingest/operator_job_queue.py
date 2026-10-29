@@ -618,8 +618,7 @@ def _run_source_refresh(progress: "V1JobProgress") -> JobExecutionResult:
 
 
 def produce_due_schedules() -> int:
-    """Elect a short-lived leader and atomically admit each due durable schedule."""
-    admitted = 0
+    """Renew scheduler liveness and optionally admit due durable schedules."""
     record_runtime_heartbeat(
         "scheduler",
         SCHEDULER_RUNTIME_ID,
@@ -629,6 +628,9 @@ def produce_due_schedules() -> int:
             "poll_seconds": 60,
         },
     )
+    if not settings.SCHEDULED_JOBS_ENABLED:
+        return 0
+    admitted = 0
     if not reconcile_schedule_catalog() or not reconcile_source_refresh_schedules():
         return admitted
     try:

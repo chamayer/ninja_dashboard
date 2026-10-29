@@ -8,6 +8,28 @@ from .base import *
 
 DEBUG = True
 
+# Full local Compose uses the same PostgreSQL role split as production.
+# The base settings intentionally remain SQLite for lightweight module checks.
+DATABASES = {
+    "default": {
+        "ENGINE": "django.db.backends.postgresql",
+        "NAME": os.environ.get("OPERATIONS_DB_NAME", "ninja_dev"),
+        "USER": os.environ.get("OPERATIONS_DB_USER", "operations_app"),
+        "PASSWORD": os.environ.get("OPERATIONS_DB_PASSWORD", ""),
+        "HOST": os.environ.get("POSTGRES_HOST", "postgres"),
+        "PORT": os.environ.get("POSTGRES_PORT", "5432"),
+        "ATOMIC_REQUESTS": True,
+        "OPTIONS": {
+            "options": "-c search_path=operations,public",
+            "connect_timeout": 5,
+            "application_name": "operations-dev",
+        },
+    },
+}
+
+OPERATIONS_MIGRATE_DB_USER = os.environ.get("OPERATIONS_MIGRATE_DB_USER", "operations_migrate")
+OPERATIONS_MIGRATE_DB_PASSWORD = os.environ.get("OPERATIONS_MIGRATE_DB_PASSWORD", "")
+
 # Local development host list.
 ALLOWED_HOSTS = ["*"]
 

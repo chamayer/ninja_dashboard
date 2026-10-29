@@ -18,7 +18,8 @@
 
 INSERT INTO operations.eol_product_map
     (tenant_id, raw_pattern, eol_product, priority, notes)
-VALUES
+SELECT seed.tenant_id, seed.raw_pattern, seed.eol_product, seed.priority, seed.notes
+FROM (VALUES
     -- 3,285 devices, 781 already on end-of-life releases.
     (1, 'google chrome',     'chrome',            10,
      'Verified 2026-08-10: 121 installed versions match Chrome release cycles.'),
@@ -32,6 +33,8 @@ VALUES
     (1, 'powershell 7%',     'powershell',        10,
      'Verified 2026-08-10. Windows PowerShell 5.x is OS-bundled and follows the '
      'OS lifecycle, so it is deliberately not mapped here.')
+) AS seed(tenant_id, raw_pattern, eol_product, priority, notes)
+JOIN intel.eol_products product ON product.name = seed.eol_product
 ON CONFLICT DO NOTHING;
 
 -- What is still unmapped, ranked by how much it would matter.
