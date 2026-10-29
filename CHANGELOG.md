@@ -2,6 +2,14 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.132.3] — 2026-10-29 — Jobs dependency closure parameter types
+
+### Fixed
+
+- Closing a Jobs dependency finding covered by an upstream failure casts its
+  parameters inside `jsonb_build_object`; untyped, they stopped the platform
+  health evaluation (runs rolled back; no data changed).
+
 ## [0.132.2] — 2026-10-29 — Admin finding upsert parameter types
 
 ### Fixed

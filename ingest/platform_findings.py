@@ -758,8 +758,8 @@ def _eval_jobs_unmet_dependencies(
                        SET status = 'resolved', closed_at = %s,
                            finding_details = finding_details || jsonb_build_object(
                                'resolution_reason', 'covered_by_upstream_job_failure',
-                               'covered_by_condition_key', %s,
-                               'covered_by_finding_type', %s,
+                               'covered_by_condition_key', %s::text,
+                               'covered_by_finding_type', %s::text,
                                'resolution_recorded_at', %s::text
                            )
                      WHERE tenant_id = %s AND condition_namespace = 'admin'
