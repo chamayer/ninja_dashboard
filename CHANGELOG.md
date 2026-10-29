@@ -2,6 +2,15 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.130.2] — 2026-10-29 — Search record states
+
+### Fixed
+
+- Search results show dedicated Record state (Present/Withdrawn) and Reported
+  state (Online/Offline/unknown) columns for source records, matching the Source
+  Records page. Reported state comes from each record's existing restricted
+  metadata view. No migration is required.
+
 ## [0.130.1] — 2026-10-28 — Per-record source status and contact
 
 ### Fixed

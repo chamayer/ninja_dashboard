@@ -4155,7 +4155,7 @@ def _search_source_records(q: str) -> list[dict[str, object]]:
                      WHEN observation.reported_name ILIKE %(p)s THEN 'name at source'
                      WHEN observation.canonical_serial ILIKE %(p)s THEN 'serial number'
                      ELSE 'VM UUID'
-                   END
+                   END, observation.reported_online
               FROM operations.v_entity_observation_admin_metadata observation
               JOIN operations.source_instances instance
                 ON instance.tenant_id = observation.tenant_id
@@ -4190,6 +4190,7 @@ def _search_source_records(q: str) -> list[dict[str, object]]:
                 "canonical_serial": row[7], "vm_uuid": row[8], "active": row[9],
                 "device_id": row[10], "computer_hostname": row[11],
                 "client_slug": row[12], "client_name": row[13], "matched": row[14],
+                "reported_online": row[15],
             }
             for row in cur.fetchall()
         ]
