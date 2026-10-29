@@ -213,7 +213,8 @@ def test_platform_health_assessments_use_admin_row_kind():
 def test_platform_health_absent_resolution_targets_admin_findings():
     source = (Path(__file__).parents[1] / "platform_findings.py").read_text()
     section = source[source.index("def _resolve_admin_absent"):source.index("def _eval_source_failures")]
-    assert "UPDATE operations.admin_findings" in section
+    assert "UPDATE operations.findings" in section
+    assert "finding.condition_namespace = 'admin'" in section
     assert "assessment.row_kind = 'admin'" in section
     assert "may_clear" in section
 
@@ -221,14 +222,18 @@ def test_platform_health_absent_resolution_targets_admin_findings():
 def test_platform_health_emits_admin_findings_not_entity_findings():
     source = (Path(__file__).parents[1] / "platform_findings.py").read_text()
     section = source[source.index("def _upsert_admin_finding"):source.index("def evaluate")]
-    assert "INSERT INTO operations.admin_findings" in section
+    shared = (Path(__file__).parents[1] / "condition_evidence.py").read_text()
+    upsert = shared[shared.index("ADMIN_FINDING_UPSERT_SQL"):shared.index("def admin_finding_upsert_params")]
+    assert "ADMIN_FINDING_UPSERT_SQL" in section
     assert "INSERT INTO operations.findings" not in section
     assert "preserve_operator_episode" in section
+    assert "'', 'admin'" in upsert
+    assert "normalize_admin_subject" in upsert
 
 
 def test_platform_health_uses_parameter_safe_local_tenant_context():
     source = (Path(__file__).parents[1] / "platform_findings.py").read_text()
-    assert "SELECT set_config('operations.tenant_id', %s, TRUE)" in source
+    assert "db.findings_transaction(TENANT_ID)" in source
     assert "SET LOCAL operations.tenant_id = %s" not in source
 
 

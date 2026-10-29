@@ -228,9 +228,7 @@ ALTER TABLE operations.condition_assessments
 DROP INDEX operations.uq_findings_active_condition_key_scope;
 DROP FUNCTION IF EXISTS operations.normalize_admin_subject(bigint, jsonb, jsonb);
 DELETE FROM operations.finding_legacy_refs WHERE legacy_kind = 'admin_finding';
-DELETE FROM operations.finding_state s
- USING operations.findings f
- WHERE f.id = s.finding_id AND f.condition_namespace = 'admin';
+
 DELETE FROM operations.findings WHERE condition_namespace = 'admin';
 CREATE UNIQUE INDEX uq_findings_active_condition_key_scope
     ON operations.findings (tenant_id, condition_key)

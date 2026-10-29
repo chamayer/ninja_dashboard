@@ -25,8 +25,11 @@ def test_platform_findings_refresh_severity_and_current_subject_reference():
     source = _source("platform_findings.py")
     section = source[source.index("def _upsert_admin_finding"):source.index("def _record_platform_assessment")]
 
-    assert "subject_ref = EXCLUDED.subject_ref" in section
-    assert "severity = EXCLUDED.severity" in section
+    shared = _source("condition_evidence.py")
+    upsert = shared[shared.index("ADMIN_FINDING_UPSERT_SQL"):shared.index("def admin_finding_upsert_params")]
+    assert "ADMIN_FINDING_UPSERT_SQL" in section
+    assert "subject_ref = EXCLUDED.subject_ref" in upsert
+    assert "severity = EXCLUDED.severity" in upsert
     assert 'severity="critical"' in source
 
 

@@ -6835,7 +6835,6 @@ def finding_suppress(request: HttpRequest, finding_id: str) -> HttpResponse:
 @require_POST
 def findings_bulk_action(request: HttpRequest) -> HttpResponse:
     """Apply one action across multiple selected findings."""
-    guard_findings()
     ids = list(dict.fromkeys(request.POST.getlist("ids")))
     action = (request.POST.get("action") or "").strip()
     if not ids:
@@ -6846,6 +6845,7 @@ def findings_bulk_action(request: HttpRequest) -> HttpResponse:
     if registered_action is not None:
         if not can_run_action(request.user, registered_action):
             raise PermissionDenied
+        guard_findings()
         if registered_action.key == BULK_RETIRE_COMPUTERS.key:
             return _retire_selected_computers(request, ids, registered_action)
         if registered_action.key == ARCHIVE_HUDU_ASSETS.key:
@@ -6865,6 +6865,7 @@ def findings_bulk_action(request: HttpRequest) -> HttpResponse:
         messages.warning(request, "That action is not available.")
         return redirect(request.POST.get("next") or "findings_queue")
 
+    guard_findings()
     now = timezone.now()
     qs = Finding.objects.filter(tenant_id=1, id__in=ids)
     policy_count = qs.filter(finding_type__name__in=_SOFTWARE_POLICY_CANDIDATE_TYPES).count()
@@ -19027,7 +19028,6 @@ def computer_merge_split(request: HttpRequest, merge_id: str) -> HttpResponse:
 
     The automatic merge pass never merges a pair an operator split again.
     """
-    guard_findings()
     if not can_manage_lifecycle(request.user):
         raise PermissionDenied
     back = _safe_next(request, "home")
@@ -19035,6 +19035,7 @@ def computer_merge_split(request: HttpRequest, merge_id: str) -> HttpResponse:
     if not reason:
         messages.error(request, "A reason is required to split a merge.")
         return redirect(back)
+    guard_findings()
     try:
         with transaction.atomic(), connection.cursor() as cur:
             cur.execute("SET LOCAL operations.tenant_id = 1")

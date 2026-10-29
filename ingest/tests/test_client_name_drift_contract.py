@@ -89,8 +89,11 @@ def test_client_mapping_findings_refresh_current_evaluation_fields():
         source.index("def _emit_unnamed_source_group_finding") : source.index("def _emit_finding")
     ]
 
-    assert "subject_ref      = EXCLUDED.subject_ref" in emit
-    assert "severity         = EXCLUDED.severity" in emit
+    shared = (Path(__file__).parents[1] / "condition_evidence.py").read_text()
+    upsert = shared[shared.index("ADMIN_FINDING_UPSERT_SQL"):shared.index("def admin_finding_upsert_params")]
+    assert "ADMIN_FINDING_UPSERT_SQL" in emit
+    assert "subject_ref = EXCLUDED.subject_ref" in upsert
+    assert "severity = EXCLUDED.severity" in upsert
     assert "severity = EXCLUDED.severity" in unnamed
 
 
