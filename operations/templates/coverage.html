@@ -11,6 +11,12 @@
 @media (max-width:600px) { .coverage-cards { grid-template-columns:repeat(2, minmax(0, 1fr)); } }
 .coverage-card { border:1px solid var(--border); border-radius:6px; background:var(--surface); padding:0.65rem 0.7rem; }
 .coverage-card h2 { margin:0 0 0.4rem; font-size:0.95rem; }
+.coverage-operations-cards { display:grid; grid-template-columns:repeat(4, minmax(0, 1fr)); gap:0.6rem; margin-bottom:1rem; }
+@media (max-width:600px) { .coverage-operations-cards { grid-template-columns:repeat(2, minmax(0, 1fr)); } }
+.coverage-operations-count { display:block; padding:0.45rem; border-radius:4px; text-decoration:none; }
+.coverage-operations-count strong { display:block; font-size:1.6rem; font-variant-numeric:tabular-nums; }
+.coverage-operations-count span { display:block; font-size:0.78rem; }
+.coverage-operations-count:hover { filter:brightness(0.95); }
 .coverage-record-total, .coverage-computer-label { color:var(--muted); font-weight:600; text-transform:uppercase; letter-spacing:0.04em; }
 .coverage-record-total { margin:-0.2rem 0 0.4rem; padding-bottom:0.35rem; border-bottom:1px solid var(--border); font-size:0.7rem; }
 .coverage-computer-label { margin:0 0 0.15rem 0.3rem; font-size:0.78rem; }
@@ -121,20 +127,27 @@
     <h2>All current Computers</h2>
     <p>These counts are not changed by the filters below. {% if requirements_evaluated_at %}Requirements were last evaluated {{ requirements_evaluated_at|timesince }} ago ({{ requirements_evaluated_at|date:"M j, H:i" }}).{% else %}Requirement results are not available yet; they appear after the next evaluator run.{% endif %}</p>
 </div>
-<div class="coverage-cards">
-    <section class="coverage-card" aria-label="Operations Computer statuses">
-        <h2>Operations</h2>
-        <div class="coverage-record-total">Across all sources</div>
-        <div class="coverage-computer-label"><a href="{{ operations_card.total_url }}">Computers ({{ operations_card.computer_total }})</a></div>
-        <div class="coverage-counts">
-            {% for count in operations_card.counts %}
-            <a class="coverage-count coverage-{{ count.name|slugify }}{% if not count.count %} is-zero{% endif %}" href="{{ count.url }}">
-                <span>{{ count.name }}</span><strong>{{ count.count }}</strong>
-            </a>
-            {% endfor %}
-        </div>
-        <p class="muted" style="margin:0.45rem 0 0; font-size:0.75rem;">Each Computer counts once. Online in any source; otherwise offline with contact in the last {{ active_device_days }} days, or stale.</p>
+<div class="coverage-result-heading">
+    <h2>Operations</h2>
+    <p>Across all sources. Each Computer counts once. Online in any source; otherwise offline with contact in the last {{ active_device_days }} days, or stale.</p>
+</div>
+<div class="coverage-operations-cards" aria-label="Operations Computer statuses">
+    <section class="coverage-card">
+        <h2>All Computers</h2>
+        <a class="coverage-operations-count" href="{{ operations_card.total_url }}" title="Clear filters and show all current Computers" aria-label="All Computers: {{ operations_card.computer_total }}">
+            <strong>{{ operations_card.computer_total }}</strong><span>Computers</span>
+        </a>
     </section>
+    {% for count in operations_card.counts %}
+    <section class="coverage-card">
+        <h2>{{ count.name }}</h2>
+        <a class="coverage-operations-count coverage-{{ count.name|slugify }}" href="{{ count.url }}" aria-label="{{ count.name }} Computers: {{ count.count }}">
+            <strong>{{ count.count }}</strong><span>Computers</span>
+        </a>
+    </section>
+    {% endfor %}
+</div>
+<div class="coverage-cards">
     {% for card in platform_cards %}
     <section class="coverage-card">
         <h2>{{ card.platform }}</h2>
