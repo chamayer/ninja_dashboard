@@ -19,17 +19,14 @@ validation results, or completed-plan summaries here.
 
 ## Next action — active plan routing
 
-- **PLAN-004 — active, design revision 8 accepted 2026-10-29.** Next: approved R0–R4 order
-  (PLAN-003 foundation first, PLAN-004 in R4), per the
-  [handoff](operations/docs/plans/PLAN-004-source-record-review.md);
-  implementation remains gated.
-  See the [handoff](operations/docs/plans/PLAN-004-source-record-review.md) and
-  [final design](operations/docs/plans/PLAN-004-source-record-final-design.md).
+- **PLAN-004 — active; R4 Stages A, C and B released 2026-10-30 (0.135.0–0.137.0).**
+  Next: review the one-time reassessment's changed/ambiguous/unmatched rows and the
+  R4 follow-ups in `operations/TODO.md`; watch ingest timings (R4-2 waiver). See the
+  [Operations handoff](operations/BLUEPRINT.md#r4-implementation-started-2026-10-30-branch-plan003-r3-base-7a8b67b)
+  and [final design](operations/docs/plans/PLAN-004-source-record-final-design.md).
 
-
-- **PLAN-003 — active.** R1 (0.131.0), R2 (0.132.3) and R3 unified queue (0.134.0, follow-ups 0.134.1) released;
-  next is R4 (PLAN-004), decisions recorded 2026-10-30 (unlocked intake + trigger; see the
-  [Operations handoff](operations/BLUEPRINT.md#plan-004--identity-and-source-record-maintenance-review)).
+- **PLAN-003 — active.** R1–R3 released; R4 (PLAN-004) released 2026-10-30 (0.135.0–0.137.0).
+  Next: final acceptance testing of R0–R4 (user, after the plan).
 
 - **PLAN-026 — active, approval-gated.** PLAN-025 is complete; next obtain
   explicit approval to implement the source configuration UI using its

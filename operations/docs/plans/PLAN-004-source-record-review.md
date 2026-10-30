@@ -4,7 +4,10 @@
 
 Revision 8 design **accepted by the user, 2026-10-29**, after independent review.
 Case combining (PLAN-033) and source-record notifications (PLAN-034) are deferred.
-No implementation or production execution is authorized yet.
+**R4 implemented and released 2026-10-30** (user-authorized): Stage A 0.135.0 (+ hotfix
+0.135.1), Stage C 0.136.0, Stage B 0.137.0 in a drained window, then the one-time
+reassessment. Amendments R4-1/R4-2 are in the final design and ADR-0049. Current
+checkpoint and results: [Operations blueprint](../../BLUEPRINT.md).
 Managed admission and evaluation remain independent of identity completion.
 
 ## Scope and authorities

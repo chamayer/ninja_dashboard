@@ -205,6 +205,7 @@ do not open competing blueprints for the same work.
 - Section: Computer identity and platform change history (2026-10-16); How a Computer is named — ADR-0034 proposal (2026-10-19)
 - Resume gate: Reconcile post-ADR-0034 follow-ups against the 0.128.0 release and current ADRs.
 - Last checked: 2026-10-20 (live). Identity relations are present; 32 merges occurred in seven days and seven name collisions remain. This confirms activity, not completion of the follow-up plan.
+- Last checked: 2026-10-30. R4 (final design rev 8) released: 0.135.0 managed subjects/rules (+0.135.1 Jobs resource-limit hotfix), 0.136.0 one-key cases, 0.137.0 link authority in a drained window with backup; one-time reassessment run (results in operations/BLUEPRINT.md). Follow-ups in operations/TODO.md.
 - Follow-up added 2026-10-26: reconcile `client_unattached_group`, `unnamed_source_group`, and `client_link_collision` at the end of each client-resolver run when a group is assigned, inactive, or gone. Also close a collision when the group no longer matches two or more clients. Record a reason for each closure. Entity-candidate withdrawal is tracked separately under PLAN-021.
 
 ## PLAN-005 — Jobs observability and schedule authority

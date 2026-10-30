@@ -1431,7 +1431,7 @@ normal release check, migration pre-checks and backups.
 
 ### R4 implementation (started 2026-10-30, branch `plan003-r3`, base `7a8b67b`)
 
-**Status:** Stage A code `d0f5826`, release 0.135.0. Commits/pushes, the Stage B window and the
+**Status:** Complete 2026-10-30 — Stages A (0.135.0/0.135.1), C (0.136.0) and B (0.137.0/0.137.1) released; reassessment run. Commits/pushes, the Stage B window and the
 reassessment are authorized (user, 2026-10-30). Testing: only what is needed to
 continue safely, no heavy workstation/dev runs; final testing after the plan.
 **Amendments recorded:** design §2.1/§3/§7.2 and ADR-0049 (R4-1 unguarded
@@ -1487,3 +1487,23 @@ stop `ninja-jobs-worker` and `operations-ingest`, confirm no active sessions →
 watch 0374 → verify (contract 5, parity, guards, health) → reassessment → notify.
 Abort: 0374 is one transaction; on failure workers wait for contract 5 and admit
 nothing; redeploy 0.136.0 (`b50c59d`) to resume.
+**Window (2026-10-30 UTC):** 13:36 pre-window counts (links device 34,557 / client 496 /
+asset 1,409; 42,271 observations, 34,557 projected; 40,027 active findings; contract 4).
+13:36:47 Jobs worker and ingest stopped; only autovacuum active. 13:38–13:45 backup
+`~/ninja-backups/ninja-pre-0.137.0-20261030T133832.dump` (1.42 GB, `pg_dump` exit 0,
+294 table-data entries). 13:46 0.137.0 (`0e14ef0`) pushed to both remotes. ~13:47 0374
+applied, contract 5; workers waited for it, then resumed. Verified: link/observation/
+active-finding counts equal pre-window, 0 divergent projections, every link has its
+subject and open history, guards present, no guard/contract errors in logs.
+Side effect: the forced stop left 4 runs holding claims (leases to 15:07); at the user's
+request they were fenced at 14:06 with `jobs_interrupt_v1` (the worker's own shutdown
+path) and replayed. 0.137.1 (`ba40a6f`): the preview's name lookups bypassed the
+per-client cache (quadratic); fixed, results unchanged.
+**Reassessment (2026-10-30 14:15–14:25 UTC, 0.137.1):** 29,473 Computer records.
+same 22,278; changed 109 (all by `hostname`/`hostname_mac`); ambiguous 88 (52 blocked,
+36 with 2–5 candidates); unmatched 6,998 (6,674 attached records with no independent
+evidence besides themselves — mostly Ninja RMM 4,675, ScreenConnect 915, Ninja VM 961 —
+and 324 unattached with no candidate). newly_matched 0, so **applied 0**; nothing was
+cleared or moved. Report (private identities): `~/ninja-backups/reassessment-20261030T141525.json`.
+**Next:** user review of the 109 changed and 88 ambiguous rows (unmatched attached rows
+keep their confirmed association); final acceptance testing (user).
