@@ -2,6 +2,25 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.137.2] — 2026-10-30 — Source-record issues use the shared condition contract
+
+### Fixed
+
+- Source-record issues (from 0.135.0) had no condition assessment or participants,
+  so their state showed no current assessment, and pages that find issues by
+  participant could not see them. They now record the source record as the
+  affected participant and the attached Computer (or a case's records) as context.
+- The four source-record issue types were missing from the active condition
+  policy, which must list every registered type. Policy `conditions-registry-11`
+  adds them; existing source-record issues are queued to be reassessed.
+
+### Added
+
+- ADR-0050 (proposed) records what a Computer is for: a learned grouping of
+  source records, needed for cross-source and machine-level questions. Facts one
+  source record answers are evaluated on that record. The glossary and the
+  Operations instructions now say the same.
+
 ## [0.137.1] — 2026-10-30 — Faster association reassessment preview
 
 ### Fixed

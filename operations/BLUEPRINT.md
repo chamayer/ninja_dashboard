@@ -1505,5 +1505,12 @@ same 22,278; changed 109 (all by `hostname`/`hostname_mac`); ambiguous 88 (52 bl
 evidence besides themselves — mostly Ninja RMM 4,675, ScreenConnect 915, Ninja VM 961 —
 and 324 unattached with no candidate). newly_matched 0, so **applied 0**; nothing was
 cleared or moved. Report (private identities): `~/ninja-backups/reassessment-20261030T141525.json`.
+**Follow-up 0.137.2 (2026-10-30):** native findings now write condition
+assessments and participants (source record affected; attached Computer or case
+members as context) via `record_assessment`; `0375` adds `conditions-registry-11`
+with the four native types (0370 had left the active policy at 71 of 75 types,
+which `create_condition_policy_version` requires to match) and requeues their
+subjects. Dev check (rolled back): participants written, assessment `eligible`,
+state `needs_action/ready`. ADR-0050 (proposed) records what a Computer is for.
 **Next:** user review of the 109 changed and 88 ambiguous rows (unmatched attached rows
 keep their confirmed association); final acceptance testing (user).
