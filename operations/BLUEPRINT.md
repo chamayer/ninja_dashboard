@@ -1468,4 +1468,22 @@ Dev check: 0373 (then numbered 0372) applied, 823 cases built, pages 200, duplic
 the Jobs worker crash-looped about 13:05–13:20 UTC (no Jobs ran). Migration 0372 adds the
 limit (same as 0336). Stable since 13:19; first assessment run completed (200 rows);
 interrupted runs left no contained claims. Stage C migration renumbered to 0373.
-**Next:** Stage C release (0.136.0), then Stage B window.
+**Stage C deployed (0.136.0, `b50c59d`):** 0373 applied; containers stable.
+**Stage B (code written, 0.137.0):** `0374_source_association_authority` (links gain
+`source_subject_id`/`association_version`; `set_source_association` and wrappers;
+merge/merge-split/record-split/link-move/group-move converted; sync retired to
+anchoring + presence + group mapping + divergence warning; guards on `device_id`,
+links, history; deferred projection check; contract 5). Python: intake
+(`observations._associate_resolved`, savepoint per row), resolver, source deletion
+presence, candidate attach, seed command. Reassessment: `ingest/source_record_reassessment.py`
+reusing the R0 preview (`preview_match`, `preview_identity_reconciliation.py`).
+Policy: apply only still-current unique `newly_matched`; changed/ambiguous/unmatched
+go to review; nothing is cleared.
+Dev checks (rolled back): direct writes refused; associate/split/merge/merge-split
+through the procedure; sync divergence 0; intake writes the link (`intake`).
+Production read-only pre-checks: 0 divergent projections, 0 links without subject.
+**Window plan (R2 runbook):** pre-window counts → `pg_dump -Fc` to `~/ninja-backups/` →
+stop `ninja-jobs-worker` and `operations-ingest`, confirm no active sessions → push →
+watch 0374 → verify (contract 5, parity, guards, health) → reassessment → notify.
+Abort: 0374 is one transaction; on failure workers wait for contract 5 and admit
+nothing; redeploy 0.136.0 (`b50c59d`) to resume.

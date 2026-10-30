@@ -2,6 +2,33 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.137.0] — 2026-10-30 — One association authority (PLAN-004 R4 Stage B)
+
+### Changed
+
+- A source record's attachment to a Computer (or a group's to a client) is now
+  recorded only in its confirmed source link and history. One database procedure,
+  `set_source_association`, changes the link, its history and the record's Computer
+  column together. It checks that the association has not changed since it was
+  read, and queues the record and its neighbors for reassessment.
+- Intake, the identity resolver, Computer merge and split, record split, client
+  source-group moves and record-match attach all go through that procedure. The
+  old link sync no longer attaches anything. It refreshes link presence and maps
+  group records, and reports any record whose Computer column disagrees with its
+  link instead of repairing it.
+- Database guards refuse any other write to the Computer column, links or link
+  history. Presence-only link updates (a source deletion, last-seen refresh) have
+  their own checked entrypoints. The findings contract is now 5, so processes
+  built before this release stop instead of writing.
+
+### Added
+
+- A one-time reassessment tool (`python -m ingest.source_record_reassessment`).
+  It previews every Computer record's association without its own evidence,
+  applies only unattached records with exactly one match that are still unchanged,
+  and lists changed, ambiguous and unmatched records for review. Existing
+  attachments are never cleared or moved by it.
+
 ## [0.136.0] — 2026-10-30 — Source-record cases (PLAN-004 R4 Stage C)
 
 ### Added
