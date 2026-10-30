@@ -2,6 +2,35 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.134.0] — 2026-10-30 — One Issues queue with corrective-action counts
+
+### Changed
+
+- Issues reads one selection over entity findings, administrative findings and
+  pending record matches (PLAN-003 R3). Counts, group headers, pages, the Issues
+  CSV and "select all" use it, as does the home **Critical mapping issues (N)**
+  link, which now opens exactly those N.
+- Counts are independent corrective actions. A finding another open issue covers,
+  or a second record of the same source-group correction (the entity and
+  administrative findings for one unmatched group), is listed under that issue's
+  **Related issues** rather than counted again.
+- Readiness (Needs action, Blocked, Pending, Covered) is no longer a filter, card or
+  count. Issues are Open, Paused or Resolved; a row explains an action that cannot
+  run. Old readiness links show a notice. An unknown Category, Type or Issue in a
+  link selects nothing instead of everything.
+- Views: Category → Type → Severity (default), Category → Type, and Flat. Opening
+  Issues goes to the highest-severity group; each group pages separately and keeps
+  its sort and page. OS and Computer type filters apply to Computer issues only.
+- Bulk actions can select every issue in the open group across pages. Pause and
+  Resume may span issue kinds; remediation actions need one kind. Review returns
+  to the same Issues view.
+
+### Removed
+
+- The per-column text filters and Online/Confidence filters on Issues. Use Search
+  and the Client, Severity, Category, Type, Issue, Platform, OS and Computer type
+  filters.
+
 ## [0.133.1] — 2026-10-30 — Finding readers stay on the entity namespace
 
 ### Fixed
