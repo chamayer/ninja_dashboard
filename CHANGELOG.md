@@ -2,6 +2,16 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.133.1] — 2026-10-30 — Finding readers stay on the entity namespace
+
+### Fixed
+
+- Since 0.132.0 admin findings share the `findings` table, but several readers were
+  not narrowed: the home dashboard, client page severity and new-issue counts and
+  the condition coverage summary included admin rows (the summary listed them
+  twice). `Finding.objects` and the direct SQL readers now return entity findings
+  only; migration `0369` records the model state and changes no data.
+
 ## [0.133.0] — 2026-10-30 — Bulk accept discovered client candidates
 
 ### Added
