@@ -66,6 +66,24 @@ class MatchResult:
     candidates: tuple[uuid.UUID, ...] = ()
 
 
+@dataclass(frozen=True)
+class MatchAttempt:
+    """One policy considered during a counterfactual match."""
+
+    matcher: str
+    candidates: tuple[uuid.UUID, ...]
+    usable: tuple[uuid.UUID, ...]
+    blockers: dict[uuid.UUID, str]
+
+
+@dataclass(frozen=True)
+class MatchPreview:
+    """The selected match plus every policy attempt made to reach it."""
+
+    result: MatchResult | None
+    attempts: tuple[MatchAttempt, ...]
+
+
 def load_identity_match_policies(
     cur, tenant_id: int
 ) -> tuple[IdentityMatchPolicy, ...]:
@@ -145,6 +163,90 @@ def resolve_match(
     ``skip_source_identity`` is the re-check: an attached record whose serial
     or VM UUID arrived or changed is matched again without its current link.
     """
+    return _resolve_match(
+        cur,
+        tenant_id=tenant_id,
+        source_name=source_name,
+        external_id=external_id,
+        entity_type=entity_type,
+        serial=serial,
+        vm_uuid=vm_uuid,
+        hostname=hostname,
+        macs=macs,
+        client_id=client_id,
+        policies=policies,
+        is_online=is_online,
+        skip_source_identity=skip_source_identity,
+        identity_types=identity_types,
+        excluded_observation_ids=(),
+        trace=False,
+    ).result
+
+
+def preview_match(
+    cur,
+    *,
+    tenant_id: int,
+    source_name: str,
+    external_id: str,
+    entity_type: str,
+    serial: str | None,
+    vm_uuid: str | None,
+    hostname: str | None,
+    macs: list[str] | None,
+    client_id: uuid.UUID | None,
+    policies: tuple[IdentityMatchPolicy, ...],
+    is_online: bool | None = None,
+    identity_types: list[str] | None = None,
+    excluded_observation_ids: tuple[uuid.UUID, ...] = (),
+) -> MatchPreview:
+    """Counterfactually match a record without its existing evidence.
+
+    Used only by the one-time reconciliation preview. The normal resolver
+    retains its source-identity shortcut and unchanged cache behavior.
+    """
+    if not excluded_observation_ids:
+        raise ValueError("counterfactual matching requires excluded observations")
+    return _resolve_match(
+        cur,
+        tenant_id=tenant_id,
+        source_name=source_name,
+        external_id=external_id,
+        entity_type=entity_type,
+        serial=serial,
+        vm_uuid=vm_uuid,
+        hostname=hostname,
+        macs=macs,
+        client_id=client_id,
+        policies=policies,
+        is_online=is_online,
+        skip_source_identity=True,
+        identity_types=identity_types,
+        excluded_observation_ids=excluded_observation_ids,
+        trace=True,
+    )
+
+
+def _resolve_match(
+    cur,
+    *,
+    tenant_id: int,
+    source_name: str,
+    external_id: str,
+    entity_type: str,
+    serial: str | None,
+    vm_uuid: str | None,
+    hostname: str | None,
+    macs: list[str] | None,
+    client_id: uuid.UUID | None,
+    policies: tuple[IdentityMatchPolicy, ...],
+    is_online: bool | None,
+    skip_source_identity: bool,
+    identity_types: list[str] | None,
+    excluded_observation_ids: tuple[uuid.UUID, ...],
+    trace: bool,
+) -> MatchPreview:
+    """Shared matching path for normal resolution and read-only preview."""
     if identity_types is None:
         identity_types = _identity_types(cur)
     record_serial = serial.strip().lower() if is_usable_serial(serial) else None
@@ -153,6 +255,7 @@ def resolve_match(
         # The record moves between clones of one image (migration 0317): its
         # serial and VM UUID prove nothing about this machine.
         record_serial = record_vm_uuid = None
+    attempts: list[MatchAttempt] = []
     for policy in policies:
         if skip_source_identity and policy.matcher == "source_identity":
             continue
@@ -171,13 +274,16 @@ def resolve_match(
             client_id=client_id if policy.requires_client_scope else None,
             matcher=policy.matcher,
             identity_types=identity_types,
+            excluded_observation_ids=excluded_observation_ids,
         )
         if not candidates:
+            if trace:
+                attempts.append(MatchAttempt(policy.matcher, (), (), {}))
             continue
-        usable = [
-            device_id
+        blockers = {
+            device_id: blocker
             for device_id in candidates
-            if not _hard_conflict(
+            if (blocker := _hard_conflict_reason(
                 cur,
                 tenant_id,
                 device_id,
@@ -188,20 +294,33 @@ def resolve_match(
                 serial=record_serial,
                 vm_uuid=record_vm_uuid,
                 is_online=is_online,
+                excluded_observation_ids=excluded_observation_ids,
+            )) is not None
+        }
+        usable = [device_id for device_id in candidates if device_id not in blockers]
+        if trace:
+            attempts.append(
+                MatchAttempt(
+                    policy.matcher, tuple(candidates), tuple(usable), blockers
+                )
             )
-        ]
         if not usable:
             continue
         if policy.requires_unique_candidate and len(usable) != 1:
             continue
-        chosen = _most_recently_active(cur, tenant_id, usable)
-        return MatchResult(
-            device_id=chosen,
-            matcher=policy.matcher,
-            compared=_compared(policy.matcher, record_serial, record_vm_uuid, hostname),
-            candidates=tuple(usable),
+        chosen = _most_recently_active(
+            cur, tenant_id, usable, excluded_observation_ids
         )
-    return None
+        return MatchPreview(
+            MatchResult(
+                device_id=chosen,
+                matcher=policy.matcher,
+                compared=_compared(policy.matcher, record_serial, record_vm_uuid, hostname),
+                candidates=tuple(usable),
+            ),
+            tuple(attempts),
+        )
+    return MatchPreview(None, tuple(attempts))
 
 
 def _identity_types(cur) -> list[str]:
@@ -249,6 +368,7 @@ def _candidates(
     client_id: uuid.UUID | None,
     matcher: str,
     identity_types: list[str],
+    excluded_observation_ids: tuple[uuid.UUID, ...],
 ) -> list[uuid.UUID]:
     if matcher == "source_identity":
         cur.execute(
@@ -259,9 +379,10 @@ def _candidates(
                 ON d.tenant_id = eo.tenant_id AND d.id = eo.device_id
              WHERE eo.tenant_id = %s AND eo.platform = %s AND eo.entity_key = %s
                AND eo.entity_type = %s AND d.deleted_at IS NULL
+               AND NOT (eo.observation_id = ANY(%s::uuid[]))
                AND (%s::uuid IS NULL OR d.client_id = %s::uuid)
             """,
-            (tenant_id, source_name, external_id, entity_type, client_id, client_id),
+            (tenant_id, source_name, external_id, entity_type, list(excluded_observation_ids), client_id, client_id),
         )
         return [row[0] for row in cur.fetchall()]
     if matcher == "serial" and serial:
@@ -274,6 +395,7 @@ def _candidates(
              WHERE eo.tenant_id = %s AND eo.active
                AND lower(trim(eo.canonical_data ->> 'serial_number')) = %s
                AND NOT (eo.platform = %s AND eo.entity_key = %s)
+               AND NOT (eo.observation_id = ANY(%s::uuid[]))
                AND NOT EXISTS (SELECT 1 FROM operations.identity_roaming_records rr
                                 WHERE rr.tenant_id = eo.tenant_id
                                   AND rr.source_instance_id = eo.source_instance_id
@@ -281,7 +403,7 @@ def _candidates(
                AND d.deleted_at IS NULL
                AND (%s::uuid IS NULL OR d.client_id = %s::uuid)
             """,
-            (tenant_id, serial, source_name, external_id, client_id, client_id),
+            (tenant_id, serial, source_name, external_id, list(excluded_observation_ids), client_id, client_id),
         )
         return [row[0] for row in cur.fetchall()]
     if matcher == "vm_uuid" and vm_uuid:
@@ -294,6 +416,7 @@ def _candidates(
              WHERE eo.tenant_id = %s AND eo.active
                AND lower(eo.canonical_data ->> 'vm_uuid') = %s
                AND NOT (eo.platform = %s AND eo.entity_key = %s)
+               AND NOT (eo.observation_id = ANY(%s::uuid[]))
                AND NOT EXISTS (SELECT 1 FROM operations.identity_roaming_records rr
                                 WHERE rr.tenant_id = eo.tenant_id
                                   AND rr.source_instance_id = eo.source_instance_id
@@ -301,7 +424,7 @@ def _candidates(
                AND d.deleted_at IS NULL
                AND (%s::uuid IS NULL OR d.client_id = %s::uuid)
             """,
-            (tenant_id, vm_uuid, source_name, external_id, client_id, client_id),
+            (tenant_id, vm_uuid, source_name, external_id, list(excluded_observation_ids), client_id, client_id),
         )
         return [row[0] for row in cur.fetchall()]
     if matcher in ("hostname", "hostname_mac") and hostname:
@@ -316,6 +439,7 @@ def _candidates(
             source_name=source_name,
             external_id=external_id,
             identity_types=identity_types,
+            excluded_observation_ids=excluded_observation_ids,
         )
     return []
 
@@ -339,6 +463,7 @@ SELECT eo.device_id, d.lifecycle_status, f.name_short, f.name_key,
       eo.canonical_data ->> 'domain') f
  WHERE eo.tenant_id = %(tenant)s
    AND (%(client)s::uuid IS NULL OR d.client_id = %(client)s::uuid)
+   AND NOT (eo.observation_id = ANY(%(excluded_observation_ids)s::uuid[]))
    AND eo.entity_key NOT LIKE 'device-health:%%'
    AND f.name_short IS NOT NULL
    AND NOT EXISTS (SELECT 1 FROM operations.identity_roaming_records rr
@@ -361,15 +486,20 @@ def invalidate_client_names(client_id=None) -> None:
         _names_cache.pop(cache_key, None)
 
 
-def client_record_names(cur, tenant_id: int, client_id) -> list[tuple]:
+def client_record_names(
+    cur, tenant_id: int, client_id, excluded_observation_ids: tuple[uuid.UUID, ...] = ()
+) -> list[tuple]:
     """(device_id, lifecycle, name_short, name_key, is_current, platform, entity_key,
     entity_type) for every named record of the client's Computers."""
-    cache_key = (tenant_id, client_id)
+    cache_key = (tenant_id, client_id, tuple(sorted(map(str, excluded_observation_ids))))
     cached = _names_cache.get(cache_key)
     now = time.monotonic()
     if cached and now - cached[0] < _NAMES_TTL:
         return cached[1]
-    cur.execute(_CLIENT_NAMES, {"tenant": tenant_id, "client": client_id})
+    cur.execute(
+        _CLIENT_NAMES,
+        {"tenant": tenant_id, "client": client_id, "excluded_observation_ids": list(excluded_observation_ids)},
+    )
     rows = cur.fetchall()
     _names_cache[cache_key] = (now, rows)
     return rows
@@ -409,6 +539,7 @@ SELECT DISTINCT eo.device_id, eo.platform, eo.entity_key, f.name_short, f.name_k
      WHERE eo.tenant_id = %(tenant)s
        AND (%(client)s::uuid IS NULL OR d.client_id = %(client)s::uuid)
        AND eo.entity_type = ANY(%(types)s::text[])
+       AND NOT (eo.observation_id = ANY(%(excluded_observation_ids)s::uuid[]))
        AND NOT EXISTS (SELECT 1 FROM operations.identity_roaming_records rr
                         WHERE rr.tenant_id = eo.tenant_id
                           AND rr.source_instance_id = eo.source_instance_id
@@ -421,14 +552,31 @@ _HISTORY_TTL = 600.0
 _history_cache: dict[tuple, tuple[float, list[tuple]]] = {}
 
 
-def _history_names(cur, tenant_id: int, client_id, identity_types: list[str]) -> list[tuple]:
-    cache_key = (tenant_id, client_id, tuple(sorted(identity_types)))
+def _history_names(
+    cur,
+    tenant_id: int,
+    client_id,
+    identity_types: list[str],
+    excluded_observation_ids: tuple[uuid.UUID, ...] = (),
+) -> list[tuple]:
+    cache_key = (
+        tenant_id,
+        client_id,
+        tuple(sorted(identity_types)),
+        tuple(sorted(map(str, excluded_observation_ids))),
+    )
     cached = _history_cache.get(cache_key)
     now = time.monotonic()
     if cached and now - cached[0] < _HISTORY_TTL:
         return cached[1]
     cur.execute(
-        _HISTORY_NAMES, {"tenant": tenant_id, "client": client_id, "types": identity_types}
+        _HISTORY_NAMES,
+        {
+            "tenant": tenant_id,
+            "client": client_id,
+            "types": identity_types,
+            "excluded_observation_ids": list(excluded_observation_ids),
+        },
     )
     rows = cur.fetchall()
     _history_cache[cache_key] = (now, rows)
@@ -445,6 +593,7 @@ def _name_candidates(
     source_name: str,
     external_id: str,
     identity_types: list[str],
+    excluded_observation_ids: tuple[uuid.UUID, ...],
 ) -> list[uuid.UUID]:
     """Computers whose records report the name (ADR-0034 section 4).
 
@@ -462,7 +611,7 @@ def _name_candidates(
     rows = [
         (device_id, _tier(lifecycle, is_current), name_short, name_key)
         for device_id, lifecycle, name_short, name_key, is_current, platform, entity_key, entity_type
-        in client_record_names(cur, tenant_id, client_id)
+        in client_record_names(cur, tenant_id, client_id, excluded_observation_ids)
         if entity_type in types
         and not (platform == source_name and entity_key == external_id)
         and _names_match(hostname, key, name_short, name_key or "")
@@ -472,7 +621,7 @@ def _name_candidates(
         rows = [
             (device_id, 4, short, name_key)
             for device_id, platform, entity_key, short, name_key in _history_names(
-                cur, tenant_id, client_id, identity_types
+                cur, tenant_id, client_id, identity_types, excluded_observation_ids
             )
             if name_key == key and not (platform == source_name and entity_key == external_id)
         ]
@@ -535,6 +684,35 @@ def _hard_conflict(
     vm_uuid: str | None,
     is_online: bool | None,
 ) -> bool:
+    return _hard_conflict_reason(
+        cur,
+        tenant_id,
+        device_id,
+        blockers,
+        source_name=source_name,
+        entity_type=entity_type,
+        external_id=external_id,
+        serial=serial,
+        vm_uuid=vm_uuid,
+        is_online=is_online,
+        excluded_observation_ids=(),
+    ) is not None
+
+
+def _hard_conflict_reason(
+    cur,
+    tenant_id: int,
+    device_id: uuid.UUID,
+    blockers: frozenset[str],
+    *,
+    source_name: str,
+    entity_type: str,
+    external_id: str,
+    serial: str | None,
+    vm_uuid: str | None,
+    is_online: bool | None,
+    excluded_observation_ids: tuple[uuid.UUID, ...],
+) -> str | None:
     """True when the candidate is proven to be a different machine."""
     # An operator split this record off the candidate (migration 0309).
     cur.execute(
@@ -546,7 +724,7 @@ def _hard_conflict(
         (tenant_id, device_id, f"{source_name}|{external_id}"),
     )
     if cur.fetchone() is not None:
-        return True
+        return "operator_exclusion"
     cur.execute(
         """
         SELECT eo.active, eo.platform, eo.entity_type, eo.entity_key,
@@ -561,8 +739,9 @@ def _hard_conflict(
           FROM operations.entity_observation_current eo
          WHERE eo.tenant_id = %s AND eo.device_id = %s
            AND NOT (eo.platform = %s AND eo.entity_key = %s)
+           AND NOT (eo.observation_id = ANY(%s::uuid[]))
         """,
-        (tenant_id, device_id, source_name, external_id),
+        (tenant_id, device_id, source_name, external_id, list(excluded_observation_ids)),
     )
     rows = cur.fetchall()
     live_rows = [row for row in rows if row[0]]
@@ -572,11 +751,11 @@ def _hard_conflict(
     if "serial" in blockers and serial:
         known = {row[4] for row in judged if row[4] and is_usable_serial(row[4])}
         if known and serial not in known:
-            return True
+            return "serial_conflict"
     if "vm_uuid" in blockers and vm_uuid:
         known = {row[5] for row in judged if row[5]}
         if known and vm_uuid not in known:
-            return True
+            return "vm_uuid_conflict"
     if "same_source_live" in blockers and is_online:
         # A record of the same source and type that is online on the
         # candidate at the same time as this one: two live installs, so two
@@ -588,12 +767,15 @@ def _hard_conflict(
                 and other_type == entity_type
                 and online
             ):
-                return True
-    return False
+                return "same_source_live"
+    return None
 
 
 def _most_recently_active(
-    cur, tenant_id: int, device_ids: list[uuid.UUID]
+    cur,
+    tenant_id: int,
+    device_ids: list[uuid.UUID],
+    excluded_observation_ids: tuple[uuid.UUID, ...] = (),
 ) -> uuid.UUID:
     if len(device_ids) == 1:
         return device_ids[0]
@@ -605,11 +787,12 @@ def _most_recently_active(
               SELECT max(eo.last_seen_at) AS seen
                 FROM operations.entity_observation_current eo
                WHERE eo.tenant_id = d.tenant_id AND eo.device_id = d.id AND eo.active
+                 AND NOT (eo.observation_id = ANY(%s::uuid[]))
           ) activity ON TRUE
          WHERE d.tenant_id = %s AND d.id = ANY(%s::uuid[])
          ORDER BY activity.seen DESC NULLS LAST, d.created_at, d.id
          LIMIT 1
         """,
-        (tenant_id, list(device_ids)),
+        (list(excluded_observation_ids), tenant_id, list(device_ids)),
     )
     return cur.fetchone()[0]

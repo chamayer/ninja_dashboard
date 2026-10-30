@@ -3,7 +3,10 @@ from django.db import connection, transaction
 
 
 class Command(BaseCommand):
-    help = "Seed observation current state from the latest legacy row per identity."
+    help = (
+        "Seed observation current state from the latest legacy row per identity. "
+        "Never writes device_id: it is the projection of confirmed links (PLAN-004 Stage B)."
+    )
 
     def add_arguments(self, parser):
         parser.add_argument("--tenant-id", type=int, default=1)
@@ -88,7 +91,7 @@ class Command(BaseCommand):
                        last_seen_binding_id, external_namespace,
                        parent_external_namespace, parent_external_id, external_id,
                        collector_instance_id,
-                       client_id, device_id, entity_type, parent_source_key, entity_key,
+                       client_id, NULL::uuid, entity_type, parent_source_key, entity_key,
                        platform, subplatform, observed_at, observed_at, clock_timestamp(),
                        TRUE, NULL, snapshot_scope, NULL,
                        raw_data, canonical_data, NULL,
@@ -103,7 +106,7 @@ class Command(BaseCommand):
                     source_binding_id = EXCLUDED.source_binding_id,
                     last_seen_binding_id = EXCLUDED.last_seen_binding_id,
                     collector_instance_id = EXCLUDED.collector_instance_id,
-                    client_id = EXCLUDED.client_id, device_id = EXCLUDED.device_id,
+                    client_id = EXCLUDED.client_id,
                     entity_type = EXCLUDED.entity_type,
                     parent_source_key = EXCLUDED.parent_source_key,
                     entity_key = EXCLUDED.entity_key,

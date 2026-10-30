@@ -78,6 +78,19 @@ input generation and queues affected evaluation atomically. No additional author
 | `ingest/derived.py` caller of the sync function | Remove the call when the sync writer retires; it is a shadow path (§8) |
 
 
+**Implementation notes (R4 Stage B, migration 0374, 2026-10-30).** The procedure is
+`operations.set_source_association`; `associate_record` / `associate_observation` /
+`associate_unassociated_records` serve intake and the resolver, and
+`set_source_association_by_key` serves candidate attach. Clearing an association
+deletes the link (its derived projector state first) and closes its history.
+Group-record client links still follow `client_resolver`'s mapping on the group
+observation, now recorded by the procedure inside the retired sync. Non-group
+`client_id` attribution is unchanged and out of this scope. The sync reports
+divergence as a warning, not yet as a finding (TODO). Presence-only link updates use
+`mark_source_links_missing` and the sync's presence refresh, and a trigger checks
+that only presence columns change. The findings contract becomes 5 as the drain
+boundary.
+
 Revoke direct runtime link/history and observation `device_id` writes; grant only
 the protected procedures. A consistency trigger rejects a projected attachment that
 differs from its link. Inventory all real writers against the release commit.

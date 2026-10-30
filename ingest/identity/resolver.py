@@ -294,19 +294,22 @@ def _group_same_machine(stream_entries: list[tuple]) -> list[list[tuple]]:
 def _attach_observation(cur, obs_id: uuid.UUID | None, device_id: uuid.UUID) -> None:
     """Attach one observation to a device.
 
-    This used to also upsert `operations.device_links`, carrying the match
-    method, confidence, display name and observed timestamps needed for that
-    row. Migration 0121 retires both that write and the table — attachment
-    authority is observations ->
-    sync_entity_source_links_from_observations() — so the only remaining
-    responsibility is the device_id, and the parameters that existed solely to
-    populate the link are gone rather than left unused.
+    Attachment authority is the confirmed link (PLAN-004 Stage B, migration
+    0374): ``operations.associate_observation`` writes the link and its history
+    and projects ``device_id``.
     """
     if obs_id is not None:
+        # The confirmed link is the authority; the procedure projects device_id
+        # (PLAN-004 Stage B). An existing Computer association is kept.
         cur.execute(
-            "UPDATE operations.entity_observation_current SET device_id = %s "
-            "WHERE observation_id = %s RETURNING client_id",
-            (device_id, obs_id),
+            "SELECT operations.associate_observation(%s, %s, %s, 'resolver',"
+            " 'ingest.identity.resolver', true)",
+            (TENANT_ID, obs_id, device_id),
+        )
+        cur.execute(
+            "SELECT client_id FROM operations.entity_observation_current"
+            " WHERE tenant_id = %s AND observation_id = %s",
+            (TENANT_ID, obs_id),
         )
         row = cur.fetchone()
         invalidate_client_names(row[0] if row else None)
@@ -1177,13 +1180,9 @@ def _promote_unmatched_clusters(
         linked = cur.fetchone()
         if linked:
             cur.execute(
-                """
-                UPDATE operations.entity_observation_current
-                SET device_id = %s
-                WHERE tenant_id = %s AND platform = %s AND entity_key = %s
-                  AND device_id IS NULL
-                """,
-                (linked[0], TENANT_ID, platform, entity_key),
+                "SELECT operations.associate_unassociated_records(%s, %s, %s, %s,"
+                " 'source_identity', 'ingest.identity.resolver')",
+                (TENANT_ID, platform, entity_key, linked[0]),
             )
             touched.add(linked[0])
             invalidate_client_names(client_id)
@@ -1224,13 +1223,9 @@ def _promote_unmatched_clusters(
             if match is not None:
                 for entry in group:
                     cur.execute(
-                        """
-                        UPDATE operations.entity_observation_current
-                        SET device_id = %s
-                        WHERE tenant_id = %s AND platform = %s AND entity_key = %s
-                          AND device_id IS NULL
-                        """,
-                        (match.device_id, TENANT_ID, entry[0], entry[2]),
+                        "SELECT operations.associate_unassociated_records(%s, %s, %s, %s,"
+                        " %s, 'ingest.identity.resolver')",
+                        (TENANT_ID, entry[0], entry[2], match.device_id, match.matcher[:32]),
                     )
                 touched.add(match.device_id)
                 invalidate_client_names(client_id)
@@ -1678,17 +1673,13 @@ def _create_device_for_group(
         entries=group,
         agent_ids=agent_ids,
     )
-    # The observation update is the whole attachment;
-    # sync_entity_source_links_from_observations() derives the link.
+    # Each record's confirmed link is written by the one association writer,
+    # which projects device_id (PLAN-004 Stage B).
     for entry in group:
         cur.execute(
-            """
-            UPDATE operations.entity_observation_current
-            SET device_id = %s
-            WHERE tenant_id = %s AND platform = %s AND entity_key = %s
-              AND device_id IS NULL
-            """,
-            (device_id, TENANT_ID, entry[0], entry[2]),
+            "SELECT operations.associate_unassociated_records(%s, %s, %s, %s,"
+            " 'promotion', 'ingest.identity.resolver')",
+            (TENANT_ID, entry[0], entry[2], device_id),
         )
     log.info(
         "resolver: promoted device %s hostname=%s client=%s platforms=%s",

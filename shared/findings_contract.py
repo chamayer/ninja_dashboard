@@ -10,7 +10,9 @@ from __future__ import annotations
 
 from typing import Any
 
-FINDING_CONTRACT = 4
+# 5: PLAN-004 Stage B (0374) — links are the association authority; processes
+# built before it must not run against its guards.
+FINDING_CONTRACT = 5
 
 
 def guard_findings_writes(cur: Any, tenant_id: int) -> None:

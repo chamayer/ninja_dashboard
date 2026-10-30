@@ -6,6 +6,17 @@
 
 ## Current Operations backlog
 
+- [ ] **PLAN-004 R4 follow-ups** (2026-10-30, not approved scope):
+      (1) emit `source_record_policy_incomplete` at source-instance/role scope when a
+      received type has no role; no production type is unclassified today, so only
+      the assessment records it. (2) Make the retired link sync's divergence
+      report a finding instead of a database warning. (3) Intake-error subjects
+      (`subject_kind = 'intake_error'`): the table supports them, but intake still
+      raises on a row without a stable identity rather than admitting it.
+      (4) Watch ingest run timings, assessment queue depth and oldest dirty revision
+      after release (R4-2 waiver); the job stops early while the evaluator holds the
+      exclusive guard. (5) Review the reassessment's changed/ambiguous/unmatched
+      rows (report on the host, see the Operations blueprint).
 - [ ] **PLAN-004 deferred capabilities** (2026-10-29):
       [PLAN-033: case combining](docs/plans/PLAN-033-source-record-case-combining.md)
       and [PLAN-034: source-record notifications](docs/plans/PLAN-034-source-record-notifications.md)

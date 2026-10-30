@@ -170,24 +170,20 @@ def capture_ninja_events(cur, rows: list[dict[str, Any]]) -> dict[str, int | str
                    AND history.effective_from < %s
                 RETURNING history.id
             ), missing_links AS (
-                UPDATE operations.entity_source_links link
-                   SET missing_since = %s, reason = 'source_deleted',
-                       version = link.version + 1
-                  FROM withdrawn
-                 WHERE link.tenant_id = %s
-                   AND link.source_instance_id = %s
-                   AND link.external_namespace = withdrawn.external_namespace
-                   AND link.parent_external_namespace =
-                       withdrawn.parent_external_namespace
-                   AND link.parent_external_id = withdrawn.parent_external_id
-                   AND link.external_id = withdrawn.external_id
-                   AND link.missing_since IS NULL
-                   AND link.last_seen_at <= %s
-                RETURNING link.id
+                -- Presence only, through the protected entrypoint: the link
+                -- is the association authority (PLAN-004 Stage B).
+                SELECT operations.mark_source_links_missing(
+                    %s, %s,
+                    coalesce((SELECT jsonb_agg(jsonb_build_object(
+                        'external_namespace', w.external_namespace,
+                        'parent_external_namespace', w.parent_external_namespace,
+                        'parent_external_id', w.parent_external_id,
+                        'external_id', w.external_id)) FROM withdrawn w), '[]'::jsonb),
+                    %s) AS n
             )
             SELECT (SELECT count(*) FROM withdrawn),
                    (SELECT count(*) FROM closed),
-                   (SELECT count(*) FROM missing_links)
+                   (SELECT n FROM missing_links)
             """,
             (
                 event_at,
@@ -197,7 +193,6 @@ def capture_ninja_events(cur, rows: list[dict[str, Any]]) -> dict[str, int | str
                 event_at,
                 event_at,
                 source_event_id,
-                event_at,
                 event_at,
                 _TENANT_ID,
                 source_instance_id,

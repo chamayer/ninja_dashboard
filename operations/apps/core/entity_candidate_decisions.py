@@ -14,8 +14,10 @@ Three decisions, all operator-invoked and all audited:
 
 from __future__ import annotations
 
+import json
+
 from django.core.exceptions import PermissionDenied, ValidationError
-from django.db import transaction
+from django.db import connection, transaction
 from django.utils import timezone
 
 from .models import (
@@ -26,7 +28,6 @@ from .models import (
     EntityCandidate,
     EntityCandidateEvent,
     EntitySourceLink,
-    EntitySourceLinkHistory,
     User,
 )
 
@@ -134,28 +135,27 @@ def _link_candidate_to_entity(
         raise ValidationError("The stable source identity is already attached elsewhere.")
     now = timezone.now()
     if existing is None:
-        EntitySourceLink.objects.create(
-            **identity,
-            entity=entity,
-            entity_class_id=entity.entity_class_id,
-            first_seen_at=candidate.first_observed_at,
-            last_seen_at=candidate.last_observed_at,
-            match_method="operator",
-            match_confidence=1,
-            reason=reason[:120],
-        )
-        EntitySourceLinkHistory.objects.create(
-            **identity,
-            entity=entity,
-            entity_class_id=entity.entity_class_id,
-            match_method="operator",
-            match_confidence=1,
-            actor_kind="user",
-            actor=actor,
-            reason=reason[:120],
-            evidence={"candidate_id": str(candidate.id)},
-            effective_from=now,
-        )
+        # The link, its history and any device projection are written by the
+        # one association writer (PLAN-004 Stage B, migration 0374).
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT operations.set_source_association_by_key("
+                "%s, %s, %s, %s, %s, %s, %s, %s, 'operator', %s, 'user', %s,"
+                " 'operations.entity_candidates', %s::jsonb, true)",
+                (
+                    candidate.tenant_id,
+                    candidate.source_instance_id,
+                    candidate.external_namespace,
+                    candidate.parent_external_namespace,
+                    candidate.parent_external_id,
+                    candidate.external_id,
+                    entity.id,
+                    entity.entity_class_id,
+                    reason[:120],
+                    actor.id,
+                    json.dumps({"candidate_id": str(candidate.id)}),
+                ),
+            )
     return now
 
 

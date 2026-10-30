@@ -27,10 +27,13 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 from collections.abc import Iterable
 from typing import Any
 
 from psycopg.types.json import Json
+
+_log = logging.getLogger(__name__)
 
 MATERIAL_HASH_VERSION = 1
 LEGACY_MATERIAL_PROJECTION_VERSION = 1
@@ -481,6 +484,12 @@ def write_current_rows(cur: Any, rows: Iterable[dict[str, Any]]) -> int:
                 row["client_id"] = prev[3]
             if row.get("device_id") is None and prev[4] is not None:
                 row["device_id"] = prev[4]
+        # A resolved Computer that differs from the current projection becomes
+        # a confirmed association through the one writer after the upsert
+        # (PLAN-004 Stage B); the upsert itself never writes device_id.
+        row["_associate"] = row.get("device_id") is not None and (
+            prev is None or prev[4] != row.get("device_id")
+        )
 
         to_upsert.append(row)
 
@@ -497,11 +506,42 @@ def write_current_rows(cur: Any, rows: Iterable[dict[str, Any]]) -> int:
     if not to_upsert:
         return 0
 
-    return _upsert_current(
+    written = _upsert_current(
         cur,
         to_upsert,
         include_projection_version=use_versioned_contracts,
     )
+    _associate_resolved(cur, [row for row in to_upsert if row.get("_associate")])
+    return written
+
+
+def _associate_resolved(cur: Any, rows: list[dict[str, Any]]) -> None:
+    """Record intake's resolved Computer through ``associate_record``.
+
+    Each call runs in its own savepoint: a failed or refused association
+    leaves the record admitted and unassociated (design §3) for the resolver to
+    retry, and never rolls back the observation write.
+    """
+    for row in rows:
+        cur.execute("SAVEPOINT intake_association")
+        try:
+            cur.execute(
+                "SELECT operations.associate_record("
+                "%s, %s, %s, %s, %s, %s, %s, 'intake', 'ingest.intake', false)",
+                (
+                    row["tenant_id"], row["source_instance_id"], row["external_namespace"],
+                    row["parent_external_namespace"], row["parent_external_id"],
+                    row["external_id"], row["device_id"],
+                ),
+            )
+        except Exception:  # the record stays admitted; the resolver retries
+            cur.execute("ROLLBACK TO SAVEPOINT intake_association")
+            _log.warning(
+                "intake association refused for %s/%s", row["entity_type"], row["external_id"],
+                exc_info=True,
+            )
+        else:
+            cur.execute("RELEASE SAVEPOINT intake_association")
 
 
 def _upsert_current(
@@ -513,8 +553,8 @@ def _upsert_current(
     """Bespoke observation-current upsert.
 
     Diverges from `db.upsert()` in two ways required by ADR-0007 hardening:
-      - COALESCE on client_id / device_id preserves post-hoc resolver /
-        merge writes against a fresh connector NULL.
+      - COALESCE on client_id preserves post-hoc resolver writes against a
+        fresh connector NULL; device_id is never written here (Stage B).
       - WHERE entity_observation_current.observed_at < EXCLUDED.observed_at
         is a belt-and-braces guard against any bypass of the Python
         out-of-order check.
@@ -538,11 +578,14 @@ def _upsert_current(
     cols_sql = ", ".join(current_columns)
     placeholders_sql = ", ".join(f"%({c})s" for c in current_columns)
 
+    # device_id is the confirmed-link projection: inserted empty and never
+    # updated here; _associate_resolved records it (PLAN-004 Stage B).
+    for row in shaped:
+        if "device_id" in row:
+            row["device_id"] = None
     update_pieces = [
         "client_id = COALESCE(EXCLUDED.client_id, "
         "operations.entity_observation_current.client_id)",
-        "device_id = COALESCE(EXCLUDED.device_id, "
-        "operations.entity_observation_current.device_id)",
     ]
     for c in update_columns:
         update_pieces.append(f"{c} = EXCLUDED.{c}")
