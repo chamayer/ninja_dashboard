@@ -1,0 +1,109 @@
+{% load human_labels %}
+{% comment %}
+Rows of the open Issues group (PLAN-003 R3). Rendered beneath the active header.
+Selection: page rows by checkbox, or every row of this exact group across pages
+("Select all"), which the server re-selects from ``leaf_query``.
+{% endcomment %}
+{% if rows %}
+<form method="post" action="{% url 'findings_bulk_action' %}" class="issues-bulk-form">
+    {% csrf_token %}
+    <input type="hidden" name="next" value="{{ request.get_full_path }}">
+    <input type="hidden" name="scope_query" value="" data-scope-query="{{ leaf_query|slice:'1:' }}">
+    <div class="issues-selection-bar" hidden>
+        <strong class="issues-selected-count">0 selected</strong>
+        {% if total > rows|length %}<label class="issues-select-scope"><input type="checkbox" class="issues-select-all-scope"> Select all {{ total }} in this group{% if total > select_all_limit %} (more than {{ select_all_limit }} cannot be selected at once){% endif %}</label>{% endif %}
+        <span class="issues-selection-actions">
+            {% if status == "paused" %}
+            <button type="submit" name="action" value="resume" class="bulk-action issue-row-action">Resume</button>
+            {% elif status == "open" %}
+            <label>Pause for <input type="number" name="days" value="7" min="1" max="90" style="width:3.5rem;"> days</label>
+            <button type="submit" name="action" value="snooze" class="bulk-action issue-row-action">Pause</button>
+            {% endif %}
+            {% if status != "resolved" %}
+            <button type="submit" name="action" value="refresh" class="bulk-action issue-row-action">Refresh</button>
+            <label>Reason <input class="finding-action-reason" type="text" name="reason" maxlength="120" placeholder="Required to exclude or retire" style="min-width:14rem;"></label>
+            <button type="submit" name="action" value="suppress" class="bulk-action issue-row-action issue-row-action--override" onclick="return confirm('Exclude the selected Issues? This is an operator override and needs a reason.')">Exclude</button>
+            {% for action in finding_actions %}
+            <button type="submit" name="action" value="{{ action.key }}" class="bulk-action issue-row-action issue-row-action--override" onclick="return confirm('{{ action.confirmation|escapejs }}')" title="{{ action.eligibility_hint }}">{{ action.label }}</button>
+            {% endfor %}
+            {% endif %}
+        </span>
+        <span class="muted issues-selection-note">Remediation actions need issues of one kind; Pause and Resume may span kinds. Items an action does not apply to are skipped and reported.</span>
+    </div>
+    <table class="ops-table issues-table" data-server-table>
+        <thead>
+            <tr>
+                <th style="width:28px;"><input type="checkbox" class="issues-toggle-page" aria-label="Select this page"></th>
+                <th style="width:6.5rem;"><a href="{{ sort_links.severity }}">Severity</a></th>
+                <th><a href="{{ sort_links.issue }}">Issue</a></th>
+                <th><a href="{{ sort_links.subject }}">Subject</a> · <a href="{{ sort_links.client }}">Client</a></th>
+                <th><a href="{{ sort_links.detected }}">Context · last detected</a></th>
+                <th style="width:13.5rem;">Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for row in rows %}
+            <tr>
+                <td>{% if row.selectable %}<input type="checkbox" name="ids" value="{{ row.id }}" class="bulk-cb">{% endif %}</td>
+                <td><span class="badge badge-{{ row.severity }}">{{ row.severity_label }}</span>{% if row.severity_shown %}<br><span class="muted" style="font-size:.7rem;">covers {{ row.severity_shown }}</span>{% endif %}</td>
+                <td>
+                    {{ row.issue_label }}
+                    {% if view == "flat" or related_to %}<br><span class="muted" style="font-size:.72rem;">{{ row.category_label }} · {{ row.type_label }}</span>{% endif %}
+                    {% if row.status != "open" %}<br><span class="badge">{{ row.status_label }}</span>{% if row.paused_until %} <span class="muted" style="font-size:.72rem;">until {{ row.paused_until|date:"Y-m-d" }}</span>{% endif %}{% endif %}
+                    {% if row.covered_count or row.other_records %}
+                    <details class="issues-related"><summary>Related issues ({{ row.covered_count|add:row.other_records }})</summary>
+                        <div class="muted" style="font-size:.75rem;">
+                            {% if row.covered_count %}{{ row.covered_count }} covered by this issue{% if row.covered_high %} ({{ row.covered_high }} high or critical){% endif %}.<br>{% endif %}
+                            {% if row.other_records %}{{ row.other_records }} other record{{ row.other_records|pluralize }} of the same corrective action.<br>{% endif %}
+                            <a href="{{ row.related_url }}">Show related issues →</a>
+                        </div>
+                    </details>
+                    {% endif %}
+                </td>
+                <td>
+                    {% if row.subject_url %}<a href="{{ row.subject_url }}"><code>{{ row.subject_label|default:"—" }}</code></a>{% else %}<code>{{ row.subject_label|default:"—" }}</code>{% endif %}
+                    {% if row.hudu_url %}<div class="muted" style="margin-top:.3rem; font-size:.75rem;">Hudu record: <a href="{{ row.hudu_url }}" target="_blank" rel="noreferrer">Open Hudu →</a></div>{% endif %}
+                    {% if row.duplicate_candidates %}
+                    <div class="muted" style="margin-top:.3rem; font-size:.75rem;">Records:
+                        {% for candidate in row.duplicate_candidates %}<a href="{{ candidate.url }}">{{ forloop.counter }}</a>{% if candidate.compare_url %} (<a href="{{ candidate.compare_url }}">compare</a>){% endif %}{% if not forloop.last %}, {% endif %}{% endfor %}
+                    </div>
+                    {% endif %}
+                </td>
+                <td class="muted">
+                    {{ row.context|default:"—" }}
+                    {% if row.detected_at %}<br><span style="font-size:.72rem;">Last detected {{ row.detected_at|date:"Y-m-d H:i" }}</span>{% endif %}
+                    {% if approval_leaf and row.fleet_device_count %}<br><span style="font-size:.72rem;">Affected Computers: {{ row.fleet_device_count }}</span>{% endif %}
+                </td>
+                <td>
+                    <div class="issue-row-actions">
+                        <a class="issue-row-action issue-row-action--primary" href="{{ row.review_url }}">{{ row.review_label|default:"Review" }}</a>
+                        {% if row.kind == "finding" and row.namespace == "entity" %}
+                            {% with f=row.f %}
+                            {% if row.publisher_review_url %}<a class="issue-row-action" href="{{ row.publisher_review_url }}" title="Decide this title or its whole publisher">By publisher</a>{% endif %}
+                            {% if row.status != "resolved" and row.refresh_available %}<button type="submit" formaction="{% url 'finding_refresh' f.id %}" class="issue-row-action" title="{{ row.refresh_title }}">Refresh</button>{% endif %}
+                            {% if row.archive_action %}<button type="submit" name="action" value="archive_hudu_assets" class="row-archive-hudu issue-row-action issue-row-action--override" onclick="return archiveHuduRow(this)">Archive in Hudu</button>{% endif %}
+                            {% if f.finding_type.name == "identity_conflict" and row.status != "resolved" %}<button type="submit" formaction="{% url 'finding_reviewed_distinct' f.id %}" name="reason" value="Reviewed as distinct after comparing source records" class="issue-row-action">Keep separate</button>{% endif %}
+                            {% if row.status == "open" %}
+                                <button type="submit" formaction="{% url 'finding_snooze' f.id %}" class="issue-row-action">Pause</button>
+                                <button type="button" class="issue-row-action issue-row-action--override" onclick="openExcludeDialog('{% url 'finding_suppress' f.id %}', '{{ row.subject_label|escapejs }}')">Exclude</button>
+                            {% endif %}
+                            {% endwith %}
+                        {% endif %}
+                    </div>
+                    {% if row.action_note %}<div class="muted" style="font-size:.7rem; margin-top:.2rem;">{{ row.action_note }}</div>{% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</form>
+<div class="pager">
+    <p class="muted" style="margin:0;">{{ total }} issue{{ total|pluralize }} · page {{ page_number }} of {{ pages }}</p>
+    <div class="pager-links">
+        {% if previous_page_url %}<a class="pager-link" href="{{ previous_page_url }}">Previous</a>{% endif %}
+        {% if next_page_url %}<a class="pager-link" href="{{ next_page_url }}">Next</a>{% endif %}
+    </div>
+</div>
+{% else %}
+<p class="muted">No issues in this group match the current filters.</p>
+{% endif %}

@@ -12,7 +12,7 @@ PAGINATED_TABLES = {
     "coverage.html": 1,
     "entity_admin_list.html": 1,
     "entity_candidates_queue.html": 1,
-    "findings_queue.html": 1,
+    "_issues_rows.html": 1,
     "org_devices.html": 1,
     "org_software.html": 1,
     "patching_queue.html": 1,

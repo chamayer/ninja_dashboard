@@ -5,7 +5,7 @@
 
 {% block content %}
 <div class="card">
-    <p style="margin:0 0 .6rem;"><a href="{% url 'findings_queue' %}">← Back to Issues</a></p>
+    <p style="margin:0 0 .6rem;"><a href="{{ return_to|default:'/findings/' }}">← Back to Issues</a></p>
     <h1 style="margin:0;">Review: {{ finding.finding_type.name|humanize_label }}</h1>
     <p class="muted" style="margin:.4rem 0 0;">{{ finding.get_severity_display }} · {{ finding.get_status_display }}</p>
 </div>

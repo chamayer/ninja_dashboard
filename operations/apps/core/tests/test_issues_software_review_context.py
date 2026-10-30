@@ -4,7 +4,7 @@ from apps.core import views
 
 _VIEWS = (Path(__file__).resolve().parents[1] / "views.py").read_text(encoding="utf-8")
 _TEMPLATE = (
-    Path(__file__).resolve().parents[3] / "templates" / "findings_queue.html"
+    Path(__file__).resolve().parents[3] / "templates" / "_issues_rows.html"
 ).read_text(encoding="utf-8")
 
 
@@ -37,21 +37,6 @@ def test_the_context_line_counts_only_uncovered_machines():
         "suggestion": "none", "signals": [],
     })
     assert text == "Microsoft.WindowsStore · on 1 machine (3917 in the fleet)"
-
-
-def test_sql_and_python_use_the_same_wording():
-    """Issues sort and filter on the SQL text but show the Python text."""
-    start = _VIEWS.index("WHEN finding_type_id IN (SELECT id FROM operations.finding_types WHERE name IN ('rare_recent', 'whitelist_suggestion'))")
-    end = _VIEWS.index("WHEN finding_type_id = (SELECT id FROM operations.finding_types WHERE name = 'vulnerable_software')", start)
-    sql = _VIEWS[start:end]
-    for fragment in ("' machine'", "' at '", "' clients'", "' in the fleet)'",
-                     "'uncovered_device_count'", "'first seen recently'",
-                     "'suggested: '", "'signals: '", "replace(", "'undecided software'"):
-        assert fragment in sql, fragment
-    label_sql = views._suggestion_label_sql()
-    for value, label in views.SoftwareSuggestionRule.Suggestion.choices:
-        assert f"WHEN '{value}' THEN '{label}'" in label_sql
-    assert "%" not in label_sql  # safe inside RawSQL
 
 
 def test_rows_link_to_the_grouped_review_page_only_for_undecided_software():

@@ -68,5 +68,5 @@ def test_client_mapping_conflicts_are_prominent_on_client_and_fleet_dashboards()
     assert "critical</a>" in inventory
     assert "Critical client mapping conflict" in client_dashboard
     assert "client_mapping_conflict_url" in client_dashboard
-    assert "critical client mapping conflict" in dashboard
+    assert "Critical mapping issues" in dashboard
     assert "client_mapping_conflict_clients" in _VIEWS

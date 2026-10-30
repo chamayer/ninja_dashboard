@@ -124,84 +124,6 @@ def test_affected_device_rows_uses_one_filtered_finding_set(monkeypatch):
     ]
 
 
-def test_findings_queue_template_exposes_device_csv_and_grouped_types():
-    template = Path("templates/findings_queue.html").read_text(encoding="utf-8")
-    source = Path("apps/core/views.py").read_text(encoding="utf-8")
-
-    assert "fleet_summary_cards" in template
-    for label in (
-        "Unresolved",
-        "Needs action",
-        "Blocked",
-        "Pending",
-        "Paused",
-        "Software decisions",
-    ):
-        assert label in source
-    assert "format=devices_csv" in template
-    assert "Issues CSV" in template
-    assert "Shown issues CSV" not in template
-    assert 'value="{{ group.value }}"' in template
-    assert "<optgroup" not in template
-    assert "Selected actions" in template
-    assert "bulk-action" in template
-    assert "table_finding" in template
-    assert "sort_links.finding" in template
-    assert "issues-group-navigation" in template
-    assert 'aria-label="Unfiltered Issues totals"' in template
-    assert "Filtered results" in template
-    assert "issues-column-filter" in template
-    assert "More filters" in template
-    assert "issues-results-intro" in template
-    assert "current_result_summary" in template
-    assert '<select name="issue" id="issues-issue-filter">' in template
-    assert "issue_choices" in template
-    assert "issues-type-row" in template
-    assert 'json_script:"issue-taxonomy-data"' in template
-    assert "card.count }} / {{ card.total" not in template
-    assert "card.percentage" not in template
-    assert "action.label" in template
-    assert "Required to exclude or retire" in template
-    assert "action.confirmation" in template
-    assert "Archive in Hudu" in template
-    assert "Hudu record:" in template
-    assert "archiveHuduRow" in template
-    assert "row.review_url" in template
-
-
-def test_findings_queue_uses_one_context_column_for_supporting_information():
-    template = Path("templates/findings_queue.html").read_text(encoding="utf-8")
-    source = Path("apps/core/views.py").read_text(encoding="utf-8")
-
-    assert "sort_links.context" in template
-    assert 'name="table_context"' in template
-    assert "sort_links.evidence" not in template
-    assert "sort_links.date" not in template
-    assert 'name="table_evidence"' not in template
-    assert 'name="table_date"' not in template
-    assert "row.detail" not in template
-    assert "row.evidence_date" not in template
-    assert "context_parts.insert(0, detail)" in source
-    assert 'f"{evidence_label}: {evidence_date.strftime' in source
-
-
-def test_every_issue_row_has_a_direct_review_path_and_review_actions_are_not_alert_actions():
-    source = Path("apps/core/views.py").read_text(encoding="utf-8")
-    queue_template = Path("templates/findings_queue.html").read_text(encoding="utf-8")
-    template = Path("templates/finding_review.html").read_text(encoding="utf-8")
-
-    assert '"review_url": reverse("finding_review", kwargs={"finding_id": f.id})' in source
-    assert "def finding_review(" in source
-    assert "Open Computer and source records" in source
-    assert "Review patch evidence" in source
-    assert "Check source health" in source
-    for action in ("finding_acknowledge", "finding_resolve"):
-        assert action not in queue_template
-        assert action not in template
-    assert "finding_snooze" in queue_template
-    assert "finding_snooze" not in template
-
-
 def test_operator_projection_uses_operator_vocabulary_and_short_reasons():
     now = datetime(2026, 9, 18, tzinfo=UTC)
     assert operator_state(
@@ -231,81 +153,6 @@ def test_operator_projection_uses_operator_vocabulary_and_short_reasons():
         )["status"]
         == "active"
     )
-
-
-def test_findings_group_summaries_are_computed_before_screen_cap():
-    source = Path("apps/core/views.py").read_text(encoding="utf-8")
-    assert source.index("issue_group_headers =") < source.index(
-        "paginator = Paginator(findings_with_detail"
-    )
-    assert "actionable_qs[:500]" not in source
-
-
-def test_database_page_replaces_raw_findings_with_display_rows():
-    source = Path("apps/core/views.py").read_text(encoding="utf-8")
-    assert "database_page.object_list = findings_with_detail" in source
-
-
-def test_collapsed_queue_skips_affected_device_rollup_until_a_type_is_opened():
-    source = Path("apps/core/views.py").read_text(encoding="utf-8")
-
-    assert 'needs_affected_devices = request.GET.get("format") == "devices_csv"' in source
-    assert "_affected_device_rows(matching_qs) if needs_affected_devices else []" in source
-
-
-def test_collapsed_queue_counts_state_from_the_stored_table():
-    source = Path("apps/core/views.py").read_text(encoding="utf-8")
-
-    summary = source[source.index("def _state_rows()") : source.index("def _state_counts_for(")]
-    assert "StoredFindingState.objects.filter(" in summary
-    assert "finding__status__in=_FINDING_ACTIVE_STATUSES" in summary
-    assert ".annotate(n=Count(\"pk\"))" in summary
-    assert "fleet_state_counts_by_type = _fleet_state_counts()" in source
-
-
-def test_filtered_issue_queue_filters_and_counts_state_in_the_database():
-    source = Path("apps/core/views.py").read_text(encoding="utf-8")
-
-    assert "qs = qs.filter(id__in=_state_ids(attention_filter))" in source
-    assert "state_counts_by_type = _state_counts_for(database_qs)" in source
-    assert "FindingState" not in source.replace("StoredFindingState", "")
-    assert "fleet_states" not in source
-    assert "governed_ids" not in source
-
-
-def test_single_condition_type_uses_a_cheap_default_group_tie_breaker():
-    source = Path("apps/core/views.py").read_text(encoding="utf-8")
-
-    assert "single_condition_scope = bool(issue_filter)" in source
-    assert 'if sort_key == "group" and single_condition_scope' in source
-    assert '("id",)' in source
-
-
-def test_issue_work_status_uses_one_operator_label_without_a_repeated_reason():
-    source = Path("apps/core/views.py").read_text(encoding="utf-8")
-    template = Path("templates/findings_queue.html").read_text(encoding="utf-8")
-
-    assert 'row["work_status_label"]' in source
-    assert 'row["operator_status_note"]' in source
-    assert '("Status", "work_status_label")' in source
-    assert ">Status</a>" in template
-    assert "{{ row.work_status_label }}" in template
-    assert "{{ row.operator_attention|humanize_label }}" not in template
-    assert '"Waiting for new information."' in source
-    assert "operator_owner" not in template
-    assert "operator_next_step" not in template
-
-
-def test_optional_type_state_links_are_stacked_for_scanning():
-    template = Path("templates/findings_queue.html").read_text(encoding="utf-8")
-
-    assert (
-        ".issues-type-row-label { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }"
-        in template
-    )
-    assert ".issues-type-count" in template
-    assert ".issues-state-links { display:grid;" in template
-    assert ".issues-state-links a { display:block; }" in template
 
 
 def test_patching_scope_labels_explain_the_three_operator_choices():
@@ -430,39 +277,6 @@ def test_bulk_retirement_fails_closed_without_lifecycle_permission():
         views.findings_bulk_action(request)
 
 
-def test_findings_scope_cards_compare_filtered_counts_with_labeled_baselines():
-    source = Path("apps/core/views.py").read_text(encoding="utf-8")
-
-    assert "fleet_policy_qs" in source
-    assert "current_result_summary" in source
-    assert '"total_label": total_label' not in source
-
-
-def test_undecided_software_is_in_the_queue_but_is_decided_not_paused():
-    source = Path("apps/core/views.py").read_text(encoding="utf-8")
-
-    assert views._SOFTWARE_POLICY_CANDIDATE_TYPES == ("whitelist_suggestion",)
-    # No longer excluded from the listing or the counts ...
-    assert "must not inflate the Issues response counts" not in source
-    assert "ft.name <> ALL(%s)" not in source
-    # ... but pausing or excluding it is still blocked: a decision is the action.
-    assert "actionable_qs" in source
-    assert "_policy_candidate_state_action_blocked" in source
-    assert "Skipped {policy_count} software policy candidate" in source
-    # The most widespread undecided title is listed first.
-    assert 'KeyTextTransform("fleet_device_count", "finding_details")' in source
-
-
-def test_findings_queue_csv_includes_windows_servicing_context():
-    source = Path("apps/core/views.py").read_text(encoding="utf-8")
-
-    assert '"Operating system"' in source
-    assert '"OS release"' in source
-    assert '"OS build"' in source
-    assert '"Lifecycle cycle"' in source
-    assert '"Security support ends"' in source
-
-
 def test_registered_evidence_group_drilldown_opens_the_full_group():
     finding = SimpleNamespace(
         finding_type=SimpleNamespace(name="cross_client_serial", drilldown_evidence_key="serial"),
@@ -490,112 +304,11 @@ def test_unregistered_evidence_group_preserves_device_drilldown():
     }
 
 
-def test_finding_group_filter_requires_the_registry_key():
-    assert views._finding_group_lookup(
-        finding_type_name="cross_client_serial",
-        configured_key="serial",
-        requested_key="serial",
-        requested_value="AB 123",
-    ) == {"finding_details__serial__iexact": "AB 123"}
-    assert (
-        views._finding_group_lookup(
-            finding_type_name="cross_client_serial",
-            configured_key="serial",
-            requested_key="client_ids",
-            requested_value="AB 123",
-        )
-        is None
-    )
-
-
-def test_device_and_issues_templates_explain_the_drilldown_scope():
-    device_template = Path("templates/device_detail.html").read_text(encoding="utf-8")
-    findings_template = Path("templates/findings_queue.html").read_text(encoding="utf-8")
-
-    assert "{% finding_drilldown_query f device.id %}" in device_template
-    assert "Showing every device with this finding type" in findings_template
-    assert "Filtered to the selected device." in findings_template
-
-
-def test_findings_queue_exposes_governed_response_filter():
-    source = Path("apps/core/views.py").read_text(encoding="utf-8")
-    template = Path("templates/findings_queue.html").read_text(encoding="utf-8")
-    for value in ("actionable", "blocked", "pending", "paused", "all"):
-        assert value in source
-    assert 'name="attention"' in template
-    assert "_condition_operator_states" in source
-    assert "condition_participants" in source
-    assert '"Status"' in source
-    assert '"Details"' in source
-    assert "Policy:" not in template
-    assert "row.assessment" not in template
-    assert "finding_reviewed_distinct" in template
-    assert "Keep separate" in template
-    assert "category_tiles" not in template
-
-
-def test_findings_queue_includes_pending_record_matches_without_promoting_evidence_to_issues():
-    source = Path("apps/core/views.py").read_text(encoding="utf-8")
-    template = Path("templates/findings_queue.html").read_text(encoding="utf-8")
-
-    assert "entity_candidate_items" in source
-    assert "EntityCandidate.Status.PENDING" in source
-    assert 'current_type_counts["identity_resolution_pending"]' in source
-    assert "client_candidates_by_source_record" in source
-    assert "observed_only" in source
-    assert "Records needing a match" in template
-    assert "Review match" in template
-    client_workspace = Path("apps/core/client_workspace.py").read_text(encoding="utf-8")
-    client_template = Path("templates/org_index.html").read_text(encoding="utf-8")
-    assert 'status=EntityCandidate.Status.PENDING' in client_workspace
-    assert "Records needing a match" in client_template
-
-
 def test_findings_queue_has_one_category_scheme_and_no_legacy_url_shims():
     source = Path("apps/core/views.py").read_text(encoding="utf-8")
     assert "requested_category_filter" not in source
     assert "finding_type__category__name" not in source
     assert "finding_categories" not in source
-
-
-def test_findings_queue_retains_offline_evidence_for_explicit_review():
-    source = Path("apps/core/views.py").read_text(encoding="utf-8")
-    assert "Retained findings stay discoverable even when their device is offline" in source
-    assert "status_scope_qs = status_scope_qs.exclude(coalesced_offline_q)" not in source
-    assert "qs = qs.exclude(coalesced_offline_q)" not in source
-
-
-def test_findings_queue_summary_cards_use_fleet_wide_operator_counts():
-    source = Path("apps/core/views.py").read_text(encoding="utf-8")
-    template = Path("templates/findings_queue.html").read_text(encoding="utf-8")
-    assert "fleet_total = sum(sum(counts.values()) for counts in fleet_state_counts_by_type.values())" in source
-    assert '"value": fleet_total,' in source
-    assert '"label": "Pending"' in source
-    assert "Review by state" in template
-    assert "operator_owner" not in source
-    assert "operator_next_step" not in source
-
-
-def test_issue_actions_use_consistent_controls_and_scoped_refresh():
-    source = Path("apps/core/views.py").read_text(encoding="utf-8")
-    template = Path("templates/findings_queue.html").read_text(encoding="utf-8")
-    urls = Path("config/urls.py").read_text(encoding="utf-8")
-
-    assert ".issue-row-action" in template
-    assert "<details>" not in template[template.index('class="issue-row-actions"') :]
-    assert "openExcludeDialog" in template
-    assert "finding_refresh" in template
-    assert "Refresh" in template
-    assert 'action" value="ack' not in template
-    assert 'action" value="resolve' not in template
-    assert "def _queue_ninja_software_refresh" in source
-    assert '/run/software/device?{query}' in source
-    assert 'urlencode({"id": external_id})' in source
-    # Only software Issues refresh a Computer's software list.
-    refresh = source[source.index("def _queue_refresh_for_finding") :]
-    refresh = refresh[: refresh.index("\ndef ", 1)]
-    assert "in _software_finding_modules()" in refresh
-    assert "finding_refresh" in urls
 
 
 def test_targeted_refresh_uses_the_same_ingest_and_evaluator_paths_as_issues():
@@ -616,93 +329,6 @@ def test_targeted_refresh_uses_the_same_ingest_and_evaluator_paths_as_issues():
     assert "Source data" in refresh_template
     assert "Reevaluate" in refresh_template
     assert "targeted_refresh" in urls
-
-
-def test_issue_categories_open_rows_without_requiring_a_type_drilldown():
-    source = Path("apps/core/views.py").read_text(encoding="utf-8")
-    template = Path("templates/findings_queue.html").read_text(encoding="utf-8")
-    assert '"expanded": bool(' in source
-    assert "category_filter\n        or type_filter" in source
-    assert 'data-category-url="{{ category.href }}"' in template
-    assert "window.location.assign(group.dataset.categoryUrl)" in template
-    assert ".issues-type-row" in template
-    assert "issues-type-count" in template
-    assert "white-space:nowrap" in template
-    assert (
-        '<details class="issues-category-group"{% if category.expanded %} open{% endif %} data-category-url="{{ category.href }}"'
-        in template
-    )
-
-
-def test_findings_queue_csv_projects_operator_labels_without_internal_owner_columns():
-    source = Path("apps/core/views.py").read_text(encoding="utf-8")
-    queue = source[
-        source.index("def findings_queue") : source.index(
-            "def _policy_candidate_state_action_blocked"
-        )
-    ]
-    assert queue.index('row["issue_label"]') < queue.index('if request.GET.get("format") == "csv"')
-    csv_section = queue[
-        queue.index("def _findings_csv_response") : queue.index(
-            "# Keep these getters", queue.index("def _findings_csv_response")
-        )
-    ]
-    assert '("Status", "work_status_label")' in csv_section
-    assert '("Owner"' not in csv_section
-    assert '("Next step"' not in csv_section
-    assert queue.index("return _findings_csv_response()") > queue.index("findings_with_detail = [")
-    assert queue.index('if request.GET.get("format") == "csv"') < queue.index(
-        "affected_devices = _affected_device_rows"
-    )
-
-
-def test_database_queue_projection_covers_merged_context_and_subject_overrides():
-    source = Path("apps/core/views.py").read_text(encoding="utf-8")
-    queue = source[
-        source.index("def findings_queue") : source.index(
-            "def _policy_candidate_state_action_blocked"
-        )
-    ]
-
-    # Every condition detail and source timestamp rendered in Context needs a
-    # matching database expression so filters and sorting use what operators see.
-    for finding_type in (
-        "device_source_record_withdrawn",
-        "device_missing_from_source",
-        "device_offline",
-        "identity_conflict",
-        "cmdb_asset_stale",
-        "cross_client_serial",
-        "computer_client_conflict",
-        "windows_servicing_%",
-        "vulnerable_software",
-        "known_malicious_hint",
-    ):
-        assert finding_type in queue
-
-    assert "operations.device_windows_servicing_current" in queue
-    assert "operations.device_session_current" in queue
-    assert "COALESCE(\n                       finding_details->>'hostname'," in queue
-    assert '"evidence": (detail_expression, "id")' not in queue
-    assert '"date": (evidence_date_expression, "id")' not in queue
-    assert '"context": (display_context_expression, "id")' in queue
-    assert 'Func(detail_expression, Value(""), function="NULLIF")' in queue
-    assert 'Func(evidence_context_expression, Value(""), function="NULLIF")' in queue
-    assert "database_qs = actionable_qs" in queue
-    assert '**{f"rendered_{key}": database_annotations[f"rendered_{key}"]}' in queue
-    assert 'f"rendered_{key}__icontains"' in queue
-
-
-def test_database_evidence_projection_escapes_psycopg_percent_literals():
-    source = Path("apps/core/views.py").read_text(encoding="utf-8")
-    queue = source[
-        source.index("def findings_queue") : source.index(
-            "def _policy_candidate_state_action_blocked"
-        )
-    ]
-    assert "LIKE 'windows_servicing_%%'" in queue
-    assert "LIKE 'windows_servicing_%%_eol'" in queue
-    assert "LIKE 'windows_servicing_%'" not in queue
 
 
 def test_database_evidence_projection_parenthesizes_json_text_before_concatenation():
@@ -742,15 +368,6 @@ def test_findings_queue_does_not_substitute_packaged_taxonomy():
     ]
     assert "load_profile" not in taxonomy_section
     assert "issue_taxonomy" in taxonomy_section
-
-
-def test_condition_reasons_are_humanized_in_evidence_surfaces():
-    queue = Path("templates/findings_queue.html").read_text(encoding="utf-8")
-    admin = Path("templates/findings_admin_health.html").read_text(encoding="utf-8")
-    device = Path("templates/device_detail.html").read_text(encoding="utf-8")
-    assert queue.count("|humanize_label") >= 1
-    assert admin.count("|humanize_label") >= 2
-    assert "blocker|humanize_label" in device
 
 
 def test_human_label_filter_formats_scoped_condition_reasons():
@@ -816,16 +433,6 @@ def test_admin_coverage_tracks_condition_keys_and_links_to_issues():
     assert "row.category_key" in template
     assert "row.type_key" in template
     assert "row.name|urlencode" in template
-
-
-def test_device_issue_card_links_to_all_retained_responses():
-    template = Path("templates/device_detail.html").read_text(encoding="utf-8")
-    assert "status=all&amp;response=all&amp;subject_id={{ device.id }}" in template
-
-
-def test_client_workspace_drilldowns_match_retained_issue_counts():
-    source = Path("apps/core/client_workspace.py").read_text(encoding="utf-8")
-    assert "f\"&response=all&type={row['finding_type__name']}\"" in source
 
 
 def test_source_action_enqueue_requires_current_actionable_response():

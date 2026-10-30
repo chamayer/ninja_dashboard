@@ -173,9 +173,9 @@
 </div>
 
 {% if client_mapping_conflict_count %}
-<section class="client-mapping-alert" aria-label="Critical client mapping conflicts">
-  <h2>{{ client_mapping_conflict_count }} critical client mapping conflict{{ client_mapping_conflict_count|pluralize }}</h2>
-  <p>Source-client attribution is unresolved or contradictory{% if client_mapping_conflict_clients %} for {{ client_mapping_conflict_clients }} known client{{ client_mapping_conflict_clients|pluralize }}{% endif %}. Client-scoped inventory and coverage can be misattributed. <a href="{{ client_mapping_conflict_url }}">Review mapping conflicts →</a></p>
+<section class="client-mapping-alert" aria-label="Critical client mapping issues">
+  <h2>Critical mapping issues ({{ client_mapping_conflict_count }})</h2>
+  <p>Source-client attribution is unresolved or contradictory{% if client_mapping_conflict_clients %} for {{ client_mapping_conflict_clients }} known client{{ client_mapping_conflict_clients|pluralize }}{% endif %}. Client-scoped inventory and coverage can be misattributed. <a href="{{ client_mapping_conflict_url }}">Review these {{ client_mapping_conflict_count }} →</a> · <a href="{{ client_mapping_all_url }}">View all mapping issues</a></p>
 </section>
 {% endif %}
 

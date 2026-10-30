@@ -31,7 +31,7 @@
         {% csrf_token %}
         <input type="hidden" name="confirmation" value="same_computer_group">
         <button class="btn btn-primary" type="submit" onclick="return confirm('Confirm that all listed records are the same computer?');">Yes, merge all records</button>
-        <a href="{% url 'findings_queue' %}?type=possible_duplicate_computers">Cancel</a>
+        <a href="{% url 'findings_queue' %}?type=duplicate_computers">Cancel</a>
     </form>
 </div>
 {% endblock %}
