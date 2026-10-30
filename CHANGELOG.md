@@ -2,6 +2,15 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.135.1] — 2026-10-30 — Jobs worker restart loop fix
+
+### Fixed
+
+- The Jobs worker restarted continuously after 0.135.0. The new Source-record
+  assessment job's resource lock had no capacity policy, so dispatch stopped with
+  "Jobs resource policy is unavailable". The lock now has the same policy as the
+  other evaluation locks.
+
 ## [0.135.0] — 2026-10-30 — Managed source records (PLAN-004 R4 Stage A)
 
 ### Added
