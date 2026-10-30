@@ -18,6 +18,7 @@ def critical_priority_clause(finding_alias: str) -> str:
                        SELECT 1
                          FROM operations.findings blocker
                         WHERE blocker.tenant_id = {finding_alias}.tenant_id
+                          AND blocker.condition_namespace = 'entity'
                           AND blocker.id <> {finding_alias}.id
                           AND blocker.severity = 'critical'
                           AND blocker.status IN ('open', 'acknowledged', 'investigating')

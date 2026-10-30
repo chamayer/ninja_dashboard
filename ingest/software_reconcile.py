@@ -839,7 +839,7 @@ def reconcile_type(
           FROM software_desired desired
          WHERE NOT EXISTS (
              SELECT 1 FROM operations.findings existing
-              WHERE existing.tenant_id = %(tid)s
+              WHERE existing.tenant_id = %(tid)s AND existing.condition_namespace = 'entity'
                 AND existing.condition_key = desired.condition_key
                 AND existing.status = ANY(%(active)s)
          )

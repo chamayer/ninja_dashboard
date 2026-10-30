@@ -891,7 +891,8 @@ def _upsert_lifecycle_finding(
     )
     if cur.rowcount:
         cur.execute(
-            "SELECT id, status FROM operations.findings WHERE tenant_id=%s AND condition_key=%s",
+            "SELECT id, status FROM operations.findings WHERE tenant_id=%s"
+            " AND condition_namespace = 'entity' AND condition_key=%s",
             (tenant_id, condition_key),
         )
         finding_id, status = cur.fetchone()
@@ -909,7 +910,8 @@ def _upsert_lifecycle_finding(
             details,
         )
         cur.execute(
-            "SELECT id, status FROM operations.findings WHERE tenant_id=%s AND condition_key=%s",
+            "SELECT id, status FROM operations.findings WHERE tenant_id=%s"
+            " AND condition_namespace = 'entity' AND condition_key=%s",
             (tenant_id, condition_key),
         )
         finding_id, status = cur.fetchone()

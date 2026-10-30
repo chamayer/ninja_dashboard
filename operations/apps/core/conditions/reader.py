@@ -45,7 +45,8 @@ SELECT 'entity' AS row_kind, f.id::text AS row_id, ft.name AS type_name,
        f.finding_details ->> 'snapshot_scope' AS snapshot_scope
 FROM operations.findings f
 JOIN operations.finding_types ft ON ft.id=f.finding_type_id
-WHERE f.tenant_id=%s AND f.status IN ('open','acknowledged','investigating','suppressed','wontfix')
+WHERE f.tenant_id=%s AND f.condition_namespace='entity'
+  AND f.status IN ('open','acknowledged','investigating','suppressed','wontfix')
 UNION ALL
 SELECT 'admin', f.id::text, ft.name, f.condition_key, f.status,
        'admin_context', f.id::text, NULL, NULL, NULL,
@@ -73,7 +74,8 @@ ASSOCIATIONS_SQL = """
 WITH active AS (
  SELECT f.id, f.tenant_id, f.subject_type, f.subject_id, ft.creates_device_exposure
  FROM operations.findings f JOIN operations.finding_types ft ON ft.id=f.finding_type_id
- WHERE f.tenant_id=%s AND f.status IN ('open','acknowledged','investigating','suppressed','wontfix')
+ WHERE f.tenant_id=%s AND f.condition_namespace='entity'
+   AND f.status IN ('open','acknowledged','investigating','suppressed','wontfix')
 ), versions AS (
  SELECT f.id, f.tenant_id, v.id AS version_id
  FROM active f JOIN catalog.software_versions v ON v.version_uuid=f.subject_id

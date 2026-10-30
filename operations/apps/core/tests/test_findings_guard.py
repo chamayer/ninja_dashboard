@@ -96,3 +96,19 @@ def test_database_contract_is_none_before_publication():
     cursor = mock.Mock()
     cursor.fetchone.return_value = (False,)
     assert findings_contract.database_findings_contract(cursor) is None
+
+
+def test_finding_readers_default_to_the_entity_namespace():
+    from apps.core.models import Finding
+
+    entity_sql = str(Finding.objects.all().query)
+    assert "WHERE" in entity_sql and "condition_namespace" in entity_sql.split("WHERE", 1)[1]
+    assert "WHERE" not in str(Finding.all_namespaces.all().query)
+    assert Finding._meta.base_manager_name == "all_namespaces"
+
+
+def test_raw_finding_counts_stay_on_the_entity_namespace():
+    home = _body("home")
+    assert "finding.condition_namespace = 'entity'" in home
+    org = _body("org_index")
+    assert org.count("condition_namespace = 'entity'") >= 2

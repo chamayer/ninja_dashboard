@@ -551,6 +551,7 @@ def _covered_counts_by_parent(parent_ids) -> dict[str, dict]:
                         WHEN 'high' THEN 3 WHEN 'medium' THEN 2 WHEN 'low' THEN 1 ELSE 0 END DESC))[1]
               FROM operations.finding_state s
               JOIN operations.findings f ON f.id = s.finding_id AND f.status = ANY(%s)
+               AND f.condition_namespace = 'entity'
              CROSS JOIN LATERAL unnest(s.covered_by) p(parent)
              WHERE s.attention = 'covered' AND s.covered_by && %s::uuid[] AND p.parent = ANY(%s::uuid[])
              GROUP BY p.parent
@@ -669,10 +670,12 @@ def _critical_issue_badges(ids: list[str]) -> dict[str, dict[str, str]]:
                 ON c.tenant_id = f.tenant_id AND c.subject_type = f.subject_type
                AND c.subject_id = f.subject_id AND c.id <> f.id
                AND c.severity = 'critical' AND c.status = ANY(%s)
+               AND c.condition_namespace = 'entity'
               JOIN operations.finding_state cs
                 ON cs.finding_id = c.id AND cs.attention = 'needs_action'
               JOIN operations.finding_types ct ON ct.id = c.finding_type_id
              WHERE f.id = ANY(%s::uuid[]) AND f.severity <> 'critical'
+               AND f.condition_namespace = 'entity'
              ORDER BY f.id, c.id
             """,
             [list(_FINDING_ACTIVE_STATUSES), ids],
@@ -1021,7 +1024,7 @@ def home(request: HttpRequest) -> HttpResponse:  # noqa: PLR0912, PLR0915
                 FROM operations.findings finding
                 JOIN operations.finding_types finding_type
                   ON finding_type.id = finding.finding_type_id
-                WHERE finding.tenant_id = 1
+                WHERE finding.tenant_id = 1 AND finding.condition_namespace = 'entity'
                   AND finding.status IN ('open', 'acknowledged', 'investigating')
                   AND (finding.snoozed_until IS NULL OR finding.snoozed_until < %s)
             )
@@ -2099,7 +2102,7 @@ def org_index(request: HttpRequest, org_slug: str) -> HttpResponse:
                 """
                 SELECT severity, COUNT(*)::int
                 FROM operations.findings
-                WHERE tenant_id = 1 AND client_id = %s
+                WHERE tenant_id = 1 AND client_id = %s AND condition_namespace = 'entity'
                   AND status IN ('open', 'acknowledged', 'investigating')
                 GROUP BY severity
                 """,
@@ -2228,7 +2231,7 @@ def org_index(request: HttpRequest, org_slug: str) -> HttpResponse:
                 """
                 SELECT COUNT(*)::int
                 FROM operations.findings
-                WHERE tenant_id = 1 AND client_id = %s
+                WHERE tenant_id = 1 AND client_id = %s AND condition_namespace = 'entity'
                   AND first_seen_at > NOW() - INTERVAL '24 hours'
                 """,
                 [str(client.id)],
@@ -14213,7 +14216,7 @@ def _condition_coverage_summary(profile) -> list[dict]:
             WITH retained AS (
                 SELECT 'entity' AS row_kind, f.id AS finding_id, f.condition_key AS name
                   FROM operations.findings f
-                 WHERE f.tenant_id = 1
+                 WHERE f.tenant_id = 1 AND f.condition_namespace = 'entity'
                    AND f.status IN ('open', 'acknowledged', 'investigating')
                    AND f.condition_key IN ({placeholders})
                 UNION ALL

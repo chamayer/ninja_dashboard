@@ -4041,6 +4041,18 @@ class MergeCandidate(UUIDTenantScopedModel):
         return f"{self.entity_type}:{self.canonical_key}"
 
 
+class EntityFindingManager(models.Manager):
+    """Entity-namespace findings only (PLAN-003).
+
+    Admin findings share the `findings` table but are read through
+    `AdminFinding`; this keeps every existing `Finding.objects` reader on the
+    population it had before the ledgers were combined.
+    """
+
+    def get_queryset(self):
+        return super().get_queryset().filter(condition_namespace="entity")
+
+
 class Finding(UUIDTenantScopedModel):
     class SubjectType(models.TextChoices):
         CLIENT = "client", "Client"
@@ -4117,6 +4129,8 @@ class Finding(UUIDTenantScopedModel):
         default="",
     )
     subject_layer_entity_id = models.UUIDField(null=True, blank=True)
+    # PLAN-003: entity or admin. Admin rows are read through AdminFinding.
+    condition_namespace = models.CharField(max_length=16, default="entity", editable=False)
     finding_details = models.JSONField(default=dict, blank=True)
     condition_key = models.CharField(max_length=255, blank=True, default="", db_index=True)
     severity = models.CharField(max_length=16, choices=Severity.choices, default=Severity.MEDIUM)
@@ -4144,7 +4158,13 @@ class Finding(UUIDTenantScopedModel):
     # first_seen_at <= D AND (closed_at IS NULL OR closed_at > D).
     closed_at = models.DateTimeField(null=True, blank=True)
 
+    # The first manager is the default: entity-only. all_namespaces serves code
+    # that must see admin rows too, and related-object access (base manager).
+    objects = EntityFindingManager()
+    all_namespaces = models.Manager()  # noqa: DJ012 - must follow the default manager
+
     class Meta:
+        base_manager_name = "all_namespaces"
         db_table = "findings"
         indexes = (
             models.Index(
