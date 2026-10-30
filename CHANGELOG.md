@@ -2,6 +2,18 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.134.1] — 2026-10-30 — Issues badge and partial-eligibility bulk actions
+
+### Changed
+
+- The Issues badge in the navigation shows the queue's Open count (independent
+  corrective actions, unpaused), refreshed at most once a minute, instead of every
+  active finding.
+- A remediation action on a mixed selection runs on the issues it applies to and
+  skips the rest. The confirmation states both counts (for example "2 selected
+  issues; 1 selected is ineligible and will be skipped"), and the result reports
+  how many were skipped.
+
 ## [0.134.0] — 2026-10-30 — One Issues queue with corrective-action counts
 
 ### Changed
