@@ -16,7 +16,17 @@
       (4) Watch ingest run timings, assessment queue depth and oldest dirty revision
       after release (R4-2 waiver); the job stops early while the evaluator holds the
       exclusive guard. (5) Review the reassessment's changed/ambiguous/unmatched
-      rows (report on the host, see the Operations blueprint).
+      rows (report on the host, see the Operations blueprint): 109 changed, 88
+      ambiguous, 137 unmatched on Computers with other records.
+- [ ] **ADR-0050 follow-ups** (2026-10-30, proposed; each needs approval):
+      (1) shared design §5 attachment policy for intake, resolver, Stage A identity
+      rule and the reassessment preview, plus the ADR-0032 amendment (remove the
+      recency tie-break first); (2) remaining design §4 rules (reference
+      correctness, purpose, per-record attribution); (3) row-1 findings per source
+      record by domain (software first), with source-record keys on their stores;
+      (4) Computer-page aggregation of record/case findings through link history;
+      (5) one owner per correction across record and Computer producers, with
+      hand-over on attach/detach.
 - [ ] **PLAN-004 deferred capabilities** (2026-10-29):
       [PLAN-033: case combining](docs/plans/PLAN-033-source-record-case-combining.md)
       and [PLAN-034: source-record notifications](docs/plans/PLAN-034-source-record-notifications.md)

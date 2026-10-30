@@ -12,6 +12,17 @@ See ADR-0012 for the model these terms describe.
 **Entity** — something the platform tracks: a client, a device, an asset, a
 user, a software product. Exists independently of any source.
 
+**Computer** — the platform's learned grouping of source records believed to
+describe one machine (entity class `device`, table `devices`), plus durable machine
+context. No source has one. Needed for questions that span sources or time
+(required-agent coverage, fully offline, one machine or two, counts, lifecycle);
+facts one source record answers are evaluated on that record. Changed only through
+`set_source_association`. See ADR-0050.
+
+**Source record** — one record as a source reports it (a Ninja device, a SentinelOne
+agent, a Hudu asset): a managed `source_record` subject from intake, whether or not it
+belongs to a Computer (ADR-0049). Its confirmed association is its link.
+
 **Anchor** — an entity's stable identifier plus the record that it exists.
 Learned once; never removed because a source went quiet.
 

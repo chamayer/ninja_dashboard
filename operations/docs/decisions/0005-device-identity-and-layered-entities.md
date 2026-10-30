@@ -1,6 +1,6 @@
 # 0005 — Device is a learned identity anchor with layered entities
 
-Status: Partially superseded by ADR-0013 (2026-08-05) and ADR-0032 (2026-10-16: "hostname alone never merges" no longer applies to a same-client name match with no hard conflict)
+Status: Proposed amendment: ADR-0050 (2026-10-30, where findings are evaluated). Partially superseded by ADR-0013 (2026-08-05) and ADR-0032 (2026-10-16: "hostname alone never merges" no longer applies to a same-client name match with no hard conflict)
 Date: 2026-07-19
 Accepted: 2026-07-20 (v1 execution — collapsed matview stays as primary consumer surface; flat Device attribute columns retained as denormalized cache in v1)
 

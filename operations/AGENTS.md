@@ -32,6 +32,11 @@ Ninja Dashboard stack.
   a relationship may carry its own attributes, with no volume exemption;
   ownership determines scope, and an unscoped entity never references a
   scoped one.
+- A Computer is a learned grouping of source records, not a source fact
+  (ADR-0050). Evaluate a fact one source record answers on that record; use the
+  Computer only for cross-source or machine-level questions. Never write
+  `device_id` or links directly: `set_source_association` is the one writer,
+  enforced by triggers (0374).
 - State a rule with its enforcement mechanism or not at all. Prose without a
   privilege, constraint, registry row, or test is a description, and this
   repository has repeatedly shipped inert ones.
