@@ -2,6 +2,15 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.137.1] — 2026-10-30 — Faster association reassessment preview
+
+### Fixed
+
+- The one-time reassessment preview reloaded every named record of a client for
+  each record it checked, because its name lookups bypassed the per-client cache.
+  They now share the cache. The record's own rows were already skipped by
+  platform and key, so results are unchanged.
+
 ## [0.137.0] — 2026-10-30 — One association authority (PLAN-004 R4 Stage B)
 
 ### Changed

@@ -611,7 +611,10 @@ def _name_candidates(
     rows = [
         (device_id, _tier(lifecycle, is_current), name_short, name_key)
         for device_id, lifecycle, name_short, name_key, is_current, platform, entity_key, entity_type
-        in client_record_names(cur, tenant_id, client_id, excluded_observation_ids)
+        # The record's own rows are skipped by platform and key below, so the
+        # per-client cache is shared; keying it by the exclusion made the
+        # reassessment preview reload every client for every record.
+        in client_record_names(cur, tenant_id, client_id)
         if entity_type in types
         and not (platform == source_name and entity_key == external_id)
         and _names_match(hostname, key, name_short, name_key or "")
@@ -621,7 +624,7 @@ def _name_candidates(
         rows = [
             (device_id, 4, short, name_key)
             for device_id, platform, entity_key, short, name_key in _history_names(
-                cur, tenant_id, client_id, identity_types, excluded_observation_ids
+                cur, tenant_id, client_id, identity_types
             )
             if name_key == key and not (platform == source_name and entity_key == external_id)
         ]
