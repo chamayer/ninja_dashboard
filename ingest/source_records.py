@@ -47,7 +47,9 @@ from typing import Any, Iterator
 import psycopg
 
 from ingest import db
+from ingest.conditions import record_assessment
 from ingest.normalize import is_usable_serial, load_identity_value_rejections
+from shared.conditions.contracts import Condition, EvaluationCoverage, Participant
 from shared.findings_contract import guard_findings_writes
 
 log = logging.getLogger(__name__)
@@ -498,6 +500,9 @@ def assess_records(
                 result,
                 now,
                 client_id=record["client_id"],
+                context_participants=(
+                    (("device", record["device_id"]),) if record["device_live"] else ()
+                ),
                 context={
                     "platform": record["platform"],
                     "entity_type": record["entity_type"],
@@ -554,6 +559,7 @@ def publish_finding(
     *,
     client_id: Any,
     context: dict[str, Any],
+    context_participants: tuple[tuple[str, Any], ...] = (),
 ) -> uuid.UUID | None:
     """Open, refresh or resolve the native finding one rule result implies.
 
@@ -595,6 +601,17 @@ def publish_finding(
     )
     row = cur.fetchone()
     if row:
+        _record_condition(
+            cur,
+            tenant_id,
+            row[0],
+            type_name,
+            key,
+            target_kind,
+            target_id,
+            context_participants,
+            now,
+        )
         return row[0]
     cur.execute(
         """
@@ -631,7 +648,57 @@ def publish_finding(
             now,
         ),
     )
-    return cur.fetchone()[0]
+    finding_id = cur.fetchone()[0]
+    _record_condition(
+        cur,
+        tenant_id,
+        finding_id,
+        type_name,
+        key,
+        target_kind,
+        target_id,
+        context_participants,
+        now,
+    )
+    return finding_id
+
+
+def _record_condition(
+    cur: Any,
+    tenant_id: int,
+    finding_id: uuid.UUID,
+    type_name: str,
+    key: str,
+    target_kind: str,
+    target_id: uuid.UUID,
+    context_participants: tuple[tuple[str, Any], ...],
+    now: datetime,
+) -> None:
+    """Write the shared condition assessment and participants of a native finding.
+
+    The native subject is the affected participant. An attached Computer, or a
+    case's member records, are context participants, so participant-based
+    readers (the Computer page, client rollups) find the finding while the link
+    holds. The rule ran on current facts under the publication locks, so its
+    coverage is complete and fresh.
+    """
+    affected = Participant(target_kind, str(target_id), "affected", tenant_id)
+    participants = (affected,) + tuple(
+        Participant(kind, str(reference), "context", tenant_id)
+        for kind, reference in context_participants
+        if reference is not None
+    )
+    record_assessment(
+        cur,
+        Condition(
+            tenant_id, "entity", str(finding_id), type_name, key, "open", participants
+        ),
+        (),
+        EvaluationCoverage(True, True, True, True),
+        now=now,
+        reevaluation_key=f"source_record:{key}",
+        participant=affected,
+    )
 
 
 def write_assessment(

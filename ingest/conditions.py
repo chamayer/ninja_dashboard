@@ -183,6 +183,9 @@ def _validate_participants(cur: Any, condition: Condition) -> None:
         "source_binding": ("source_bindings", "id"),
         "collector_instance": ("collector_instances", "id"),
         "software_installation": ("software_installations_current", "installation_uuid"),
+        # Native mechanism subjects (PLAN-004, ADR-0049).
+        "source_record": ("source_record_subjects", "id"),
+        "source_record_case": ("source_record_cases", "id"),
     }
     for kind, (table, column) in tables.items():
         references = {item.reference for item in condition.participants if item.kind == kind}

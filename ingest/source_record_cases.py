@@ -285,6 +285,7 @@ def assess_case_keys(
                 result,
                 now,
                 client_id=None,
+                context_participants=tuple(("source_record", m["id"]) for m in members),
                 context={
                     "case_label": f"Shared {_FAMILY_LABELS[key['key_family']]}",
                     "key_family": _FAMILY_LABELS[key["key_family"]],
