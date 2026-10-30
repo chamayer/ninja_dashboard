@@ -26,7 +26,11 @@ from apps.core.generic_admin import (
     entity_observation_reveal,
 )
 from apps.core.software_policy import software_policy_config
-from apps.core.source_record_views import source_record_detail
+from apps.core.source_record_views import (
+    source_record_case_detail,
+    source_record_cases,
+    source_record_detail,
+)
 from apps.core.views import (
     admin_data,
     admin_finding_acknowledge,
@@ -315,6 +319,12 @@ urlpatterns = [
     path("inventory/clients/", inventory_clients, name="inventory_clients"),
     path("inventory/computers/", fleet_coverage, name="inventory_computers"),
     path("inventory/source-records/", source_records, name="inventory_source_records"),
+    path("inventory/source-records/cases/", source_record_cases, name="source_record_cases"),
+    path(
+        "inventory/source-records/cases/<uuid:case_id>/",
+        source_record_case_detail,
+        name="source_record_case_detail",
+    ),
     path(
         "inventory/source-records/<uuid:subject_id>/",
         source_record_detail,
@@ -323,10 +333,16 @@ urlpatterns = [
     path("sources/", sources_status, name="sources_status"),
     path("sources/<uuid:source_instance_id>/records/", source_records, name="source_records"),
     path("sources/<uuid:binding_id>/refresh/", source_refresh_run, name="source_refresh_run"),
-    path("sources/<uuid:binding_id>/schedule/", source_schedule_update, name="source_schedule_update"),
+    path(
+        "sources/<uuid:binding_id>/schedule/", source_schedule_update, name="source_schedule_update"
+    ),
     path("merge-candidates/", merge_candidates_queue, name="merge_candidates_queue"),
     path("clients/candidates/", client_candidates_queue, name="client_candidates_queue"),
-    path("clients/candidates/bulk-accept/", client_candidates_bulk_accept, name="client_candidates_bulk_accept"),
+    path(
+        "clients/candidates/bulk-accept/",
+        client_candidates_bulk_accept,
+        name="client_candidates_bulk_accept",
+    ),
     path(
         "clients/candidates/<uuid:candidate_id>/",
         client_candidate_detail,

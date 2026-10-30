@@ -6,6 +6,7 @@
 <div class="card" style="margin-bottom:1rem;">
   <h1 style="margin:0;">{% if source_name %}{{ source_name }} source records{% if source_client_name %} · {{ source_client_name }}{% endif %}{% else %}Inventory source records{% endif %}</h1>
   <p class="muted">{{ total }} current observation record{{ total|pluralize }}. Source records are evidence, not a Computer total: Computer attachment, client attribution, and parent-record association are shown separately.</p>
+  <p><a href="{% url 'source_record_cases' %}">Source record cases</a> — records of one source that share a hardware identifier.</p>
   {% include "_csv_download.html" %}
 </div>
 

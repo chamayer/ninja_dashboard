@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}Source record cases{% endblock %}
+
+{% block content %}
+<p><a href="{% url 'inventory_source_records' %}">← Source records</a></p>
+<div class="card" style="margin-bottom:1rem;">
+  <h1 style="margin:0;">Source record cases</h1>
+  <p class="muted">Each case is one question: several records of one source report the same hardware identifier. Sharing an identifier does not prove the records are one machine, and a record can be in several cases.</p>
+  <p>
+    <a href="?state=open{% if family %}&family={{ family }}{% endif %}"{% if state == "open" %} aria-current="page"{% endif %}>Open ({{ counts.open|default:0 }})</a> ·
+    <a href="?state=duplicate{% if family %}&family={{ family }}{% endif %}"{% if state == "duplicate" %} aria-current="page"{% endif %}>Duplicate dispositions ({{ counts.duplicate|default:0 }})</a> ·
+    <a href="?state=closed{% if family %}&family={{ family }}{% endif %}"{% if state == "closed" %} aria-current="page"{% endif %}>Closed ({{ counts.closed|default:0 }})</a>
+  </p>
+  <form method="get" style="display:flex;gap:.7rem;align-items:end;">
+    <input type="hidden" name="state" value="{{ state }}">
+    <label>Identifier<br><select name="family"><option value="">Any</option>{% for key, label in families.items %}<option value="{{ key }}"{% if family == key %} selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
+    <button type="submit">Filter</button>
+  </form>
+</div>
+
+<div class="card">
+  <p class="muted">{{ total }} case{{ total|pluralize }}{% if pages > 1 %} · page {{ page }} of {{ pages }}{% endif %}</p>
+  {% if cases %}
+  <table>
+    <thead><tr><th>Shared identifier</th><th>Value</th><th>Source</th><th>Records</th><th>Issue</th><th>Opened</th></tr></thead>
+    <tbody>
+    {% for c in cases %}
+      <tr>
+        <td><a href="{% url 'source_record_case_detail' case_id=c.id %}">{{ c.family_label }}</a></td>
+        <td><code>{{ c.key_value }}</code></td>
+        <td>{{ c.source_name }}</td>
+        <td>{{ c.member_count }}</td>
+        <td>{% if c.work_owner == "legacy:duplicate_platform_record" %}covered by the Computer's duplicate issue{% elif c.work_owner == "duplicate_disposition" %}duplicate of another case{% elif c.finding_status %}{{ c.finding_status }}{% else %}—{% endif %}</td>
+        <td>{{ c.opened_at|date:"Y-m-d" }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  <p>{% if previous_page %}<a href="?state={{ state }}&family={{ family }}&page={{ previous_page }}">← Previous</a>{% endif %} {% if next_page %}<a href="?state={{ state }}&family={{ family }}&page={{ next_page }}">Next →</a>{% endif %}</p>
+  {% else %}
+  <p class="muted">No cases.</p>
+  {% endif %}
+</div>
+{% endblock %}

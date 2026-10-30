@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+{% block title %}Shared {{ case.family_label }}{% endblock %}
+
+{% block content %}
+<p><a href="{% url 'source_record_cases' %}">← Source record cases</a></p>
+<div class="card" style="margin-bottom:1rem;">
+  <h1 style="margin:0;">Shared {{ case.family_label }} <code>{{ case.key_value }}</code></h1>
+  <p class="muted">{{ case.source_name }} · {{ case.member_count }} record{{ case.member_count|pluralize }} · {{ case.state }}{% if case.closure_reason %} ({{ case.closure_reason }}){% endif %} · opened {{ case.opened_at|date:"Y-m-d" }}</p>
+  {% if case.state == "duplicate" %}
+  <p>Recorded as a duplicate of <a href="{% url 'source_record_case_detail' case_id=case.duplicate_of_id %}">another case</a>{% if case.decided_at %} on {{ case.decided_at|date:"Y-m-d" }}{% endif %}: “{{ case.decision_reason }}”. This is duplicate work, not a verified correction; it reopens if these records or the other case change.</p>
+  {% endif %}
+  <p class="muted">These records report the same {{ case.family_label }}. That alone does not prove they are one machine.</p>
+</div>
+
+<div class="card" style="margin-bottom:1rem;">
+  <h2>Records</h2>
+  <table>
+    <thead><tr><th>Name</th><th>Type</th><th>Serial</th><th>VM UUID</th><th>Last seen</th><th>Computer</th><th>Joined</th></tr></thead>
+    <tbody>
+    {% for m in members %}
+      <tr>
+        <td><a href="{% url 'source_record_detail' subject_id=m.id %}">{% if m.restricted %}(restricted){% else %}{{ m.reported_name|default:"(unnamed)" }}{% endif %}</a></td>
+        <td>{{ m.platform }} · {{ m.entity_type }}</td>
+        <td>{{ m.canonical_serial|default:"—" }}</td>
+        <td>{{ m.vm_uuid|default:"—" }}</td>
+        <td>{{ m.last_seen_at|date:"Y-m-d H:i"|default:"—" }}</td>
+        <td>{% if m.device_id and m.client_slug %}<a href="{% url 'device_detail' org_slug=m.client_slug device_id=m.device_id %}">{{ m.device_name|default:"(unnamed)" }}</a>{% else %}not attached{% endif %}</td>
+        <td>{{ m.joined_at|date:"Y-m-d" }}</td>
+      </tr>
+    {% empty %}
+      <tr><td colspan="7" class="muted">No current records.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% if released %}<p class="muted">{{ released|length }} record{{ released|length|pluralize }} left this case earlier.</p>{% endif %}
+</div>
+
+<div class="card" style="margin-bottom:1rem;">
+  <h2>Related cases</h2>
+  {% if related %}
+  <p class="muted">Other cases that share at least one of these records. Each is its own question.</p>
+  <table>
+    <thead><tr><th>Shared identifier</th><th>Value</th><th>Records</th><th>Shared with this case</th><th>State</th></tr></thead>
+    <tbody>
+    {% for r in related %}
+      <tr><td><a href="{% url 'source_record_case_detail' case_id=r.id %}">{{ r.family_label }}</a></td><td><code>{{ r.key_value }}</code></td><td>{{ r.member_count }}</td><td>{{ r.shared_members }}</td><td>{{ r.state }}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="muted">No related cases.</p>
+  {% endif %}
+</div>
+
+{% if may_decide and duplicate_targets %}
+<div class="card" style="margin-bottom:1rem;">
+  <h2>Same question as another case</h2>
+  <p class="muted">Close this case as duplicate work when a related case asks the same question. It does not change or correct any record.</p>
+  <form method="post">
+    {% csrf_token %}
+    <input type="hidden" name="version" value="{{ case.version }}">
+    <label>Duplicate of<br><select name="duplicate_of" required>{% for r in duplicate_targets %}<option value="{{ r.id }}">{{ r.family_label }} {{ r.key_value }} ({{ r.shared_members }} shared)</option>{% endfor %}</select></label>
+    <label>Reason<br><textarea name="reason" rows="2" cols="60" required></textarea></label>
+    <button type="submit">Record duplicate</button>
+  </form>
+</div>
+{% endif %}
+
+<div class="card">
+  <h2>Issue history</h2>
+  {% if findings %}
+  <table>
+    <thead><tr><th>Status</th><th>Severity</th><th>Opened</th><th>Closed</th></tr></thead>
+    <tbody>
+    {% for f in findings %}
+      <tr><td>{{ f.status }}{% if f.finding_details.disposition == "duplicate_of" %} (duplicate disposition){% endif %}</td><td>{{ f.severity }}</td><td>{{ f.first_seen_at|date:"Y-m-d" }}</td><td>{{ f.closed_at|date:"Y-m-d"|default:"—" }}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="muted">No issue was opened for this case.</p>
+  {% endif %}
+</div>
+{% endblock %}
