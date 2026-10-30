@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}Confirm new clients{% endblock %}
+{% block content %}
+<div class="card">
+  <h1>Accept {{ candidates|length }} candidates as new clients?</h1>
+  <p class="muted">Each selected candidate will create a separate Operations client and attach its contributing source groups. This will not map candidates to existing clients.</p>
+  <ul>
+    {% for candidate in candidates %}
+    <li>{{ candidate.display_name|default:candidate.normalized_name }} <span class="muted">({{ candidate.source_refs|length }} source group{{ candidate.source_refs|length|pluralize }})</span></li>
+    {% endfor %}
+  </ul>
+  <form method="post" action="{% url 'client_candidates_bulk_accept' %}">
+    {% csrf_token %}
+    {% for candidate_id in candidate_ids %}<input type="hidden" name="candidate_ids" value="{{ candidate_id }}">{% endfor %}
+    <input type="hidden" name="next" value="{{ next_url }}">
+    <input type="hidden" name="confirm" value="yes">
+    <label for="bulk-accept-reason">Reason for accepting these candidates</label><br>
+    <input id="bulk-accept-reason" name="reason" maxlength="240" value="{{ reason }}" required style="width:min(100%, 36rem);">
+    <div style="display:flex; gap:.6rem; margin-top:.8rem; align-items:center;">
+      <button type="submit">Create {{ candidates|length }} new clients</button>
+      <a href="{{ next_url }}">Cancel</a>
+    </div>
+  </form>
+</div>
+{% endblock %}

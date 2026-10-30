@@ -67,12 +67,14 @@
 <section class="card" id="new-clients">
   <h2>New / discovered clients <span class="muted" style="font-size:.85rem; font-weight:400;">{{ new_client_count }} name{{ new_client_count|pluralize }} · {{ new_group_count }} source group{{ new_group_count|pluralize }}</span></h2>
   <p class="muted">Reported by a source but not set up in Operations. Review each one to accept it as a new client, map it to an existing client, or exclude it. These are the same records Issues lists as unattached client source groups.</p>
+  <form id="bulk-accept-candidates" method="post" action="{% url 'client_candidates_bulk_accept' %}">{% csrf_token %}<input type="hidden" name="next" value="{{ request.path }}#new-clients"></form>
   <div class="new-clients-window">
   <table class="ops-table">
-    <thead><tr><th>Reported name</th><th>Sources</th><th class="num">Source records</th><th class="num">First / last seen</th><th title="The existing client the evidence points to: computers already linked to it, else computer names only it has">Likely client</th><th></th></tr></thead>
+    <thead><tr><th><input type="checkbox" id="candidate-select-all" aria-label="Select all candidates"></th><th>Reported name</th><th>Sources</th><th class="num">Source records</th><th class="num">First / last seen</th><th title="The existing client the evidence points to: computers already linked to it, else computer names only it has">Likely client</th><th></th></tr></thead>
     <tbody>
     {% for row in new_clients %}
     <tr>
+      <td><input type="checkbox" form="bulk-accept-candidates" class="candidate-select" name="candidate_ids" value="{{ row.candidate.id }}" aria-label="Select {{ row.candidate.display_name|default:row.candidate.normalized_name }}"></td>
       <td><a href="{% url 'client_candidate_detail' candidate_id=row.candidate.id %}?next={{ request.path|urlencode }}%23new-clients">{{ row.candidate.display_name|default:row.candidate.normalized_name }}</a></td>
       <td>{% for group in row.groups %}<span class="badge {% if group.reported %}badge-info{% else %}badge-suppressed{% endif %}" title="{{ group.external_name }}">{{ group.source }}{% if group.state == 'renamed' %} → {{ group.renamed_to }}{% elif group.state == 'attached' %} (attached){% elif group.state == 'gone' %} (not reported){% endif %}</span> {% endfor %}</td>
       <td class="num">{% if row.reported_count %}{{ row.record_count }}{% if row.computer_count %}<br><span class="muted">{{ row.computer_count }} linked</span>{% endif %}{% else %}<span class="muted">—</span>{% endif %}</td>
@@ -85,6 +87,25 @@
     </tbody>
   </table>
   </div>
+  <div style="margin-top:.65rem; display:flex; gap:.5rem; align-items:center; flex-wrap:wrap;">
+    <button type="submit" form="bulk-accept-candidates">Accept selected as new clients</button>
+    <span class="muted">You’ll review the selected names and enter a reason before creating them.</span>
+  </div>
+  <script>
+    (function () {
+      var all = document.getElementById('candidate-select-all');
+      var candidates = document.querySelectorAll('.candidate-select');
+      if (all) all.addEventListener('change', function () {
+        candidates.forEach(function (candidate) { candidate.checked = all.checked; });
+      });
+      candidates.forEach(function (candidate) {
+        candidate.addEventListener('change', function () {
+          if (!candidate.checked) all.checked = false;
+          else all.checked = Array.from(candidates).every(function (item) { return item.checked; });
+        });
+      });
+    })();
+  </script>
   <p style="margin:.6rem 0 0;"><a href="{{ new_clients_issues_url }}">All {{ new_group_count }} in Issues →</a></p>
 </section>
 {% endif %}

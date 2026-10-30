@@ -51,6 +51,7 @@ def test_operations_guard_uses_the_request_connection():
         "admin_finding_acknowledge",
         "admin_finding_apply_client_rename",
         "client_candidate_accept",
+        "client_candidates_bulk_accept",
         "client_candidate_map",
         "merge_candidate_group_review",
         "device_merge",

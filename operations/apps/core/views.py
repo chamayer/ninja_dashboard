@@ -17987,6 +17987,8 @@ def client_candidate_detail(request: HttpRequest, candidate_id) -> HttpResponse:
 
 # ── Candidate actions (Track C.4) — all audited ─────────────────────────────
 
+_CLIENT_CANDIDATE_REASON_MAX_LENGTH = 240
+
 
 def _audit(
     request, action: str, entity_id, before, after, *, entity_type: str = "client_candidate"
@@ -18179,31 +18181,10 @@ def _new_client(display_name: str, reason: str, profile=None) -> Client:
     )
 
 
-@login_required
-@require_POST
-@transaction.atomic
-def client_candidate_accept(request, candidate_id) -> HttpResponse:
-    """Create a new client from the candidate, attach every contributing
-    source group, mint an alias row, and instantiate the requirement
-    profile as per-client coverage_requirements."""
-    guard_findings()
-    candidate = get_object_or_404(
-        ClientCandidate,
-        id=candidate_id,
-        tenant_id=1,
-        status="open",
-    )
-    display_name = (request.POST.get("display_name") or candidate.display_name or "").strip()
-    if not display_name:
-        messages.error(request, "Display name required.")
-        return _candidate_detail_redirect(request, candidate)
-    profile_id = request.POST.get("profile_id") or None
-    profile = None
-    if profile_id:
-        profile = get_object_or_404(RequirementProfile, id=profile_id, tenant_id=1)
-        if profile.is_tenant_default:
-            profile = None
-
+def _accept_candidate_as_new(
+    request, candidate: ClientCandidate, display_name: str, *, profile=None, reason: str
+) -> Client:
+    """Apply the audited accept-as-new transition to one open candidate."""
     client = _new_client(display_name, f"candidate.accept:{candidate.id}", profile)
 
     ClientNameAlias.objects.update_or_create(
@@ -18224,19 +18205,14 @@ def client_candidate_accept(request, candidate_id) -> HttpResponse:
         for ref in candidate.source_refs or []:
             sid = ref.get("source_id")
             ext_id = ref.get("external_id")
-            if not (sid and ext_id):
-                continue
-            _attach_group_to_client(cur, sid, ext_id, client.id)
-
-    # Profile is source of truth per BLUEPRINT C.6 — assigning
-    # client.requirement_profile above is sufficient. No per-client
-    # CoverageRequirement instantiation.
+            if sid and ext_id:
+                _attach_group_to_client(cur, sid, ext_id, client.id)
 
     candidate.status = ClientCandidate.Status.ACCEPTED
     candidate.resolved_client = client
     candidate.resolved_at = timezone.now()
     candidate.resolved_by = request.user.get_username()
-    candidate.resolved_reason = "accepted → new client"
+    candidate.resolved_reason = reason[:_CLIENT_CANDIDATE_REASON_MAX_LENGTH]
     candidate.save()
 
     _audit(
@@ -18249,10 +18225,138 @@ def client_candidate_accept(request, candidate_id) -> HttpResponse:
             "client_id": str(client.id),
             "display_name": display_name,
             "profile_id": str(profile.id) if profile else None,
+            "reason": reason[:_CLIENT_CANDIDATE_REASON_MAX_LENGTH],
         },
+    )
+    return client
+
+
+@login_required
+@require_POST
+@transaction.atomic
+def client_candidate_accept(request, candidate_id) -> HttpResponse:
+    """Create a new client from the candidate, attach every contributing
+    source group, mint an alias row, and instantiate the requirement
+    profile as per-client coverage_requirements."""
+    candidate = get_object_or_404(
+        ClientCandidate,
+        id=candidate_id,
+        tenant_id=1,
+        status="open",
+    )
+    display_name = (request.POST.get("display_name") or candidate.display_name or "").strip()
+    if not display_name:
+        messages.error(request, "Display name required.")
+        return _candidate_detail_redirect(request, candidate)
+    profile_id = request.POST.get("profile_id") or None
+    profile = None
+    if profile_id:
+        profile = get_object_or_404(RequirementProfile, id=profile_id, tenant_id=1)
+        if profile.is_tenant_default:
+            profile = None
+
+    # Profile is source of truth per BLUEPRINT C.6 — assigning
+    # client.requirement_profile above is sufficient. No per-client
+    # CoverageRequirement instantiation.
+    guard_findings()
+    _accept_candidate_as_new(
+        request,
+        candidate,
+        display_name,
+        profile=profile,
+        reason="accepted → new client",
     )
     messages.success(request, f"Accepted — created client “{display_name}”.")
     return redirect(_safe_next(request, "client_candidates_queue"))
+
+
+@login_required
+@require_POST
+def client_candidates_bulk_accept(request: HttpRequest) -> HttpResponse:  # noqa: PLR0911
+    """Preview and accept selected open candidates as separate new clients."""
+    raw_ids = request.POST.getlist("candidate_ids")
+    try:
+        candidate_ids = list(dict.fromkeys(uuid.UUID(value) for value in raw_ids))
+    except (ValueError, AttributeError):
+        messages.error(request, "The selected candidate list is invalid. Nothing was changed.")
+        return redirect(_safe_next(request, "inventory_clients"))
+    if not candidate_ids:
+        messages.error(request, "Select at least one candidate.")
+        return redirect(_safe_next(request, "inventory_clients"))
+
+    confirmed = request.POST.get("confirm") == "yes"
+    reason = (request.POST.get("reason") or "").strip()
+    if confirmed and not reason:
+        messages.error(request, "Enter a reason for accepting these candidates.")
+        confirmed = False
+    if len(reason) > _CLIENT_CANDIDATE_REASON_MAX_LENGTH:
+        messages.error(request, "The reason must be 240 characters or fewer.")
+        confirmed = False
+
+    if confirmed:
+        # Attaching source groups resolves client-mapping findings (PLAN-003 R2).
+        guard_findings()
+        try:
+            with transaction.atomic():
+                candidates = list(
+                    ClientCandidate.objects.select_for_update()
+                    .filter(tenant_id=1, id__in=candidate_ids)
+                    .order_by("display_name", "normalized_name")
+                )
+                if len(candidates) != len(candidate_ids) or any(
+                    candidate.status != ClientCandidate.Status.OPEN for candidate in candidates
+                ):
+                    messages.error(
+                        request,
+                        "At least one selected candidate is no longer open. Nothing was changed; reload the list.",
+                    )
+                    return redirect(_safe_next(request, "inventory_clients"))
+                display_names = {
+                    candidate.id: (candidate.display_name or candidate.normalized_name).strip()
+                    for candidate in candidates
+                }
+                if any(not display_name for display_name in display_names.values()):
+                    messages.error(request, "A selected candidate has no name. Nothing was changed.")
+                    return redirect(_safe_next(request, "inventory_clients"))
+                for candidate in candidates:
+                    _accept_candidate_as_new(
+                        request,
+                        candidate,
+                        display_names[candidate.id],
+                        reason=reason,
+                    )
+        except IntegrityError:
+            messages.error(
+                request,
+                "A selected candidate conflicts with an existing client mapping. Nothing was changed; reload and review the candidates.",
+            )
+            return redirect(_safe_next(request, "inventory_clients"))
+        messages.success(request, f"Accepted {len(candidate_ids)} candidates as new clients.")
+        return redirect(_safe_next(request, "inventory_clients"))
+
+    candidates = list(
+        ClientCandidate.objects.filter(
+            tenant_id=1,
+            id__in=candidate_ids,
+            status=ClientCandidate.Status.OPEN,
+        ).order_by("display_name", "normalized_name")
+    )
+    if len(candidates) != len(candidate_ids):
+        messages.error(
+            request,
+            "At least one selected candidate is no longer open. Reload the list and select again.",
+        )
+        return redirect(_safe_next(request, "inventory_clients"))
+    return render(
+        request,
+        "client_candidates_bulk_accept_confirm.html",
+        {
+            "candidates": candidates,
+            "candidate_ids": candidate_ids,
+            "next_url": _safe_next(request, "inventory_clients"),
+            "reason": reason,
+        },
+    )
 
 
 @login_required

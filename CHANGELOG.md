@@ -2,6 +2,16 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.133.0] — 2026-10-30 — Bulk accept discovered client candidates
+
+### Added
+
+- Inventory → Clients and Client mappings can accept several open client candidates
+  as new clients in one action (PLAN-030). Selected names are shown for review and
+  an operator reason is required; the whole batch is refused if any candidate is no
+  longer open. Each candidate uses the existing accept-as-new behavior: entity
+  anchor, name alias, source-group attachment and audit record.
+
 ## [0.132.3] — 2026-10-29 — Jobs dependency closure parameter types
 
 ### Fixed
