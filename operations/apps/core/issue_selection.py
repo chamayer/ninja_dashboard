@@ -213,7 +213,8 @@ def _filtered_sql(scope: Scope, *, labels: bool = False) -> tuple[str, dict[str,
         # and platform work is not "unassigned".
         where.append(
             "i.client_id IS NULL AND (i.subject_type IN"
-            " ('device', 'source_group', 'source_group_set', 'entity_candidate')"
+            " ('device', 'source_group', 'source_group_set', 'entity_candidate',"
+            " 'source_record', 'source_record_case')"
             " OR i.type_name = 'unmatched_source_group')"
         )
     elif scope.client:

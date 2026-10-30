@@ -55,6 +55,9 @@ of shared physical identity. ADR-0012's evidence/projector and tenant rules rema
 | Decision 5 mixed notification suppression/context | Deferred with new notifications to PLAN-034; access controls remain required now |
 | Decisions 6–7 activation baseline/material release/delayed sweep | Deferred to PLAN-034; no replacement first-opened-time policy is approved |
 
+| Decision 3 shared guard for input-only writes | **Amended R4-1 (user, 2026-10-30):** intake, association and presence writers take no guard. An observation trigger admits the subject and enqueues work in the intake transaction. A deferred subject trigger advances the tenant generation at commit. Publication holds the exclusive guard plus a share lock on the generation row, so input commits wait one bounded batch ([design §3/§7.2](../plans/PLAN-004-source-record-final-design.md#72-minimal-locking-and-bounded-transactions)) |
+| Decision 3 "validate load before rollout" | **Waived R4-2 (user, 2026-10-30):** no representative load run. Watch ingest timings, queue depth and oldest dirty revision after release |
+
 These amendments supersede the earlier proposed delivery contract for this design
 revision. They do not rewrite accepted deployed runtime policy. Stable subject/case
 IDs, normal finding history and assessment revisions preserve room for follow-ups.

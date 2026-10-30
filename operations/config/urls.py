@@ -26,6 +26,7 @@ from apps.core.generic_admin import (
     entity_observation_reveal,
 )
 from apps.core.software_policy import software_policy_config
+from apps.core.source_record_views import source_record_detail
 from apps.core.views import (
     admin_data,
     admin_finding_acknowledge,
@@ -314,6 +315,11 @@ urlpatterns = [
     path("inventory/clients/", inventory_clients, name="inventory_clients"),
     path("inventory/computers/", fleet_coverage, name="inventory_computers"),
     path("inventory/source-records/", source_records, name="inventory_source_records"),
+    path(
+        "inventory/source-records/<uuid:subject_id>/",
+        source_record_detail,
+        name="source_record_detail",
+    ),
     path("sources/", sources_status, name="sources_status"),
     path("sources/<uuid:source_instance_id>/records/", source_records, name="source_records"),
     path("sources/<uuid:binding_id>/refresh/", source_refresh_run, name="source_refresh_run"),

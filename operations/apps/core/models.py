@@ -4082,6 +4082,11 @@ class Finding(UUIDTenantScopedModel):
         # version -- a version-derived id would change on every upgrade and
         # reopen the finding while the path stayed put.
         SOFTWARE_INSTALLATION = "software_installation", "Software installation"
+        # Native PLAN-004 mechanism subjects (ADR-0049): subject_id holds
+        # source_record_subjects.id or source_record_cases.id. Neither is a
+        # canonical entity.
+        SOURCE_RECORD = "source_record", "Source record"
+        SOURCE_RECORD_CASE = "source_record_case", "Source record case"
 
     class Severity(models.TextChoices):
         CRITICAL = "critical", "Critical"

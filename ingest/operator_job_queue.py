@@ -881,7 +881,7 @@ def _execute(job_key: str, progress: V1JobProgress) -> int | JobExecutionResult 
     Importing main here avoids its startup import cycle. The direct lower-level
     functions intentionally raise, allowing the durable record to show failure.
     """
-    from ingest import cmdb_findings, main, platform_findings, runlog
+    from ingest import cmdb_findings, main, platform_findings, runlog, source_records
     from ingest.intel import (
         abusech,
         capability_match,
@@ -962,6 +962,10 @@ def _execute(job_key: str, progress: V1JobProgress) -> int | JobExecutionResult 
         "platform-health-evaluate": (
             "Evaluating platform health",
             lambda: sum(platform_findings.evaluate(dry_run=False).values()),
+        ),
+        "source-record-assess": (
+            "Assessing changed source records",
+            lambda: source_records.assess(),
         ),
         "notifications-dispatch": (
             "Sending notifications",

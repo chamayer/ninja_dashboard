@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% block title %}Source record{% endblock %}
+
+{% block content %}
+<p><a href="{% url 'inventory_source_records' %}">← Source records</a></p>
+<div class="card" style="margin-bottom:1rem;">
+  <h1 style="margin:0;">{{ subject.reported_name|default:"Source record" }}</h1>
+  <p class="muted">{{ subject.platform }} · {{ subject.entity_type }} · role {{ subject.record_role }} · {% if subject.presence == "present" %}present{% else %}withdrawn{% if subject.withdrawn_at %} {{ subject.withdrawn_at|date:"Y-m-d" }}{% endif %}{% endif %}</p>
+  {% if subject.restricted %}<p class="muted">This record is restricted; its names and identifiers are hidden.</p>{% endif %}
+  <table>
+    <tr><th>Attached Computer</th><td>{% if subject.device_id and subject.client_slug %}<a href="{% url 'device_detail' org_slug=subject.client_slug device_id=subject.device_id %}">{{ subject.device_name|default:"(unnamed Computer)" }}</a> · {{ subject.client_name }}{% if subject.match_method %} · {{ subject.match_method }}{% endif %}{% else %}Not attached{% endif %}</td></tr>
+    {% if not subject.restricted %}
+    <tr><th>Serial</th><td>{{ subject.canonical_serial|default:"—" }}</td></tr>
+    <tr><th>VM UUID</th><td>{{ subject.vm_uuid|default:"—" }}</td></tr>
+    {% endif %}
+    <tr><th>Last seen</th><td>{{ subject.last_seen_at|date:"Y-m-d H:i"|default:"—" }}</td></tr>
+    <tr><th>Managed since</th><td>{{ subject.admitted_at|date:"Y-m-d H:i" }}</td></tr>
+    <tr><th>Versions</th><td>input {{ subject.input_version }} · association {{ subject.association_version }}</td></tr>
+  </table>
+</div>
+
+<div class="card" style="margin-bottom:1rem;">
+  <h2>Assessments</h2>
+  {% if assessments %}
+  <table>
+    <thead><tr><th>Rule</th><th>Result</th><th>Missing</th><th>Owner</th><th>Assessed</th></tr></thead>
+    <tbody>
+    {% for row in assessments %}
+      <tr>
+        <td>{{ row.rule_label }}{% if row.dimension %} · {{ row.dimension }}{% endif %}</td>
+        <td>{{ row.result_label }}</td>
+        <td>{{ row.missing_facts|join:", "|default:"—" }}</td>
+        <td>{% if row.work_owner == "entity_candidate" %}pending identity candidate{% elif row.work_owner %}{{ row.work_owner }}{% else %}—{% endif %}</td>
+        <td>{{ row.assessed_at|date:"Y-m-d H:i" }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="muted">Not assessed yet.</p>
+  {% endif %}
+</div>
+
+<div class="card" style="margin-bottom:1rem;">
+  <h2>Findings</h2>
+  {% if findings %}
+  <table>
+    <thead><tr><th>Issue</th><th>Severity</th><th>Status</th><th>First seen</th><th>Last detected</th></tr></thead>
+    <tbody>
+    {% for f in findings %}
+      <tr><td>{{ f.display_name }}</td><td>{{ f.severity }}</td><td>{{ f.status }}</td><td>{{ f.first_seen_at|date:"Y-m-d" }}</td><td>{{ f.last_detected_at|date:"Y-m-d H:i" }}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="muted">No findings.</p>
+  {% endif %}
+</div>
+
+{% if cases %}
+<div class="card">
+  <h2>Cases</h2>
+  <ul>
+  {% for c in cases %}
+    <li><a href="{% url 'source_record_case_detail' case_id=c.id %}">Shared {{ c.key_family }}</a> · {{ c.member_count }} records · {{ c.state }}</li>
+  {% endfor %}
+  </ul>
+</div>
+{% endif %}
+{% endblock %}

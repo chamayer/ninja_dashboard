@@ -4218,6 +4218,15 @@ def _entity_issue_rows(request, findings, issue_categories, issue_type_groups) -
             if loc:
                 pieces.append(f"@ {loc}")
             return " ".join(pieces) if cn else (d.get("reason") or "")
+        if name == "source_record_identity_review":
+            count = len((d.get("evidence") or {}).get("candidates") or {})
+            return f"identifiers match {count} Computers" if count else "several Computers match"
+        if name == "source_record_identifier_invalid":
+            return f"placeholder {d.get('dimension') or 'identifier'}"
+        if name == "source_record_duplicate_review":
+            members = (d.get("evidence") or {}).get("member_count")
+            family = d.get("key_family") or "identifier"
+            return f"{members} records share one {family}" if members else f"shared {family}"
         if name == "multi_av_conflict":
             avs = d.get("av_products") or []
             return ", ".join(avs) if avs else "multiple AV products"
@@ -4438,6 +4447,20 @@ def _entity_issue_rows(request, findings, issue_categories, issue_type_groups) -
                 if f.subject_type == Finding.SubjectType.SOFTWARE_VERSION
                 else "software title"
             )
+        elif f.subject_type == Finding.SubjectType.SOURCE_RECORD:
+            subject_label = details.get("name") or "(unnamed source record)"
+            subject_url = reverse("source_record_detail", kwargs={"subject_id": f.subject_id})
+            if source_text := " · ".join(
+                part for part in (details.get("platform"), details.get("entity_type")) if part
+            ):
+                context_parts.append(source_text)
+            if f.client:
+                context_parts.append(f.client.display_name)
+        elif f.subject_type == Finding.SubjectType.SOURCE_RECORD_CASE:
+            subject_label = details.get("case_label") or "Source record case"
+            subject_url = reverse("source_record_case_detail", kwargs={"case_id": f.subject_id})
+            if details.get("platform"):
+                context_parts.append(details["platform"])
         elif f.subject_type in {
             Finding.SubjectType.SOURCE_BINDING,
             Finding.SubjectType.COLLECTOR_INSTANCE,

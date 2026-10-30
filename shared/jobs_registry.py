@@ -587,6 +587,19 @@ _RAW_DEFINITIONS = (
         run_all=False,
         schedule_ids=("platform_health_evaluate_cycle",),
     ),
+    JobDefinition(
+        "source-record-assess",
+        "Source-record assessment",
+        "Assess changed source records and publish their findings (PLAN-004).",
+        "maintenance",
+        "service",
+        "",
+        "source_record_assessment",
+        "run_log",
+        "ingest.source_records.assess",
+        run_all=False,
+        schedule_ids=("source_record_assess_cycle",),
+    ),
 )
 
 # Recovery policy is deliberately separate from execution snapshots: it is an
@@ -711,6 +724,11 @@ REPLAY_SAFE_RECOVERY_EVIDENCE = MappingProxyType(
             "CMDB evaluation reads local documentation observations and convergently "
             "updates local findings. A later replay has no external mutation."
         ),
+        "source-record-assess": (
+            "Source-record assessment reads local observations and keys and convergently "
+            "updates local assessments and findings in short guarded transactions; queue rows "
+            "acknowledge only the revision processed. A later replay has no external mutation."
+        ),
         "run-log-recovery": (
             "Diagnostic recovery only closes stale local run-log rows. A later replay "
             "finds nothing further to close and has no external mutation."
@@ -795,6 +813,12 @@ _SCHEDULE_DEFINITIONS = (
         "platform_health_evaluate_cycle",
         "platform-health-evaluate",
         "constant:30",
+        "minutes",
+    ),
+    ScheduleDefinition(
+        "source_record_assess_cycle",
+        "source-record-assess",
+        "constant:5",
         "minutes",
     ),
     ScheduleDefinition(
@@ -919,6 +943,7 @@ _RESOURCE_KEYS_BY_DEFINITION: dict[str, tuple[str, ...]] = {
     "source-actions": ("tenant:{tenant_id}:source-actions",),
     "run-log-recovery": ("tenant:{tenant_id}:run-history",),
     "platform-health-evaluate": ("tenant:{tenant_id}:platform-health",),
+    "source-record-assess": ("tenant:{tenant_id}:source-record-assessment",),
 }
 for _key in ("intel-nvd", "intel-cpe-dict", "intel-kev", "intel-epss", "intel-matcher"):
     _RESOURCE_KEYS_BY_DEFINITION[_key] += ("global:intel-cve-corpus",)
@@ -973,6 +998,7 @@ _CAPACITY_KEYS_BY_DEFINITION: dict[str, tuple[str, ...]] = {
     "source-actions": (),
     "run-log-recovery": ("capacity:control",),
     "platform-health-evaluate": ("capacity:processing", "capacity:control"),
+    "source-record-assess": ("capacity:processing",),
 }
 
 _SUPERSESSION_RANKS = MappingProxyType(
@@ -1187,6 +1213,7 @@ _SYSTEM_SERVICE_KEYS = frozenset(
         "source-actions",
         "run-log-recovery",
         "platform-health-evaluate",
+        "source-record-assess",
         "software-enqueue-orgs",
     }
 )

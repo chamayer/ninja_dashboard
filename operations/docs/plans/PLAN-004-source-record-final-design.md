@@ -59,8 +59,8 @@ cutoff-assessment or work-claim tables in this release.
 `entity_source_links` plus its history is the sole confirmed-association authority.
 `entity_observation_current.device_id` becomes its compatibility projection.
 Only `operations.set_source_association(...)` changes the link, history and projected
-value, checking expected association version and tenant permissions. The caller
-already holds the §7.2 tenant guard. It updates lookup entries, advances the tenant
+value, checking expected association version and tenant permissions. (Amendment
+R4-1: the caller takes no tenant guard; the generation row serializes commits.) It updates lookup entries, advances the tenant
 input generation and queues affected evaluation atomically. No additional authority.
 
 | Current writer | Handoff |
@@ -115,6 +115,19 @@ is retained, not a guarantee that reassessment cannot produce a legitimate alert
 There is no E3R/E4 notification baseline, staged successor or activation sweep.
 
 ## 3. Intake, evidence and resolution lifecycle
+
+**Amendment R4-1 (user decision 2026-10-30, supersedes the guard clause below).**
+Intake does not take the tenant guard. A database trigger on
+`entity_observation_current` performs admission in the observation-write
+transaction: it upserts the subject by natural key, sets the current observation
+pointer, advances the subject input version on a decision-relevant change, replaces
+its lookup keys and enqueues the subject plus its old and new neighbors. A deferred
+constraint trigger on `source_record_subjects` advances the tenant input generation
+once per transaction at commit, so the generation row is locked only for the commit
+itself. Intake code needs no admission call and cannot skip it. A trigger failure
+rolls back the observation write, as the paragraph below requires. Chosen as the
+fastest option for incoming data: R2's exclusive writers (evaluator sessions of
+about 24 minutes) would otherwise stall collection.
 
 After acquiring the §7.2 tenant guard, in the observation-write
 transaction: upsert the source-subject anchor by its exact
@@ -390,6 +403,25 @@ existing next-due scheduling even when facts do not otherwise change. Changed in
 cannot close findings until their closure rule is evaluated with current facts.
 
 ### 7.2 Minimal locking and bounded transactions
+
+**Amendment R4-1 (user decision 2026-10-30).** Input writers (the intake trigger,
+`set_source_association` and the presence entrypoint) take no tenant guard. They
+serialize only on the tenant generation row, which the deferred subject trigger
+updates at commit. Publication takes the exclusive tenant guard, then
+`SELECT ... FOR SHARE` on the generation row, and holds both until it commits. An
+input commit therefore cannot land between validation and publication; it waits for
+one bounded publication batch. The worker reads its inputs after acquiring both
+locks, in the same short transaction, so the generation it publishes against is
+current by construction and continuous ingest cannot starve publication. Batches are
+small, with statement and lock timeouts. Lock timeouts requeue the batch rather than
+fail it. Graph, finding, case and operator-action writers keep exclusive mode as below.
+
+**Amendment R4-2 (user decision 2026-10-30): load measurement waived.** The
+representative concurrent-ingest measurement in the last paragraph of this section
+is waived for this release. The workstation rule forbids load runs, and no other
+environment was authorized. Instead, watch ingest run timings, the queue depth and
+the age of the oldest dirty revision after release. If intake slows or the queue
+does not drain, stop and review measured alternatives, as below.
 
 Retain only two tenant-guard categories, using PLAN-003's one migration-owned key:
 input/admission/association-only mutations take shared mode; finding, assessment,
