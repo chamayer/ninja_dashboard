@@ -2,6 +2,24 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.136.0] — 2026-10-30 — Source-record cases (PLAN-004 R4 Stage C)
+
+### Added
+
+- **Source record cases** (Inventory › Source records › cases): one case per
+  question, "several records of one source report the same serial number, VM UUID
+  or MAC address". A case page shows its records side by side, with each
+  record's Computer, and related cases that share a record. A record can be in
+  several cases, and sharing an identifier is never treated as proof that the
+  records are one machine.
+- **Possible duplicate source records** (High, no notifications) opens for a
+  shared serial or VM UUID unless all of the records are already on one
+  Computer, where the existing duplicate issue owns the work. A shared MAC alone
+  keeps the case for investigation but opens no issue.
+- **Same question as another case**: an operator with lifecycle permission can
+  close a case as a duplicate of a related case, with a required reason. This is
+  recorded as duplicate work, not a correction. Self and circular references
+  are refused. The case reopens if its records or the other case change.
 ## [0.135.1] — 2026-10-30 — Jobs worker restart loop fix
 
 ### Fixed

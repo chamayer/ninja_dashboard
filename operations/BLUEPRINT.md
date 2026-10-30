@@ -1451,4 +1451,21 @@ group roles take no identity keys; >200-member buckets enqueue only their case
 key; attached invalid serials belong to `placeholder_serial`, pending candidates
 own their identity work; `source_record_policy_incomplete` registered but not
 emitted (no production type is unclassified) — TODO.
-**Next:** model-state check, Stage A release, then Stage C, then Stage B window.
+**Stage A deployed (0.135.0):** 0370/0371 applied in production 13:05 UTC; 42,271
+subjects and ~59.8k keys backfilled and queued; containers healthy; first job run
+queued behind Jobs capacity. Dev check: one 1,400-target pass in 5.7 s (~0.8 s per
+200-row batch, the longest intake commit wait). 0370 was also applied to the dev
+database unintentionally by the dev image entrypoint (dev only, succeeded).
+**Stage C (code written, 0.136.0):** `0373_source_record_cases` (cases with one
+open-or-reserved case per scope, members with provenance, history,
+`mark_source_record_case_duplicate` with guard/self/cycle/tenant/version checks);
+`ingest/source_record_cases.py`; case list/detail pages with related cases and the
+duplicate form (lifecycle permission). Decision: only serial/VM UUID cases open
+`source_record_duplicate_review`; MAC-only cases are investigation-only (§5).
+Dev check: 0373 (then numbered 0372) applied, 823 cases built, pages 200, duplicate recorded, cycle refused.
+**Incident 0.135.0 → hotfix 0.135.1 (`8b5e59b`):** the new job's resource key had no
+`job_resource_limits` row, so dispatch raised "Jobs resource policy is unavailable" and
+the Jobs worker crash-looped about 13:05–13:20 UTC (no Jobs ran). Migration 0372 adds the
+limit (same as 0336). Stable since 13:19; first assessment run completed (200 rows);
+interrupted runs left no contained claims. Stage C migration renumbered to 0373.
+**Next:** Stage C release (0.136.0), then Stage B window.
