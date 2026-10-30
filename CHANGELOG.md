@@ -2,6 +2,32 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.135.0] — 2026-10-30 — Managed source records (PLAN-004 R4 Stage A)
+
+### Added
+
+- Every received source record is now a managed record with a durable ID from
+  the moment it arrives, whether or not it is attached to a Computer, classified
+  or mapped to a client. A database trigger admits it in the same transaction
+  that writes the observation, so intake needs no extra call and takes no
+  tenant lock. A trigger at commit advances one tenant input generation.
+- A new **Source-record assessment** job (every 5 minutes) checks changed records
+  and their neighbors. It reports whether each record has a role, is present,
+  has a usable serial, and is attached to one Computer. Results are on a new
+  source-record page reached from Issues.
+- Two new issue types, both for records not attached to a Computer:
+  **Source record matches several Computers** (Critical), when its identifiers
+  point to two or more Computers (names count only within its client), and
+  **Source record has an invalid identifier**, for a placeholder serial. Work
+  that existing issues already cover (a Computer's placeholder serial, a pending
+  record match) is not repeated. The new types never send notifications.
+- The assessment queue is registered for Admin Health queue monitoring.
+
+### Changed
+
+- Design amendment R4-1 (unguarded intake with a generation trigger) and the
+  R4-2 load-test waiver are recorded in the PLAN-004 design and ADR-0049.
+
 ## [0.134.1] — 2026-10-30 — Issues badge and partial-eligibility bulk actions
 
 ### Changed

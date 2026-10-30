@@ -1428,3 +1428,27 @@ and record the waiver in the design. (3) Stage B drained window: any time when
 ready; drain, apply, notify the user after. (4) The one-time reassessment runs in
 the same drained window right after Stage B; report results. Each still uses the
 normal release check, migration pre-checks and backups.
+
+### R4 implementation (started 2026-10-30, branch `plan003-r3`, base `7a8b67b`)
+
+**Status:** Stage A code `d0f5826`, release 0.135.0. Commits/pushes, the Stage B window and the
+reassessment are authorized (user, 2026-10-30). Testing: only what is needed to
+continue safely, no heavy workstation/dev runs; final testing after the plan.
+**Amendments recorded:** design §2.1/§3/§7.2 and ADR-0049 (R4-1 unguarded
+intake + trigger/deferred generation; R4-2 load waiver).
+**Production facts (read-only, 2026-10-30):** at `0369`; ingest connects as
+superuser `ninja` (enforcement must be triggers, not grants); 42,271 current
+observations, 34,557 with `device_id`, 34,557 device links, 0 device-link
+divergences; 1,409 `asset` links (no projection); PostgreSQL 16.14.
+**Stage A (code written):** `0370_source_record_subjects` (subjects, generation,
+lookup keys, monitored queue `source_record.assessment`, current assessments,
+admission + deferred generation triggers, backfill, four non-alertable native
+types, replay-safe recovery row); `ingest/source_records.py` (job
+`source-record-assess`, every 5 min, 200-row batches under exclusive guard +
+generation share lock); Issues rendering and `inventory/source-records/<uuid>/`.
+Decisions: name keys compare only within the mapped client; documentation and
+group roles take no identity keys; >200-member buckets enqueue only their case
+key; attached invalid serials belong to `placeholder_serial`, pending candidates
+own their identity work; `source_record_policy_incomplete` registered but not
+emitted (no production type is unclassified) — TODO.
+**Next:** model-state check, Stage A release, then Stage C, then Stage B window.
