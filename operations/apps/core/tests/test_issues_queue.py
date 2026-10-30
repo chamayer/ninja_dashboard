@@ -161,12 +161,16 @@ def test_drilldown_scopes_are_explained():
     assert "Filtered to the selected device." in _QUEUE
 
 
-def test_bulk_pause_spans_kinds_after_permission_checks_and_remediation_needs_one_kind():
+def test_bulk_pause_spans_kinds_and_remediation_skips_ineligible_kinds():
     bulk = _VIEWS[
         _VIEWS.index("def findings_bulk_action") : _VIEWS.index("def _retire_selected_computers")
     ]
     assert bulk.index("raise PermissionDenied") < bulk.index('if action in ("snooze", "resume")')
-    assert "applies to one kind of issue at a time" in bulk
+    assert "finding_type__name__in=registered_action.finding_types" in bulk
+    assert "does not apply to." in bulk
+    assert "confirmIssueAction(this" in _ROWS
+    assert 'data-type="{{ row.type_name }}"' in _ROWS
+    assert "are') + ' ineligible and will be skipped." in _QUEUE
     assert "Finding.all_namespaces.filter(" in bulk
     assert "_issues_scope_from_query(scope_query" in bulk
     assert "_ISSUES_SELECT_ALL_LIMIT" in bulk
@@ -200,3 +204,12 @@ def test_csv_shares_the_selection_and_keeps_lifecycle_context():
     ):
         assert column in _VIEWS
     assert '("Owner"' not in _VIEWS
+
+
+def test_nav_badge_is_the_queue_open_count():
+    source = Path("apps/core/context_processors.py").read_text(encoding="utf-8")
+    assert 'issue_selection.count(issue_selection.Scope(status="open"))' in source
+    assert (
+        "Finding.objects.filter(\n            tenant_id=tenant_id,\n            status__in"
+        not in source.split('nav_patching_open"] =')[0]
+    )

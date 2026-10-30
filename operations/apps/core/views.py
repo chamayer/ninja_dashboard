@@ -6216,18 +6216,29 @@ def findings_bulk_action(request: HttpRequest) -> HttpResponse:
     if registered_action is not None:
         if not can_run_action(request.user, registered_action):
             raise PermissionDenied
-        selected_types = set(
-            Finding.objects.filter(tenant_id=1, id__in=ids)
-            .values_list("finding_type__name", flat=True)
-            .distinct()
-        )
-        if len(selected_types) > 1:
+        # A remediation runs only on the issue kinds it is registered for.
+        # Other selected issues are skipped and reported, not acted on.
+        eligible_ids = [
+            str(finding_id)
+            for finding_id in Finding.objects.filter(
+                tenant_id=1,
+                id__in=ids,
+                finding_type__name__in=registered_action.finding_types,
+            ).values_list("id", flat=True)
+        ]
+        if not eligible_ids:
             messages.warning(
-                request,
-                f"{registered_action.label} applies to one kind of issue at a time; "
-                "the selection mixes several. Select issues of one kind.",
+                request, f"{registered_action.label} does not apply to the selected issues."
             )
             return redirect(request.POST.get("next") or "findings_queue")
+        skipped = len(ids) - len(eligible_ids)
+        if skipped:
+            messages.info(
+                request,
+                f"Skipped {skipped} selected issue{'s' if skipped != 1 else ''} that "
+                f"{registered_action.label} does not apply to.",
+            )
+        ids = eligible_ids
         guard_findings()
         if registered_action.key == BULK_RETIRE_COMPUTERS.key:
             return _retire_selected_computers(request, ids, registered_action)

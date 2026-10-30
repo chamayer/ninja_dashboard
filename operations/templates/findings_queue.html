@@ -286,6 +286,29 @@
         reasonInput.value = reason.trim();
         return true;
     };
+    // Normal confirmation for partial eligibility: the action runs on the
+    // selected issues of its registered kinds and skips the rest.
+    window.confirmIssueAction = function(button, confirmation) {
+        var form = button.form;
+        var types = (button.dataset.types || '').split(' ');
+        var label = button.dataset.label || 'This action';
+        var allScope = form.querySelector('.issues-select-all-scope');
+        var eligible = 0, ineligible = 0;
+        form.querySelectorAll('.bulk-cb').forEach(function(c) {
+            if (!c.checked && !(allScope && allScope.checked)) return;
+            if (types.indexOf(c.dataset.type) >= 0) eligible++; else ineligible++;
+        });
+        if (allScope && allScope.checked) {
+            if (ineligible) confirmation = label + ' applies to some issues in this group; the others will be skipped. ' + confirmation;
+        } else if (!eligible) {
+            window.alert(label + ' does not apply to the selected issues.');
+            return false;
+        } else if (ineligible) {
+            confirmation = label + ': ' + eligible + ' selected issue' + (eligible === 1 ? '' : 's') + '; '
+                + ineligible + ' selected ' + (ineligible === 1 ? 'is' : 'are') + ' ineligible and will be skipped. ' + confirmation;
+        }
+        return window.confirm(confirmation);
+    };
     window.openExcludeDialog = function(action, subject) {
         var dialog = document.getElementById('issue-exclude-dialog');
         var form = document.getElementById('issue-exclude-form');

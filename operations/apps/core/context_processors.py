@@ -3,9 +3,26 @@
 from __future__ import annotations
 
 from django.conf import settings
+from django.core.cache import cache
 from django.http import HttpRequest
 
+from . import issue_selection
 from .models import Client, ClientCandidate, EntityCandidate, Finding, MergeCandidate
+
+# The Issues badge is the queue's Open count (independent corrective actions,
+# PLAN-003 R3). It is shared by every page render, so it is cached briefly
+# per process rather than recalculated on each request.
+_NAV_ISSUES_CACHE_SECONDS = 60
+
+
+def _nav_issues_count(tenant_id: int) -> int:
+    key = f"nav_issues_open:{tenant_id}"
+    value = cache.get(key)
+    if value is None:
+        value = issue_selection.count(issue_selection.Scope(status="open"))
+        cache.set(key, value, _NAV_ISSUES_CACHE_SECONDS)
+    return value
+
 
 _FINDING_ACTIVE_STATUSES = (
     Finding.Status.OPEN,
@@ -67,10 +84,7 @@ def brand(request: HttpRequest) -> dict:
                 deleted_at__isnull=True,
             ).order_by("display_name")
         )
-        ctx["nav_findings_count"] = Finding.objects.filter(
-            tenant_id=tenant_id,
-            status__in=_FINDING_ACTIVE_STATUSES,
-        ).count()
+        ctx["nav_findings_count"] = _nav_issues_count(tenant_id)
         # These badges are rendered only in the application admin tabs, so
         # avoid even their small count queries on ordinary operator pages.
         if request.path_info.startswith("/admin/"):

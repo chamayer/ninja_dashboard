@@ -24,7 +24,7 @@ Selection: page rows by checkbox, or every row of this exact group across pages
             <label>Reason <input class="finding-action-reason" type="text" name="reason" maxlength="120" placeholder="Required to exclude or retire" style="min-width:14rem;"></label>
             <button type="submit" name="action" value="suppress" class="bulk-action issue-row-action issue-row-action--override" onclick="return confirm('Exclude the selected Issues? This is an operator override and needs a reason.')">Exclude</button>
             {% for action in finding_actions %}
-            <button type="submit" name="action" value="{{ action.key }}" class="bulk-action issue-row-action issue-row-action--override" onclick="return confirm('{{ action.confirmation|escapejs }}')" title="{{ action.eligibility_hint }}">{{ action.label }}</button>
+            <button type="submit" name="action" value="{{ action.key }}" class="bulk-action issue-row-action issue-row-action--override" data-types="{{ action.finding_types|join:' ' }}" data-label="{{ action.label }}" onclick="return confirmIssueAction(this, '{{ action.confirmation|escapejs }}')" title="{{ action.eligibility_hint }}">{{ action.label }}</button>
             {% endfor %}
             {% endif %}
         </span>
@@ -44,7 +44,7 @@ Selection: page rows by checkbox, or every row of this exact group across pages
         <tbody>
             {% for row in rows %}
             <tr>
-                <td>{% if row.selectable %}<input type="checkbox" name="ids" value="{{ row.id }}" class="bulk-cb">{% endif %}</td>
+                <td>{% if row.selectable %}<input type="checkbox" name="ids" value="{{ row.id }}" class="bulk-cb" data-type="{{ row.type_name }}">{% endif %}</td>
                 <td><span class="badge badge-{{ row.severity }}">{{ row.severity_label }}</span>{% if row.severity_shown %}<br><span class="muted" style="font-size:.7rem;">covers {{ row.severity_shown }}</span>{% endif %}</td>
                 <td>
                     {{ row.issue_label }}
