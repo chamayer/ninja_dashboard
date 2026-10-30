@@ -1,11 +1,45 @@
 # Operations TODO
 
-Per `Development/DEVELOPMENT.md`: Inbox / Backlog / Completed. This file is
-module-specific; root `../TODO.md` keeps cross-repo items and pointers.
+> **Current backlog authority:** use `../docs/records/PLAN_REGISTRY.md` for
+> substantial-plan status. The historical material below is retained pending a
+> later item-by-item reconciliation and is not a current work queue.
 
----
+## Current Operations backlog
 
-## Inbox
+- [ ] **PLAN-004 deferred capabilities** (2026-10-29):
+      [PLAN-033: case combining](docs/plans/PLAN-033-source-record-case-combining.md)
+      and [PLAN-034: source-record notifications](docs/plans/PLAN-034-source-record-notifications.md)
+      are brief deferred plans. Improve their use cases, scope, decisions and
+      acceptance/validation when activated; no implementation is authorized now.
+- [ ] **PLAN-004 measured optimization options** (2026-10-29): revisit per-key
+      coordination or additional publishers only if representative load demonstrates
+      excessive coarse-generation retries/queue latency. Revisit a data-authored rule
+      policy system only when code-defined rules/config revisions cannot meet a
+      concrete operator need. Prove the race model before removing the coarse guard;
+      do not restore tickets, counters or policy machinery without separate review.
+
+- [ ] **Cross-scope ScreenConnect identity review** (PLAN-025, 2026-10-28).
+      After the AMROSE shared-source collection, an unassigned ScreenConnect
+      record shared serial and MAC evidence with a client-scoped Computer.
+      Review how duplicate/client-conflict findings should surface this evidence
+      without assuming client ownership. Preserve the current no-cross-client
+      auto-mapping behavior; no identity or mapping change is authorized here.
+
+- [ ] **PLAN-003/PLAN-014 — recognized OS, unenrolled and retained findings**
+      (read-only verification 2026-10-27). See F07 verification in
+      `docs/plans/PLAN-003-review-proposal.md`. 540 active unenrolled rows concern
+      402 Computers. Of 87 current matches outside cleanup, 85 lack canonical
+      OS relationships; 2 Windows records have OS links whose nine active
+      agent records attach to other Computers. No valid missing-agent case
+      established; earlier blanket coverage-expansion suggestion withdrawn.
+      Preserve recognized-OS applicability, not hardware/VM-shell requirements;
+      legacy os_instances is not a canonical anchor. Investigate link/history
+      consistency with identity/PLAN-014, and review whether unenrolled has an
+      independent actionable role before retirement. Separately audit 48 retired
+      subjects, 11 now with agents, 34 without qualifying tracking, and 138
+      extra rows on 10 subjects; preserve history and do not assume merge/key
+      causes or close records without evidence. No implementation, refresh,
+      cleanup or production change authorized by this review.
 
 - [ ] **Retire the per-client "computers with this program" page** (2026-10-26).
       `org_software_devices` duplicates Software > Installations filtered by
@@ -35,6 +69,13 @@ module-specific; root `../TODO.md` keeps cross-repo items and pointers.
       all devices only. Needs a decision on whether scoped baseline items
       should add to the all-devices list (a findings behaviour change for any
       existing scoped items; measure them in production first).
+      **Decided (user, 2026-10-30):** merge, don't replace. A server gets the
+      all-devices items plus its server-scoped items; a scoped item overrides
+      an all-devices item only where they conflict (the same requirement), and
+      the default/all-devices item applies wherever the scope configures
+      nothing. Still to do: define "conflicting" against the requirement key,
+      measure existing scoped items in production, then implement in
+      `resolve_tier` and enable scoped items on the Requirements page.
 
 - [ ] **Publisher approvals do not reach installs with a variant publisher
       name** (2026-10-22). Reconcile matches `lower(i.publisher)` exactly,
@@ -45,6 +86,14 @@ module-specific; root `../TODO.md` keeps cross-repo items and pointers.
       by the user; an alternative design (e.g. the decision itself naming
       the variant names it covers) still needs agreement.
 
+- [ ] **Jobs dispatch: one misconfigured run stops every Job** (2026-10-22).
+      `jobs_dispatch_ready_v1` raises "Jobs resource policy is unavailable"
+      when a queued run names a lock without a `job_resource_limits` row, so
+      the worker exits and restarts in a loop (worker down ~15:23–deploy of
+      `61b1584` for `tenant:{tenant_id}:ninja-enrichment`). Proposal: skip and
+      mark that run with a visible wait reason and an operator-facing Finding
+      instead of raising. `test_jobs_resource_limits.py` now guards registry
+      keys, but not limits removed or renamed later.
 - [ ] **Explore: a finding when a Ninja automation action fails** (user
       backlogged 2026-10-22). Idea only, not designed. Ninja reports
       automation outcomes (scripts, scheduled tasks, condition actions) as
@@ -86,6 +135,39 @@ module-specific; root `../TODO.md` keeps cross-repo items and pointers.
       are in `entity_observation_history.material_data`, but confirm an index
       serves an org-history lookup per attached group before adding it to the
       hourly `_check_name_drift` query.
+- [ ] **Computers Sources column: link each line to its source record** (user
+      deferred 2026-10-21). Only Hudu stores a record URL (`hudu_url`); the
+      agent sources store `external_id` only. Plan: Hudu line linked from the
+      stored URL; an admin-managed per-source record-link pattern on the
+      Sources page (needs a small migration) with `{id}` substitution; the
+      most recent record when a source has several; the Computer's
+      Observations tab as fallback. Needs a verified deep-link format per
+      source from an administrator.
+- [ ] **Sources page: per-type counts double-count Ninja devices** (found
+      2026-10-22). `v_source_instance_entity_counts` counts current-observation
+      rows, and every Ninja device has two: an identity record (`device`
+      namespace, or `vmware_guest_vmx_path` for VMware guests) and a health
+      record (`device-health`, from `ingest/core/device_health.py`). Production
+      read-only check: "OS agent (RMM): 9394 active" is 4,697 agents × 2;
+      identity records total 5,657, matching the `source.Ninja` run_log
+      `rows` and current `ninja_core.devices`. The data is correct; the card
+      overstates. Fix options: count distinct items per entity type on the
+      card, or show `device-health` records as their own line; the
+      "Source records: active · total" line has the same effect. The
+      "Records" label (run_log `rows`, the devices Ninja returned) should also
+      say what it counts. Display-only — no data change needed.
+- [ ] **PLAN-004 — Computer identity, history, and naming:** verify remaining
+      post-ADR-0034 follow-ups before reopening implementation.
+- [ ] **PLAN-005 — Jobs observability and schedule authority:** verify the
+      remaining health and schedule follow-ups against current behavior.
+- [ ] **Ninja device collection: phase and count progress** (observed
+      2026-10-22). The Jobs run has a live worker heartbeat but reports only
+      one collection stage while the shared observation writer processes a
+      full snapshot. Publish truthful phases (fetch, observation write,
+      reconciliation, derived refresh) and expected/written counts without
+      inventing a percentage. Record comparable duration metrics before
+      optimizing: the first shared-writer run for about 5,700 Ninja records
+      took about 13 minutes versus prior runs of about 1–2 minutes.
 - [ ] **Sign-in follow-ups (after PLAN-013):** (1) replace the `is_staff`
       edit checks in `finding_types_admin.py`, `software_policy.py`, the
       client-mappings view, `home.html`, and `sources.html` with group
@@ -96,6 +178,17 @@ module-specific; root `../TODO.md` keeps cross-repo items and pointers.
       `test_conditions.py` (2), `test_conditions_command.py` (1), and
       `test_e5_generic_admin.py` (1) — the conditions profile now has 61
       definitions against the expected 54.
+- [ ] **Jobs: re-queue follow-on steps after a worker restart** (built
+      2026-10-23 as `replay_interrupted_runs`, not yet shipped; seen
+      2026-10-23). The resolver and platform-evaluate run only as dependency
+      steps of a collection (migration 0244 retired their schedules). A deploy
+      that restarts the worker marks the in-flight step `worker_interrupted`
+      and its dependents `prerequisite_failed`; nothing runs them until the
+      next collection (three deploys left the resolver idle from 12:47 to
+      after 15:35 UTC). Fix: when a run ends `worker_interrupted`, request its
+      required dependents again (or re-request the interrupted step once).
+      Rejected: restoring the 30-minute timer, which brings back the
+      duplicate runs 0244/0323 removed.
 - [ ] **Entity kinds beyond computers** (ADR-0044, proposed 2026-10-25).
       ~5,200 active records have no Computer, mostly Hudu documentation
       (Auvik 2,863, Locations, Applications, Printing, WAN, ...). Plan:
@@ -103,20 +196,15 @@ module-specific; root `../TODO.md` keeps cross-repo items and pointers.
       record-type-to-kind mapping table (admin data), classes `location` and
       `service` plus `asset.kind`, relationships, inventory by kind. Interim:
       Source records shows why each record is unlinked (0344).
-- [ ] **Overlapping source-group findings** (measured 2026-10-23,
-      read-only): of 38 open `unmatched_source_group` findings, 28 are for
-      groups already linked to a client (nothing resolves them) and 7 repeat an
-      open `client_unattached_group`. Close stale rows, then decide whether one
-      type should own "source group with no client". PLAN-004 follow-up,
-      measured read-only 2026-10-26: 3 of 8 active `client_unattached_group`
-      findings are stale (one group is now attached; two source observations
-      are inactive); 5 remain valid. No active collision finding was present;
-      the open unnamed-group finding remains valid. Reconcile these findings
-      after each client-resolver run: `client_unattached_group`,
-      `unnamed_source_group`, and `client_link_collision` when a group is
-      assigned, inactive, or gone; also close collisions below two client
-      matches. Record each closure reason. Generic entity-candidate withdrawal
-      is separately tracked by PLAN-021.
+- [ ] **PLAN-003 client-mapping issue counts/status:** resolve the measured
+      dashboard/Issues discrepancy as one distinct-corrective-action contract;
+      see the single resolution item in `docs/plans/PLAN-003-current-design.md`.
+      PLAN-004 retains resolver lifecycle cleanup: after resolver runs, close
+      stale `client_unattached_group`, `unnamed_source_group`, and
+      `client_link_collision` rows with reasons when groups are assigned,
+      inactive, gone, or below two client matches. The 2026-10-26 read-only
+      check found 3 of 8 active `client_unattached_group` rows stale. Generic
+      entity-candidate withdrawal remains PLAN-021.
 - [ ] **Overlapping identity findings** (measured 2026-10-23): 190 Computers
       carry identity findings; 23 carry two or more types, mostly
       `duplicate_device_records` with `identity_conflict`,
@@ -133,14 +221,14 @@ module-specific; root `../TODO.md` keeps cross-repo items and pointers.
       `test_identity_findings.py::test_name_only_computers_form_one_group...`,
       `test_device_status_settings.py::test_no_consumer_uses_a_literal...`,
       `test_software_classify_schedule.py::test_scheduler_registers...`.
-- [ ] **Computers Sources column: link each line to its source record** (user
-      deferred 2026-10-21). Only Hudu stores a record URL (`hudu_url`); the
-      agent sources store `external_id` only. Plan: Hudu line linked from the
-      stored URL; an admin-managed per-source record-link pattern on the
-      Sources page (needs a small migration) with `{id}` substitution; the
-      most recent record when a source has several; the Computer's
-      Observations tab as fallback. Needs a verified deep-link format per
-      source from an administrator.
+
+Per `Development/DEVELOPMENT.md`: Inbox / Backlog / Completed. This file is
+module-specific; root `../TODO.md` keeps cross-repo items and pointers.
+
+---
+
+## Historical inbox — not a current work queue
+
 - [x] After device-list pagination/search ships, live-check
       `/orgs/uta/devices/` through Operations and compare response size/time
       against the previous large render. 2026-07-07: live response was 47,649
@@ -154,7 +242,7 @@ module-specific; root `../TODO.md` keeps cross-repo items and pointers.
 
 ---
 
-## Backlog
+## Historical backlog — not a current work queue
 
 ### Coverage evaluator — `stale_required_platform` noise reduction
 

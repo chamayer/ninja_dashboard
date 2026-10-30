@@ -2,11 +2,11 @@
 
 ## Status and goal
 
-Complete locally, approved and validated 2026-10-28. Computer source-record rows
+Deployed and verified 2026-10-28 in 0.130.1. Computer source-record rows
 must show each record's reported status and contact time. The shared reader
 also serves merge review. The broader PLAN-004 review remains outside this
 repair; the [registry](../../../docs/records/PLAN_REGISTRY.md#plan-004--computer-identity-history-and-naming)
-owns lifecycle status. The user subsequently approved this scoped commit.
+owns lifecycle status. Repair `a0a2c53` and release `c7628b9` are on both remotes.
 
 ## Scope and files
 
@@ -19,7 +19,7 @@ owns lifecycle status. The user subsequently approved this scoped commit.
 - Update this checkpoint, the review handoff, root routing, and registry.
 
 No matching, finding, lifecycle, attachment, source cleanup, production-data,
-release, push or deployment change is authorized. Preserve unrelated edits.
+release or deployment beyond this approved repair is authorized. Preserve unrelated edits.
 
 ## Decisions and steps
 
@@ -42,9 +42,6 @@ no new architectural or attachment policy is adopted.
 
 ## Validation and checkpoint
 
-Inspected current files, Git diffs/status, module instructions, metadata-view
-migrations, shared reader and templates. `0361` is unoccupied. A repository
-virtual environment has Django, pytest, Ruff, psycopg and testcontainers.
 Migration 0361 appends the guarded timestamp and preserves view permissions.
 The shared reader now joins metadata by tenant/observation ID and keeps the
 existing tuple shape. Templates require no changes. Dockerfiles already copy
@@ -57,13 +54,15 @@ grants. Django system
 checks, migration graph (0361 is the sole Operations head), scoped Ruff/format,
 fatal view lint, registry validation and whole-worktree whitespace checks pass.
 The staged registry also passes the workspace's currently untracked validator.
-Tests use synthetic data only. Live browser behavior, existing dev-stack migration
-application and production deployment were not performed. Migration rollback
+Tests use synthetic data only. Live browser behavior and existing dev-stack
+migration application remain unverified. Production applied 0361; all three
+application services are healthy, deployed file hashes match `c7628b9`, Django
+checks pass, and runtime metadata access and tenant isolation remain enforced.
+See the [deployment record](../records/PLAN-004-source-record-status-deployment-2026-10-28.md).
+Migration rollback
 retains the additive field; the previous application reader remains compatible.
 
-The existing module BLUEPRINT is over 75 KB and contains unrelated active work;
-rewriting it is outside this scoped repair. The registry links this compact
-checkpoint. Broader review documents and root routing remain separate work.
+The oversized module BLUEPRINT remains outside this repair; the registry links
+this scoped checkpoint.
 
-Next: obtain separate push/deployment approval explicitly including migration
-0361, then validate deployment. Resume the broader review separately.
+Next: resume the broader PLAN-004 review; any browser acceptance remains separate.

@@ -1,100 +1,61 @@
-- **PLAN-031 — active.** Next: validate the source-record reported-state migration and page. See the [Operations handoff](operations/BLUEPRINT.md#plan-031--source-record-and-reported-states).
-
-# PLAN-019 — Data pipeline correctness and source-record retention
-
-**Active.** Detail: [PLAN-019](docs/plans/PLAN-019-data-pipeline-correctness-and-retention.md). Step 1 and Step 2 (U04, `0349`) deployed in 0.129.0; F09 decided (no daily presence for any source).
-
-- **Next:** Step 3 (F08 separate sites scope, F02 bounded continuation after its prototype), with its own approval.
-
-# PLAN-017 — Consolidated data architecture review
-
-Done 2026-10-26; [registry](docs/records/PLAN_REGISTRY.md),
-[triage](docs/records/PLAN-017-phase-5-triage.md). Next: PLAN-019.
-
-# PLAN-012 — Computers inventory read model
-
-## Goal
-
-Make the Computers inventory page fast without weakening its full-fleet
-contract. Preserve canonical computer data, tenant isolation, coverage
-verdicts, source and Hudu state, filters, summary cards, CSV, and
-current-versus-withdrawn semantics. Reusable fleet facts move into an owned,
-rebuildable read model refreshed after ingest.
-
-## Scope
-
-One rebuildable effective read model owned by the existing source, identity,
-coverage, and Hudu authorities, with a refresh function integrated into
-`refresh_derived()`. No cache or duplicate authority. Requirement-rule
-changes are out of scope; they belong to PLAN-014 (`ingest/BLUEPRINT.md`).
+# Root development blueprint
 
 ## Status
 
-Active. The read model itself has not started.
+Registry-active plans are routed below. Plan status and lifecycle dates
+are authoritative in `docs/records/PLAN_REGISTRY.md`.
 
-Done under this plan (pushed to both remotes):
-- `cc5d936`: the evaluator stores requirement verdicts (ADR-0035, migration
-  0332). This prerequisite gives the read model one requirement authority.
-- `453c41c` and `ccae6da`: Computers page fixes the user requested (card
-  order, one Hudu card, Status filter over every catalogued agent, one-line
-  filter bar, compact cards, clearer Hudu column, OS "Unknown"). These are
-  page fixes, not read-model progress.
+## Goal
 
-Not done:
-- no inventory read model or materialized view;
-- no refresh function and no `refresh_derived()` integration;
-- the route still assembles fleet state from several runtime queries;
-- no performance re-measurement, parity validation, release documentation,
-  or plan completion.
+Provide one compact entry point to each active plan's current next action and
+authoritative details.
 
-## Evidence
+## Scope
 
-Deployed 0.128.15 measured Computers at 4.740 s browser first response: 3.154 s
-of database wait across 15 fleet reads, plus 1.209 s of template rendering.
-That was before `cc5d936`, which replaced the page's requirement derivation
-with one indexed read. Re-measure before designing.
+This file is only the cross-service index. `docs/records/PLAN_REGISTRY.md`
+owns plan status and lifecycle dates. Module blueprints own module checkpoints;
+`docs/plans/` owns cross-service plan detail. Do not store plan narratives,
+validation results, or completed-plan summaries here.
 
-Production after the first verdict pass (2026-10-21 17:48 UTC): 19,012
-verdicts. Hudu Missing went from 4,208 on the page to 260. The drift check
-shows 582 open findings with no matching verdict, which the resolve step's
-separate rule copy explains (PLAN-014).
+## Next action — active plan routing
 
-## Validation
+- **PLAN-004 — active, design revision 8 accepted 2026-10-29.** Next: approved R0–R4 order
+  (PLAN-003 foundation first, PLAN-004 in R4), per the
+  [handoff](operations/docs/plans/PLAN-004-source-record-review.md);
+  implementation remains gated.
+  See the [handoff](operations/docs/plans/PLAN-004-source-record-review.md) and
+  [final design](operations/docs/plans/PLAN-004-source-record-final-design.md).
 
-Recorded with each commit: migration 0332 and evaluator Postgres tests,
-Computers page tests (20), Edge screenshots, and the full suites. Each run
-had only the 8 failures that also fail on HEAD 3091a47.
 
-## Checkpoint
+- **PLAN-003 — active.** R1 (0.131.0), R2 (0.132.3) and R3 unified queue (0.134.0, follow-ups 0.134.1) released;
+  next is R4 (PLAN-004), decisions recorded 2026-10-30 (unlocked intake + trigger; see the
+  [Operations handoff](operations/BLUEPRINT.md#plan-004--identity-and-source-record-maintenance-review)).
 
-Prerequisites and page fixes are deployed. The read-model design has not
-started.
+- **PLAN-026 — active, approval-gated.** PLAN-025 is complete; next obtain
+  explicit approval to implement the source configuration UI using its
+  documented source/binding contract. See the
+  [plan](docs/plans/PLAN-026-source-configuration-ui.md).
 
-## Next action
+- **PLAN-029 — active.** Next: renew scheduler heartbeat independently of
+  scheduled work and collect Ninja reference data before devices. See the
+  [plan](docs/plans/PLAN-029-jobs-readiness-and-first-ingest.md).
 
-Re-measure the deployed Computers page. Trace each remaining runtime query
-to its authority. Define the read model, its refresh owner and
-`refresh_derived()` hook, its tenant boundary, staleness behavior, and
-parity checks before implementation. Then move the Dashboard and
-software-capability requirement copies to the stored verdicts.
+- **PLAN-007 — active.** Next: verify current implementation and migration
+  `0335` against the [registry entry](docs/records/PLAN_REGISTRY.md#plan-007-ingest-domain-separation) before resuming.
+- **PLAN-012 — active, gated.** Next: reconstruct and confirm the missing
+  consumer ledger, design, affected-file inventory, and resumable slices in
+  the [checkpoint](docs/records/PLAN-012-computer-read-checkpoint.md).
+- **PLAN-015 — active.** Next: implement and validate the read-only preview;
+  production reads require separate authorization. See the [plan](operations/docs/plans/PLAN-015-identity-reconciliation.md)
+  and [Operations checkpoint](operations/BLUEPRINT.md).
+- **PLAN-016 — active.** Next: implement the bounded, tenant-scoped,
+  read-only explorer and focused tests. See the [plan](operations/docs/plans/PLAN-016-admin-sql-explorer.md)
+  and [Operations checkpoint](operations/BLUEPRINT.md).
+- **PLAN-019 — active, approval-gated.** Step 3 is next; each step requires
+  separate explicit approval. See the [plan](docs/plans/PLAN-019-data-pipeline-correctness-and-retention.md).
+- **PLAN-022 — active.** Wave A is complete. Design each Wave B item and obtain
+  its separate approval before execution. See the [plan](docs/plans/PLAN-022-legacy-data-cleanup.md).
 
-PLAN-023: see `operations/BLUEPRINT.md`.
-
-## PLAN-021 — Generic entity candidate lifecycle reconciliation
-
-**Status:** Active. Scope and current review: [PLAN-021](operations/docs/plans/PLAN-021-entity-candidate-lifecycle.md)
-and [2026-10-27 aggregate review](docs/records/PLAN-021-candidate-review-2026-10-27/review.md).
-The fresh read-only check found 77 linked, non-attached proposals whose active
-observation hashes match but whose proposed class conflicts with the linked
-entity class. Local implementation is in migration 0355 and the versioned
-ingest projector; the legacy three-column wrapper remains compatible across
-service startup. Stale proposals receive audited withdrawal, matching links
-attach by class, and reactivated unlinked evidence reopens. Attached
-identity/history and rejected decisions are preserved. The focused
-candidate/admin run produced 24 passes with one unrelated existing admin test
-excluded; five passing cases use isolated PostgreSQL. Django system check,
-migration autodetection, Ruff, registry validation, and `git diff --check`
-pass. The excluded test expects missing `ConditionPolicyActivationForm`. No
-production migration, data mutation, or deployment was run. **Next:** local
-commit is authorized. Any `origin` push needs explicit approval for automatic
-deployment and migration 0355, followed by the approved secondary mirror push.
+Completed and ready plans remain in the registry; their details stay in their
+registered source documents. Update this index only when active status,
+next action, or cross-service routing changes.

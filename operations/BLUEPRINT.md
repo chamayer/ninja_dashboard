@@ -1,7 +1,39 @@
+## PLAN-030 — Bulk accept discovered client candidates
+
+**Status/goal:** Complete (released 0.133.0, `020cf560`, 2026-10-30). Let an operator accept selected open source-client
+candidates as new Operations clients in one reviewed action.
+**Scope/files:** `apps/core/views.py`, `config/urls.py`,
+`templates/inventory_clients.html`, `templates/client_mappings.html`, and the
+bulk-confirmation template; no schema change. Preserve unrelated dirty edits.
+**Decisions:** Reuse the existing accept-as-new behavior for each selected
+candidate, including tenant scope, client entity anchor, aliases, source-group
+attachment, resolved actor/reason, and audit record. Do not map to existing
+clients or alter resolver thresholds. Show selected names/count before the
+final POST; require an operator reason; reject the whole batch if any selected
+candidate is no longer open.
+**Validation:** Python compilation, `git diff --check`, plan-registry validation,
+Operations image build, and `manage.py check` pass. No automated tests were
+added or run; the user wants a manual dev opportunity. No feature migration,
+source collection, candidate acceptance, commit, push, or production deployment
+occurred.
+**Checkpoint:** Selection, confirmation, atomic all-or-none acceptance, source
+group attachment, actor/reason audit, and shared helper are implemented. After
+explicit local approval, Compose applied pending migrations 0358 and 0359 and
+recreated Operations with the new image. The action is available from both
+Inventory → Clients and Client mappings. Operations and Postgres are healthy
+at `localhost:3003`; ingest remains healthy and Jobs worker is running. Login
+GET returns 200 and `manage.py check` passes. The Jobs ledger remains at 9
+completed and 1 failed run; no candidate was accepted and no source collection
+ran. Released 2026-10-30 as 0.133.0 at the user's request ("commit plan-030 and
+close it out"); ported onto production master with the PLAN-003 R2 findings guard
+on the single and bulk accept handlers. Verified deployed: healthy containers,
+contract 4, routes respond. The uncommitted copy in the main folder is superseded.
+
 ## PLAN-025 — Shared ScreenConnect and Operations inventory summary
 
-**Status/goal:** Active. Bring restored shared ScreenConnect group evidence into
-the existing source pipeline and add a deduplicated Operations inventory card.
+**Status/goal:** Complete. Shared ScreenConnect support and the Operations
+inventory card are implemented; the authorized first production collection and
+its dependent resolver/evaluation chain have completed.
 **Scope/files:** `ingest/sources.py`, `ingest/connectors/screenconnect.py`, focused collector tests,
 `apps/core/views.py`, `templates/coverage.html`, focused coverage tests, and
 root/module checkpoints and registry. Preserve the pre-existing dirty worktree.
@@ -19,8 +51,33 @@ files pass formatting; existing config/view/test files retain prior formatting.
 Dockerfiles already copy every changed runtime file. Live shared collection and
 browser behavior are unverified. Root blueprint already exceeds its 4,000-byte
 governance limit; unrelated checkpoint reconciliation is outside this scope.
-**Checkpoint:** Local implementation complete; no migrations, commits, deployment,
-or production writes. The shared connector explicitly selects a customer
+**Checkpoint:** Local implementation and initial production source refresh are
+complete. `AMROSE ScreenConnect` (`sc_amrose`) and its `internal-ingest` binding are
+enabled with a four-hour schedule (`interval:240`), which the user saved from
+the Sources GUI after implementation. Refresh run
+`5e27a49b-db4a-45b5-b9aa-93baf9b5adc4` completed with 4,632 rows touched, zero
+failed rows, and a complete 4,507-session snapshot. Aggregate metadata shows
+4,424 sessions with Company, 83 without it, 125 Company groups, no empty-name
+groups, 97 groups with a client, and 28 unassigned groups. The dependent identity
+resolver completed at 21:22 UTC (`resolved=417`). Platform evaluation
+`e78b011c-aabd-4bde-bf76-f24e293b3c3b` is now stalled, not waiting on AMROSE
+data: it was coalesced with a Ninja chain whose `ninja-enrichment`
+`9d781258-5917-4be6-9550-091b6c85c53c` stopped before a terminal result at
+21:27 UTC. Its dependent `patches` and `patch-classify` runs, then evaluation,
+were marked stalled. Portainer logged a successful stack deployment at 21:27;
+Docker events show Operations, ingest, and Jobs containers were replaced at
+21:27:32. The initiating actor/trigger is not present in the retained logs.
+All three services are healthy now. Replay-safe recovery automatically retried
+Ninja enrichment (`e67d87c0-0411-4599-86ff-b4a6f4634ea2`), which completed at
+21:32 UTC. Its new patches run completed at 21:33:50, patch classification
+completed at 21:33:53, and platform evaluation
+`c77515f0-bcba-4b0e-8a50-dd298eb63a2e` completed at 21:39:15 with 5,874 rows
+touched and no error. The original interrupted workflow remains stalled in
+history. The source
+refresh completed despite an opportunistic generic relationship projection
+error (`relationship source cardinality would be exceeded`), which the pipeline
+logged and continued past. No migration, commit, or push.
+The shared connector explicitly selects a customer
 `CustomProperty1`–`CustomProperty8`, preserves unassigned sessions, and keeps
 scoped ScreenConnect identity unchanged. The Operations Computer summary card is
 already present in the local worktree; preserve it and the unrelated dirty work.
@@ -48,15 +105,36 @@ ScreenConnect source, assigned to a client, with a different base URL. Do not
 use its credential pair against the shared URL. The local connector tests pass
 (8); Operations test startup is unavailable on this workstation because the
 `shared` Python package imported by `operations/apps/core/admin.py` is absent.
-Prior focused Operations checks are recorded above. No shared source
-configuration or collection has been performed. The proposed disabled-instance
-shape and secret-reference guidance are in
+Prior focused Operations checks are recorded above. On 2026-10-28, the
+production instance `AMROSE ScreenConnect` (`sc_amrose`) and its `internal-ingest`
+binding were created and then enabled with `CustomProperty1` grouping. The
+binding remains unscheduled; private GUID/key references are present in the
+ingest runtime. Creation and activation are recorded in `operations.change_actions`.
+The first refresh completed as recorded above. No migration, commit, or push
+was performed. The existing client-scoped UTA instance is unchanged.
+Configuration guidance is in
 [`screenconnect-source.md`](../docs/reference/screenconnect-source.md).
-**Next action:** Identify a supported read path for ScreenConnect Host-page
-group definitions and membership; the current RESTful extension did not return
-them through `GetSessionGroups`. Review unmatched Company values and group
-semantics before requesting authorization for a separate, initially disabled
-shared source/binding. Collection remains separately gated.
+**Deferred:** A possible cross-scope ScreenConnect serial/MAC identity conflict
+needs review without assuming client ownership; tracked in
+[`operations/TODO.md`](TODO.md). The separate Host-page container definitions
+remain unavailable through the tested RESTful extension. No migration, commit,
+or push was added.
+
+## PLAN-032 — Per-instance source display titles
+
+**Status/goal:** Complete. The Sources page displays each configured source
+instance name while client-mapping filters retain the shared catalog identity.
+AMROSE is labeled **AMROSE ScreenConnect**; the UTA instance keeps its own label.
+**Scope/files:** `apps/core/views.py` and `templates/sources.html`; no schema
+change.
+**Decision:** `source_instances.config.source_name` is the per-instance display
+label. Keep `operations.sources.name` as the catalog identity used by client
+mapping filters.
+**Validation:** Python compilation and staged `git diff --check` passed; tests
+were not run. Commit `9aef8fc` is present in both `origin/master` and
+`a-m-rose/master`. Live browser verification remains unconfirmed.
+**Checkpoint:** The code is committed and pushed to both remotes. No migration
+was required. See `docs/records/PLAN_REGISTRY.md` for lifecycle status.
 
 ## PLAN-024 — Preserve Ninja software display names
 
@@ -118,6 +196,71 @@ because Django is not installed locally.
 **Next:** commit this scoped change locally. Obtain explicit approval before
 the `origin` push, including its automatic deployment and any pending
 migrations.
+
+## Requirement profile assignment visibility
+
+Active (user authorized 2026-10-23). On the Requirements page, add scoped
+baseline rows (All, Servers, Workstations) with validated preset fields and
+an explicit role-list conflict choice: copy the All baseline first or replace
+that role's list. This preserves the evaluator's existing replacement-list
+semantics. Also show each profile's assigned active clients, plus clients
+inheriting the default profile, in collapsed lists; permit audited
+individual and selected-client bulk assignment from those lists. Scope:
+requirement-profile page/view/tests only; no schema, evaluator, automatic
+legacy migration, commit, or push. The scoped-editor UI was committed and
+pushed as `9024b46`. Expanded scope (user authorized 2026-10-23): retire the
+runtime Global fallback without deleting legacy rows. A null client profile
+inherits the tenant-default (Standard) profile and a non-null profile is an
+override; update evaluator/readers, onboarding, and UI consistently.
+Checkpoint: implementation complete locally. Updated evaluator, automatic
+resolution, software capability derivation, Computer requirement display,
+onboarding, client configuration, profile UI, architecture authority, and
+ADR-0042. Compilation, focused Ruff, scope import, plan-registry, and scoped
+whitespace checks pass. Django/pytest cannot run on the workstation and the
+local Operations container is stopped. Commit/push not authorized.
+
+## Inventory source-record scope
+
+Active (user authorized 2026-10-22). Add a muted `Records` source-population
+count to each Computer inventory card and a muted `Computers` header above the
+existing Computer-based status rows. `Records` counts only Computer-capable
+source records (including unlinked and withdrawn ones), never client/group
+records; the existing `Total` remains the status subtotal for Computers.
+Scope: coverage view, template, and focused test; no schema or data change.
+Checkpoint: aggregate narrowed to the card's Computer record types. Focused
+coverage tests (23), Django system check, Python compilation, fatal lint, and
+whitespace validation pass. Commit/push not authorized.
+
+## Finding recalculation contract
+
+Active (user authorized 2026-10-22, including commit and deployment push).
+Goal: make each normal finding reevaluation refresh its present evaluation
+data—including severity, confidence, attribution, and details—while retaining
+the original episode start and operator-controlled status. Client-mapping and
+platform-infrastructure conditions are critical and appear prominently on the
+fleet and client pages. Scope: finding producers, focused regression tests,
+and dashboard presentation; no schema or direct production-data migration.
+Checkpoint: committed and pushed as `0358966` (origin, then `a-m-rose`).
+Focused tests (22), Django system check, Python compilation, fatal lint, and
+whitespace validation passed. Deployment is the origin-push automation; no
+schema or direct production-data migration is included. Next action: verify
+the deployed application and observe normal producer reevaluation.
+
+## Source records runtime-read repair
+
+Active (user authorized 2026-10-22). Production `/inventory/source-records/`
+returned HTTP 500 because the new reader queried the restricted
+`entity_observation_current` table under `operations_app`. Replace its count,
+type-list, row, and name-search reads with the existing tenant-scoped,
+read-only `v_entity_observation_admin_metadata` projection; add a structural
+regression test. No schema, data, policy, or source-link changes. Validate
+the focused test, Django check, lint, whitespace, and the deployed endpoint
+after separately approved commit and push. Current checkpoint: implementation
+complete locally. Focused source-reader tests (8), Django system check, Ruff
+fatal/import checks, plan-registry validation, and whitespace validation pass;
+full-file Ruff retains pre-existing complexity/style findings in `views.py`.
+Next action: obtain separate commit and deployment-push authorization, then
+verify the deployed route under the runtime role.
 
 ## Client mappings — recorded and movable (ADR-0040)
 
@@ -645,7 +788,7 @@ and older names show "→ new name" with no live evidence. Candidate last-seen
 is one resolver-stamped date for the whole name, so per-group state is shown
 on the source badges.
 
-Extended (user-approved): ADR-0038 (Proposed) — the resolver moves a renamed
+Extended (user-approved): ADR-0040 (Proposed) — the resolver moves a renamed
 unattached group off other open candidates and closes an emptied one as
 `renamed` (`_release_renamed_group`); migration 0337 adds the choice (no SQL).
 On deploy this also closes existing stale candidates such as "Rise NYC" on the
@@ -689,6 +832,28 @@ database (no local Docker). Reused the existing `_safe_next` rather than a new
 redirect helper. Next action: check the deployed pages; then move this
 section out of the active blueprint.
 
+## PLAN-015 — One-time source-record identity reconciliation
+
+Active. Build the read-only preview only: counterfactually match every current,
+attached identity-signal record using today's policies while excluding its own
+evidence. Do not run it against production or implement reattachment, merges,
+or derived refresh. The tool must report proposed destinations, rules,
+candidate/blocker traces, and a digest without writing database state.
+
+Scope: `ingest/identity/matching.py`, a new ingest operator module, and
+focused tests. PLAN-004 retains ongoing identifier-change rechecks; PLAN-012
+and PLAN-014 retain their existing scopes. Existing uncommitted work belongs
+to other tasks and must be preserved.
+
+Current checkpoint: local implementation and focused validation passed (15
+PostgreSQL tests, compile, Ruff, registry, and whitespace checks). An authorized
+production read-only hostname/client footprint query found 131 one-peer records
+and 40 multi-peer records. Its guard-aware follow-up reduced the one-peer set
+to 110 while retaining 40 multi-peer review cases; neither query made changes.
+All 40 ambiguous records are covered by an open `duplicate_device_records` or
+`identity_conflict` Finding (possibly shared across records). Next action:
+review the 110 candidates before any reattachment proposal.
+
 # PLAN-004 corrective repair — restricted observation reads
 
 ## Goal and scope
@@ -723,6 +888,14 @@ password; it created an empty local Compose network and volume only. No
 production schema or application state has changed. Commit and deployment
 push were approved on 2026-10-21. Next action: commit this repair, push it,
 then verify the deployed endpoints and migration under the runtime role.
+
+Follow-up authorized 2026-10-21: the Computer detail Source records query can
+multiply a record when more than one presence row matches its source/type, and
+the pending-cleanup banner falsely says there are no current records. Keep the
+existing record/lifecycle architecture: select at most one presence row for
+display and change the banner to say the Computer is marked for review while
+directing the operator to its displayed source records. No lifecycle policy,
+schema, or source data changes are authorized.
 
 # PLAN-013 — Operations sign-in page
 
@@ -761,7 +934,7 @@ Permissions continue to come from groups (`viewer`, `operator`, `admin`).
 
 ## Status
 
-Implemented and validated locally; committed and pushed on user approval (2026-10-21). Deployed-stack sign-in not yet verified.
+Completed and validated locally and in the deployed browser on 2026-10-26; implementation was committed and pushed on user approval (2026-10-21).
 
 ## Validation
 
@@ -771,25 +944,337 @@ Implemented and validated locally; committed and pushed on user approval (2026-1
   conditions/generic-admin failures occur on clean HEAD 3091a47.
 - `manage.py check` clean; ruff check/format clean on new files. Pre-existing
   format drift in `config/urls.py` and `config/settings/base.py` left as is.
-- Not validated: a real database sign-in (local settings use the SQLite
-  skeleton) and the deployed stack.
+- User confirmed deployed browser sign-in, sign-out, password-change form
+  access/fields, and post-logout authentication guard all passed. The password
+  itself was not changed.
 
 ## Checkpoint
 
-Committed. Follow-ups (group-based edit checks, SSO decision, Users page)
-are in `operations/TODO.md`.
+Completed. The deployed Operations container is healthy after migration
+0352/0353 on deployment `b1d3772`. Browser verification confirmed sign-in,
+authenticated password-change form access, sign-out, and the post-logout
+password-page redirect to login. No password was changed. Follow-ups
+(group-based edit checks, SSO decision, Users page) are in `operations/TODO.md`.
 
 ## Next action
 
-Verify sign-in, sign-out, and password change on the deployed stack, then mark PLAN-013 complete.
+No further action. Any future password-change transaction should be tested
+only when a real account password change is intended.
+## PLAN-016 — Admin read-only SQL explorer
 
-## PLAN-003 — Central work queue and finding state (W7-W9)
+Active. Add an Admin Data query page that uses transaction-level read-only
+execution, forces tenant scope, and includes the guard-aware 110-candidate
+identity query. No mutations, exports, deployment, or schema changes.
 
-**Status:** Implementation complete locally (2026-10-26); deployment push pending separate approval.
-**Goal:** complete W7-W9 while retaining separate entity and admin finding
-storage. PLAN-004 identity work is excluded.
+Current checkpoint: plan defined; inspect existing Admin Data routing and tests,
+then implement focused UI and request coverage.
 
-**Scope:** platform Jobs finding evaluation, Issues read projection, Admin
+## PLAN-004 — Computer detail source-record regression
+
+Active corrective repair. Production Computer detail requests fail because the
+source-record query supplies three parameters for two placeholders. Scope is a
+one-line parameter correction and targeted validation only; no deployment is
+authorized. Current checkpoint: corrected the local query; 60 focused tests,
+Python compilation, plan-registry validation, and whitespace checks passed.
+Next action: request separate commit and deployment approval.
+
+## Inventory navigation
+
+Active focused UI change. Inventory no longer loads Client inventory on click;
+it expands to explicit Clients and Computers links. Scope is the shared base
+template only. Next action: run template/navigation regression checks.
+
+## Ninja enrichment Job visibility
+
+Active focused Jobs-catalog correction. Ninja enrichment remains a supporting
+process of the one Ninja source, but it must be visible in Jobs with its own
+schedule, status, and Run action. It is not a second configured source.
+Scope: expose `ninja-enrichment` in the source-data Jobs group and describe
+its locations, policies and patching scope, device exemptions, health, custom
+fields, troubleshooting signals, and derived-state refresh. Next action: run
+focused registry/UI checks; commit and deployment require separate approval.
+## PLAN-012 — Search and Client inventory source evidence
+
+Active (user authorized 2026-10-22). Extend the global search results with a
+separate source-record population, retaining canonical Computers as a distinct
+result type. In Client inventory, render each coverage source on its own line
+and expose the current source-side client name(s) in parentheses. No matching,
+attachment, schema, or source-data behavior changes. Validate focused
+structural tests, Django check, lint, and whitespace. Current checkpoint:
+implementation complete locally. Focused read and client-mapping tests (14),
+template loading, Django checks, Python compilation, correctness/import lint,
+and scoped whitespace validation pass. Full-file lint retains 85 known
+pre-existing complexity/style findings in `views.py`. Next action: review the
+source-record result copy and source-name presentation, then obtain separate
+commit and push authorization if approved.
+
+## PLAN-003 — Central work queue and finding state
+
+**Status:** Active, design and implementation-readiness work. No runtime,
+schema/data, commit or deployment action has started. Preserve the unrelated
+dirty worktree.
+**Goal/scope:** one grouped Issues queue, one authoritative entity/admin finding
+store and one Covers/Requires contract, preserving history, subject distinctions,
+permissions and tenant isolation. Candidate storage stays separate; coordinate
+identity/applicability/shared-read work with PLAN-004/014/021/012.
+
+**Current contract:** [PLAN-003 current design](docs/plans/PLAN-003-current-design.md).
+Historical requirements: [checklist](docs/plans/PLAN-003-issues-page-design.md).
+Detailed 71-type review, primary conversations/commits and aggregate production
+evidence: [review report](docs/plans/PLAN-003-review-proposal.md). Those records
+retain superseded proposals; use the current contract for implementation design.
+
+**Checkpoint:** operator directions reconciled, including root-issue boundaries,
+existing ADR-0040/0043 consolidation, software administrative versus Computer
+work, recognized-OS applicability, Hudu lifecycle versus integration work,
+page/subgroup selection, same-type bulk actions with mixed Pause/Resume, and
+lightweight partial-eligibility handling. Latest accepted filter rule: OS and
+Computer type apply to Computer-specific issues, not approval groups; the
+partial software population proposal is withdrawn. No general row expansion.
+Readiness presentation controls are approved for removal; older Readiness
+controls do not remain in the implementation contract. Covered evidence and
+execution guards remain.
+
+**Verified limits:** tenant-1 production checks were aggregate, repeatable-read
+and read-only; no evaluator/refresh/source action ran. No valid installation
+task established among the 87 measured non-cleanup no-agent cases; two OS links
+need separate consistency investigation. 140 Hudu assets map to 102 Hudu-only
+Computers, each already owning a documentation_only lifecycle finding. An
+integration-gap signal replaces zero of those cases without causal evidence.
+Deferred consistency/retained-row cleanup is in operations/TODO.md, not authorized
+implementation scope. No browser, application or migration acceptance claimed.
+
+**Resolved 2026-10-29: count independent corrective actions (one per source group for client mapping); no "pending" label/count, freshness kept in details. Approved R0–R4 order is in the current design. Original item (2026-10-28):** Local dev shows the dashboard's 152
+critical mapping conflicts combine 75 `unmatched_source_group` findings and
+77 `client_unattached_group` admin findings; 75 of the latter overlap the same
+source groups. Issues reports 75 unresolved and 75 pending for those same
+75 entity findings; `pending` reflects `no_current_assessment`, not a separate
+set of work. Resolve this once in the current design: define one source-group
+issue identity/corrective-action count across the dashboard and Issues, and
+make the status label/action meaning explicit. Keep stale resolver-row cleanup
+under PLAN-004 as a dependency, not as another PLAN-003 issue. See the
+[current design](docs/plans/PLAN-003-current-design.md#resolution-item-client-mapping-counts-and-status).
+
+### R1 — additive expansion and dormant tenant guard (released 0.131.0, `302a2f2`)
+
+Approved joint order step R1 (current design). Baseline `1176034`; R0 record:
+[R0 baseline](docs/records/PLAN-003-004-R0-baseline-2026-10-29.md). Everything is
+additive and unused: no runtime code calls it, old readers/writers are unchanged.
+
+- **`0362_findings_tenant_id_unique`** (non-atomic): `CREATE UNIQUE INDEX
+  CONCURRENTLY uq_findings_tenant_id ON findings (tenant_id, id)` so composite
+  FKs can reference findings without blocking writers.
+- **`0363_common_findings_expansion`** (raw SQL, no Django model state change):
+  - `findings`: `subject_ref jsonb NOT NULL DEFAULT '{}'`, `condition_namespace`
+    (`entity`/`admin`, default `entity`), nullable `condition_identity` and
+    `episode_key` with a partial unique active-episode index. `subject_id` stays
+    NOT NULL and active-key uniqueness is unchanged until M2–M4.
+  - `finding_types.allowed_subject_kinds text[] NULL` (unseeded, not enforced).
+  - Empty tables: tenant-scoped `finding_legacy_refs` and `finding_relationships`
+    (composite tenant FKs, forced RLS, runtime roles SELECT only); global
+    `finding_action_registry`, `finding_relationship_rules` and
+    `finding_relationship_rule_actions` (runtime roles SELECT only). Registered in
+    `change_history_registry`; configuration tables are `covered`.
+  - Composite `(tenant_id, finding_id)` FKs on `finding_state` and
+    `source_action_requests`, added `NOT VALID` (new rows enforced; validation
+    is an M2 preflight).
+  - Dormant tenant guard: `tenant_guard_key`, `acquire_tenant_guard(tenant,
+    'shared'|'exclusive')` (session-tenant check, refuses shared→exclusive
+    upgrade), `tenant_guard_mode` and `assert_tenant_guard`, using a namespace
+    disjoint from Jobs keys. EXECUTE only for runtime roles that will need it.
+- **Tests:** a PostgreSQL integration test in the repo convention (testcontainers)
+  covering legacy inserts without new columns, composite FK/RLS/DML denial, and
+  guard modes across two sessions (shared/shared overlap, exclusive blocks,
+  upgrade refused, wrong tenant refused). Then the fresh-database stack: migrate
+  to head, `makemigrations --check`, `manage.py check`, sign-in and pages.
+- **Out of R1:** data backfill, admin-row copy, triggers/projector, protected
+  mutation procedures, contract version (all M2–M4), queue/UI changes (R3).
+- **Release:** commit needs approval; push deploys and auto-applies both
+  migrations, so it needs separate approval.
+- **Checkpoint (2026-10-29):** released in 0.131.0 (`302a2f2`) and verified in production; [deployment record](docs/records/PLAN-003-R1-deployment-2026-10-29.md) includes an ~11-minute startup stall. Files:
+  `apps/core/migrations/0362_findings_tenant_id_unique.py`,
+  `0363_common_findings_expansion.py`, `apps/core/tests/test_migration_0363_postgres.py`.
+  `0363` refuses to run if a failed concurrent build left the 0362 index invalid.
+  The action registry and relationship rules stay unseeded until M3.
+- **Validation:** `test_migration_0363_postgres.py` (9) and the existing 0306
+  change-history tests pass on PostgreSQL 16 (19 total). Throwaway fresh-database
+  stack: SQL to `118`, Django to `0363`, `makemigrations --check` and
+  `manage.py check` clean; sign-in and main pages 200; rollback to `0361` and
+  reapply succeed; ORM create/update/delete as `operations_app` unchanged.
+  Ruff clean on the new files. Not run: full test suite, production-size timing
+  of the `findings` ALTER (brief exclusive lock while columns are added).
+
+### R2 — M2–M4 coordinated cutover (released 0.132.3, 2026-10-29)
+
+Goal: one findings ledger with protected, tenant-guarded writers and one
+relationship mechanism, shipped as a single release in a drained maintenance
+window. Readers keep today's populations (entity-only and admin-only adapters);
+the unified queue is R3. Contract version 4 is published only after exact-set
+assertions pass. Source: technical design §§3–5 and §7; consumer ledger.
+
+**Branch rule:** all R2 work lives on branch `plan003-r2`. Any push of `master`
+deploys and auto-migrates, so no R2 migration may land on `master` until the
+whole artifact is approved for release.
+
+| WP | Scope | Main files |
+| --- | --- | --- |
+| 1 Preflight | Read-only SQL: admin/entity key collisions per namespace, subject shapes per type, assessments/participants by `row_kind`, `finding_state`/`source_action_requests` tenant agreement (validates the R1 NOT VALID FKs), grants by role on graph tables | new `ops` preflight SQL + test |
+| 2 M2 conversion | Allow `subject_id` NULL only for validated structured subjects; normalize admin `subject_ref` per §3 table; copy every admin row (field map per §3) with `condition_namespace='admin'`, legacy refs, preserved IDs/versions/history; backfill `condition_identity` from agreeing assessments or the frozen hash; active uniqueness becomes (tenant, namespace, key); validate the R1 FKs | migration + frozen-hash helper + tests |
+| 3 M3 protected graph | `SECURITY DEFINER` mutation functions for findings, assessments, participants, type/rule config and relationships (owner: no-login `NOBYPASSRLS` role); each asserts the exclusive tenant guard and caller contract; triggers assert, never acquire; revoke direct runtime DML; namespace-aware `compute/refresh/touch_finding_state`; relationship projector with cycle rejection; seed action registry and rules from `finding_types.covered_by` and exact Job dependency closures | migration(s) + tests |
+| 4 Writers | Convert every producer and action path in the ledger (ingest: conditions, evaluator, cmdb/patch/platform/windows-servicing/software-reconcile findings, identity findings/resolver/client resolver, requirement state, source actions, notifications; Operations: `conditions/live.py`, finding actions/views handlers, finding types admin) to take the guard at the outer transaction and call the protected functions | ingest + Operations modules |
+| 5 Readers | Entity-only adapter (`condition_namespace='entity'`) for every `Finding.objects` call site; `admin_findings` becomes a read-only compatibility view over admin rows; `v_issue_findings` and `v_condition_assessment_current` rebuilt on one ledger with unchanged populations | `models.py`, views, adapters, migration |
+| 6 M4 + admission | Exact-set assertions (both adapters, home/domain counters, queue rows, CSV, disjointness and union conservation) then `finding_contract_version()` = 4; Operations entrypoint, ingest main and Jobs worker refuse to start or write on another version | migration, `entrypoint.sh`, `ingest/main.py`, `jobs_worker.py` |
+| 7 Rehearsal + window | PostgreSQL role/trigger/concurrency tests; full rehearsal on an isolated copy of production (needs authorization) with timings, rollback and conservation; written drain/abort procedure (stop ingest/Jobs/notifier/source actions before migrating) | tests, runbook, record |
+
+Order: WP1 → WP2 → WP3 (each with tests) → WP4/WP5 in parallel → WP6 → WP7.
+
+**Checkpoint:** WP1 done on `plan003-r2` (`378ef03`): production preflight results in
+`operations/docs/records/PLAN-003-R2-preflight/` on that branch. No ID/key collisions; 18 admin subject shapes across 15 types;
+the 4+4 "orphaned" admin assessments/participants belong to entity findings and M2 deletes them (user decision); ~618,000
+entity rows, so whole-table work is timed in rehearsal. WP2 done (`5befc9eb`): migration
+`0364` copies admin rows with normalized subjects and `legacy_ref`, deletes the
+mislabelled rows, namespace-qualifies active-key uniqueness and adds/validates
+tenant FKs; rehearsed on a scratch dev copy (2 s for 9,750 + 107 rows) and a
+synthetic fixture of all 18 production shapes; rollback and reapply verified.
+Implementation choice: `condition_identity` stays NULL (identity remains derived
+from tenant, namespace, type and key; stored only when a later conversion changes
+an input), so M2 does not rehash ~618,000 rows. WP3 done: `0365` (`7922e465`)
+adds the contract generation (3; M4 publishes 4) and statement/row triggers on
+findings, assessments and participants requiring the session tenant, exclusive
+tenant guard, matching contract and same-tenant rows, and makes state
+namespace-aware (0 entity state differences; admin rows get state). `0366`
+(`230fec99`) seeds the action registry and 16 covers rules from `covered_by`; state
+reads the rules (0 differences over 9,870 findings), `covered_by` edits sync the
+rules, and `finding_relationships` stays empty until R3 reads it.
+**Enforcement decision (fact-driven):** production ingest logs in as `ninja`, a
+superuser with BYPASSRLS, so revoked privileges and RLS cannot constrain it; the
+technical design's alternative, trigger assertions, is used because triggers bind
+superusers too. Hardening ingest to a non-superuser login is backlog work.
+WP4–WP6 implemented on the branch: `0367` (`6703bac3`) turns `admin_findings` into a
+read-only view over admin rows (legacy table retained) and rebuilds
+`v_issue_findings` on one ledger with values identical to the pre-conversion
+population; `0368` asserts the converted ledger and publishes contract 4.
+`ded134d6`/`cf614121` convert every ingest producer and Operations write path to
+take the exclusive guard and declare contract 4 (shared admin upsert, namespace
+conflict target and filters; the repeatable-read evaluator holds the guard for its
+session before its snapshot), add startup admission (ingest/Jobs wait for the
+contract; Operations refuses to serve on mismatch), and update source-contract
+tests. Scratch rehearsal through `0368`: all seven producers run under enforcement;
+unit suites show only the failures already present on base `93a2dd0` (ingest 6,
+Operations 8). Rule used: entity writers filter namespace only for the three types
+present in both namespaces; single-namespace types are pinned by type.
+Local functional testing done (`d5f1c964`, `d977fbed`): guard unit tests (ingest 6,
+Operations 20) and single-row request checks on the scratch copy (entity and admin
+acknowledge succeed; an unguarded write is refused; contract check reports 4).
+Scratch databases and temporary worktrees removed.
+User decision (2026-10-29): skip the production-copy rehearsal; migration time,
+real-volume rollback and first evaluator duration stay unmeasured. Window runbook
+on the branch (`operations/docs/records/PLAN-003-R2-window-runbook.md`): backup,
+drain ingest/Jobs, push, watch, verify, abort via `migrate operations 0363` then the
+previous release. Master unchanged since `93a2dd0`, so no renumbering needed.
+**Released 2026-10-29:** 0.132.0 (`2f050393`), 0.132.1 (`f761e23f`, 0368 check
+narrowed to active findings after it aborted on 441,718 historical closed findings),
+0.132.2 (`3b456c86`, admin upsert parameter casts), 0.132.3 (`ac12e064`, Jobs
+dependency closure casts). First production evaluator run ~24 min. Operations down ~15 min
+(18:23–18:38 EDT). Counts identical to pre-window; contract 4 live.
+[Deployment record](docs/records/PLAN-003-R2-deployment-2026-10-29.md).
+Evaluator and platform-health runs confirmed on 0.132.3; admin findings refresh.
+R2 complete. **WP5 gap fixed in 0.133.1 (`d3b988e7`, 2026-10-30):** R2 had not
+narrowed the readers, so home, client-page and coverage-summary counts included the
+admin rows. `Finding.objects` is now entity-only (`all_namespaces` and the base
+manager see both); raw SQL readers in views, the conditions reader and four ingest
+lookups filter the entity namespace; `0369` changes model state only. In production:
+`0369` applied, containers healthy, 39,412 active entity and 555 admin findings.
+PLAN-030 landed in 0.133.0. Next: R3 (unified queue/counts) on branch `plan003-r3`. Evaluator timing
+and all volume/lock measurements belong to the WP7 rehearsal, not the workstation
+(`AGENTS.md`, "Local development machine limits"); the local full-evaluator runs
+done on 2026-10-29 were a mistake and are not repeated.
+No concurrent index builds at startup (R1 lesson); the window drains ingest.
+
+### R3 — unified queue and counts (released 0.134.0, `4673dc1`, 2026-10-30)
+
+Code `1239106` on `plan003-r3`; pushed to origin and a-m-rose (no migrations).
+`apps/core/issue_selection.py` is the one selection: entity+admin findings and
+pending `EntityCandidate`s, `action_key` dedup (entity `unmatched_source_group` +
+admin `client_unattached_group` per source group; admin record represents),
+covered children excluded and reachable via `?related=<id>`. `findings_queue`
+rebuilt on it (old view's entity/admin row hydration extracted to
+`_entity_issue_rows`/`_admin_issue_rows`); `_issues_rows.html` renders rows
+beneath the open header. Readiness removed (notice for legacy `attention`/
+`response`/`covered`); Open/Paused/Resolved; views severity/type/flat (session);
+highest-severity default path; per-group page/sort in session; scoped "select all"
+(cap 5,000) via `scope_query`; Pause/Resume span kinds/namespaces; remediation
+one kind; Review `?return=` back link; home Critical mapping count/link share
+`mapping_scope()`. Removed: column text filters, Online/Confidence filters.
+**Validation:** Operations suite = baseline (8 pre-existing failures, same set);
+new `test_issues_queue.py` + PostgreSQL `test_issue_selection_postgres.py` (20 pass);
+scratch-DB page smoke (all views/filters/CSV/bulk) 0.1–0.4 s locally; `check`,
+`makemigrations --check` clean; release governance check passed on a clean worktree.
+**0.134.1** (code `72441ae`, release `ae0dcd1`, pushed to both remotes): nav
+Issues badge = `issue_selection.count(Scope(status="open"))`, cached 60 s per
+process (`context_processors._nav_issues_count`); registered remediation runs on
+the selected rows of its registered types, skips and reports the rest, and the
+confirmation states eligible/ineligible counts (`confirmIssueAction`). Redeployed;
+all three containers healthy (status only). Suite: the
+8 baseline failures plus `test_migration_0309/0318_postgres` (missing SQL
+functions in the harness), which fail identically on `4673dc1`.
+**Not done / follow-up:** client-page per-domain counts still read raw findings
+(not a mapping count; no design line requires them on the selection); production
+latency unmeasured. **Deployed (0.134.0):** Portainer redeployed Operations, ingest and the
+Jobs worker; all healthy (container status only; no authenticated page check, and
+reading container logs was not permitted in this session).
+
+**Decisions needed during R2:** authorization for a production database copy for
+rehearsal (WP7) and the maintenance window time. External saved-query consumers
+appear retired (`metabase_ro` dropped in `0359`); confirm none remain.
+
+**Affected files:** current design, checklist/report, this handoff and root
+router/registry; TODO carries separately gated findings. VERSION/CHANGELOG are
+unchanged because this is design-only, with no application release.
+
+**Technical package revised after review (2026-10-27):**
+[technical design](docs/plans/PLAN-003-technical-design.md),
+[consumer/alertability ledger](docs/plans/PLAN-003-consumer-ledger.md) and
+[Proposed ADR-0046](docs/decisions/0046-unified-findings-and-relationships.md).
+Baseline 80557f6 plus preserved dirty worktree. Audit covers 36 runtime Python
+reference files, 13 live database functions and related views/FKs/history;
+catalog snapshot was read-only/repeatable-read under tenant 1 at 18:08 UTC.
+All 71 current/proposed alertability flags are recorded. User approved turning
+off alertability for the inventory/lifecycle-review meaning of unenrolled in
+M5; storage conversion preserves current flags. User also approved Readiness
+control removal while retaining technical guards. Common storage/identity/state,
+six planned migration stages, guarded
+cutover/rollback and acceptance criteria are specified. No migration files,
+runtime edits, evaluator/source actions or release changes made.
+
+**Second-pass review checkpoint:** [R1–R4](docs/plans/PLAN-003-technical-review.md)
+are revised: named namespace-specific read adapters and exact-set assertions;
+registered relationship action keys; tenant lock function before row locks with
+trigger assertion; exact writer contract generations with database stale-caller
+rejection; M2–M4 in one drained artifact. No runtime or migration enforcement
+was implemented. Migration numbers are assigned after rebase; occupied 0354 is
+preserved.
+
+**Approved decisions:** remove Readiness presentation controls while retaining
+technical guards; M5 sets `device_unenrolled` alertability false for its
+inventory/lifecycle-review meaning. **Implementation handoff:** the consumer
+ledger classifies direct ORM callsites, runtime processes, registered actions
+and relationship effects. Implement the versioned database writer/lock boundary
+and namespace adapters from the reviewed technical package. Verify PostgreSQL
+role/RLS and concurrency behavior before migration approval/execution. All-
+tenant preflight, external-consumer audit and isolated recovery rehearsal remain
+release gates.
+Before execution/release require actual code/migrations, all-tenant preflight,
+external saved-query audit, authorized isolated recovery rehearsal and runtime
+RLS/action/browser/performance acceptance. No validation result is invented.
+Recommend a fresh session before implementation; verify Git/files on resumption.
+
+**Validation:** registry, shared governance and scoped whitespace checks pass;
+warnings are root BLUEPRINT length and docs/current-state.md age. No application
+tests apply to these doc-only changes. Historical W7-W9 details below are not
+current execution approval or proof that the redesigned page is implemented.
+
+**Prior W7-W9 implementation scope:** platform Jobs finding evaluation, Issues read projection, Admin
 Health reveal links, and finding-ledger/type housekeeping. No identity
 matching, candidate withdrawal, canonical data repair, or direct production
 writes. New migrations 0352-0353 apply through an approved deployment push.
@@ -818,10 +1303,11 @@ entries), and `git diff --check` pass. Django checks and database migration
 execution were unavailable locally; tests were not run. Production behavior
 is unverified and awaits normal approval/deployment.
 
-**Next action:** request separate origin-push approval. That push automatically
-deploys and applies migrations 0352-0353.
+**Prior execution gate:** the previous checkpoint requested origin-push
+approval for automatic deployment and migrations 0352-0353. This is historical
+context; the current next action is the design review above.
 
-**Deployment incident (2026-10-26):** Operations is restart-looping because
+**Historical deployment incident (2026-10-26; not current live status):** Operations is restart-looping because
 migration 0352 references nonexistent `operations.findings.resolved_at`;
 entity findings store this timestamp as `closed_at`. Migration 0353 also tried
 to write nonexistent `resolved_at` when closing the exact duplicate. Both SQL
@@ -860,13 +1346,25 @@ remotes match HEAD before release; deployed read-only migration checks show no
 pending Django migrations and ingest versions 001–118 applied. Release 0.129.2
 adds no migrations. The runbook's manual-redeploy instruction conflicts with
 AGENTS.md; follow AGENTS.md and rely on the push-triggered deployment only.
-**Next action:** commit the isolated UI/release/checkpoint changes, push origin
-then the secondary mirror, and verify the published commit. Live UI validation
-remains separate from local synthetic browser validation.
+**Published:** `80557f6` (0.129.2) committed and pushed successfully to origin,
+then a-m-rose on 2026-10-27. Unrelated local work remains uncommitted.
+**Next action:** verify Portainer deployment and the live page when authorized.
+The deployment outcome and live UI remain unverified; no manual redeploy ran.
+
+**Read-only follow-up (2026-10-27):** user asked why installation names are
+lowercase. Confirmed `ingest/inventory/software.py` normalizes the source
+program name with `name.lower()` into `canonical_name`; `software_installations`
+uses that key directly for the Program label and Product option labels.
+The layout release did not change this data path. A proper display-name repair
+needs a separately preserved source label while retaining canonical keys for
+matching/links; display-label availability has not yet been established.
+No application edits are authorized by this diagnostic question or made here.
+Recommend a fresh session before implementing that independent follow-up;
+verify Git and the checkpoint first and preserve the unrelated dirty worktree.
 
 ## PLAN-021 — Generic entity candidate lifecycle reconciliation
 
-**Status:** Active; cross-service checkpoint is in root [BLUEPRINT.md](../BLUEPRINT.md).
+**Status:** Complete; cross-service checkpoint is in root [BLUEPRINT.md](../BLUEPRINT.md).
 The reviewed production population has 77 linked candidates whose proposed
 entity class conflicts with the authoritative link. Local implementation adds
 audited withdrawal for inactive unlinked proposals and linked class conflicts,
@@ -886,17 +1384,47 @@ excluded; the passing set includes five isolated PostgreSQL lifecycle/security
 tests. Django system check,
 migration autodetection, targeted Ruff, plan registry, Python compilation,
 formatting, and whitespace validation pass. The excluded test expects missing
-`ConditionPolicyActivationForm`. No production
-migration or data change has run.
+`ConditionPolicyActivationForm`. Commit `6add50f` was pushed to `origin` and
+then `a-m-rose`. Migration 0355 and Operations health were verified. On
+2026-10-27 the bounded production projector completed one changed batch with
+669 withdrawals (592 inactive-unlinked, 77 linked-class conflicts). Read-only
+tenant-scoped checks confirmed matching withdrawal events, no inactive
+unlinked actionable candidates, no active withdrawn unlinked candidates, and
+no linked class mismatches among pending/observed-only candidates. Sixteen
+attached-class mismatches remain preserved in history. See the root
+[checkpoint](../BLUEPRINT.md), [plan record](docs/plans/PLAN-021-entity-candidate-lifecycle.md),
+and [registry](../docs/records/PLAN_REGISTRY.md). No further PLAN-021 action
+remains.
+## PLAN-004 — Identity and source-record maintenance review
 
-**Next:** local commit is authorized. Any `origin` push needs explicit approval
-for automatic Portainer deployment and migration 0355, followed by the approved
-secondary mirror push.
+**Active, review only.** Full review scope, confirmed gaps, user requirements,
+ownership and acceptance gates: [handoff](docs/plans/PLAN-004-source-record-review.md).
+PLAN-003 owns shared finding storage and queue presentation; PLAN-004 owns
+matching, source-record maintenance and detection. Initial production/code
+review is complete; fleet impact and all-source contracts remain pending.
+**Next:** resume in a fresh session, verify deployed/Git state, then complete
+the producer/consumer/state matrix and aggregate review before implementation.
 
-## PLAN-031 — Source record and reported states
+**R4 blocked on a decision (2026-10-30, after R3 release 0.134.0).** Final design
+§3/§7.2 has intake take the shared tenant guard in every observation-write
+transaction. R2's writers take the exclusive guard via `db.findings_transaction`
+(resolver, client resolver, cmdb, patch, platform, Windows servicing, software
+reconcile) and the evaluator holds it for its session (~24 min first production
+run). Shared-mode intake would wait behind those, stalling collection. Options:
+(a) shorten exclusive holds to bounded publication batches before Stage A intake;
+(b) admit subjects outside the intake transaction (Jobs worker reading new/changed
+observations), a design amendment; (c) intake without the guard plus a trigger
+that advances the generation. Also unresolved: §7.2 requires representative
+concurrent-ingest load measurement, which the workstation rule forbids; needs an
+authorized environment. Stage B handoff needs a drained window and the
+reassessment operation needs separate authorization. No R4 code written.
 
-**Status/goal:** Active; distinguish record presence from the individual source's reported online state.
-**Scope:** Safe metadata view migration, Source Records reader, HTML and CSV; retain tenant and restricted-layout protections.
-**Decision:** Display Present/Withdrawn separately from Online/Offline/—; unknown values stay unknown. Read the individual record, not a Computer-level aggregate.
-**Validation:** Python compilation, migration Ruff check, and scoped whitespace check passed. Django is unavailable locally; database migration and browser checks remain pending. Registry validation reports a pre-existing PLAN-028 root-blueprint mismatch. Production execution is not authorized.
-**Checkpoint:** Migration 0360 appends a restricted-safe nullable record state; HTML and CSV use it. Next: review and validate the migration and rendered page in an authorized environment.
+**R4 decisions (user, 2026-10-30):** (1) Option (c): intake writes observations
+without the tenant guard; a database trigger records each change and advances
+the generation (chosen as fastest for incoming data). This amends final design
+§3/§7.2 and ADR-0049 — record the amendment there before Stage A code. (2) §7.2
+concurrent-ingest load measurement is waived; watch ingest timings after release
+and record the waiver in the design. (3) Stage B drained window: any time when
+ready; drain, apply, notify the user after. (4) The one-time reassessment runs in
+the same drained window right after Stage B; report results. Each still uses the
+normal release check, migration pre-checks and backups.
