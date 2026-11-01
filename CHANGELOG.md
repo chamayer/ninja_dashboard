@@ -2,6 +2,23 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.138.3] — 2026-11-01 — Faster source-record assessment
+
+### Fixed
+
+- Source-record assessment took about 30 seconds per 200 records after 0.138.0,
+  holding the lock that intake commits wait on for that long, so the backlog
+  drained slowly and ingest commits were delayed. Measured on production for
+  one 200-record batch:
+  - record load: 13.9 s → 1.5 s;
+  - unauthorized-tool check: 13.2 s → 3.7 s;
+  - vulnerability check: from 552,020 CVE rows per batch to one row per
+    installation, with title CVE summaries computed once per run.
+- Fixes: legacy CMDB owners and concern titles are read once per batch, and
+  restricted-safe values are read from the safe view by observation ID. Results
+  are unchanged. Vulnerability evidence lists affected installations with their
+  worst CVE and CVE count.
+
 ## [0.138.2] — 2026-11-01 — Condition policy fix
 
 ### Fixed
