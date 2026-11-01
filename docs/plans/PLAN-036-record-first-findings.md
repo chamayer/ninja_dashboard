@@ -197,4 +197,10 @@ require their existing operational gate and are not evidenced by local tests.
   active policy covers 82/82 types; production pre-checks pass (0385's type and an
   active policy exist; no display-name collision). Operations and PostgreSQL suites
   were not run locally (light-checks rule); final testing is the user's.
-- Released as 0.138.0.
+- Released as 0.138.0 (`4fb92c48`), deployed 05:24 UTC: 0376–0387 applied, policy 12,
+  contract 6, parity 0. Two regressions followed and were fixed the same morning:
+  0.138.1 (`5ea0a6cc`) — software-signal query passed 8 parameters to 2 placeholders,
+  so every source-record batch failed; 0.138.2 (`b0c847dd`) — presentation keys in two
+  schema 2 definitions made the active policy unparseable, so all condition assessments
+  failed ~05:24–05:42 UTC. Verified after 0.138.2: assessments resume platform-wide,
+  worker log clean, all open native findings assessed, queue draining.

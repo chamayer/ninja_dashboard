@@ -1516,6 +1516,12 @@ which `create_condition_policy_version` requires to match) and requeues their
 subjects. Dev check (rolled back): participants written, assessment `eligible`,
 state `needs_action/ready`. ADR-0050 (proposed) records what a Computer is for.
 **Hotfix 0.138.1 (2026-11-01):** 0.138.0 deployed cleanly (0387, policy 12, contract 6, parity 0) but every source-record batch failed on a placeholder-count bug in the software-signal query (unit tests mock the cursor); fixed, failed rows requeued by 0388; validated on a real dev database, including synthetic software rows.
+**Hotfix 0.138.2 (2026-11-01):** 0387 had copied label/category/type into two schema 2
+definitions, so `parse_profile` rejected the active policy and **no condition assessment
+was written platform-wide from ~05:24 to 05:42 UTC** (none recorded in that window).
+0389 publishes `conditions-registry-13` without them and requeued failed rows; verified
+05:43: policy parses, assessments resume, worker log clean, all 73 open native findings
+assessed. Lesson recorded in memory (parse new policies and run new SQL on the dev DB).
 **PLAN-036 (0.138.0, 2026-11-01):** record-first findings and one §5 identity policy; see [PLAN-036](../docs/plans/PLAN-036-record-first-findings.md#release-checkpoint-2026-11-01).
 **Next:** user review of the 109 changed and 88 ambiguous rows (unmatched attached rows
 keep their confirmed association); final acceptance testing (user).
