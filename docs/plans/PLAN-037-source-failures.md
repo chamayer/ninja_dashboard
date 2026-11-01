@@ -20,6 +20,12 @@ once collection succeeds.
 | 5 | AMROSE ScreenConnect (`dcaecb81…`) | 10-29 | Jobs worker shutdown interrupted the handler | Latest run 11-01 19:32 completed; the Issue stays open. |
 | 6 | LogMeIn (`…0014`) | 10-30 | 1 source collection(s) failed | Latest run 11-01 17:44 completed; the Issue stays open. |
 | 7 | agent_compliance (domain) | 10-07 | Exceeded 180 min, presumed hung | The agent-compliance source is retired; nothing will ever clear this Issue. |
+| 8 | LogMeIn (platform key `source_failure:LogMeIn`) | 09-17 | No successful run since 10-01 | Legacy platform-keyed episode from before binding-scoped failures; LogMeIn now also has binding Issue 6. |
+| 9 | SentinelOne (platform key `source_failure:SentinelOne`) | 09-20 | No successful run since 10-01 | Legacy platform-keyed episode; check whether SentinelOne still collects under a binding. |
+
+Issue 1 (Ninja) closed at 21:20 UTC: a user-approved evaluation ran after the
+scheduled Ninja run completed at 21:18. Issues 3–6 have completed runs and did not
+close in that evaluation, which is Step 1's question.
 
 ## Steps
 
@@ -27,7 +33,7 @@ once collection succeeds.
 | --- | --- | --- |
 | 1 | Find why Issues 3–6 stay open after a completed run | Their latest collections completed, so the source-failure guard should have cleared them. Read how `_source_failure_guard` and the admin assessment decide `may_clear` (current-observation clear assessment, PLAN-036) and why these episodes are not closed. Read-only first. |
 | 2 | Fix or retire the ThreatFox collection | Confirm abuse.ch's current ThreatFox export endpoint and authentication; update the collector, or disable the binding if the feed is no longer used. |
-| 3 | Close the retired agent_compliance Issue | Close it with a closure reason naming the retirement, and stop raising source failures for retired domains. |
+| 3 | Close the retired and legacy Issues | Close agent_compliance (retired) and the legacy platform-keyed LogMeIn and SentinelOne episodes with closure reasons, and stop raising source failures for retired domains. |
 | 4 | Do not raise a failure for a run a deploy interrupted | 20 Ninja runs in 7 days were stalled by worker shutdowns, and each redeploy opens a source failure until the next success. Candidate: treat `worker_interrupted` as retryable and retry it once before raising. |
 | 5 | Ninja failed required steps | 23 Ninja runs in 7 days failed a required step (`devices`). Read the retained diagnostics; this may overlap the Ninja collection-gap item in `TODO.md`. |
 
