@@ -96,6 +96,8 @@ class ApplyResult:
     new: int = 0
     changed: int = 0
     source_changed: int = 0
+    source_retired: int = 0
+    source_held: int = 0
     unchanged: int = 0
     removed: int = 0
     held_devices: int = 0
@@ -108,6 +110,7 @@ class ApplyResult:
             self.new
             or self.changed
             or self.source_changed
+            or self.source_retired
             or self.removed
             or self.relinked
         )
@@ -116,6 +119,7 @@ class ApplyResult:
         return (
             f"seen={self.seen} unresolved={self.unresolved} devices={self.devices} "
             f"new={self.new} changed={self.changed} source_changed={self.source_changed} "
+            f"source_retired={self.source_retired} source_held={self.source_held} "
             f"unchanged={self.unchanged} "
             f"removed={self.removed} relinked={self.relinked} "
             f"held_devices={self.held_devices} complete={self.complete}"
@@ -457,6 +461,86 @@ def _apply_source_record_rows(cur: Any, rows: list[tuple], at: datetime) -> int:
     return material_changes
 
 
+SOURCE_REMOVED_REASON = "removed from the source record's complete software list"
+
+
+def _retire_absent_source_rows(
+    cur: Any, rows: list[tuple], complete: bool, cfg: Mapping[str, Any], at: datetime
+) -> tuple[int, int]:
+    """Mark titles a source record no longer lists as stale (shrink-protected).
+
+    Same contract as the Computer inventory: removals need a complete response,
+    and a record whose list shrank sharply keeps its rows (``hold_reason``) until
+    a normal-sized list arrives. Returns ``(retired_rows, held_records)``.
+    """
+    if not complete or not rows:
+        return 0, 0
+    listed: dict[uuid.UUID, set[str]] = {}
+    for row in rows:
+        listed.setdefault(row[0], set()).add(row[1])
+    cur.execute(
+        """
+        SELECT source_record_id, count(*)
+          FROM operations.source_record_software_current
+         WHERE tenant_id = %s AND source_record_id = ANY(%s::uuid[]) AND stale_since IS NULL
+         GROUP BY 1
+        """,
+        (TENANT_ID, list(listed)),
+    )
+    before = dict(cur.fetchall())
+    allowed = []
+    held = 0
+    for record_id, titles in listed.items():
+        if hold_reason({"listed_count": before.get(record_id, 0)}, len(titles), cfg):
+            held += 1
+        else:
+            allowed.append(record_id)
+    if not allowed:
+        return 0, held
+    keep_ids = [r for r in allowed for _ in listed[r]]
+    keep_names = [name for r in allowed for name in sorted(listed[r])]
+    cur.execute(
+        """
+        WITH retired AS (
+            UPDATE operations.source_record_software_current c
+               SET stale_since = %s, stale_reason = %s, refreshed_at = %s
+             WHERE c.tenant_id = %s AND c.source_record_id = ANY(%s::uuid[])
+               AND c.stale_since IS NULL
+               AND NOT EXISTS (
+                   SELECT 1 FROM unnest(%s::uuid[], %s::text[]) AS k(source_record_id, canonical_name)
+                    WHERE k.source_record_id = c.source_record_id
+                      AND k.canonical_name = c.canonical_name)
+            RETURNING c.source_record_id, c.canonical_name
+        ), closed AS (
+            UPDATE operations.source_record_software_history h
+               SET effective_to = %s, active = FALSE
+              FROM retired r
+             WHERE h.tenant_id = %s AND h.source_record_id = r.source_record_id
+               AND h.canonical_name = r.canonical_name AND h.effective_to IS NULL
+            RETURNING h.source_record_id
+        ), queued AS (
+            SELECT operations.source_record_enqueue(%s, 'source_record', source_record_id)
+              FROM (SELECT DISTINCT source_record_id FROM retired) changed
+        )
+        SELECT (SELECT count(*) FROM retired), (SELECT count(*) FROM queued)
+        """,
+        (
+            at,
+            SOURCE_REMOVED_REASON,
+            at,
+            TENANT_ID,
+            allowed,
+            keep_ids,
+            keep_names,
+            at,
+            TENANT_ID,
+            TENANT_ID,
+        ),
+    )
+    retired, _queued = cur.fetchone()
+    return int(retired), held
+
+
 # ── Apply ──────────────────────────────────────────────────────────
 
 LISTING_SQL = """
@@ -763,6 +847,9 @@ def apply(
         source_rows = list(unique_source_rows.values())
         if source_rows:
             result.source_changed = _apply_source_record_rows(cur, source_rows, at)
+            result.source_retired, result.source_held = _retire_absent_source_rows(
+                cur, source_rows, stream.complete, cfg, at
+            )
         cur.execute(LISTING_SQL)
         cur.execute(
             "CREATE INDEX ON inventory_listing (device_id, client_id, canonical_name)"
