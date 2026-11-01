@@ -32,6 +32,7 @@ def test_software_source_rows_open_change_and_unchanged_history(postgres_connect
     first = datetime(2026, 10, 1, tzinfo=timezone.utc)
     changed = datetime(2026, 10, 2, tzinfo=timezone.utc)
     refreshed = datetime(2026, 10, 3, tzinfo=timezone.utc)
+    relisted = datetime(2026, 10, 4, tzinfo=timezone.utc)
     with connection.cursor() as cur:
         cur.execute(
             """
@@ -87,16 +88,16 @@ def test_software_source_rows_open_change_and_unchanged_history(postgres_connect
             collected_at,
         )
 
-    for version, digest, at, expected in (
-        ("1.0", b"one", first, 1),
-        ("2.0", b"two", changed, 1),
-        ("2.0", b"two", refreshed, 0),
+    for listed, at, expected in (
+        ((("1.0", b"one"),), first, 1),
+        ((("2.0", b"two"),), changed, 1),
+        ((("2.0", b"two"),), refreshed, 0),
+        # A list naming the title twice: one history row, the last listed wins.
+        ((("3.0", b"three"), ("3.1", b"three-one")), relisted, 1),
     ):
+        rows = [row(version, digest, at) for version, digest in listed]
         with connection.transaction(), connection.cursor() as cur:
-            assert (
-                _apply_source_record_rows(cur, [row(version, digest, at)], at)
-                == expected
-            )
+            assert _apply_source_record_rows(cur, rows, at) == expected
     with connection.cursor() as cur:
         cur.execute(
             """SELECT version, effective_from, effective_to, active
@@ -106,12 +107,13 @@ def test_software_source_rows_open_change_and_unchanged_history(postgres_connect
         history = cur.fetchall()
         assert history == [
             ("1.0", first, changed, False),
-            ("2.0", changed, None, True),
+            ("2.0", changed, relisted, False),
+            ("3.1", relisted, None, True),
         ]
         cur.execute(
             """SELECT version, first_observed_at, last_observed_at
                  FROM operations.source_record_software_current"""
         )
-        assert cur.fetchone() == ("2.0", first, refreshed)
+        assert cur.fetchone() == ("3.1", first, relisted)
         cur.execute("SELECT target_id FROM operations.source_record_assessment_queue")
         assert cur.fetchall() == [(subject_id,)]

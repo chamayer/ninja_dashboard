@@ -372,6 +372,9 @@ def _apply_source_record_rows(cur: Any, rows: list[tuple], at: datetime) -> int:
     """Apply source-scoped installations without inferring Computer identity."""
     if not rows:
         return 0
+    # One row per (record, title), last listed wins, as LISTING_SQL does for
+    # Computers: a list naming a title twice must not open two history rows.
+    rows = list({(row[0], row[1]): row for row in rows}.values())
     cur.execute(
         "CREATE TEMP TABLE source_software_input ("
         "source_record_id uuid, canonical_name text, display_name text, publisher text, "
@@ -398,22 +401,36 @@ def _apply_source_record_rows(cur: Any, rows: list[tuple], at: datetime) -> int:
         )
         for row in rows:
             copy.write_row(row)
+    # Close before opening, as separate statements: the open-row unique index is
+    # checked per row, and a CTE's UPDATE has no ordering against the INSERT.
+    cur.execute(
+        "CREATE TEMP TABLE source_software_changed"
+        " (LIKE source_software_input) ON COMMIT DROP"
+    )
     cur.execute(
         """
-        WITH changed AS (
+        INSERT INTO source_software_changed
             SELECT i.* FROM source_software_input i
             LEFT JOIN operations.source_record_software_current c
               ON c.tenant_id = %s AND c.source_record_id = i.source_record_id
              AND c.canonical_name = i.canonical_name
             WHERE c.source_record_id IS NULL OR c.material_hash IS DISTINCT FROM i.material_hash
                OR c.stale_since IS NOT NULL
-        ), closed AS (
-            UPDATE operations.source_record_software_history h
-               SET effective_to = %s, active = FALSE
-              FROM changed d
-             WHERE h.tenant_id = %s AND h.source_record_id = d.source_record_id
-               AND h.canonical_name = d.canonical_name AND h.effective_to IS NULL
-        )
+        """,
+        (TENANT_ID,),
+    )
+    cur.execute(
+        """
+        UPDATE operations.source_record_software_history h
+           SET effective_to = %s, active = FALSE
+          FROM source_software_changed d
+         WHERE h.tenant_id = %s AND h.source_record_id = d.source_record_id
+           AND h.canonical_name = d.canonical_name AND h.effective_to IS NULL
+        """,
+        (at, TENANT_ID),
+    )
+    cur.execute(
+        """
         INSERT INTO operations.source_record_software_history (
             tenant_id, source_record_id, canonical_name, display_name, publisher,
             version, install_location, install_date, product_code, size_bytes,
@@ -422,9 +439,9 @@ def _apply_source_record_rows(cur: Any, rows: list[tuple], at: datetime) -> int:
         SELECT %s, d.source_record_id, d.canonical_name, d.display_name, d.publisher,
                d.version, d.install_location, NULLIF(d.install_date, '')::date,
                d.product_code, d.size_bytes, d.is_system_component, d.material_hash,
-               %s, %s, %s, TRUE FROM changed d
+               %s, %s, %s, TRUE FROM source_software_changed d
         """,
-        (TENANT_ID, at, TENANT_ID, TENANT_ID, at, at, at),
+        (TENANT_ID, at, at, at),
     )
     material_changes = int(cur.rowcount)
     cur.execute(
