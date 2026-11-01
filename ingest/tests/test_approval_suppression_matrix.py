@@ -93,8 +93,11 @@ def test_no_blanket_skip_for_approved_software() -> None:
     assert not re.search(
         r'if\s+\w+\s+in\s+\("approve",\s*"approve_publisher"\)\s*:\s*\n\s*continue', code
     ), "a loop-head skip on approval suppresses every later detector"
-    # The approval vocabulary is tested in one place, the registry-gated helper.
-    assert code.count('("approve", "approve_publisher")') == 1
+    # The approval vocabulary is tested in one place, the registry-gated helper
+    # shared with the source-record rules (PLAN-036).
+    assert code.count('("approve", "approve_publisher")') == 0
+    assert "software_capabilities.silenced_by_approval(" in code
+    assert "def silenced_by_approval(" in _code_only(_CAPABILITIES)
 
 
 def test_multi_av_conflict_is_not_reconciled() -> None:
