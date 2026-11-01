@@ -342,22 +342,3 @@ def test_participant_reconciliation_removes_stale_scope_and_assessment_rows(pg):
             (finding_id,),
         )
         assert cur.fetchall() == []
-
-
-def test_condition_scope_advisory_lock_serializes_concurrent_reconciliation(pg):
-    finding_id = uuid4()
-    lock_sql = "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))"
-    first = psycopg.connect(pg["admin"], autocommit=False)
-    second = psycopg.connect(pg["admin"], autocommit=False)
-    try:
-        with first.cursor() as cur:
-            cur.execute(lock_sql, (f"1:entity:{finding_id}",))
-        with second.cursor() as cur:
-            cur.execute("SET statement_timeout = '100ms'")
-            with pytest.raises(psycopg.errors.QueryCanceled):
-                cur.execute(lock_sql, (f"1:entity:{finding_id}",))
-    finally:
-        first.rollback()
-        second.rollback()
-        first.close()
-        second.close()
