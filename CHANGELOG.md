@@ -2,6 +2,15 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.140.2] — 2026-11-01 — Recovery assessment that can clear
+
+### Fixed
+
+- 0.140.1 recorded the recovery of a source with no participant, so the active
+  policy's `parent_open` rule had no signal and the assessment could not clear;
+  no source-failure Issue closed. The recovery is now recorded with the same
+  platform-signal participant the platform writer uses.
+
 ## [0.140.1] — 2026-11-01 — Recovered sources close their failure Issues
 
 ### Fixed
