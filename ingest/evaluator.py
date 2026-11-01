@@ -453,12 +453,36 @@ def _source_failure_guard(
                 },
                 measured=True,
             )
+        # A recovered source is no longer a problem, so nothing above assesses it.
+        # Record that measured absence; without it the close below would wait for
+        # an assessment that is never written (every recovered source stayed open).
+        cur.execute(
+            """
+            SELECT id, condition_key FROM operations.findings
+             WHERE tenant_id = %s AND condition_namespace = 'admin'
+               AND finding_type_id = %s
+               AND status IN ('open', 'acknowledged', 'investigating')
+               AND NOT (condition_key = ANY(%s::text[]))
+            """,
+            (tenant_id, ft_id, active_keys),
+        )
+        for finding_id, condition_key in cur.fetchall():
+            record_assessment(
+                cur,
+                Condition(
+                    tenant_id, "admin", str(finding_id), "source_failure", condition_key, "open"
+                ),
+                (),
+                EvaluationCoverage(True, True, True, True),
+                now=now,
+                reevaluation_key=f"evaluator-admin-clear:{condition_key}:{now.isoformat()}",
+            )
         cur.execute(
             """
             UPDATE operations.findings
                SET status = 'resolved', closed_at = %s
              WHERE tenant_id = %s AND condition_namespace = 'admin'
-               AND condition_key LIKE 'source_failure:binding:%%'
+               AND finding_type_id = %s
                AND status IN ('open', 'acknowledged', 'investigating')
                AND NOT (condition_key = ANY(%s::text[]))
                AND EXISTS (
@@ -473,7 +497,7 @@ def _source_failure_guard(
                         (policy.policy->>'freshness_hours')::integer * interval '1 hour'
                )
             """,
-            (now, tenant_id, active_keys),
+            (now, tenant_id, ft_id, active_keys),
         )
     return problems
 
