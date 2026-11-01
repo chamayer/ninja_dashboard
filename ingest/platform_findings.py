@@ -84,9 +84,18 @@ def _upsert_admin_finding(
     )
     if preserved is not None:
         return uuid.UUID(preserved)
-    cur.execute(ADMIN_FINDING_UPSERT_SQL + " RETURNING id", admin_finding_upsert_params(
-        TENANT_ID, finding_type_id, condition_key, severity, subject_ref, details, now
-    ))
+    cur.execute(
+        ADMIN_FINDING_UPSERT_SQL + " RETURNING id",
+        admin_finding_upsert_params(
+            TENANT_ID,
+            finding_type_id,
+            condition_key,
+            severity,
+            subject_ref,
+            details,
+            now,
+        ),
+    )
     row = cur.fetchone()
     if row is None:
         raise RuntimeError("Admin finding upsert did not return a finding ID")
@@ -110,6 +119,7 @@ def evaluate(*, dry_run: bool = True) -> dict[str, int]:
         "software_inventory_held": 0,
         "entity_link_divergence": 0,
         "source_record_policy_incomplete": 0,
+        "ingest_run_slowdown": 0,
     }
 
     with db.findings_transaction(TENANT_ID) as cur:
@@ -147,15 +157,28 @@ def evaluate(*, dry_run: bool = True) -> dict[str, int]:
         source_policy_keys = _eval_source_record_policy_gaps(
             cur, ft_source_policy, now, counts, dry_run
         )
+        # Registered by Operations migration 0390; tolerated as absent while a
+        # deploy has started ingest before Operations applied it.
+        cur.execute(
+            "SELECT id FROM operations.finding_types WHERE name = 'ingest_run_slowdown'"
+        )
+        slow_row = cur.fetchone()
+        ft_slow = slow_row[0] if slow_row else None
+        slow_keys = _eval_ingest_slowdown(cur, ft_slow, now, counts, dry_run)
 
         if not dry_run:
             # A None type (not registered yet) is a no-op in _resolve_admin_absent.
-            _resolve_admin_absent(cur, ft_held, held_keys, now, assessment_required=True)
+            _resolve_admin_absent(
+                cur, ft_held, held_keys, now, assessment_required=True
+            )
             _resolve_admin_absent(
                 cur, ft_divergence, divergence_keys, now, assessment_required=True
             )
             _resolve_admin_absent(
                 cur, ft_source_policy, source_policy_keys, now, assessment_required=True
+            )
+            _resolve_admin_absent(
+                cur, ft_slow, slow_keys, now, assessment_required=True
             )
             _resolve_admin_absent(
                 cur, ft_failure, failure_keys, now, assessment_required=True
@@ -290,7 +313,11 @@ SELECT s.device_id, d.canonical_hostname, s.held_at, s.held_reason,
 
 
 def _eval_inventory_holds(
-    cur: Any, finding_type_id: int | None, now: datetime, counts: dict[str, int], dry_run: bool
+    cur: Any,
+    finding_type_id: int | None,
+    now: datetime,
+    counts: dict[str, int],
+    dry_run: bool,
 ) -> list[str]:
     """One finding per computer whose software removals are held.
 
@@ -302,11 +329,21 @@ def _eval_inventory_holds(
     keys: list[str] = []
     if finding_type_id is None:
         return keys
-    cur.execute("SELECT to_regclass('operations.software_inventory_devices') IS NOT NULL")
+    cur.execute(
+        "SELECT to_regclass('operations.software_inventory_devices') IS NOT NULL"
+    )
     if not cur.fetchone()[0]:
         return keys
     cur.execute(INVENTORY_HOLDS_SQL, (TENANT_ID,))
-    for device_id, hostname, held_at, reason, previous, listed, released in cur.fetchall():
+    for (
+        device_id,
+        hostname,
+        held_at,
+        reason,
+        previous,
+        listed,
+        released,
+    ) in cur.fetchall():
         key = f"software_inventory_held:{device_id}"
         keys.append(key)
         counts["software_inventory_held"] += 1
@@ -336,7 +373,13 @@ def _eval_inventory_holds(
             },
         )
         _record_platform_assessment(
-            cur, finding_id, key, "software_inventory_held", subject_id, now, measured=True
+            cur,
+            finding_id,
+            key,
+            "software_inventory_held",
+            subject_id,
+            now,
+            measured=True,
         )
     return keys
 
@@ -349,7 +392,9 @@ def _eval_entity_link_divergence(
     dry_run: bool,
 ) -> list[str]:
     """Report projection drift without repairing the confirmed-link authority."""
-    cur.execute("SELECT to_regclass('operations.entity_observation_current') IS NOT NULL")
+    cur.execute(
+        "SELECT to_regclass('operations.entity_observation_current') IS NOT NULL"
+    )
     if not cur.fetchone()[0]:
         return []
     cur.execute(
@@ -388,8 +433,13 @@ def _eval_entity_link_divergence(
             if existing is not None:
                 subject_id = _subject("platform_control", "entity_link_divergence")
                 _record_platform_assessment(
-                    cur, existing[0], key, "entity_link_divergence", subject_id,
-                    now, measured=True,
+                    cur,
+                    existing[0],
+                    key,
+                    "entity_link_divergence",
+                    subject_id,
+                    now,
+                    measured=True,
                 )
         return []
     counts["entity_link_divergence"] += 1
@@ -411,7 +461,12 @@ def _eval_entity_link_divergence(
             },
         )
         _record_platform_assessment(
-            cur, finding_id, key, "entity_link_divergence", subject_id, now,
+            cur,
+            finding_id,
+            key,
+            "entity_link_divergence",
+            subject_id,
+            now,
             measured=True,
         )
     return [key]
@@ -425,9 +480,7 @@ def _eval_source_record_policy_gaps(
     dry_run: bool,
 ) -> list[str]:
     """One actionable configuration finding per source instance and unknown type."""
-    cur.execute(
-        "SELECT to_regclass('operations.source_record_subjects') IS NOT NULL"
-    )
+    cur.execute("SELECT to_regclass('operations.source_record_subjects') IS NOT NULL")
     if not cur.fetchone()[0]:
         return []
     cur.execute(
@@ -450,7 +503,9 @@ def _eval_source_record_policy_gaps(
         if dry_run:
             continue
         if finding_type_id is None:
-            raise RuntimeError("Finding type is missing: source_record_policy_incomplete")
+            raise RuntimeError(
+                "Finding type is missing: source_record_policy_incomplete"
+            )
         subject_id = _subject(
             "source_record_policy", f"{source_instance_id}:{entity_type}"
         )
@@ -470,8 +525,13 @@ def _eval_source_record_policy_gaps(
             },
         )
         _record_platform_assessment(
-            cur, finding_id, key, "source_record_policy_incomplete", subject_id,
-            now, measured=True,
+            cur,
+            finding_id,
+            key,
+            "source_record_policy_incomplete",
+            subject_id,
+            now,
+            measured=True,
         )
 
     if not dry_run and finding_type_id is not None:
@@ -495,8 +555,13 @@ def _eval_source_record_policy_gaps(
             except (TypeError, ValueError):
                 continue
             _record_platform_assessment(
-                cur, finding_id, key, "source_record_policy_incomplete", subject_id,
-                now, measured=True,
+                cur,
+                finding_id,
+                key,
+                "source_record_policy_incomplete",
+                subject_id,
+                now,
+                measured=True,
             )
     return keys
 
@@ -592,19 +657,22 @@ def _eval_stalled_queues(
                 SELECT count(*) FILTER (WHERE status = 'pending'),
                        EXTRACT(EPOCH FROM (
                            now() - min(queued_at) FILTER (WHERE status = 'pending')
-                       )) / 60
+                       )) / 60,
+                       count(*) FILTER (WHERE status = 'failed')
                   FROM {}
                 """
             ).format(sql.Identifier(schema, table))
         )
-        depth, oldest_age_m = cur.fetchone()
+        depth, oldest_age_m, failed_count = cur.fetchone()
         depth = depth or 0
         oldest_age_m = float(oldest_age_m or 0)
+        failed_count = failed_count or 0
 
         # A threshold of 0 means "unset", not "zero tolerance" — treat as off.
+        # Rows a worker gave up on are always a finding: work is being lost.
         over_depth = bool(max_depth) and depth > max_depth
         over_age = bool(max_age_m) and oldest_age_m > max_age_m
-        if not (over_depth or over_age):
+        if not (over_depth or over_age or failed_count):
             continue
 
         key = f"software_queue_stalled:{queue_key}"
@@ -616,7 +684,9 @@ def _eval_stalled_queues(
             cur,
             finding_type_id=finding_type_id,
             condition_key=key,
-            severity="high" if (over_depth and over_age) else "medium",
+            severity="high"
+            if (failed_count or (over_depth and over_age))
+            else "medium",
             now=now,
             subject_ref={
                 "signal_kind": "queue",
@@ -625,12 +695,19 @@ def _eval_stalled_queues(
             details={
                 "queue_key": queue_key,
                 "table_name": table_name,
+                "failed": failed_count,
                 "pending_depth": depth,
                 "max_depth": max_depth,
                 "oldest_pending_minutes": round(oldest_age_m, 1),
                 "max_pending_age_m": max_age_m,
                 "breached": [
-                    b for b, hit in (("depth", over_depth), ("age", over_age)) if hit
+                    b
+                    for b, hit in (
+                        ("depth", over_depth),
+                        ("age", over_age),
+                        ("failed", bool(failed_count)),
+                    )
+                    if hit
                 ],
             },
         )
@@ -731,6 +808,91 @@ def _eval_jobs_health(
         dry_run,
         keys["jobs_registry_mismatch"],
     )
+    return keys
+
+
+_COLLECTION_JOBS = (
+    "source-refresh",
+    "agent-observations",
+    "documentation-observations",
+    "patches",
+    "ninja-enrichment",
+)
+_SLOWDOWN_RECENT = "6 hours"
+_SLOWDOWN_FACTOR = 2.0
+_SLOWDOWN_MIN_SECONDS = 300.0
+
+
+def _eval_ingest_slowdown(
+    cur: Any,
+    finding_type_id: int | None,
+    now: datetime,
+    counts: dict[str, int],
+    dry_run: bool,
+) -> list[str]:
+    """One finding per collection Job and scope running much slower than its baseline.
+
+    Recent median (last 6 hours, at least 3 runs) against the previous week's
+    median (at least 10 runs): more than twice as long and at least five
+    minutes longer. Watches ingest after record-first assessment (R4-2).
+    """
+    if finding_type_id is None:
+        return []
+    cur.execute(
+        f"""
+        WITH runs AS (
+            SELECT job_key, scope_identity, completed_at,
+                   extract(epoch FROM completed_at - started_at) AS seconds
+              FROM operations.operator_job_runs
+             WHERE tenant_id = %s AND status = 'completed' AND started_at IS NOT NULL
+               AND completed_at > now() - interval '8 days'
+               AND job_key = ANY(%s)
+        )
+        SELECT job_key, scope_identity,
+               percentile_cont(0.5) WITHIN GROUP (ORDER BY seconds)
+                   FILTER (WHERE completed_at > now() - interval '{_SLOWDOWN_RECENT}'),
+               count(*) FILTER (WHERE completed_at > now() - interval '{_SLOWDOWN_RECENT}'),
+               percentile_cont(0.5) WITHIN GROUP (ORDER BY seconds)
+                   FILTER (WHERE completed_at <= now() - interval '{_SLOWDOWN_RECENT}'),
+               count(*) FILTER (WHERE completed_at <= now() - interval '{_SLOWDOWN_RECENT}')
+          FROM runs
+         GROUP BY 1, 2
+        """,
+        (TENANT_ID, list(_COLLECTION_JOBS)),
+    )
+    keys: list[str] = []
+    for job_key, scope, recent, n_recent, baseline, n_baseline in cur.fetchall():
+        if not recent or not baseline or n_recent < 3 or n_baseline < 10:
+            continue
+        recent, baseline = float(recent), float(baseline)
+        if (
+            recent <= baseline * _SLOWDOWN_FACTOR
+            or recent - baseline < _SLOWDOWN_MIN_SECONDS
+        ):
+            continue
+        subject_key = f"{job_key}:{scope}"
+        key = f"ingest_run_slowdown:{subject_key}"
+        keys.append(key)
+        counts["ingest_run_slowdown"] += 1
+        _emit_jobs_finding(
+            cur,
+            finding_type_id=finding_type_id,
+            type_name="ingest_run_slowdown",
+            condition_key=key,
+            severity="medium",
+            subject_key=subject_key,
+            details={
+                "job_key": job_key,
+                "scope_identity": scope,
+                "recent_median_seconds": round(recent),
+                "baseline_median_seconds": round(baseline),
+                "recent_runs": int(n_recent),
+                "baseline_runs": int(n_baseline),
+                "control_section": "runs",
+            },
+            now=now,
+            dry_run=dry_run,
+        )
     return keys
 
 
@@ -848,7 +1010,9 @@ def _eval_jobs_queue_backlog(
             finding_type_id=finding_type_id,
             type_name="jobs_queue_backlog",
             condition_key=key,
-            severity="critical" if set(row["breached"]) == {"depth", "age"} else "medium",
+            severity="critical"
+            if set(row["breached"]) == {"depth", "age"}
+            else "medium",
             subject_key=queue_key,
             details={
                 **row,
@@ -1030,7 +1194,8 @@ def _eval_jobs_registry_mismatch(
         and row.get("definition_digest") != definition(key).snapshot_digest()
     )
     pool_rows = {
-        row.get("resource_template"): row for row in snapshot.get("resource_limits", [])
+        row.get("resource_template"): row
+        for row in snapshot.get("resource_limits", [])
         if row.get("policy_kind") == "execution_pool"
     }
     expected_digest = registry_digest()
@@ -1059,7 +1224,8 @@ def _eval_jobs_registry_mismatch(
         issues["execution_pool_policy_mismatch"] = True
     if any(
         not policy["minimum"] <= pool_rows[key].get("capacity", 0) <= policy["maximum"]
-        for key, policy in EXECUTION_POOL_POLICIES.items() if key in pool_rows
+        for key, policy in EXECUTION_POOL_POLICIES.items()
+        if key in pool_rows
     ):
         issues["execution_pool_capacity_out_of_range"] = True
     if runtime_mismatch:

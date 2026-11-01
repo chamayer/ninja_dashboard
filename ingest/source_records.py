@@ -421,6 +421,10 @@ def evaluate_record(
     unauthorized_tools: list[dict] | None = None,
     capability_policy_known: bool = True,
     identity_conflicts: dict[uuid.UUID, set[str]] | None = None,
+    attached_contradiction: dict | None = None,
+    stale_after_days: int | None = None,
+    computer_alive: bool = False,
+    now: datetime | None = None,
 ) -> list[dict]:
     """The rule results for one record. Pure: inputs in, results out."""
     data = record.get("canonical_data") or {}
@@ -506,6 +510,11 @@ def evaluate_record(
                 missing=(
                     [] if last_contact is not None else ["reported_last_contact_at"]
                 ),
+            )
+        )
+        results.append(
+            _staleness_result(
+                record, last_contact, stale_after_days, computer_alive, now
             )
         )
     else:
@@ -870,10 +879,37 @@ def evaluate_record(
                     )
                 )
 
+    # record.purpose: no purpose policy is authored, so presence is allowed by
+    # default (user decision 2026-11-01); a future restriction would contradict it.
+    results.append(
+        _result(
+            "record.purpose", "supported", evidence={"policy": "allowed_by_default"}
+        )
+    )
+
     # identity.association
     if not compares:
         results.append(
             _result("identity.association", "not_applicable", evidence={"role": role})
+        )
+    elif attached and attached_contradiction:
+        # A corroborated serial/VM UUID match points to exactly one other
+        # Computer: the attachment needs a decision (standing rule, 2026-11-01).
+        owner = attached_contradiction.get("owner") or ""
+        results.append(
+            _result(
+                "identity.association",
+                "contradicted",
+                evidence={
+                    "device_id": str(record["device_id"]),
+                    "proposed_device_id": str(attached_contradiction["target"]),
+                    "matcher": attached_contradiction["matcher"],
+                },
+                owner=owner,
+                finding=None
+                if owner
+                else {"type": "source_record_identity_review", "severity": "critical"},
+            )
         )
     elif attached:
         results.append(
@@ -1023,6 +1059,206 @@ def _rejected_software_by_record(
                 }
             )
     return rejected, policy_known
+
+
+def _staleness_result(
+    record: dict,
+    last_contact: datetime | None,
+    stale_after_days: int | None,
+    computer_alive: bool,
+    now: datetime | None,
+) -> dict:
+    """An agent record no longer contacting its source (one default threshold).
+
+    The threshold is the tenant's retire-review setting for every source (user
+    decision 2026-11-01). When the whole Computer has gone quiet, its lifecycle
+    review owns the work; a native cleanup issue opens only for an unattached
+    record or one whose Computer still reports through other sources.
+    """
+    if stale_after_days is None or now is None:
+        return _result("record.staleness", "unknown", missing=["stale_after_days"])
+    if last_contact is None:
+        return _result(
+            "record.staleness", "unknown", missing=["reported_last_contact_at"]
+        )
+    age_days = (now - last_contact).total_seconds() / 86400
+    evidence = {"days_since_contact": int(age_days), "threshold_days": stale_after_days}
+    if age_days <= stale_after_days:
+        return _result("record.staleness", "supported", evidence=evidence)
+    attached = record["device_id"] is not None and record["device_live"]
+    if attached and not computer_alive:
+        return _result(
+            "record.staleness",
+            "contradicted",
+            evidence=evidence,
+            owner="legacy:computer_lifecycle",
+        )
+    return _result(
+        "record.staleness",
+        "contradicted",
+        evidence=evidence,
+        finding={"type": "source_record_cleanup", "severity": "medium"},
+    )
+
+
+_LEGACY_IDENTITY_OWNERS = (
+    "shared_serial",
+    "two_machines_on_one_computer",
+    "duplicate_device_records",
+)
+
+
+def _attached_contradictions(
+    cur: Any, tenant_id: int, records: list[dict]
+) -> dict[uuid.UUID, dict]:
+    """Attached records whose corroborated serial/VM UUID points to another Computer.
+
+    A cheap key pre-filter keeps the full matcher to records that share a strong
+    key with a record on a different Computer. An open legacy identity finding
+    on either Computer owns the correction.
+    """
+    attached = {
+        r["id"]: r
+        for r in records
+        if r["record_role"] in _IDENTITY_ROLES
+        and r["presence"] == "present"
+        and r["device_id"] is not None
+        and r["device_live"]
+        and r["observation_id"] is not None
+    }
+    if not attached:
+        return {}
+    cur.execute(
+        """
+        SELECT DISTINCT mine.subject_id
+          FROM operations.source_record_lookup_keys mine
+          JOIN operations.source_record_lookup_keys other
+            ON other.tenant_id = mine.tenant_id AND other.key_family = mine.key_family
+           AND other.normalized_value = mine.normalized_value
+           AND other.subject_id <> mine.subject_id
+          JOIN operations.entity_source_links mine_link
+            ON mine_link.tenant_id = mine.tenant_id AND mine_link.source_subject_id = mine.subject_id
+           AND mine_link.entity_class_id = 'device'
+          JOIN operations.entity_source_links other_link
+            ON other_link.tenant_id = other.tenant_id
+           AND other_link.source_subject_id = other.subject_id
+           AND other_link.entity_class_id = 'device'
+           AND other_link.entity_id <> mine_link.entity_id
+         WHERE mine.tenant_id = %s AND mine.subject_id = ANY(%s::uuid[])
+           AND mine.key_family IN ('serial', 'vm_uuid')
+        """,
+        (tenant_id, list(attached)),
+    )
+    suspects = [attached[row[0]] for row in cur.fetchall()]
+    if not suspects:
+        return {}
+    policies = load_identity_match_policies(cur, tenant_id)
+    identity_types = sorted(identity_entity_types(cur))
+    found: dict[uuid.UUID, dict] = {}
+    for record in suspects:
+        data = record.get("canonical_data") or {}
+        preview = preview_match(
+            cur,
+            tenant_id=tenant_id,
+            source_name=record["platform"],
+            external_id=record["external_id"],
+            entity_type=record["entity_type"],
+            serial=data.get("serial_number"),
+            vm_uuid=data.get("vm_uuid"),
+            hostname=record_name_short(
+                cur,
+                record["platform"],
+                record["entity_type"],
+                data.get("hostname") or data.get("guest_name"),
+                data.get("domain"),
+            )
+            or None,
+            macs=data.get("macs") or [],
+            client_id=record["client_id"],
+            source_instance_id=record["source_instance_id"],
+            policies=policies,
+            is_online=data.get("is_online"),
+            identity_types=identity_types,
+            excluded_observation_ids=(record["observation_id"],),
+        )
+        result = preview.result
+        if (
+            result is not None
+            and result.matcher in ("serial", "vm_uuid")
+            and result.device_id != record["device_id"]
+        ):
+            found[record["id"]] = {
+                "target": result.device_id,
+                "matcher": result.matcher,
+            }
+    if not found:
+        return {}
+    devices = {attached[sid]["device_id"] for sid in found} | {
+        v["target"] for v in found.values()
+    }
+    cur.execute(
+        """
+        SELECT DISTINCT f.subject_id
+          FROM operations.findings f
+          JOIN operations.finding_types ft ON ft.id = f.finding_type_id
+         WHERE f.tenant_id = %s AND f.subject_type = 'device'
+           AND f.subject_id = ANY(%s::uuid[])
+           AND ft.name = ANY(%s)
+           AND f.status IN ('open', 'acknowledged', 'investigating', 'suppressed')
+        """,
+        (tenant_id, list(devices), list(_LEGACY_IDENTITY_OWNERS)),
+    )
+    owned = {row[0] for row in cur.fetchall()}
+    for subject_id, item in found.items():
+        if attached[subject_id]["device_id"] in owned or item["target"] in owned:
+            item["owner"] = "legacy:computer_identity"
+    return found
+
+
+def _computers_alive(
+    cur: Any, tenant_id: int, records: list[dict], stale_after_days: int, now: datetime
+) -> dict[uuid.UUID, bool]:
+    """Per record: does its Computer still report through another record?"""
+    devices = {
+        r["device_id"]
+        for r in records
+        if r["device_id"] is not None and r["device_live"]
+    }
+    if not devices:
+        return {}
+    cur.execute(
+        """
+        SELECT link.entity_id, s.id, s.observation_id
+          FROM operations.entity_source_links link
+          JOIN operations.source_record_subjects s
+            ON s.tenant_id = link.tenant_id AND s.id = link.source_subject_id
+         WHERE link.tenant_id = %s AND link.entity_class_id = 'device'
+           AND link.entity_id = ANY(%s::uuid[]) AND s.presence = 'present'
+        """,
+        (tenant_id, list(devices)),
+    )
+    members = cur.fetchall()
+    cur.execute(
+        """
+        SELECT observation_id, reported_last_contact_at
+          FROM operations.v_entity_observation_admin_metadata
+         WHERE tenant_id = %s AND observation_id = ANY(%s::uuid[])
+        """,
+        (tenant_id, [m[2] for m in members if m[2] is not None]),
+    )
+    contact = dict(cur.fetchall())
+    alive: dict[uuid.UUID, bool] = {}
+    for record in records:
+        if record["device_id"] is None or not record["device_live"]:
+            continue
+        alive[record["id"]] = any(
+            device == record["device_id"]
+            and subject != record["id"]
+            and contact.get(observation) is not None
+            and (now - contact[observation]).total_seconds() / 86400 <= stale_after_days
+            for device, subject, observation in members
+        )
+    return alive
 
 
 def _qualified_identity_conflicts(
@@ -1541,6 +1777,11 @@ def assess_records(
         cur, tenant_id, subject_ids, software_config, unauthorized_tools
     )
     identity_conflicts = _qualified_identity_conflicts(cur, tenant_id, records)
+    attached_contradictions = _attached_contradictions(cur, tenant_id, records)
+    from ingest import device_status_settings
+
+    _offline_days, stale_after_days = device_status_settings.load(cur, tenant_id)
+    computers_alive = _computers_alive(cur, tenant_id, records, stale_after_days, now)
     candidates = _candidate_computers(
         cur,
         tenant_id,
@@ -1553,6 +1794,10 @@ def assess_records(
         ],
     )
     type_ids = finding_type_ids(cur)
+    active_keys = active_native_keys(
+        cur, tenant_id, "source_record", [r["id"] for r in records]
+    )
+    assessments: list[tuple] = []
     for record in records:
         results = evaluate_record(
             record,
@@ -1572,6 +1817,10 @@ def assess_records(
             unauthorized_tools.get(record["id"], []),
             capability_policy_known.get(record["id"], False),
             identity_conflicts=identity_conflicts.get(record["id"]),
+            attached_contradiction=attached_contradictions.get(record["id"]),
+            stale_after_days=stale_after_days,
+            computer_alive=computers_alive.get(record["id"], False),
+            now=now,
         )
         for result in results:
             finding_id = publish_finding(
@@ -1593,6 +1842,7 @@ def assess_records(
                     if record["restricted"]
                     else ((record.get("canonical_data") or {}).get("hostname")),
                 },
+                active_keys=active_keys,
             )
             write_assessment(
                 cur,
@@ -1605,7 +1855,9 @@ def assess_records(
                 generation=generation,
                 finding_id=finding_id,
                 now=now,
+                buffer=assessments,
             )
+    flush_assessments(cur, assessments)
 
 
 # --- shared publication helpers -----------------------------------------------------
@@ -1620,6 +1872,7 @@ _TYPE_NAMES = (
     "source_record_suspicious_software",
     "source_record_malicious_software_hint",
     "source_record_unauthorized_tool",
+    "source_record_cleanup",
 )
 _RULE_TYPES = {
     ("identity.association", ""): "source_record_identity_review",
@@ -1632,6 +1885,7 @@ _RULE_TYPES = {
     ("software.suspicious_name", ""): "source_record_suspicious_software",
     ("software.threat_intel", ""): "source_record_malicious_software_hint",
     ("software.capability", ""): "source_record_unauthorized_tool",
+    ("record.staleness", ""): "source_record_cleanup",
 }
 
 
@@ -1655,14 +1909,18 @@ def publish_finding(
     client_id: Any,
     context: dict[str, Any],
     context_participants: tuple[tuple[str, Any], ...] = (),
+    active_keys: set[str] | None = None,
 ) -> uuid.UUID | None:
     """Open, refresh or resolve the native finding one rule result implies.
+
+    ``active_keys`` (from ``active_native_keys``) lets a batch skip the resolve
+    statement for the many results that have no open finding.
 
     The rule's own result is the closure test: a current non-contradicted
     result (or ownership by legacy work) resolves an open native finding.
     """
     type_name = _RULE_TYPES.get((result["rule"], result["dimension"]))
-    if type_name is None:
+    if type_name is None or type_name not in type_ids:
         return None
     key = condition_key(target_kind, target_id, result["rule"], result["dimension"])
     spec = result["finding"]
@@ -1672,6 +1930,8 @@ def publish_finding(
             or result["rule"] == "identifier.validity"
             or result["rule"] == "record.reference"
         ):
+            return None
+        if active_keys is not None and key not in active_keys:
             return None
         cur.execute(
             """
@@ -1813,14 +2073,72 @@ def write_assessment(
     generation: int,
     finding_id: uuid.UUID | None,
     now: datetime,
+    buffer: list[tuple] | None = None,
 ) -> None:
+    """Upsert one current assessment, or append it to ``buffer`` for one flush."""
+    row = (
+        tenant_id,
+        target_kind,
+        target_id,
+        result["rule"],
+        result["dimension"],
+        RULE_REVISION,
+        target_version,
+        generation,
+        result["result"],
+        json.dumps(result["evidence"]),
+        json.dumps(list(result["missing"])),
+        result["owner"],
+        finding_id,
+        now,
+    )
+    if buffer is not None:
+        buffer.append(row)
+        return
+    flush_assessments(cur, [row])
+
+
+def active_native_keys(
+    cur: Any, tenant_id: int, target_kind: str, target_ids: list[uuid.UUID]
+) -> set[str]:
+    """Condition keys of the open native findings of these targets (one query)."""
+    if not target_ids:
+        return set()
+    cur.execute(
+        """
+        SELECT condition_key FROM operations.findings
+         WHERE tenant_id = %s AND condition_namespace = 'entity'
+           AND subject_type = %s AND subject_id = ANY(%s::uuid[])
+           AND status IN ('open', 'acknowledged')
+        """,
+        (tenant_id, target_kind, target_ids),
+    )
+    return {row[0] for row in cur.fetchall()}
+
+
+def flush_assessments(cur: Any, rows: list[tuple]) -> None:
+    """Upsert buffered current assessments in one set-based statement."""
+    if not rows:
+        return
+    columns = [list(column) for column in zip(*rows, strict=True)]
     cur.execute(
         """
         INSERT INTO operations.source_record_assessment_current AS a (
             tenant_id, target_kind, target_id, rule_key, dimension, rule_revision,
             target_version, input_generation, result, evidence, missing_facts,
             work_owner, finding_id, assessed_at
-        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s, %s, %s, %s)
+        )
+        SELECT r.tenant_id, r.target_kind, r.target_id, r.rule_key, r.dimension,
+               r.rule_revision, r.target_version, r.input_generation, r.result,
+               r.evidence::jsonb,
+               ARRAY(SELECT jsonb_array_elements_text(r.missing::jsonb)),
+               r.work_owner, r.finding_id, r.assessed_at
+          FROM unnest(%s::bigint[], %s::text[], %s::uuid[], %s::text[], %s::text[],
+                      %s::integer[], %s::bigint[], %s::bigint[], %s::text[], %s::text[],
+                      %s::text[], %s::text[], %s::uuid[], %s::timestamptz[])
+               AS r(tenant_id, target_kind, target_id, rule_key, dimension, rule_revision,
+                    target_version, input_generation, result, evidence, missing,
+                    work_owner, finding_id, assessed_at)
         ON CONFLICT (tenant_id, target_kind, target_id, rule_key, dimension) DO UPDATE
            SET rule_revision = EXCLUDED.rule_revision,
                target_version = EXCLUDED.target_version,
@@ -1832,20 +2150,5 @@ def write_assessment(
                finding_id = EXCLUDED.finding_id,
                assessed_at = EXCLUDED.assessed_at
         """,
-        (
-            tenant_id,
-            target_kind,
-            target_id,
-            result["rule"],
-            result["dimension"],
-            RULE_REVISION,
-            target_version,
-            generation,
-            result["result"],
-            json.dumps(result["evidence"]),
-            result["missing"],
-            result["owner"],
-            finding_id,
-            now,
-        ),
+        columns,
     )

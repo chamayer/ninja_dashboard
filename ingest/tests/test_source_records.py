@@ -619,3 +619,101 @@ def test_unclassified_role_is_unknown_for_role_rule():
         source_records.evaluate_record(_record(record_role="unclassified"), {})
     )
     assert results[("record.role", "")]["missing"] == ["record_role"]
+
+
+def test_stale_unattached_agent_opens_cleanup():
+    import datetime as dt
+
+    now = dt.datetime(2026, 11, 1, tzinfo=dt.UTC)
+    record = _record(
+        reported_last_contact_at=now - dt.timedelta(days=45), reported_online=False
+    )
+    result = _by_rule(
+        source_records.evaluate_record(record, {}, stale_after_days=30, now=now)
+    )[("record.staleness", "")]
+    assert result["result"] == "contradicted"
+    assert result["finding"]["type"] == "source_record_cleanup"
+
+
+def test_stale_record_on_quiet_computer_belongs_to_lifecycle():
+    import datetime as dt
+
+    now = dt.datetime(2026, 11, 1, tzinfo=dt.UTC)
+    record = _record(
+        device_id=uuid.uuid4(),
+        device_live=True,
+        reported_last_contact_at=now - dt.timedelta(days=45),
+        reported_online=False,
+    )
+    result = _by_rule(
+        source_records.evaluate_record(
+            record, {}, stale_after_days=30, computer_alive=False, now=now
+        )
+    )[("record.staleness", "")]
+    assert result["owner"] == "legacy:computer_lifecycle"
+    assert result["finding"] is None
+
+
+def test_recent_contact_is_not_stale_and_purpose_defaults_allowed():
+    import datetime as dt
+
+    now = dt.datetime(2026, 11, 1, tzinfo=dt.UTC)
+    record = _record(
+        reported_last_contact_at=now - dt.timedelta(days=2), reported_online=True
+    )
+    results = _by_rule(
+        source_records.evaluate_record(record, {}, stale_after_days=30, now=now)
+    )
+    assert results[("record.staleness", "")]["result"] == "supported"
+    assert results[("record.purpose", "")]["result"] == "supported"
+
+
+def test_attached_contradiction_opens_identity_review_unless_owned():
+    record = _record(device_id=uuid.uuid4(), device_live=True)
+    target = uuid.uuid4()
+    open_result = _by_rule(
+        source_records.evaluate_record(
+            record, {}, attached_contradiction={"target": target, "matcher": "serial"}
+        )
+    )[("identity.association", "")]
+    assert open_result["result"] == "contradicted"
+    assert open_result["finding"]["severity"] == "critical"
+    owned = _by_rule(
+        source_records.evaluate_record(
+            record,
+            {},
+            attached_contradiction={
+                "target": target,
+                "matcher": "serial",
+                "owner": "legacy:computer_identity",
+            },
+        )
+    )[("identity.association", "")]
+    assert owned["finding"] is None and owned["owner"] == "legacy:computer_identity"
+
+
+def test_disposition_classes():
+    from ingest.source_record_dispositions import classify
+
+    base = {"previous_device_id": "d1", "matcher": None, "candidates": []}
+    assert classify({**base, "outcome": "same"}) is None
+    assert classify({**base, "outcome": "unmatched"}) == (
+        "keep",
+        "no_independent_evidence",
+    )
+    assert classify({**base, "outcome": "ambiguous"}) == ("keep", "ambiguous")
+    assert classify(
+        {**base, "outcome": "changed", "matcher": "hostname", "candidates": ["d2"]}
+    ) == (
+        "keep",
+        "name_only_difference",
+    )
+    assert classify(
+        {**base, "outcome": "changed", "matcher": "serial", "candidates": ["d2"]}
+    ) == (
+        "move",
+        "corroborated_hardware_match",
+    )
+    new = {"previous_device_id": None, "matcher": "serial", "candidates": ["d2"]}
+    assert classify({**new, "outcome": "newly_matched"}) == ("move", "unique_new_match")
+    assert classify({**new, "outcome": "unmatched", "candidates": []}) is None
