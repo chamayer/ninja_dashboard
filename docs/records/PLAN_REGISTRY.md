@@ -1,5 +1,19 @@
 # Plan registry
 
+## PLAN-037 — Source collection failures
+
+- Scope: Make every open source-failure Issue reflect a current failure: find why completed collections leave Issues open, fix or retire the ThreatFox collector (410 Gone), close the retired agent_compliance failure, stop deploy-interrupted runs from raising failures, and review Ninja's failed required steps.
+- Status: defined
+- Defined: 2026-11-01
+- Started: —
+- Completed: —
+- Blueprint: —
+- Source: docs/plans/PLAN-037-source-failures.md
+- Section: PLAN-037 — Source collection failures
+- Related plans: PLAN-036 owns the admin-finding clear assessments the guard uses; PLAN-019 F09 and the TODO Ninja collection-gap item overlap Step 5.
+- Resume gate: Each step needs user approval; Step 1 is read-only.
+- Last checked: 2026-11-01 (registered after the 0.140.0 post-release check; 7 open source-failure Issues measured read-only).
+
 ## PLAN-036 — Record-first findings and consistent identity decisions
 
 - Scope: Finalize ADR-0050; implement automatic source-record risk findings and consistent PLAN-004 §5 association decisions, with the related findings presentation and handover.
