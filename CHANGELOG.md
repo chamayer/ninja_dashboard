@@ -2,6 +2,57 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.139.0] — 2026-11-01 — Nothing left in limbo (PLAN-004 R4 follow-up)
+
+### Added
+
+- Standing source-record rules, so no record waits for row-by-row review:
+  - An attached record whose corroborated serial or VM UUID points to exactly
+    one other Computer opens the identity review (Critical). An open shared
+    serial, two-machines or duplicate-device issue on either Computer keeps the
+    work instead.
+  - Staleness uses one threshold for every source (the device retire-review
+    setting). A stale agent that is unattached, or whose Computer still reports
+    through other sources, opens a new "Source record is stale" cleanup issue
+    (Medium). A fully quiet Computer stays with its lifecycle review.
+  - Purpose is allowed unless a rule says otherwise.
+- Every association-reassessment row gets one recorded disposition with its
+  class and reason: kept (no independent evidence, name-only difference,
+  ambiguous) or moved (a corroborated serial/VM UUID points to exactly one other
+  Computer, or exactly one corroborated match for an unattached record). The
+  source-record page lists them and undoes the latest move in one click (needs
+  the lifecycle permission). Ninja device-health companion records are left out.
+- Admin Health: "Data collection is running slowly" opens when the median of
+  recent runs is more than twice the 7-day median and at least 5 minutes
+  longer. Failed rows in any registered queue now count as a stalled queue
+  (High).
+
+### Changed
+
+- When Ninja sends a complete list, software a source record no longer lists
+  is marked stale, so its record issues resolve. A list that shrank sharply
+  waits for an administrator, as on the Computer inventory.
+- Source-record assessments are written in one statement per batch.
+
+### Fixed
+
+- Software refresh failed for some Computers from 0.138.0 on, with
+  `source_record_software_history_open`: a list naming one title twice opened
+  two history rows, and the history update ran without a fixed order. The last
+  listed entry now wins, as on the Computer inventory, and history is closed
+  before it is opened. 441 failed refreshes are queued again.
+- From 0.138.0, the client resolver failed whenever it closed a stale client
+  mapping issue ("could not determine data type of parameter"). That failed
+  identity resolution and the evaluation queued after it (6 of 23 runs on
+  2026-11-01). The closing reason now has a type.
+
+### Migrations
+
+- 0390 adds the cleanup and slowdown issue types, policy
+  `conditions-registry-14`, and queues every record. 0391 adds
+  `operations.source_record_dispositions`. 0392 queues the failed software
+  refreshes again.
+
 ## [0.138.3] — 2026-11-01 — Faster source-record assessment
 
 ### Fixed

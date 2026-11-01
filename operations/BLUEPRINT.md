@@ -1516,6 +1516,33 @@ which `create_condition_policy_version` requires to match) and requeues their
 subjects. Dev check (rolled back): participants written, assessment `eligible`,
 state `needs_action/ready`. ADR-0050 (proposed) records what a Computer is for.
 **Hotfix 0.138.1 (2026-11-01):** 0.138.0 deployed cleanly (0387, policy 12, contract 6, parity 0) but every source-record batch failed on a placeholder-count bug in the software-signal query (unit tests mock the cursor); fixed, failed rows requeued by 0388; validated on a real dev database, including synthetic software rows.
+### Leave-nothing-in-limbo follow-up (user decisions 2026-11-01)
+
+**Decisions:** (1) reassessment rows are dispositioned by class — keep where nothing
+strong contradicts the attachment; move when a corroborated serial/VM UUID points to
+exactly one other Computer and the current one conflicts; otherwise a native identity
+issue (now a standing rule for attached records); (2) one stale-record threshold for all
+sources (reuse the existing retire-review setting, no per-source config); (3) purpose
+defaults to allowed unless a rule restricts it; (4) full test suites run in a throwaway
+container on the host, never on the workstation.
+**Steps:** attached-contradiction rule; stale rule; purpose default; source software
+retirement with shrink protection; ingest-slowdown health finding; host test run;
+release (dev-DB parse/SQL checks first); one-off keep/move disposition operation
+recorded per row.
+**Dropped:** "queue drain waits for the guard" (the measured cause was query speed and
+evaluator lock time, fixed in 0.138.3); a separate post-deploy smoke check (failed rows
+in any registered queue now open a High stalled-queue finding instead).
+**Found on production (read-only, 2026-11-01):** two 0.138.0 regressions, both fixed
+in 0.139.0: client resolver `IndeterminateDatatype` on the closure reason (6/23
+resolver runs failed, and their evaluations stalled as prerequisite-failed); source-record
+software history duplicate-key (441 Computers' refreshes failed; requeued by 0392).
+The generic relationship projection has been blocked since 2026-10-21; that predates
+this train and is in `TODO.md`.
+**Host tests (throwaway compose project, versus 0.137.2 baseline):** Operations has the
+same 9 failures as the baseline, with no new ones. Ingest had one new failure, a
+source-text test that still pointed at the pre-PLAN-036 helper file; fixed.
+**Status:** releasing as 0.139.0; disposition run follows the deploy.
+
 **Hotfix 0.138.2 (2026-11-01):** 0387 had copied label/category/type into two schema 2
 definitions, so `parse_profile` rejected the active policy and **no condition assessment
 was written platform-wide from ~05:24 to 05:42 UTC** (none recorded in that window).

@@ -24,8 +24,9 @@ validation results, or completed-plan summaries here.
   gated. See the [handoff](docs/plans/PLAN-036-record-first-findings.md).
 
 - **PLAN-004 — active; R4 Stages A, C and B released 2026-10-30 (0.135.0–0.137.0).**
-  Next: review the one-time reassessment's changed/ambiguous/unmatched rows and the
-  R4 follow-ups in `operations/TODO.md`; watch ingest timings (R4-2 waiver). See the
+  0.139.0 replaces row-by-row reassessment review with standing rules and recorded
+  per-row dispositions (user decisions 2026-11-01). Next: confirm the disposition run's
+  counts and the R4 follow-ups in `operations/TODO.md`. See the
   [Operations handoff](operations/BLUEPRINT.md#r4-implementation-started-2026-10-30-branch-plan003-r3-base-7a8b67b)
   and [final design](operations/docs/plans/PLAN-004-source-record-final-design.md).
 

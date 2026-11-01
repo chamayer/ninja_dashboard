@@ -7,6 +7,18 @@ Read Inbox at the start of every session.
 
 ## Inbox
 
+- [ ] **Generic relationship projection blocked since 2026-10-21 (found
+      2026-11-01, read-only):** every `sync_entity_relationships` batch raises
+      `relationship source cardinality would be exceeded`, which the pipeline
+      logs and continues past (also noted in the 10-28 incident). The dirty
+      queue holds 5,631 tuples, all `os_installation_runs_on_computer`, and the
+      oldest is from 2026-10-21 22:33 UTC. 45 of them want an OS installation
+      active on a Computer while another active edge exists for the same
+      installation. The batch takes the oldest rows first, so those block
+      every later tuple. Candidate: withdraw the superseded edge in the same
+      batch, or turn the conflict into an identity finding instead of an
+      exception. The fix changes a SECURITY DEFINER projector, so it needs
+      approval.
 - [ ] **PLAN-019 — Data pipeline correctness and source-record retention:**
       `active` (docs/plans/PLAN-019-data-pipeline-correctness-and-retention.md);
       Step 1 done; F09 decided (no daily presence); Step 2 (U04) built.

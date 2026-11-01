@@ -204,3 +204,8 @@ require their existing operational gate and are not evidenced by local tests.
   schema 2 definitions made the active policy unparseable, so all condition assessments
   failed ~05:24–05:42 UTC. Verified after 0.138.2: assessments resume platform-wide,
   worker log clean, all open native findings assessed, queue draining.
+- Two further 0.138.0 regressions were found read-only on production and fixed in
+  0.139.0. First, the client resolver's closure-reason parameter had no type, so 6 of
+  23 resolver runs failed and their evaluations were marked prerequisite-failed.
+  Second, source-record software history opened two rows for a list that named one
+  title twice: 441 Computers' refreshes failed, and 0392 queues them again.
