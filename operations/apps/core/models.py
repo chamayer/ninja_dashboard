@@ -3042,6 +3042,8 @@ class EntityRelationshipCurrent(UUIDTenantScopedModel):
         ACTIVE = "active", "Active"
         SUPPRESSED = "suppressed", "Suppressed"
         NO_EVIDENCE = "no_evidence", "No eligible evidence"
+        CONFLICT = "conflict", "Targets disagree"
+        SUPERSEDED = "superseded", "Outranked by another target"
 
     relationship_type = models.ForeignKey(
         RelationshipType,
