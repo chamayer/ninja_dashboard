@@ -2,6 +2,18 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.140.1] — 2026-11-01 — Recovered sources close their failure Issues
+
+### Fixed
+
+- A source-failure Issue never closed after its source recovered. Since 0.137.x
+  an admin Issue closes only with a current assessment that allows clearing, but
+  a recovered source is no longer a problem, so nothing assessed it; each new
+  policy version also invalidated the older assessments. The evaluator now
+  records the measured recovery as an assessment and then closes the Issue. This
+  also closes the retired agent_compliance and the old platform-keyed LogMeIn and
+  SentinelOne failures, which no current source reports.
+
 ## [0.140.0] — 2026-11-01 — Evaluation in short batches
 
 ### Changed
