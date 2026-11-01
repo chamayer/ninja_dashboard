@@ -1924,6 +1924,7 @@ class IdentityMatchPolicy(UUIDTenantScopedModel):
     priority = models.PositiveSmallIntegerField()
     requires_client_scope = models.BooleanField(default=True)
     requires_unique_candidate = models.BooleanField(default=True)
+    requires_independent_corroboration = models.BooleanField(default=False)
     avoid_same_stream_duplicates = models.BooleanField(default=False)
     blocking_signal_keys = models.JSONField(default=list, blank=True)
     confidence = models.DecimalField(max_digits=4, decimal_places=3)
@@ -1937,6 +1938,17 @@ class IdentityMatchPolicy(UUIDTenantScopedModel):
             models.UniqueConstraint(fields=("tenant", "matcher"), name="uq_identity_match_policy"),
             models.UniqueConstraint(
                 fields=("tenant", "priority"), name="uq_identity_match_policy_priority"
+            ),
+            models.CheckConstraint(
+                condition=models.Q(requires_unique_candidate=True),
+                name="ck_identity_match_requires_unique_candidate",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    ~models.Q(matcher__in=["serial", "vm_uuid"])
+                    | models.Q(requires_independent_corroboration=True)
+                ),
+                name="ck_identity_match_hardware_corroboration",
             ),
         )
 

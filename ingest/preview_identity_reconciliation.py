@@ -147,6 +147,7 @@ def run(*, tenant_id: int = 1) -> dict[str, Any]:
                 client_id=client_id,
                 policies=policies,
                 is_online=data.get("is_online"),
+                source_instance_id=source_instance_id,
                 identity_types=identity_types,
                 excluded_observation_ids=(observation_id,),
             )

@@ -28,10 +28,10 @@ POLICIES = (
         "source_identity", 10, False, True, False, frozenset(), Decimal("1")
     ),
     IdentityMatchPolicy(
-        "serial", 20, True, False, False, frozenset({"vm_uuid"}), Decimal("1")
+        "serial", 20, True, True, False, frozenset({"vm_uuid"}), Decimal("1"), True
     ),
     IdentityMatchPolicy(
-        "vm_uuid", 30, True, False, False, frozenset({"serial"}), Decimal("1")
+        "vm_uuid", 30, True, True, False, frozenset({"serial"}), Decimal("1"), True
     ),
     IdentityMatchPolicy(
         "hostname_mac",
@@ -175,6 +175,7 @@ def record(
     seen=NOW,
     key=None,
     entity_type=None,
+    source_instance_id=None,
     **data,
 ):
     entity_key = key or str(uuid.uuid4())
@@ -189,8 +190,9 @@ def record(
     cur.execute(
         """INSERT INTO operations.entity_observation_current
                (observation_id, tenant_id, device_id, client_id, platform, entity_type,
-                entity_key, active, last_seen_at, canonical_data, external_id)
-           VALUES (%s, 1, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+                entity_key, active, last_seen_at, canonical_data, external_id,
+                source_instance_id)
+               VALUES (%s, 1, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
         (
             uuid.uuid4(),
             device_id,
@@ -203,6 +205,7 @@ def record(
             seen,
             json.dumps(data),
             entity_key,
+            source_instance_id or uuid.uuid5(uuid.NAMESPACE_DNS, f"source:{platform}"),
         ),
     )
     return entity_key
@@ -217,6 +220,7 @@ def match(
     vm_uuid=None,
     online=None,
     key="new",
+    source_instance_id=None,
 ):
     matching.invalidate_client_names()
     result = resolve_match(
@@ -232,6 +236,8 @@ def match(
         client_id=CLIENT,
         policies=POLICIES,
         is_online=online,
+        source_instance_id=source_instance_id
+        or uuid.uuid5(uuid.NAMESPACE_DNS, f"source:{platform}"),
     )
     return result.device_id if result else None
 
@@ -256,7 +262,7 @@ def test_serial_is_compared_with_what_records_report_now(cur):
     record(cur, stale, "Ninja", serial_number="NEW456")
     # The old laptop, renamed, still reports the stored serial: no match.
     assert match(cur, "gf-32", platform="SentinelOne", serial="OLD123") is None
-    assert match(cur, "anything", platform="SentinelOne", serial="new456") == stale
+    assert match(cur, "gf-12", platform="SentinelOne", serial="new456") == stale
 
 
 def test_a_different_serial_blocks_a_name_match(cur):
@@ -274,12 +280,22 @@ def test_two_live_records_of_one_source_are_two_machines(cur):
     assert match(cur, "server", online=False) == server
 
 
-def test_several_candidates_pick_the_most_recently_active(cur):
+def test_several_eligible_candidates_remain_unresolved_regardless_of_recency(cur):
     older = computer(cur, "dev-sql2", created=NOW - timedelta(days=90))
     newer = computer(cur, "dev-sql2", created=NOW - timedelta(days=10))
     record(cur, older, "Ninja", seen=NOW - timedelta(days=5))
     record(cur, newer, "SentinelOne", seen=NOW - timedelta(hours=1))
-    assert match(cur, "dev-sql2") == newer
+    assert match(cur, "dev-sql2") is None
+
+
+def test_ambiguous_stronger_key_does_not_fall_through_to_unique_name(cur):
+    first = computer(cur, "serial-candidate-a")
+    second = computer(cur, "serial-candidate-b")
+    name_only = computer(cur, "hostname-candidate")
+    record(cur, first, "Ninja", serial_number="SERIAL123")
+    record(cur, second, "SentinelOne", serial_number="SERIAL123")
+    record(cur, name_only, "SentinelOne")
+    assert match(cur, "hostname-candidate", serial="SERIAL123") is None
 
 
 def test_a_15_character_cut_matches_one_longer_name(cur):
@@ -299,9 +315,10 @@ def test_separator_variants_match(cur):
     assert match(cur, "qbserver", platform="R-U-ON") == qb
 
 
-def test_duplicate_agents_on_one_serial_share_a_computer(cur):
+def test_duplicate_agent_record_needs_independent_serial_corroboration(cur):
     pc = computer(cur, "pc-9")
     record(cur, pc, "SentinelOne", serial_number="GM13HWMH", is_online=True)
+    record(cur, pc, "Ninja")
     assert (
         match(cur, "pc-9", platform="SentinelOne", serial="GM13HWMH", online=True) == pc
     )
@@ -320,12 +337,35 @@ def test_a_record_split_off_never_returns_to_that_computer(cur):
     assert match(cur, "pc-split", key="lmi-8") == pc
 
 
+def test_same_platform_external_key_in_another_source_instance_is_not_identity(cur):
+    first_instance = uuid.uuid4()
+    second_instance = uuid.uuid4()
+    pc = computer(cur, "first-source-machine")
+    record(
+        cur,
+        pc,
+        "Ninja",
+        key="node-17",
+        source_instance_id=first_instance,
+    )
+    assert (
+        match(
+            cur,
+            "different-source-machine",
+            platform="Ninja",
+            key="node-17",
+            source_instance_id=second_instance,
+        )
+        is None
+    )
+
+
 def _roam(cur, key):
     cur.execute(
         """INSERT INTO operations.identity_roaming_records
                (tenant_id, source_instance_id, external_id, platform, serial_count, name_count)
-           VALUES (1, '00000000-0000-4000-8000-000000000010', %s, 'SentinelOne', 5, 5)""",
-        (key,),
+           VALUES (1, %s, %s, 'SentinelOne', 5, 5)""",
+        (uuid.uuid5(uuid.NAMESPACE_DNS, "source:SentinelOne"), key),
     )
 
 
@@ -334,9 +374,11 @@ def test_a_roaming_record_proves_nothing_by_serial(cur):
     clone = computer(cur, "citrixapp37")
     image = computer(cur, "citrixappmcs")
     record(cur, clone, "Ninja", serial_number="VMW-37")
+    record(cur, clone, "ScreenConnect", hostname="other-name")
     roaming = record(cur, image, "SentinelOne", serial_number="VMW-37")
+    record(cur, image, "Ninja", hostname="citrixappmcs")
     _roam(cur, roaming)
-    # As a candidate: its serial does not pull another record to its Computer.
+    # As a candidate: its serial is usable only with independent name evidence.
     assert match(cur, "other-name", platform="ScreenConnect", serial="vmw-37") == clone
     # As the incoming record: it is placed by name, not by the clone's serial.
     assert (

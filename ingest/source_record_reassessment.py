@@ -55,8 +55,9 @@ def _unattached(
     policies = load_identity_match_policies(cur, tenant_id)
     cur.execute(
         """
-        SELECT o.observation_id, o.entity_type, o.platform, o.entity_key, o.client_id,
-               o.canonical_data, s.id, s.input_version, s.association_version
+        SELECT o.observation_id, o.source_instance_id, o.entity_type, o.platform,
+               o.entity_key, o.client_id, o.canonical_data, s.id, s.input_version,
+               s.association_version
           FROM operations.entity_observation_current o
           JOIN operations.source_record_subjects s
             ON s.tenant_id = o.tenant_id AND s.observation_id = o.observation_id
@@ -69,6 +70,7 @@ def _unattached(
     entries = []
     for (
         observation_id,
+        source_instance_id,
         entity_type,
         platform,
         entity_key,
@@ -99,6 +101,7 @@ def _unattached(
             client_id=client_id,
             policies=policies,
             is_online=data.get("is_online"),
+            source_instance_id=source_instance_id,
             identity_types=identity_types,
             excluded_observation_ids=(observation_id,),
         )

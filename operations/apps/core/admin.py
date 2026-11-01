@@ -10,6 +10,7 @@ from django.db.models.expressions import RawSQL
 from django.shortcuts import render
 from django.urls import reverse
 from django.utils import timezone
+
 from shared.conditions.policy import parse_profile
 
 from .models import (
@@ -290,7 +291,7 @@ class IdentityMatchPolicyAdmin(admin.ModelAdmin):
         "matcher",
         "priority",
         "requires_client_scope",
-        "requires_unique_candidate",
+        "requires_independent_corroboration",
         "avoid_same_stream_duplicates",
         "confidence",
         "enabled",
@@ -299,7 +300,10 @@ class IdentityMatchPolicyAdmin(admin.ModelAdmin):
     list_filter = ("tenant", "matcher", "enabled", "requires_client_scope")
     search_fields = ("display_name", "description", "reason")
     ordering = ("tenant", "priority")
-    readonly_fields = ("id", "version")
+    readonly_fields = (
+        "id", "version", "requires_unique_candidate",
+        "requires_independent_corroboration",
+    )
 
     def has_delete_permission(self, request, obj=None):
         # Disabling preserves a clear record of why a rule stopped applying.

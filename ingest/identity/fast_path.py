@@ -29,6 +29,7 @@ def resolve_device_fast(
     client_id: uuid.UUID | None = None,
     policies: tuple[IdentityMatchPolicy, ...] | None = None,
     is_online: bool | None = None,
+    source_instance_id: uuid.UUID | None = None,
 ) -> uuid.UUID | None:
     """Return one Computer selected by the enabled identity policy (ADR-0032)."""
     return resolve_device_by_policy(
@@ -44,4 +45,5 @@ def resolve_device_fast(
         client_id=client_id,
         policies=policies or load_identity_match_policies(cur, tenant_id),
         is_online=is_online,
+        source_instance_id=source_instance_id,
     )

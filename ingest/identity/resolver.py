@@ -81,7 +81,7 @@ def drain_resolution(batch_size: int = 200, *, refresh_current: bool = True) -> 
         cur.execute(
             """
             SELECT observation_id, entity_type, entity_key, platform, client_id,
-                   observed_at, canonical_data
+                   observed_at, canonical_data, source_instance_id
             FROM operations.entity_observation_current
             WHERE tenant_id = %s AND device_id IS NULL
               AND active = TRUE
@@ -107,6 +107,7 @@ def drain_resolution(batch_size: int = 200, *, refresh_current: bool = True) -> 
             client_id,
             observed_at,
             canonical_data,
+            source_instance_id,
         ) in rows:
             cd = canonical_data or {}
 
@@ -114,7 +115,12 @@ def drain_resolution(batch_size: int = 200, *, refresh_current: bool = True) -> 
             vm_uuid = cd.get("vm_uuid")
             hostname_raw = cd.get("hostname") or cd.get("guest_name")
             # The one SQL normalization (ADR-0034 section 1).
-            norm = record_name_short(cur, platform, entity_type, hostname_raw, cd.get("domain")) or None
+            norm = (
+                record_name_short(
+                    cur, platform, entity_type, hostname_raw, cd.get("domain")
+                )
+                or None
+            )
             device_id = resolve_device_by_policy(
                 cur,
                 tenant_id=TENANT_ID,
@@ -128,6 +134,7 @@ def drain_resolution(batch_size: int = 200, *, refresh_current: bool = True) -> 
                 client_id=client_id,
                 policies=identity_policies,
                 is_online=cd.get("is_online"),
+                source_instance_id=source_instance_id,
             )
             if device_id is not None:
                 _attach_observation(cur, obs_id, device_id)
@@ -250,47 +257,6 @@ def _load_finding_type_id(cur, name: str) -> int | None:
     return row[0] if row else None
 
 
-def _entries_same_machine(cd_a: dict, cd_b: dict) -> bool:
-    """Hard proof two platform records describe one machine: equal usable
-    serial or equal vm_uuid.
-
-    A shared MAC address is not proof (ADR-0032): of 310 same-source pairs
-    sharing a MAC that serial could check, 4 were different machines
-    (Hyper-V virtual adapters, docks), and MAC alone decided only 2.
-    """
-    sa, sb = cd_a.get("serial_number"), cd_b.get("serial_number")
-    if (
-        is_usable_serial(sa)
-        and is_usable_serial(sb)
-        and sa.strip().lower() == sb.strip().lower()
-    ):
-        return True
-    ua, ub = cd_a.get("vm_uuid"), cd_b.get("vm_uuid")
-    return bool(ua and ub and str(ua).lower() == str(ub).lower())
-
-
-def _group_same_machine(stream_entries: list[tuple]) -> list[list[tuple]]:
-    """Partition one stream's entries into machine groups.
-
-    Entries proven to be the same machine (serial / vm_uuid) share a group —
-    duplicate agents on one box. Unproven entries stay singletons and are
-    matched one by one (ADR-0032), so a same-name record joins its machine
-    unless a hard conflict separates it. Groups and entries are ordered
-    newest-first.
-    """
-    ordered = sorted(stream_entries, key=lambda e: e[4] or e[3], reverse=True)
-    groups: list[list[tuple]] = []
-    for entry in ordered:
-        cd = entry[5]
-        for group in groups:
-            if any(_entries_same_machine(cd, member[5]) for member in group):
-                group.append(entry)
-                break
-        else:
-            groups.append([entry])
-    return groups
-
-
 def _attach_observation(cur, obs_id: uuid.UUID | None, device_id: uuid.UUID) -> None:
     """Attach one observation to a device.
 
@@ -340,8 +306,9 @@ def _maybe_create_candidate(
         for device_id in sorted(
             {
                 device_id
-                for device_id, _lifecycle, name_short, _key, is_current, _platform, _entity_key,
-                entity_type in client_record_names(cur, TENANT_ID, client_id)
+                for device_id, _lifecycle, name_short, _key, is_current, _platform, _entity_key, entity_type, _source_instance_id in client_record_names(
+                    cur, TENANT_ID, client_id
+                )
                 if is_current and entity_type in types and name_short == norm
             },
             key=str,
@@ -764,7 +731,9 @@ def _record_identity_conflict_assessments(cur, finding_type_id: int) -> None:
         if not participants:
             continue
         if client_id:
-            participants += (Participant("client", str(client_id), "context", TENANT_ID),)
+            participants += (
+                Participant("client", str(client_id), "context", TENANT_ID),
+            )
         condition = Condition(
             TENANT_ID,
             "entity",
@@ -999,7 +968,8 @@ def _collapse_mac_variants(
         platforms: set[str] = set()
         ids_by_platform: dict[str, set[str]] = {}
         for _key, entries in group:
-            for platform, _entity_type, entity_key, _first, _last, _cd in entries:
+            for entry in entries:
+                platform, _entity_type, entity_key, _first, _last, _cd = entry[:6]
                 platforms.add(platform)
                 ids_by_platform.setdefault(platform, set()).add(entity_key)
         if len(platforms) < 2:
@@ -1112,9 +1082,8 @@ def _promote_unmatched_clusters(
 
     cur.execute(
         """
-        SELECT client_id, platform, entity_type, entity_key,
-               MIN(observed_at), MAX(observed_at),
-               (ARRAY_AGG(canonical_data ORDER BY observed_at DESC))[1]
+        SELECT client_id, source_instance_id, platform, entity_type, entity_key,
+               observed_at, observed_at, canonical_data, observation_id
         FROM operations.entity_observation_current
         WHERE tenant_id = %s AND device_id IS NULL AND client_id IS NOT NULL
           AND active = TRUE
@@ -1124,7 +1093,6 @@ def _promote_unmatched_clusters(
           -- 4,991 Devices were minted from Hudu doc.asset records before this
           -- was caught. Promotion must be opt-in per entity type.
           AND entity_type = ANY(%s)
-        GROUP BY client_id, platform, entity_type, entity_key
         """,
         (TENANT_ID, sorted(identity_entity_types(cur))),
     )
@@ -1133,62 +1101,35 @@ def _promote_unmatched_clusters(
         return 0
     touched: set = set()
 
-    # (client_id, norm) → list of (platform, entity_type, entity_key, first, last, cd)
+    # (client_id, norm) → source records with their exact observation IDs.
     clusters: dict[tuple, list[tuple]] = {}
     for (
         client_id,
+        source_instance_id,
         platform,
         entity_type,
         entity_key,
         first_seen,
         last_seen,
         raw_cd,
+        observation_id,
     ) in unresolved:
         cd = raw_cd or {}
         hostname = cd.get("hostname") or cd.get("guest_name")
         norm = record_name_short(cur, platform, entity_type, hostname, cd.get("domain"))
         if not norm:
             continue
-        # A record already attached to a device was resolved in an earlier
-        # pass — these stale NULL observations just backfill; a new device for
-        # them would be an empty orphan row.
-        #
-        # This guard used to read `operations.device_links`, which was written
-        # a few lines below in this same transaction. Migration 0121 retires
-        # that write, and the replacement `entity_source_links` is only
-        # derived later in the cycle by
-        # sync_entity_source_links_from_observations(). Reading the derived
-        # table here would leave the guard blind to anything attached during
-        # the current run and mint a duplicate device for it — the same
-        # ordering trap the entity anchor had before 322d2a4.
-        #
-        # The sibling observation is the correct source: every attachment,
-        # whether by fast path, by this resolver or by promotion, sets
-        # `entity_observation_current.device_id` in the transaction that makes
-        # it. Verified against production before the cutover: across all four
-        # sources, zero (source, external_id) keys disagreed between the link
-        # table and the observation's device_id.
-        cur.execute(
-            """
-            SELECT device_id FROM operations.entity_observation_current
-            WHERE tenant_id = %s AND platform = %s AND entity_key = %s
-              AND entity_type = %s AND device_id IS NOT NULL
-            LIMIT 1
-            """,
-            (TENANT_ID, platform, entity_key, entity_type),
-        )
-        linked = cur.fetchone()
-        if linked:
-            cur.execute(
-                "SELECT operations.associate_unassociated_records(%s, %s, %s, %s,"
-                " 'source_identity', 'ingest.identity.resolver')",
-                (TENANT_ID, platform, entity_key, linked[0]),
-            )
-            touched.add(linked[0])
-            invalidate_client_names(client_id)
-            continue
         clusters.setdefault((client_id, norm), []).append(
-            (platform, entity_type, entity_key, first_seen, last_seen, cd)
+            (
+                platform,
+                entity_type,
+                entity_key,
+                first_seen,
+                last_seen,
+                cd,
+                source_instance_id,
+                observation_id,
+            )
         )
 
     clusters = _collapse_mac_variants(clusters)
@@ -1196,16 +1137,30 @@ def _promote_unmatched_clusters(
 
     promoted = 0
     for (client_id, norm), entries in clusters.items():
-        # ADR-0032: every machine group goes through the same matching as a
-        # single record, in turn. A group joins an existing Computer, or one
-        # an earlier group of this cluster just created, unless a hard
-        # conflict proves it is a different machine; only then is a new
-        # Computer created. Nothing is created without matching (the old
-        # "kept separate" path minted Computers for same-source records
-        # without looking at their serial).
-        for group in _group_same_machine(entries):
-            head = max(group, key=lambda entry: entry[4] or entry[3])
-            platform, entity_type, entity_key, _first, _last, cd = head
+        # Decide each record through the shared policy. A sibling in this
+        # unmatched name cluster cannot lend its hardware match or independent
+        # corroboration to another record.
+        ordered = sorted(
+            entries, key=lambda entry: (entry[0], entry[1], str(entry[6]), entry[2])
+        )
+        for entry in ordered:
+            (
+                platform,
+                entity_type,
+                entity_key,
+                _first,
+                _last,
+                cd,
+                source_instance_id,
+                observation_id,
+            ) = entry
+            hostname_raw = cd.get("hostname") or cd.get("guest_name")
+            record_name = (
+                record_name_short(
+                    cur, platform, entity_type, hostname_raw, cd.get("domain")
+                )
+                or norm
+            )
             match = resolve_match(
                 cur,
                 tenant_id=TENANT_ID,
@@ -1214,24 +1169,24 @@ def _promote_unmatched_clusters(
                 entity_type=entity_type,
                 serial=cd.get("serial_number"),
                 vm_uuid=cd.get("vm_uuid"),
-                hostname=norm,
+                hostname=record_name,
                 macs=cd.get("macs") or [],
                 client_id=client_id,
                 policies=identity_policies,
                 is_online=cd.get("is_online"),
+                source_instance_id=source_instance_id,
             )
             if match is not None:
-                for entry in group:
-                    cur.execute(
-                        "SELECT operations.associate_unassociated_records(%s, %s, %s, %s,"
-                        " %s, 'ingest.identity.resolver')",
-                        (TENANT_ID, entry[0], entry[2], match.device_id, match.matcher[:32]),
-                    )
+                _attach_observation(cur, observation_id, match.device_id)
                 touched.add(match.device_id)
                 invalidate_client_names(client_id)
                 continue
-            touched.add(_create_device_for_group(cur, agent_ids, client_id, norm, group))
-            # The next group of this cluster must see the Computer just created.
+            device_id = _create_device_for_group(
+                cur, agent_ids, client_id, record_name, [entry]
+            )
+            touched.add(device_id)
+            # Later records see the new Computer, but must independently match
+            # it through the same evidence policy.
             invalidate_client_names(client_id)
             promoted += 1
 
@@ -1483,7 +1438,11 @@ def refresh_roaming_records(cur) -> None:
     seconds = time.monotonic() - started
     if claimed:
         _complete_maintenance(cur, ROAMING_COMPONENT, seconds)
-    _telemetry["roaming"] = {"ran": True, "records": records, "seconds": round(seconds, 1)}
+    _telemetry["roaming"] = {
+        "ran": True,
+        "records": records,
+        "seconds": round(seconds, 1),
+    }
     log.info("resolver: %s roaming agent records in %.1fs", records, seconds)
 
 
@@ -1501,7 +1460,11 @@ def reconcile_computer_names() -> None:
             changed = write_computer_names(cur, None)
         seconds = time.monotonic() - started
         _telemetry["naming"] = {"changed": changed, "seconds": round(seconds, 1)}
-        log.info("resolver: naming reconciliation changed %d Computers in %.1fs", changed, seconds)
+        log.info(
+            "resolver: naming reconciliation changed %d Computers in %.1fs",
+            changed,
+            seconds,
+        )
     except Exception:
         _telemetry["naming"] = {"failed": True}
         log.exception("resolver: naming reconciliation failed — continuing")
@@ -1537,7 +1500,8 @@ def run_shadow_naming() -> None:
             if cur.fetchone()[0]:
                 # Collisions of this pass, for the identity findings (ADR-0034).
                 cur.execute(
-                    "SELECT operations.refresh_computer_name_collisions(%s::bigint)", (TENANT_ID,)
+                    "SELECT operations.refresh_computer_name_collisions(%s::bigint)",
+                    (TENANT_ID,),
                 )
                 collisions = cur.fetchone()[0]
         with db.transaction() as cur:
@@ -1677,9 +1641,9 @@ def _create_device_for_group(
     # which projects device_id (PLAN-004 Stage B).
     for entry in group:
         cur.execute(
-            "SELECT operations.associate_unassociated_records(%s, %s, %s, %s,"
-            " 'promotion', 'ingest.identity.resolver')",
-            (TENANT_ID, entry[0], entry[2], device_id),
+            "SELECT operations.associate_observation(%s, %s, %s, 'promotion',"
+            " 'ingest.identity.resolver', true)",
+            (TENANT_ID, entry[7], device_id),
         )
     log.info(
         "resolver: promoted device %s hostname=%s client=%s platforms=%s",
@@ -2068,7 +2032,10 @@ def _sync_device_attributes(cur) -> None:
             (TENANT_ID,),
         )
         if cur.rowcount:
-            log.info("resolver: cleared %d unmatched groups that now have a client", cur.rowcount)
+            log.info(
+                "resolver: cleared %d unmatched groups that now have a client",
+                cur.rowcount,
+            )
         # Close the findings whose group is no longer pending.
         cur.execute(
             """
@@ -2337,7 +2304,7 @@ def _write_layer_entities_for_new_device(
     if entries and agent_ids:
         seen_agents: set[int] = set()
         for entry in entries:
-            platform, entity_type, _entity_key, e_first, e_last, e_cd = entry
+            platform, entity_type, _entity_key, e_first, e_last, e_cd = entry[:6]
             if not entity_type or not entity_type.startswith("agent."):
                 continue
             agent_id = agent_ids.get(platform)
