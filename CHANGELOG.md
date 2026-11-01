@@ -2,6 +2,16 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.139.1] — 2026-11-01 — Superseded software failures
+
+### Fixed
+
+- From 0.139.0, failed rows in a queue open a High stalled-queue issue. 28 old
+  failed software refreshes would have kept it open, although a later refresh of
+  each of those Computers had succeeded. A successful refresh now closes that
+  Computer's earlier failed entries and keeps their original error. Migration
+  0393 applies this once to the 28 existing entries.
+
 ## [0.139.0] — 2026-11-01 — Nothing left in limbo (PLAN-004 R4 follow-up)
 
 ### Added
