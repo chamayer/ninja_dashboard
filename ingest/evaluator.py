@@ -41,7 +41,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from ingest import computer_listing, db, device_status_settings, normalize
+from ingest import computer_listing, db, device_status_settings, normalize, platform_findings
 from ingest.condition_evidence import (
     ADMIN_FINDING_UPSERT_SQL,
     admin_finding_upsert_params,
@@ -467,15 +467,14 @@ def _source_failure_guard(
             (tenant_id, ft_id, active_keys),
         )
         for finding_id, condition_key in cur.fetchall():
-            record_assessment(
-                cur,
-                Condition(
-                    tenant_id, "admin", str(finding_id), "source_failure", condition_key, "open"
-                ),
-                (),
-                EvaluationCoverage(True, True, True, True),
-                now=now,
-                reevaluation_key=f"evaluator-admin-clear:{condition_key}:{now.isoformat()}",
+            # The same participant scope the platform writer uses; a condition with
+            # no participant gets no ``parent_open`` signal and can never clear.
+            binding = condition_key.removeprefix("source_failure:binding:")
+            subject = platform_findings._subject(
+                "source_binding" if binding != condition_key else "source_failure", binding
+            )
+            platform_findings._record_platform_assessment(
+                cur, finding_id, condition_key, "source_failure", subject, now, measured=True
             )
         cur.execute(
             """
