@@ -1010,9 +1010,9 @@ commit and push authorization if approved.
 
 ## PLAN-003 — Central work queue and finding state
 
-**Status:** Active, design and implementation-readiness work. No runtime,
-schema/data, commit or deployment action has started. Preserve the unrelated
-dirty worktree.
+**Status:** R1–R3 implementation released through 0.134.1; PLAN-003 is complete.
+The client dashboard now uses the shared independent-action count under the
+PLAN-036 continuation. Preserve unrelated dirty work.
 **Goal/scope:** one grouped Issues queue, one authoritative entity/admin finding
 store and one Covers/Requires contract, preserving history, subject distinctions,
 permissions and tenant isolation. Candidate storage stays separate; coordinate
@@ -1218,9 +1218,10 @@ confirmation states eligible/ineligible counts (`confirmIssueAction`). Redeploye
 all three containers healthy (status only). Suite: the
 8 baseline failures plus `test_migration_0309/0318_postgres` (missing SQL
 functions in the harness), which fail identically on `4673dc1`.
-**Not done / follow-up:** client-page per-domain counts still read raw findings
-(not a mapping count; no design line requires them on the selection); production
-latency unmeasured. **Deployed (0.134.0):** Portainer redeployed Operations, ingest and the
+**Not done / follow-up:** other client-page per-domain counts still read raw
+findings; no current design requirement assigns those to the shared queue.
+Production latency remains unmeasured. The scoped client mapping total now uses
+the independent-action selection under PLAN-036. **Deployed (0.134.0):** Portainer redeployed Operations, ingest and the
 Jobs worker; all healthy (container status only; no authenticated page check, and
 reading container logs was not permitted in this session).
 
@@ -1397,15 +1398,17 @@ and [registry](../docs/records/PLAN_REGISTRY.md). No further PLAN-021 action
 remains.
 ## PLAN-004 — Identity and source-record maintenance review
 
-**Active, review only.** Full review scope, confirmed gaps, user requirements,
-ownership and acceptance gates: [handoff](docs/plans/PLAN-004-source-record-review.md).
+**R4 implementation released; PLAN-004 remains in verification.** Revision 8
+design and release results are in the [handoff](docs/plans/PLAN-004-source-record-review.md).
 PLAN-003 owns shared finding storage and queue presentation; PLAN-004 owns
-matching, source-record maintenance and detection. Initial production/code
-review is complete; fleet impact and all-source contracts remain pending.
-**Next:** resume in a fresh session, verify deployed/Git state, then complete
-the producer/consumer/state matrix and aggregate review before implementation.
+matching, source-record maintenance and detection. Local intake failure
+validation and the resolver lifecycle follow-up are complete. Remaining: review
+reassessment changed/ambiguous/unmatched rows on the authorized host and perform
+the post-release timing/queue observation under the R4-2 waiver.
 
-**R4 blocked on a decision (2026-10-30, after R3 release 0.134.0).** Final design
+**Historical checkpoint — decision resolved and R4 released.** The 2026-10-30
+R4 decision pause after R3 release 0.134.0 is retained below as implementation
+history. Final design
 §3/§7.2 has intake take the shared tenant guard in every observation-write
 transaction. R2's writers take the exclusive guard via `db.findings_transaction`
 (resolver, client resolver, cmdb, patch, platform, Windows servicing, software
@@ -1512,5 +1515,6 @@ with the four native types (0370 had left the active policy at 71 of 75 types,
 which `create_condition_policy_version` requires to match) and requeues their
 subjects. Dev check (rolled back): participants written, assessment `eligible`,
 state `needs_action/ready`. ADR-0050 (proposed) records what a Computer is for.
+**PLAN-036 (0.138.0, 2026-11-01):** record-first findings and one §5 identity policy; see [PLAN-036](../docs/plans/PLAN-036-record-first-findings.md#release-checkpoint-2026-11-01).
 **Next:** user review of the 109 changed and 88 ambiguous rows (unmatched attached rows
 keep their confirmed association); final acceptance testing (user).

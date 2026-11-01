@@ -2,6 +2,37 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.138.0] — 2026-11-01 — Record-first findings and one identity policy (PLAN-036, ADR-0050)
+
+### Added
+
+- Software is kept per source record (Ninja), so it is evaluated as soon as the
+  record arrives, attached to a Computer or not. New source-record issues, none
+  of which notify: vulnerable software, rejected software, an unauthorized
+  remote-access/RMM tool, a suspicious name, and a threat-intelligence hint.
+  They use the same CVSS/KEV, reject, authorization and approval rules as
+  Computer findings. Missing policy context is shown as unknown.
+- The Computer page lists the issues of every source record that was on that
+  Computer while the issue was open (through link history), with its source.
+- More record checks: MAC validity, Hudu card references (the existing CMDB
+  issue keeps the work when it covers the same asset), source-group attribution,
+  and reported connectivity and last contact for agents.
+- Admin Health issues for a source type with no record role, and for any record
+  whose Computer column disagrees with its link. Rows without a stable identity
+  are kept as intake errors, fail the snapshot and skip reconciliation.
+
+### Changed
+
+- One matching policy for intake, the resolver, reassessment and previews
+  (design §5). A record attaches automatically only to exactly one eligible
+  Computer. Recency never breaks a tie, and serial or VM UUID matches need
+  matching name or MAC evidence from another source. Each record is promoted on
+  its own evidence.
+- The client dashboard counts independent corrective actions, as Issues does.
+  The client resolver closes stale per-group findings with a reason.
+- All new condition definitions are activated in one policy version, and the
+  findings contract is 6, so new workers wait for this release's migrations.
+
 ## [0.137.2] — 2026-10-30 — Source-record issues use the shared condition contract
 
 ### Fixed

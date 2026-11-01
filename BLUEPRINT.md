@@ -19,14 +19,15 @@ validation results, or completed-plan summaries here.
 
 ## Next action — active plan routing
 
+- **PLAN-036 — active.** Complete the missed PLAN-003 client action-count and
+  PLAN-004 resolver lifecycle follow-ups; production reassessment review remains
+  gated. See the [handoff](docs/plans/PLAN-036-record-first-findings.md).
+
 - **PLAN-004 — active; R4 Stages A, C and B released 2026-10-30 (0.135.0–0.137.0).**
   Next: review the one-time reassessment's changed/ambiguous/unmatched rows and the
   R4 follow-ups in `operations/TODO.md`; watch ingest timings (R4-2 waiver). See the
   [Operations handoff](operations/BLUEPRINT.md#r4-implementation-started-2026-10-30-branch-plan003-r3-base-7a8b67b)
   and [final design](operations/docs/plans/PLAN-004-source-record-final-design.md).
-
-- **PLAN-003 — active.** R1–R3 released; R4 (PLAN-004) released 2026-10-30 (0.135.0–0.137.0).
-  Next: final acceptance testing of R0–R4 (user, after the plan).
 
 - **PLAN-026 — active, approval-gated.** PLAN-025 is complete; next obtain
   explicit approval to implement the source configuration UI using its

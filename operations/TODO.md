@@ -6,27 +6,29 @@
 
 ## Current Operations backlog
 
-- [ ] **PLAN-004 R4 follow-ups** (2026-10-30, not approved scope):
-      (1) emit `source_record_policy_incomplete` at source-instance/role scope when a
-      received type has no role; no production type is unclassified today, so only
-      the assessment records it. (2) Make the retired link sync's divergence
-      report a finding instead of a database warning. (3) Intake-error subjects
-      (`subject_kind = 'intake_error'`): the table supports them, but intake still
-      raises on a row without a stable identity rather than admitting it.
-      (4) Watch ingest run timings, assessment queue depth and oldest dirty revision
-      after release (R4-2 waiver); the job stops early while the evaluator holds the
-      exclusive guard. (5) Review the reassessment's changed/ambiguous/unmatched
-      rows (report on the host, see the Operations blueprint): 109 changed, 88
-      ambiguous, 137 unmatched on Computers with other records.
-- [ ] **ADR-0050 follow-ups** (2026-10-30, proposed; each needs approval):
-      (1) shared design §5 attachment policy for intake, resolver, Stage A identity
-      rule and the reassessment preview, plus the ADR-0032 amendment (remove the
-      recency tie-break first); (2) remaining design §4 rules (reference
-      correctness, purpose, per-record attribution); (3) row-1 findings per source
-      record by domain (software first), with source-record keys on their stores;
-      (4) Computer-page aggregation of record/case findings through link history;
-      (5) one owner per correction across record and Computer producers, with
-      hand-over on attach/detach.
+- [ ] **Computer findings page presentation** (deferred from ADR-0050, 2026-10-30):
+      redesign the page so the combined machine view remains easy to scan while
+      showing contributing source names unobtrusively in finding details. Preserve
+      the distinction in data ownership without making operators learn internal
+      subject plumbing. Define layout and acceptance when activated.
+
+- [ ] **PLAN-004 R4 production follow-ups** (2026-10-30; continuation approved):
+      PLAN-036 now registers a durable divergence finding (migration 0383).
+      Local PostgreSQL validation of durable `intake_error` subjects and
+      failed-snapshot behavior is complete under PLAN-036. Remaining: review the
+      reassessment's changed, ambiguous and unmatched rows on the authorized
+      host. Run timing and queue observation remain post-release checks under
+      the R4-2 waiver. See
+      [PLAN-036](../docs/plans/PLAN-036-record-first-findings.md).
+- [x] **ADR-0050 approved continuation — local implementation** (2026-10-30):
+      record-first software risk findings, compact Computer-page source attribution,
+      unique/corroborated matching and exact per-observation resolver association
+      are implemented locally. The shared client mapping action count and stale
+      resolver-finding lifecycle/reasons are implemented and locally validated.
+      Agent status/contact
+      is now assessed as source evidence; a stale-agent finding remains undefined
+      until an explicit source-role threshold is established. See
+      [PLAN-036](../docs/plans/PLAN-036-record-first-findings.md).
 - [ ] **PLAN-004 deferred capabilities** (2026-10-29):
       [PLAN-033: case combining](docs/plans/PLAN-033-source-record-case-combining.md)
       and [PLAN-034: source-record notifications](docs/plans/PLAN-034-source-record-notifications.md)
