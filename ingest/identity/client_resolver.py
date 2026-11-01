@@ -902,7 +902,7 @@ def _resolve_stale_client_mapping_finding(
     cur.execute(
         """UPDATE operations.findings
               SET finding_details = COALESCE(finding_details, '{}'::jsonb)
-                  || jsonb_build_object('closure_reason', %s)
+                  || jsonb_build_object('closure_reason', %s::text)
             WHERE tenant_id = %s AND condition_namespace = %s
               AND finding_type_id = %s AND condition_key = %s
               AND status = 'resolved'""",
