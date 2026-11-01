@@ -2,6 +2,16 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.138.2] — 2026-11-01 — Condition policy fix
+
+### Fixed
+
+- From 0.138.0, condition assessments failed across the platform. The new
+  condition policy gave two definitions a label, category and type, which
+  schema 2 policies must not carry, so the policy could not be loaded.
+  `conditions-registry-13` removes them, and failed source-record assessments
+  are queued again.
+
 ## [0.138.1] — 2026-11-01 — Source-record assessment fix
 
 ### Fixed
