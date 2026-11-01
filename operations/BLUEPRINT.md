@@ -1515,6 +1515,7 @@ with the four native types (0370 had left the active policy at 71 of 75 types,
 which `create_condition_policy_version` requires to match) and requeues their
 subjects. Dev check (rolled back): participants written, assessment `eligible`,
 state `needs_action/ready`. ADR-0050 (proposed) records what a Computer is for.
+**Hotfix 0.138.1 (2026-11-01):** 0.138.0 deployed cleanly (0387, policy 12, contract 6, parity 0) but every source-record batch failed on a placeholder-count bug in the software-signal query (unit tests mock the cursor); fixed, failed rows requeued by 0388; validated on a real dev database, including synthetic software rows.
 **PLAN-036 (0.138.0, 2026-11-01):** record-first findings and one §5 identity policy; see [PLAN-036](../docs/plans/PLAN-036-record-first-findings.md#release-checkpoint-2026-11-01).
 **Next:** user review of the 109 changed and 88 ambiguous rows (unmatched attached rows
 keep their confirmed association); final acceptance testing (user).

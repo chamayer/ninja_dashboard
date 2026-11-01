@@ -2,6 +2,15 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.138.1] — 2026-11-01 — Source-record assessment fix
+
+### Fixed
+
+- Source-record assessment failed on every batch after 0.138.0: the software
+  name and threat-signal check passed eight parameters to a query that takes
+  two ("the query has 2 placeholders but 8 parameters were passed"). It now
+  passes the right two. Records that failed are queued again.
+
 ## [0.138.0] — 2026-11-01 — Record-first findings and one identity policy (PLAN-036, ADR-0050)
 
 ### Added
