@@ -68,7 +68,7 @@ services:
     build:
       context: .
       dockerfile: ingest/Dockerfile
-    command: ["python", "-m", "ingest.migrations", "--through", "084_exposure_only_actionable_types"]
+    command: ["python", "-m", "ingest.migrations", "--through", "106_capability_tag_rule"]
     env_file:
       - .env.dev
     environment:
@@ -80,6 +80,34 @@ services:
       postgres:
         condition: service_healthy
       operations-migrations-bootstrap:
+        condition: service_completed_successfully
+
+  operations-source-record-bootstrap:
+    build:
+      context: .
+      dockerfile: operations/Dockerfile
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >-
+        export OPERATIONS_DB_USER="$$OPERATIONS_MIGRATE_DB_USER";
+        export OPERATIONS_DB_PASSWORD="$$OPERATIONS_MIGRATE_DB_PASSWORD";
+        if python manage.py showmigrations operations | grep -q '\[X\] 0321_os_unknown_coverage_cover'; then
+          echo 'Operations source-record prerequisites already bootstrapped';
+        else
+          python manage.py migrate operations 0152_device_observation_current_read_model --noinput;
+        fi
+    env_file:
+      - .env.dev
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      OPERATIONS_DB_NAME: ninja_dev
+      OPERATIONS_ENV_FILE: /app/envdir/.env
+      DJANGO_SETTINGS_MODULE: config.settings.dev
+    depends_on:
+      postgres:
+        condition: service_healthy
+      ingest-schema-bootstrap:
         condition: service_completed_successfully
 
   dev-ninja-core-grants:
@@ -101,7 +129,7 @@ services:
       ingest-schema-bootstrap:
         condition: service_completed_successfully
 
-  operations-jobs-bootstrap:
+  operations-pre-final-schema-bootstrap:
     build:
       context: .
       dockerfile: operations/Dockerfile
@@ -110,10 +138,10 @@ services:
       - >-
         export OPERATIONS_DB_USER="$$OPERATIONS_MIGRATE_DB_USER";
         export OPERATIONS_DB_PASSWORD="$$OPERATIONS_MIGRATE_DB_PASSWORD";
-        if python manage.py showmigrations operations | grep -q '\[X\] 0282_software_device_readiness'; then
-          echo 'Jobs schema already bootstrapped';
+        if python manage.py showmigrations operations | grep -q '\[X\] 0321_os_unknown_coverage_cover'; then
+          echo 'Operations prerequisites already bootstrapped';
         else
-          python manage.py migrate operations 0184_jobs_admission_and_schedule_apis --noinput;
+          python manage.py migrate operations 0321_os_unknown_coverage_cover --noinput;
         fi
     env_file:
       - .env.dev
@@ -126,7 +154,25 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-      ingest-schema-bootstrap:
+      operations-source-record-bootstrap:
+        condition: service_completed_successfully
+
+  ingest-final-schema-bootstrap:
+    build:
+      context: .
+      dockerfile: ingest/Dockerfile
+    command: ["python", "-m", "ingest.migrations", "--through", "118_drop_legacy_agent_compliance"]
+    env_file:
+      - .env.dev
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: ninja_dev
+      POSTGRES_USER: ninja_dev
+    depends_on:
+      postgres:
+        condition: service_healthy
+      operations-pre-final-schema-bootstrap:
         condition: service_completed_successfully
 
   job-definitions:
@@ -146,7 +192,7 @@ services:
         condition: service_healthy
       ingest-migrations:
         condition: service_completed_successfully
-      operations-jobs-bootstrap:
+      operations-pre-final-schema-bootstrap:
         condition: service_completed_successfully
 
   operations-readiness-bootstrap:
@@ -175,6 +221,8 @@ services:
       postgres:
         condition: service_healthy
       job-definitions:
+        condition: service_completed_successfully
+      ingest-final-schema-bootstrap:
         condition: service_completed_successfully
 
   ingest:
