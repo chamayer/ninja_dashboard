@@ -7,6 +7,16 @@ Read Inbox at the start of every session.
 
 ## Inbox
 
+- [ ] **Platform evaluation holds the tenant guard for 30+ minutes (measured
+      2026-11-01):** `platform-evaluate` held the guard from 06:30 to 07:02 UTC,
+      and again for more than 30 minutes from 10:36 UTC (after policy 14 and the
+      full record requeue), in one transaction writing condition assessments and
+      participants. Meanwhile source-record assessment yields with 0 rows, and
+      every exclusive-guard caller waits; two ingest sessions sat in
+      `acquire_tenant_guard('exclusive')` for 13 and 31 minutes. Candidate:
+      commit evaluation in bounded batches, each taking the guard, as
+      source-record assessment does. The change affects evaluator atomicity, so it
+      needs design approval.
 - [ ] **Generic relationship projection blocked since 2026-10-21 (found
       2026-11-01, read-only):** every `sync_entity_relationships` batch raises
       `relationship source cardinality would be exceeded`, which the pipeline

@@ -209,3 +209,7 @@ require their existing operational gate and are not evidenced by local tests.
   23 resolver runs failed and their evaluations were marked prerequisite-failed.
   Second, source-record software history opened two rows for a list that named one
   title twice: 441 Computers' refreshes failed, and 0392 queues them again.
+- 0.139.1 (`87d870cb`) closes superseded failed software refreshes. The one-time
+  disposition run kept all 1,271 reassessment rows that changed, matched ambiguously
+  or lost their match, and moved none. Details are in `operations/BLUEPRINT.md`
+  (leave-nothing-in-limbo follow-up).

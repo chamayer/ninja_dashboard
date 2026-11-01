@@ -1541,7 +1541,20 @@ this train and is in `TODO.md`.
 **Host tests (throwaway compose project, versus 0.137.2 baseline):** Operations has the
 same 9 failures as the baseline, with no new ones. Ingest had one new failure, a
 source-text test that still pointed at the pre-PLAN-036 helper file; fixed.
-**Status:** releasing as 0.139.0; disposition run follows the deploy.
+**Status:** Complete. Released as 0.139.0 (`568938dd`) and 0.139.1 (`87d870cb`) on
+2026-11-01; both remotes match. 0.139.1 makes a successful software refresh close
+that Computer's earlier failed entries; 0393 closed the 28 existing ones.
+**Verified on production:** 0390–0393 applied; policy `conditions-registry-14` (84
+definitions) is active. All 441 requeued software refreshes completed, and no software
+queue row is failed. Worker logs show only the known relationship-projection error.
+**Disposition run** `8ca4b2b8` (10:44 UTC; report `~/ninja-backups/dispositions-20261101.json`)
+used a preview of 22,241 records: 20,645 same, 111 changed, 59 ambiguous, 1,426 unmatched.
+Recorded dispositions: keep 1,101 no independent evidence, 111 name-only difference,
+59 ambiguous; **0 moves**, because no corroborated serial/VM UUID pointed to exactly one
+other Computer. 325 unattached unmatched records need no disposition; the
+standing staleness and cleanup rules own them.
+**Deferred (TODO.md):** the relationship projection blocked since 10-21, and
+platform evaluation holding the tenant guard for 30+ minutes.
 
 **Hotfix 0.138.2 (2026-11-01):** 0387 had copied label/category/type into two schema 2
 definitions, so `parse_profile` rejected the active policy and **no condition assessment
