@@ -1323,7 +1323,7 @@ def _software_signal_findings_by_record(
                title_decision, publisher_decision, threat_hits, existing_concern
           FROM resolved
         """,
-        (tenant_id, subject_ids, *((tenant_id,) * 6)),
+        (tenant_id, subject_ids),
     )
     findings: dict[uuid.UUID, dict[str, list[dict]]] = defaultdict(
         lambda: {"suspicious": [], "threat": []}
