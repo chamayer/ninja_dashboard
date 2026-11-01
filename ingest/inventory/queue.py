@@ -33,6 +33,9 @@ DOMAIN_KIND = "software.activity"
 BATCH_DEVICES = 100
 MAX_CLAIM = 5000
 _ERROR_MAX = 2000
+SUPERSEDED_FAILURE_PREFIX = (
+    "Superseded by a later successful refresh of this computer. Error was: "
+)
 _DEVICE_DF = re.compile(r"^id=(\d+)$")
 
 SOFTWARE_ACTIVITY_TYPES: frozenset[str] = frozenset(
@@ -179,6 +182,15 @@ def _finish(entries: list[Entry], error: str = "") -> int:
                 f"UPDATE {TABLE} SET status = 'done', completed_at = NOW(), error = NULL "
                 "WHERE id = ANY(%s)",
                 (ids,),
+            )
+            # A computer refreshed successfully no longer has lost work: close its
+            # earlier failed entries (keeping their error) so the stalled-queue
+            # health finding reflects only refreshes that are still missing.
+            cur.execute(
+                f"UPDATE {TABLE} SET status = 'done', completed_at = NOW(), "
+                "error = %s::text || COALESCE(error, '') "
+                f"WHERE status = 'failed' AND df IN (SELECT df FROM {TABLE} WHERE id = ANY(%s))",
+                (SUPERSEDED_FAILURE_PREFIX, ids),
             )
             return 0
         cur.execute(

@@ -58,3 +58,20 @@ def test_only_single_computer_requests_are_usable():
     assert queue.Entry(1, "id=12", 0, 3).ninja_device_id == 12
     assert queue.Entry(1, "org=5", 0, 3).ninja_device_id is None
     assert queue.Entry(1, "id=1 or 1=1", 0, 3).ninja_device_id is None
+
+
+def test_a_successful_refresh_closes_the_computers_earlier_failures(monkeypatch):
+    cur = _Cursor()
+
+    @contextmanager
+    def _fake_cursor():
+        yield cur
+
+    monkeypatch.setattr(queue, "_tenant_cursor", _fake_cursor)
+    queue._finish([queue.Entry(7, "id=42", 0, 3)])
+    done, superseded = cur.statements
+    assert done[1] == ([7],)
+    sql = " ".join(superseded[0].split())
+    # The failed entries are closed, not deleted, and keep their original error.
+    assert "WHERE status = 'failed' AND df IN" in sql and "COALESCE(error, '')" in sql
+    assert superseded[1] == (queue.SUPERSEDED_FAILURE_PREFIX, [7])
