@@ -70,3 +70,10 @@ def test_client_mapping_conflicts_are_prominent_on_client_and_fleet_dashboards()
     assert "client_mapping_conflict_url" in client_dashboard
     assert "Critical mapping issues" in dashboard
     assert "client_mapping_conflict_clients" in _VIEWS
+
+
+def test_client_dashboard_counts_shared_independent_mapping_actions():
+    client_view = _VIEWS[_VIEWS.index("def org_index"): _VIEWS.index("def org_devices")]
+    assert 'types=issue_selection.mapping_types(), client=client.slug' in client_view
+    assert 'issue_selection.count(mapping_scope)' in client_view
+    assert 'finding_type__name__in=(' not in client_view

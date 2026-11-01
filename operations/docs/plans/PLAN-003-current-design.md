@@ -1,16 +1,17 @@
 # PLAN-003 — Issues queue current design
 
-Status: active, design phase. Checkpoint: 2026-10-27. This consolidates the
-current review direction; it is not authorization to implement, migrate,
-refresh findings, commit or deploy. The registry owns plan status.
+Status: implementation complete through R3; client dashboard count alignment
+is complete locally under PLAN-036. Checkpoint: 2026-10-30. This document records
+the current contract; the registry owns plan lifecycle and release gates.
 
 Use this document for the current contract. The
 [requirements checklist](PLAN-003-issues-page-design.md) preserves historical
 requirements/current-code gaps; the [review report](PLAN-003-review-proposal.md)
 contains the 71-type inventory, primary conversation/commit evidence and
 read-only production checks. Earlier alternatives in those documents do not
-override the later decisions summarized here. Git has unrelated user work;
-preserve it. No application or production changes were made for this review.
+override the later decisions summarized here. Preserve unrelated work. PLAN-003
+R1–R3 have shipped; dashboard count reconciliation is recorded in the PLAN-036
+handoff.
 
 ## Resolved decision: client mapping counts and status
 

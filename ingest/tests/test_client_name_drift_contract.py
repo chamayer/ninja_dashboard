@@ -108,6 +108,84 @@ def test_client_name_drift_closes_entity_findings_with_closed_at():
     assert "resolved_at" not in resolve_unseen
 
 
+def test_stale_group_findings_close_per_type_with_auditable_reasons():
+    source = (Path(__file__).parents[1] / "identity" / "client_resolver.py").read_text()
+    cleanup = source[
+        source.index("def _resolve_stale_client_mapping_findings"):
+        source.index("def _record_resolver_assessment")
+    ]
+    for finding_type in (
+        "client_unattached_group", "unnamed_source_group", "client_link_collision"
+    ):
+        assert f'"{finding_type}"' in source
+    assert "f.condition_namespace" in cleanup
+    assert "f.finding_details" in cleanup
+    assert "status IN ('open', 'acknowledged')" in cleanup
+    assert "source group is no longer present" in cleanup
+    assert "source group became inactive" in cleanup
+    assert "source group was assigned to a client" in cleanup
+    assert "closure_reason" in cleanup
+
+
+def test_unnamed_group_closure_uses_entity_details_and_records_reason(monkeypatch):
+    class Cursor:
+        rowcount = 1
+
+        def __init__(self):
+            self.calls = []
+
+        def execute(self, sql, params=None):
+            self.calls.append((sql, params))
+
+        def fetchone(self):
+            return (True, None, {"name": "New group"})
+
+    cursor = Cursor()
+    monkeypatch.setattr(client_resolver, "_finding_type_id", lambda *args: 17)
+    client_resolver._resolve_stale_client_mapping_finding(
+        cursor,
+        "unnamed_source_group",
+        "entity",
+        "condition-key",
+        {},
+        {"source_binding_id": "binding-id", "entity_key": "group-id"},
+    )
+
+    assert "condition_namespace = 'entity'" in cursor.calls[-2][0]
+    assert cursor.calls[-2][1] == (1, 17, "condition-key")
+    assert cursor.calls[-1][1][0] == "source group now has a usable name"
+
+
+def test_assigned_group_closure_uses_admin_subject_ref_and_reason(monkeypatch):
+    class Cursor:
+        rowcount = 1
+
+        def __init__(self):
+            self.calls = []
+
+        def execute(self, sql, params=None):
+            self.calls.append((sql, params))
+
+        def fetchone(self):
+            return (True, "client-id", {"name": "Acme"})
+
+    cursor = Cursor()
+    cleared = []
+    monkeypatch.setattr(client_resolver, "_resolve_finding", lambda *args: cleared.append(args) or True)
+    monkeypatch.setattr(client_resolver, "_finding_type_id", lambda *args: 19)
+    client_resolver._resolve_stale_client_mapping_finding(
+        cursor,
+        "client_unattached_group",
+        "admin",
+        "condition-key",
+        {"source_binding_id": "binding-id", "external_id": "group-id"},
+        {},
+    )
+
+    assert cleared == [(cursor, "client_unattached_group", "condition-key")]
+    assert cursor.calls[-1][1][0] == "source group was assigned to a client"
+
+
 def test_every_group_renamed_at_its_source_renames_the_client(monkeypatch):
     renamed = []
     emitted, active = _findings(

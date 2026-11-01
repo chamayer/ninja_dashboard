@@ -104,6 +104,11 @@ def drain_client_resolution() -> int:
         log.info("client_resolver: %d unattached org groups", len(rows))
 
         source_by_binding = _load_source_by_binding(cur)
+        active_group_conditions: dict[str, set[str]] = {
+            "client_unattached_group": set(),
+            "unnamed_source_group": set(),
+            "client_link_collision": set(),
+        }
         for obs_id, binding_id, entity_key, platform, canonical_data, observed_at in rows:
             cd = canonical_data or {}
             group_name = (cd.get("name") or "").strip()
@@ -116,6 +121,8 @@ def drain_client_resolution() -> int:
                 # so operators can decide whether to fix at source,
                 # add to placeholder_org_names, or ignore. dedup keyed
                 # on (source_binding, entity_key).
+                condition_key = _cond_group(binding_id, entity_key)
+                active_group_conditions["unnamed_source_group"].add(condition_key)
                 _emit_unnamed_source_group_finding(
                     cur, binding_id, entity_key, source_id, platform,
                 )
@@ -141,10 +148,15 @@ def drain_client_resolution() -> int:
                 _clear_candidate(cur, normalized, client_id)
                 _resolve_finding(cur, "client_unattached_group",
                                  _cond_group(binding_id, entity_key))
+                _resolve_finding(cur, "client_link_collision",
+                                 _cond_group(binding_id, entity_key))
                 attached += 1
                 continue
 
             if len(matches) >= 2:
+                active_group_conditions["client_link_collision"].add(
+                    _cond_group(binding_id, entity_key)
+                )
                 _emit_finding(
                     cur, "client_link_collision",
                     condition_key=_cond_group(binding_id, entity_key),
@@ -167,6 +179,9 @@ def drain_client_resolution() -> int:
                 continue
 
             # Rung 4 — candidate + admin finding.
+            active_group_conditions["client_unattached_group"].add(
+                _cond_group(binding_id, entity_key)
+            )
             _upsert_candidate(
                 cur, normalized, group_name, source_id, entity_key, observed_at,
             )
@@ -183,6 +198,8 @@ def drain_client_resolution() -> int:
                 severity="critical",
                 admin=True,
             )
+
+        _resolve_stale_client_mapping_findings(cur, active_group_conditions)
 
         # A mapped name difference is a client-level finding, or a rename
         # when every group was renamed at its source. Never a rematch;
@@ -768,10 +785,10 @@ def _emit_finding(
         )
 
 
-def _resolve_finding(cur, type_name: str, condition_key: str) -> None:
+def _resolve_finding(cur, type_name: str, condition_key: str) -> bool:
     ft_id = _finding_type_id(cur, type_name)
     if ft_id is None:
-        return
+        return False
     cur.execute(
         """SELECT id, subject_ref FROM operations.admin_findings
            WHERE tenant_id = %s AND finding_type_id = %s AND condition_key = %s
@@ -786,7 +803,7 @@ def _resolve_finding(cur, type_name: str, condition_key: str) -> None:
             cur, type_name, condition_key, subject_ref, datetime.now(timezone.utc)
         )
     if not assessment or not assessment.get("may_clear"):
-        return
+        return False
     cur.execute(
         """
         UPDATE operations.findings
@@ -796,6 +813,100 @@ def _resolve_finding(cur, type_name: str, condition_key: str) -> None:
           AND status IN ('open', 'acknowledged')
         """,
         (_TENANT_ID, ft_id, condition_key),
+    )
+    return cur.rowcount > 0
+
+
+def _resolve_stale_client_mapping_findings(
+    cur, active_conditions: dict[str, set[str]]
+) -> None:
+    """Close resolver findings whose source-group condition is no longer current."""
+    for type_name, conditions in active_conditions.items():
+        cur.execute(
+            """SELECT f.condition_namespace, f.condition_key,
+                      f.subject_ref, f.finding_details
+                 FROM operations.findings f
+                 JOIN operations.finding_types t ON t.id = f.finding_type_id
+                WHERE f.tenant_id = %s
+                  AND ((t.name = 'unnamed_source_group' AND f.condition_namespace = 'entity')
+                       OR (f.condition_namespace = 'admin'
+                           AND f.subject_ref ? 'source_binding_id'
+                           AND f.subject_ref ? 'external_id'))
+                  AND t.name = %s
+                  AND f.status IN ('open', 'acknowledged', 'investigating')
+                  AND f.condition_key <> ALL(%s)""",
+            (_TENANT_ID, type_name, list(conditions)),
+        )
+        stale = cur.fetchall()
+        for namespace, condition_key, subject_ref, details in stale:
+            _resolve_stale_client_mapping_finding(
+                cur, type_name, namespace, condition_key, subject_ref, details
+            )
+
+
+def _resolve_stale_client_mapping_finding(
+    cur,
+    type_name: str,
+    namespace: str,
+    condition_key: str,
+    subject_ref: dict[str, Any] | None,
+    details: dict[str, Any] | None,
+) -> None:
+    """Record why one resolver issue ended, then clear it through assessment."""
+    identity = (details if namespace == "entity" else subject_ref) or {}
+    binding_id = identity.get("source_binding_id")
+    entity_key = identity.get("entity_key" if namespace == "entity" else "external_id")
+    reason = "source group no longer meets this resolver condition"
+    if binding_id and entity_key:
+        cur.execute(
+            """SELECT active, client_id, canonical_data
+                 FROM operations.entity_observation_current
+                WHERE tenant_id = %s AND source_binding_id = %s
+                  AND entity_type = 'org' AND entity_key = %s
+                ORDER BY observed_at DESC LIMIT 1""",
+            (_TENANT_ID, binding_id, entity_key),
+        )
+        current = cur.fetchone()
+        if current is None:
+            reason = "source group is no longer present"
+        elif not current[0]:
+            reason = "source group became inactive"
+        elif current[1] is not None:
+            reason = "source group was assigned to a client"
+        elif type_name == "unnamed_source_group":
+            data = current[2] or {}
+            if (data.get("name") or "").strip() and _norm(data.get("name")):
+                reason = "source group now has a usable name"
+            else:
+                reason = "source group is now a placeholder or excluded group"
+        elif type_name == "client_link_collision":
+            reason = "source group no longer matches multiple clients"
+    if namespace == "entity":
+        type_id = _finding_type_id(cur, type_name)
+        if type_id is None:
+            return
+        cur.execute(
+            """UPDATE operations.findings
+                  SET status = 'resolved', closed_at = NOW()
+                WHERE tenant_id = %s AND condition_namespace = 'entity'
+                  AND finding_type_id = %s AND condition_key = %s
+                  AND status IN ('open', 'acknowledged')""",
+            (_TENANT_ID, type_id, condition_key),
+        )
+        closed = cur.rowcount > 0
+    else:
+        closed = _resolve_finding(cur, type_name, condition_key)
+    if not closed:
+        return
+    type_id = _finding_type_id(cur, type_name)
+    cur.execute(
+        """UPDATE operations.findings
+              SET finding_details = COALESCE(finding_details, '{}'::jsonb)
+                  || jsonb_build_object('closure_reason', %s)
+            WHERE tenant_id = %s AND condition_namespace = %s
+              AND finding_type_id = %s AND condition_key = %s
+              AND status = 'resolved'""",
+        (reason, _TENANT_ID, namespace, type_id, condition_key),
     )
 
 
