@@ -1553,8 +1553,20 @@ Recorded dispositions: keep 1,101 no independent evidence, 111 name-only differe
 59 ambiguous; **0 moves**, because no corroborated serial/VM UUID pointed to exactly one
 other Computer. 325 unattached unmatched records need no disposition; the
 standing staleness and cleanup rules own them.
-**Deferred (TODO.md):** the relationship projection blocked since 10-21, and
-platform evaluation holding the tenant guard for 30+ minutes.
+**0.139.2 (user approved "fix the 2 problems", 2026-11-01):**
+- *Evaluator lock time:* runs grew from ~4 to ~30 min at 0.132.0. The guard check
+  (`tenant_guard_mode`) scans `pg_locks` on every guarded write, and the evaluator
+  held one advisory lock per finding (~6,650) from `reconcile_condition_participants`.
+  Sampled writes took 120–170 ms each. 0394 drops that per-finding lock, which the
+  exclusive tenant guard already makes redundant. Batching the evaluator is not needed.
+- *Relationship projection:* 45 dirty tuples wanted a second active edge for one
+  OS installation. In 40 the old edge had lost evidence but was demoted in the same
+  statement; in 5, sources at equal authority name two Computers. 0395 decides a
+  one-target source as a whole and demotes before activating. A higher authority wins
+  (`superseded`); a tie keeps the current edge, and the others become `conflict`.
+- Host tests: 3 real-Postgres projector cases plus the 0394 check passed; Django
+  migration state is clean; owners pre-checked on production.
+**Deferred (TODO.md):** an operator finding for relationship `conflict` rows.
 
 **Hotfix 0.138.2 (2026-11-01):** 0387 had copied label/category/type into two schema 2
 definitions, so `parse_profile` rejected the active policy and **no condition assessment

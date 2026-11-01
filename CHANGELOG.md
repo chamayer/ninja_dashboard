@@ -2,6 +2,26 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.139.2] — 2026-11-01 — Evaluator lock time and relationship projection
+
+### Fixed
+
+- Platform evaluation took about 30 minutes per run from 0.132.0 (about 4 before),
+  and held the findings tenant guard the whole time, so other findings writers
+  waited. Every guarded write checks the guard by reading `pg_locks`, and the
+  evaluator held one extra advisory lock per finding it reconciled. Migration 0394
+  drops that per-finding lock; the exclusive tenant guard already serializes
+  these writers.
+- The generic relationship projection had failed every batch since 2026-10-21
+  ("relationship source cardinality would be exceeded"), leaving 5,631 updates
+  queued. When an OS installation's evidence moved to another Computer, the new
+  edge could be written before the old one was withdrawn. Migration 0395 decides
+  all edges of a one-target source together and withdraws before it activates.
+  When sources disagree, the higher authority wins (the other edge is marked
+  superseded). At equal authority the current edge stays and the others are
+  marked as a conflict, so an installation is never moved or shown on two
+  Computers by a disagreement.
+
 ## [0.139.1] — 2026-11-01 — Superseded software failures
 
 ### Fixed

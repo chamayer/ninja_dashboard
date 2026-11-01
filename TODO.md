@@ -7,28 +7,15 @@ Read Inbox at the start of every session.
 
 ## Inbox
 
-- [ ] **Platform evaluation holds the tenant guard for 30+ minutes (measured
-      2026-11-01):** `platform-evaluate` held the guard from 06:30 to 07:02 UTC,
-      and again for more than 30 minutes from 10:36 UTC (after policy 14 and the
-      full record requeue), in one transaction writing condition assessments and
-      participants. Meanwhile source-record assessment yields with 0 rows, and
-      every exclusive-guard caller waits; two ingest sessions sat in
-      `acquire_tenant_guard('exclusive')` for 13 and 31 minutes. Candidate:
-      commit evaluation in bounded batches, each taking the guard, as
-      source-record assessment does. The change affects evaluator atomicity, so it
-      needs design approval.
-- [ ] **Generic relationship projection blocked since 2026-10-21 (found
-      2026-11-01, read-only):** every `sync_entity_relationships` batch raises
-      `relationship source cardinality would be exceeded`, which the pipeline
-      logs and continues past (also noted in the 10-28 incident). The dirty
-      queue holds 5,631 tuples, all `os_installation_runs_on_computer`, and the
-      oldest is from 2026-10-21 22:33 UTC. 45 of them want an OS installation
-      active on a Computer while another active edge exists for the same
-      installation. The batch takes the oldest rows first, so those block
-      every later tuple. Candidate: withdraw the superseded edge in the same
-      batch, or turn the conflict into an identity finding instead of an
-      exception. The fix changes a SECURITY DEFINER projector, so it needs
-      approval.
+- [ ] **Operator finding for relationship conflicts (0.139.2 follow-up):** the
+      projector now marks a one-target tuple `conflict` (`targets_disagree`) when
+      sources at equal authority name different targets, and keeps the current
+      edge active. On 2026-11-01 five OS installations were in this state (Ninja
+      sources disagreeing which Computer runs them, e.g. two pairs of swapped
+      Computers). The rows are visible only in the relationship admin view;
+      an identity finding would put them in Issues. Needs a new condition
+      definition (policy version), so not yet approved. Target-cardinality-one
+      types (none exist) would still raise in the tuple trigger.
 - [ ] **PLAN-019 — Data pipeline correctness and source-record retention:**
       `active` (docs/plans/PLAN-019-data-pipeline-correctness-and-retention.md);
       Step 1 done; F09 decided (no daily presence); Step 2 (U04) built.
