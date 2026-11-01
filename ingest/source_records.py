@@ -229,8 +229,29 @@ def _acknowledge(
 
 
 def _load_records(cur: Any, tenant_id: int, subject_ids: list[uuid.UUID]) -> list[dict]:
+    # The legacy CMDB owners are read once per batch, not once per record.
     cur.execute(
         """
+        WITH legacy_stale AS (
+            SELECT DISTINCT f.finding_details->>'asset_id' AS asset_id,
+                   f.finding_details->>'source_instance_id' AS source_instance_id
+              FROM operations.findings f
+              JOIN operations.finding_types ft ON ft.id = f.finding_type_id
+             WHERE f.tenant_id = %s AND f.condition_namespace = 'entity'
+               AND f.status IN ('open', 'acknowledged', 'investigating', 'suppressed')
+               AND ft.name = 'cmdb_asset_stale'
+        ), legacy_divergent AS (
+            SELECT DISTINCT f.client_id, ref->>'asset_id' AS asset_id,
+                   ref->>'source_instance_id' AS source_instance_id
+              FROM operations.findings f
+              JOIN operations.finding_types ft ON ft.id = f.finding_type_id
+              CROSS JOIN LATERAL jsonb_array_elements(
+                  CASE WHEN jsonb_typeof(f.finding_details->'source_refs') = 'array'
+                       THEN f.finding_details->'source_refs' ELSE '[]'::jsonb END) ref
+             WHERE f.tenant_id = %s AND f.condition_namespace = 'entity'
+               AND f.status IN ('open', 'acknowledged', 'investigating', 'suppressed')
+               AND ft.name = 'cmdb_link_incorrect'
+        )
         SELECT s.id, s.input_version, s.association_version, s.record_role, s.presence,
                s.platform, s.entity_type, s.source_instance_id, s.external_id,
                o.observation_id, o.client_id, o.canonical_data,
@@ -247,12 +268,10 @@ def _load_records(cur: Any, tenant_id: int, subject_ids: list[uuid.UUID]) -> lis
                            o.canonical_data ->> 'platform_group_id'
                        AND group_link.missing_since IS NULL
                 ) AS source_group_client_id,
-               meta.reported_online, meta.reported_last_contact_at,
                link.entity_id AS device_id,
                d.client_id AS device_client_id,
                link.match_method,
                d.id IS NOT NULL AS device_live,
-               coalesce(meta.restricted, false) AS restricted,
                EXISTS (SELECT 1 FROM operations.entity_candidates c
                         WHERE c.tenant_id = s.tenant_id
                           AND c.source_instance_id = s.source_instance_id
@@ -261,34 +280,11 @@ def _load_records(cur: Any, tenant_id: int, subject_ids: list[uuid.UUID]) -> lis
                           AND c.parent_external_id = s.parent_external_id
                           AND c.external_id = s.external_id
                           AND c.status = 'pending') AS candidate_pending,
-               EXISTS (
-                    SELECT 1 FROM operations.findings f
-                    JOIN operations.finding_types ft ON ft.id = f.finding_type_id
-                     WHERE f.tenant_id = s.tenant_id
-                       AND f.condition_namespace = 'entity'
-                       AND f.status IN ('open', 'acknowledged', 'investigating', 'suppressed')
-                       AND ft.name = 'cmdb_asset_stale'
-                       AND f.finding_details->>'asset_id' = s.external_id
-                       AND f.finding_details->>'source_instance_id' = s.source_instance_id::text
-                ) AS legacy_stale_reference,
-                EXISTS (
-                    SELECT 1 FROM operations.findings f
-                    JOIN operations.finding_types ft ON ft.id = f.finding_type_id
-                     WHERE f.tenant_id = s.tenant_id
-                       AND f.condition_namespace = 'entity'
-                       AND f.status IN ('open', 'acknowledged', 'investigating', 'suppressed')
-                       AND ft.name = 'cmdb_link_incorrect'
-                       AND f.client_id = o.client_id
-                       AND f.finding_details->'source_refs' @>
-                           jsonb_build_array(jsonb_build_object(
-                               'asset_id', s.external_id,
-                               'source_instance_id', s.source_instance_id::text))
-                ) AS legacy_divergent_reference
+               stale_ref.asset_id IS NOT NULL AS legacy_stale_reference,
+               divergent_ref.asset_id IS NOT NULL AS legacy_divergent_reference
           FROM operations.source_record_subjects s
           LEFT JOIN operations.entity_observation_current o
             ON o.tenant_id = s.tenant_id AND o.observation_id = s.observation_id
-          LEFT JOIN operations.v_entity_observation_admin_metadata meta
-            ON meta.tenant_id = s.tenant_id AND meta.observation_id = s.observation_id
           LEFT JOIN operations.entity_source_links link
             ON link.tenant_id = s.tenant_id AND link.source_instance_id = s.source_instance_id
            AND link.external_namespace = s.external_namespace
@@ -298,12 +294,39 @@ def _load_records(cur: Any, tenant_id: int, subject_ids: list[uuid.UUID]) -> lis
            AND link.entity_class_id = 'device'
           LEFT JOIN operations.devices d
             ON d.tenant_id = link.tenant_id AND d.id = link.entity_id AND d.deleted_at IS NULL
+          LEFT JOIN legacy_stale stale_ref
+            ON stale_ref.asset_id = s.external_id
+           AND stale_ref.source_instance_id = s.source_instance_id::text
+          LEFT JOIN legacy_divergent divergent_ref
+            ON divergent_ref.asset_id = s.external_id
+           AND divergent_ref.source_instance_id = s.source_instance_id::text
+           AND divergent_ref.client_id IS NOT DISTINCT FROM o.client_id
          WHERE s.tenant_id = %s AND s.id = ANY(%s::uuid[]) AND s.subject_kind = 'record'
         """,
-        (tenant_id, subject_ids),
+        (tenant_id, tenant_id, tenant_id, subject_ids),
     )
     columns = [c.name for c in cur.description]
-    return [dict(zip(columns, row, strict=True)) for row in cur.fetchall()]
+    records = [dict(zip(columns, row, strict=True)) for row in cur.fetchall()]
+    # Restricted-safe values come from the safe view, filtered by the batch's
+    # observation IDs: a constant filter reaches the view's base table, while a
+    # join to the view made it evaluate every observation.
+    cur.execute(
+        """
+        SELECT observation_id, reported_online, reported_last_contact_at, restricted
+          FROM operations.v_entity_observation_admin_metadata
+         WHERE tenant_id = %s AND observation_id = ANY(%s::uuid[])
+        """,
+        (tenant_id, [r["observation_id"] for r in records if r["observation_id"]]),
+    )
+    safe = {row[0]: row[1:] for row in cur.fetchall()}
+    for record in records:
+        online, contact, restricted = safe.get(
+            record["observation_id"], (None, None, False)
+        )
+        record["reported_online"] = online
+        record["reported_last_contact_at"] = contact
+        record["restricted"] = bool(restricted)
+    return records
 
 
 def _candidate_computers(
@@ -1148,21 +1171,24 @@ def _unauthorized_tools_by_record(
               LEFT JOIN operations.v_software_decision_keys publisher_global
                 ON publisher_global.tenant_id = %s AND publisher_global.match_kind = 'publisher'
                AND publisher_global.scope = 'global' AND publisher_global.match_key = lower(i.publisher)
+        ), concerns AS (
+            -- One pass per batch over open concern findings for these titles.
+            SELECT DISTINCT lower(f.finding_details->>'canonical_name') AS title_key
+              FROM operations.findings f
+              JOIN operations.finding_types other_type ON other_type.id = f.finding_type_id
+             WHERE f.tenant_id = %s
+               AND f.status IN ('open', 'acknowledged', 'investigating', 'suppressed')
+               AND other_type.concern_signal
+               AND lower(f.finding_details->>'canonical_name')
+                   IN (SELECT lower(canonical_name) FROM installs)
         )
         SELECT r.source_record_id, r.client_id, r.canonical_name, r.publisher, r.version,
                r.product_uuid, e.capability, e.alertable, e.evidence_sources,
                c.unauthorized_finding_type, ft.suppressed_by_approval,
                r.title_decision, r.publisher_decision,
-               EXISTS (
-                   SELECT 1 FROM operations.findings f
-                   JOIN operations.finding_types other_type
-                     ON other_type.id = f.finding_type_id
-                    WHERE f.tenant_id = %s
-                      AND f.status IN ('open', 'acknowledged', 'investigating', 'suppressed')
-                      AND other_type.concern_signal
-                      AND lower(f.finding_details->>'canonical_name') = lower(r.canonical_name)
-               ) AS other_concern
+               concern.title_key IS NOT NULL AS other_concern
           FROM resolved r
+          LEFT JOIN concerns concern ON concern.title_key = lower(r.canonical_name)
           LEFT JOIN catalog.v_product_capability_effective e
             ON e.product_uuid = r.product_uuid AND e.alertable
           LEFT JOIN catalog.capability c ON c.key = e.capability
@@ -1292,38 +1318,46 @@ def _software_signal_findings_by_record(
                AND d.deleted_at IS NULL
              WHERE i.tenant_id = %s AND i.source_record_id = ANY(%s::uuid[])
                AND i.stale_since IS NULL
+        ), threat_titles AS (
+            SELECT lower(canonical_name) AS title_key, count(*) AS hits
+              FROM operations.safety_signal
+             WHERE tenant_id = %s AND signal_type = 'threat_hit'
+               AND lower(canonical_name) IN (SELECT lower(canonical_name) FROM installs)
+             GROUP BY 1
+        ), threat_publishers AS (
+            SELECT lower(publisher) AS publisher_key, count(*) AS hits
+              FROM operations.safety_signal
+             WHERE tenant_id = %s AND signal_type = 'threat_hit'
+               AND lower(publisher) IN (SELECT lower(publisher) FROM installs)
+             GROUP BY 1
+        ), concerns AS (
+            SELECT DISTINCT lower(f.finding_details->>'canonical_name') AS title_key
+              FROM operations.findings f
+              JOIN operations.finding_types ft ON ft.id = f.finding_type_id
+             WHERE f.tenant_id = %s
+               AND f.status IN ('open', 'acknowledged', 'investigating', 'suppressed')
+               AND ft.concern_signal
+               AND ft.name NOT IN ('suspicious_name', 'source_record_suspicious_software')
+               AND lower(f.finding_details->>'canonical_name')
+                   IN (SELECT lower(canonical_name) FROM installs)
         ), resolved AS (
             SELECT i.*,
                    {software_coverage.TITLE_DECISION} AS title_decision,
                    {software_coverage.PUBLISHER_DECISION} AS publisher_decision,
                    COALESCE(title_hits.hits, 0) + COALESCE(publisher_hits.hits, 0) AS threat_hits,
-                   EXISTS (
-                       SELECT 1 FROM operations.findings f
-                       JOIN operations.finding_types ft ON ft.id = f.finding_type_id
-                        WHERE f.tenant_id = i.tenant_id
-                          AND f.status IN ('open', 'acknowledged', 'investigating', 'suppressed')
-                          AND ft.concern_signal
-                          AND lower(f.finding_details->>'canonical_name') = lower(i.canonical_name)
-                          AND ft.name NOT IN ('suspicious_name', 'source_record_suspicious_software')
-                   ) AS existing_concern
+                   concern.title_key IS NOT NULL AS existing_concern
               FROM installs i
               {software_coverage.EFFECTIVE_DECISION_JOINS}
-              LEFT JOIN LATERAL (
-                  SELECT count(*) AS hits FROM operations.safety_signal s
-                   WHERE s.tenant_id = i.tenant_id AND s.signal_type = 'threat_hit'
-                     AND lower(s.canonical_name) = lower(i.canonical_name)
-              ) title_hits ON TRUE
-              LEFT JOIN LATERAL (
-                  SELECT count(*) AS hits FROM operations.safety_signal s
-                   WHERE s.tenant_id = i.tenant_id AND s.signal_type = 'threat_hit'
-                     AND lower(s.publisher) = lower(i.publisher)
-              ) publisher_hits ON TRUE
+              LEFT JOIN threat_titles title_hits ON title_hits.title_key = lower(i.canonical_name)
+              LEFT JOIN threat_publishers publisher_hits
+                ON publisher_hits.publisher_key = lower(i.publisher)
+              LEFT JOIN concerns concern ON concern.title_key = lower(i.canonical_name)
         )
         SELECT source_record_id, canonical_name, publisher, version, install_location,
                title_decision, publisher_decision, threat_hits, existing_concern
           FROM resolved
         """,
-        (tenant_id, subject_ids),
+        (tenant_id, subject_ids, tenant_id, tenant_id, tenant_id),
     )
     findings: dict[uuid.UUID, dict[str, list[dict]]] = defaultdict(
         lambda: {"suspicious": [], "threat": []}
@@ -1378,6 +1412,50 @@ def _software_signal_findings_by_record(
     return findings, enabled
 
 
+_TITLE_CVE_TTL = 300.0
+_title_cve_cache: dict[tuple[int, float], tuple[float, dict]] = {}
+
+
+def _title_cve_summaries(
+    cur: Any, tenant_id: int, cvss_cutoff: float
+) -> dict[str, tuple[bool, int, str, float | None]]:
+    """Per title: (any KEV, qualifying CVE count, worst CVE, worst CVSS).
+
+    Covers every title present in source-record inventory. CVE intelligence
+    changes only when the intel Jobs run, so one computation serves a whole
+    assessment run (cached for ``_TITLE_CVE_TTL`` seconds).
+    """
+    key = (tenant_id, cvss_cutoff)
+    cached = _title_cve_cache.get(key)
+    now = time.monotonic()
+    if cached and now - cached[0] < _TITLE_CVE_TTL:
+        return cached[1]
+    cur.execute(
+        """
+        SELECT lower(match.canonical_name),
+               bool_or(cve.kev_flag), count(*),
+               (array_agg(cve.cve_id ORDER BY cve.kev_flag DESC, cve.cvss_v3 DESC NULLS LAST))[1],
+               max(cve.cvss_v3)
+          FROM operations.cve_match match
+          JOIN intel.cves cve ON cve.cve_id = match.cve_id
+         WHERE match.tenant_id = %s
+           AND lower(match.canonical_name) IN (
+               SELECT DISTINCT lower(canonical_name)
+                 FROM operations.source_record_software_current
+                WHERE tenant_id = %s AND stale_since IS NULL)
+           AND (cve.kev_flag OR cve.cvss_v3 >= %s)
+         GROUP BY 1
+        """,
+        (tenant_id, tenant_id, cvss_cutoff),
+    )
+    summaries = {
+        title: (bool(kev), int(count), worst, float(cvss) if cvss is not None else None)
+        for title, kev, count, worst, cvss in cur.fetchall()
+    }
+    _title_cve_cache[key] = (now, summaries)
+    return summaries
+
+
 def assess_records(
     cur: Any,
     tenant_id: int,
@@ -1398,64 +1476,61 @@ def assess_records(
     cvss_cutoff = float(software_config["vulnerable_software_cvss_cutoff"])
     vulnerable_enabled = bool(software_config["vulnerable_software_enabled"])
     rejected_enabled = bool(software_config["rejected_installed_enabled"])
+    # Title-level CVE summaries (cve_match is title-level, like the Computer
+    # finding) are computed once per run and cached; each batch reads only its
+    # installations and whether a Computer finding already owns the title.
+    title_cves = _title_cve_summaries(cur, tenant_id, cvss_cutoff)
     cur.execute(
         """
-        SELECT i.source_record_id, i.canonical_name, i.version,
-               cve.cve_id, cve.cvss_v3, cve.kev_flag,
-               EXISTS (
-                   SELECT 1
-                     FROM operations.source_record_subjects s
-                     JOIN operations.entity_source_links link
-                       ON link.tenant_id = s.tenant_id
-                      AND link.source_instance_id = s.source_instance_id
-                      AND link.external_namespace = s.external_namespace
-                      AND link.parent_external_namespace = s.parent_external_namespace
-                      AND link.parent_external_id = s.parent_external_id
-                      AND link.external_id = s.external_id
-                      AND link.entity_class_id = 'device'
-                     JOIN operations.v_device_software_exposure exposure
-                       ON exposure.tenant_id = link.tenant_id
-                      AND exposure.device_id = link.entity_id
-                     JOIN operations.findings f
-                       ON f.tenant_id = exposure.tenant_id AND f.id = exposure.finding_id
-                     JOIN operations.finding_types ft ON ft.id = f.finding_type_id
-                    WHERE s.tenant_id = i.tenant_id AND s.id = i.source_record_id
-                      AND ft.name = 'vulnerable_software'
-                      AND f.status IN ('open', 'acknowledged', 'investigating', 'suppressed')
-                      AND lower(f.finding_details->>'canonical_name') = lower(i.canonical_name)
-               ) AS owned_by_computer
-          FROM operations.source_record_software_current i
-          JOIN operations.cve_match match
-            ON match.tenant_id = i.tenant_id
-           AND lower(match.canonical_name) = lower(i.canonical_name)
-          JOIN intel.cves cve ON cve.cve_id = match.cve_id
-         WHERE i.tenant_id = %s AND i.source_record_id = ANY(%s::uuid[])
-           AND i.stale_since IS NULL
-           AND (cve.kev_flag OR cve.cvss_v3 >= %s)
-         ORDER BY i.source_record_id, cve.kev_flag DESC, cve.cvss_v3 DESC
+        WITH installs AS (
+            SELECT i.source_record_id, i.canonical_name, i.version,
+                   lower(i.canonical_name) AS title_key
+              FROM operations.source_record_software_current i
+             WHERE i.tenant_id = %s AND i.source_record_id = ANY(%s::uuid[])
+               AND i.stale_since IS NULL
+        ), owned AS (
+            SELECT DISTINCT s.id AS source_record_id,
+                   lower(f.finding_details->>'canonical_name') AS title_key
+              FROM operations.source_record_subjects s
+              JOIN operations.entity_source_links link
+                ON link.tenant_id = s.tenant_id AND link.source_subject_id = s.id
+               AND link.entity_class_id = 'device'
+              JOIN operations.v_device_software_exposure exposure
+                ON exposure.tenant_id = link.tenant_id AND exposure.device_id = link.entity_id
+              JOIN operations.findings f
+                ON f.tenant_id = exposure.tenant_id AND f.id = exposure.finding_id
+              JOIN operations.finding_types ft ON ft.id = f.finding_type_id
+             WHERE s.tenant_id = %s AND s.id = ANY(%s::uuid[])
+               AND ft.name = 'vulnerable_software'
+               AND f.status IN ('open', 'acknowledged', 'investigating', 'suppressed')
+        )
+        SELECT i.source_record_id, i.canonical_name, i.version, i.title_key,
+               owned.source_record_id IS NOT NULL AS owned_by_computer
+          FROM installs i
+          LEFT JOIN owned
+            ON owned.source_record_id = i.source_record_id AND owned.title_key = i.title_key
         """,
-        (tenant_id, subject_ids, cvss_cutoff),
+        (tenant_id, subject_ids, tenant_id, subject_ids),
     )
     software_risks: dict[uuid.UUID, list[dict]] = defaultdict(list)
-    for (
-        subject_id,
-        name,
-        version,
-        cve_id,
-        cvss,
-        kev,
-        owned_by_computer,
-    ) in cur.fetchall():
+    for subject_id, name, version, title_key, owned_by_computer in cur.fetchall():
+        summary = title_cves.get(title_key)
+        if summary is None:
+            continue
+        kev, cve_count, worst_cve, worst_cvss = summary
         software_risks[subject_id].append(
             {
                 "canonical_name": name,
                 "version": version,
-                "cve": cve_id,
-                "cvss": float(cvss) if cvss is not None else None,
-                "kev": bool(kev),
+                "cve": worst_cve,
+                "cvss": worst_cvss,
+                "kev": kev,
+                "cve_count": cve_count,
                 "owned_by_computer": bool(owned_by_computer),
             }
         )
+    for risks in software_risks.values():
+        risks.sort(key=lambda risk: (not risk["kev"], -(risk["cvss"] or 0)))
     rejected_software, software_policy_known = _rejected_software_by_record(
         cur, tenant_id, records, subject_ids
     )
