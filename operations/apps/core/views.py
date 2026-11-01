@@ -5979,6 +5979,80 @@ def finding_reviewed_distinct(request: HttpRequest, finding_id: str) -> HttpResp
     return redirect(request.POST.get("next") or "findings_queue")
 
 
+def _os_installation_disagreements(finding: Finding, details: dict) -> list[dict[str, object]]:
+    """OS installations that equally trusted sources place on the issue's Computers.
+
+    The relationship projector marks such tuples ``conflict`` (0395) and keeps
+    the current edge; the cause is usually a Computer holding two machines'
+    records, so the identity issue on that Computer shows them as evidence.
+    """
+    device_ids = list(details.get("candidate_device_ids") or [])
+    if finding.subject_type == Finding.SubjectType.DEVICE and finding.subject_id:
+        device_ids.append(finding.subject_id)
+    valid = []
+    for value in device_ids:
+        try:
+            valid.append(str(uuid.UUID(str(value))))
+        except ValueError:
+            continue
+    if not valid:
+        return []
+    with transaction.atomic(), connection.cursor() as cur:
+        cur.execute("SET LOCAL operations.tenant_id = 1")
+        cur.execute(
+            """
+            WITH involved AS (
+                SELECT DISTINCT edge.source_entity_id
+                  FROM operations.entity_relationships edge
+                  JOIN operations.devices device
+                    ON device.tenant_id = edge.tenant_id
+                   AND device.entity_id = edge.target_entity_id
+                 WHERE edge.tenant_id = 1
+                   AND edge.relationship_type_id = 'os_installation_runs_on_computer'
+                   AND edge.status IN ('active', 'conflict')
+                   AND device.id = ANY(%s::uuid[])
+                   AND EXISTS (
+                       SELECT 1 FROM operations.entity_relationships other
+                        WHERE other.tenant_id = edge.tenant_id
+                          AND other.relationship_type_id = edge.relationship_type_id
+                          AND other.source_entity_id = edge.source_entity_id
+                          AND other.status = 'conflict')
+            )
+            SELECT involved.source_entity_id, device.id, device.canonical_hostname,
+                   client.slug, edge.status
+              FROM involved
+              JOIN operations.entity_relationships edge
+                ON edge.tenant_id = 1
+               AND edge.relationship_type_id = 'os_installation_runs_on_computer'
+               AND edge.source_entity_id = involved.source_entity_id
+               AND edge.status IN ('active', 'conflict')
+              JOIN operations.devices device
+                ON device.tenant_id = edge.tenant_id AND device.entity_id = edge.target_entity_id
+              LEFT JOIN operations.clients client ON client.id = device.client_id
+             ORDER BY involved.source_entity_id, edge.status, device.canonical_hostname
+            """,
+            [valid],
+        )
+        rows = cur.fetchall()
+    grouped: dict[str, dict] = {}
+    for installation, device_id, hostname, client_slug, status in rows:
+        item = grouped.setdefault(
+            str(installation), {"installation": str(installation), "computers": []}
+        )
+        item["computers"].append(
+            {
+                "label": hostname or "Unnamed Computer",
+                "url": reverse(
+                    "device_detail", kwargs={"org_slug": client_slug, "device_id": device_id}
+                )
+                if client_slug
+                else "",
+                "shown": status == "active",
+            }
+        )
+    return list(grouped.values())
+
+
 @login_required
 @require_GET
 def finding_review(request: HttpRequest, finding_id: str) -> HttpResponse:
@@ -6088,6 +6162,7 @@ def finding_review(request: HttpRequest, finding_id: str) -> HttpResponse:
         "finding_review.html",
         {
             "finding": finding,
+            "os_disagreements": _os_installation_disagreements(finding, details),
             # Back to the exact Issues state (view, group, filters, sort, page).
             "return_to": _issues_return_url(request.GET.get("return")),
             "subject_label": subject_label,

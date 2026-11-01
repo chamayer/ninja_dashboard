@@ -22,4 +22,18 @@
     </div>
 </div>
 
+{% if os_disagreements %}
+<div class="card">
+    <h2>Sources disagree about the operating system</h2>
+    <p class="muted">Equally trusted sources report the same OS installation on different Computers. This usually means one Computer holds two machines' records. It clears once the Computers are split or their records are reassigned.</p>
+    <ul>
+        {% for item in os_disagreements %}
+        <li>OS installation {{ item.installation|truncatechars:9 }} is reported on
+            {% for computer in item.computers %}{% if not forloop.first %}{% if forloop.last %} and {% else %}, {% endif %}{% endif %}{% if computer.url %}<a href="{{ computer.url }}">{{ computer.label }}</a>{% else %}{{ computer.label }}{% endif %}{% if computer.shown %} (shown now){% endif %}{% endfor %}.
+        </li>
+        {% endfor %}
+    </ul>
+</div>
+{% endif %}
+
 {% endblock %}
