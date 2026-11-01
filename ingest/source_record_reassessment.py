@@ -63,6 +63,7 @@ def _unattached(
             ON s.tenant_id = o.tenant_id AND s.observation_id = o.observation_id
          WHERE o.tenant_id = %s AND o.device_id IS NULL AND o.active
            AND o.entity_type = ANY(%s::text[])
+           AND o.external_namespace <> 'device-health'
          ORDER BY o.observation_id
         """,
         (tenant_id, identity_types),

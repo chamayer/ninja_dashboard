@@ -6,6 +6,7 @@ show no names or identifiers, and every query is tenant scoped.
 
 from __future__ import annotations
 
+import json
 import uuid
 
 from django.contrib.auth.decorators import login_required
@@ -86,9 +87,73 @@ def load_subject(cur, tenant_id: int, subject_id: uuid.UUID) -> dict | None:
     return subject
 
 
+def _undo_disposition(request: HttpRequest, tenant_id: int, subject_id: uuid.UUID):
+    """Put back the attachment a reassessment move replaced (one click, audited)."""
+    from django.contrib import messages
+    from django.db import DatabaseError, transaction
+    from django.shortcuts import redirect
+
+    from apps.core.finding_actions import can_manage_lifecycle
+
+    back = redirect("source_record_detail", subject_id=subject_id)
+    if not can_manage_lifecycle(request.user):
+        messages.error(request, "You do not have permission to undo this change.")
+        return back
+    try:
+        with transaction.atomic(), connection.cursor() as cur:
+            cur.execute("SELECT set_config('operations.tenant_id', %s, TRUE)", (str(tenant_id),))
+            cur.execute(
+                """
+                SELECT d.id, d.previous_device_id, s.association_version, dev.entity_id
+                  FROM operations.source_record_dispositions d
+                  JOIN operations.source_record_subjects s
+                    ON s.tenant_id = d.tenant_id AND s.id = d.subject_id
+                  LEFT JOIN operations.devices dev
+                    ON dev.tenant_id = d.tenant_id AND dev.id = d.previous_device_id
+                   AND dev.deleted_at IS NULL
+                 WHERE d.tenant_id = %s AND d.subject_id = %s AND d.outcome = 'move'
+                   AND d.applied AND d.undone_at IS NULL
+                 ORDER BY d.decided_at DESC LIMIT 1
+                   FOR UPDATE OF d
+                """,
+                (tenant_id, subject_id),
+            )
+            row = cur.fetchone()
+            if row is None:
+                messages.warning(request, "There is no reassessment change to undo.")
+                return back
+            disposition_id, previous_device, version, previous_entity = row
+            if previous_device is not None and previous_entity is None:
+                messages.error(request, "The previous Computer no longer exists.")
+                return back
+            cur.execute(
+                "SELECT operations.set_source_association(%s, %s, 'device', 'operator', 1,"
+                " 'undo reassessment', %s, 'user', %s, 'operations.ui', %s::jsonb)",
+                (
+                    subject_id,
+                    previous_entity,
+                    version,
+                    request.user.id,
+                    json.dumps({"undone_disposition_id": str(disposition_id)}),
+                ),
+            )
+            cur.execute(
+                "UPDATE operations.source_record_dispositions"
+                " SET undone_at = now(), undone_by_id = %s WHERE id = %s",
+                (request.user.id, disposition_id),
+            )
+    except DatabaseError as exc:
+        messages.error(request, f"Nothing was changed: {str(exc).splitlines()[0]}")
+        return back
+    messages.success(request, "The previous attachment is restored.")
+    return back
+
+
 @login_required
 def source_record_detail(request: HttpRequest, subject_id: uuid.UUID) -> HttpResponse:
     tenant_id = int(getattr(request, "tenant_id", 1))
+    if request.method == "POST" and request.POST.get("action") == "undo_disposition":
+        return _undo_disposition(request, tenant_id, subject_id)
     with connection.cursor() as cur:
         cur.execute("SELECT set_config('operations.tenant_id', %s, TRUE)", (str(tenant_id),))
         subject = load_subject(cur, tenant_id, subject_id)
@@ -118,6 +183,25 @@ def source_record_detail(request: HttpRequest, subject_id: uuid.UUID) -> HttpRes
         )
         findings = _rows(cur)
         cases = case_memberships(cur, tenant_id, subject_id)
+        cur.execute(
+            """
+            SELECT outcome, disposition_class, reason, applied, undone_at, decided_at
+              FROM operations.source_record_dispositions
+             WHERE tenant_id = %s AND subject_id = %s
+             ORDER BY decided_at DESC LIMIT 5
+            """,
+            (tenant_id, subject_id),
+        )
+        dispositions = _rows(cur)
+    from apps.core.finding_actions import can_manage_lifecycle
+
+    undoable = bool(
+        dispositions
+        and dispositions[0]["outcome"] == "move"
+        and dispositions[0]["applied"]
+        and dispositions[0]["undone_at"] is None
+        and can_manage_lifecycle(request.user)
+    )
     for row in assessments:
         row["rule_label"] = RULE_LABELS.get(row["rule_key"], row["rule_key"])
         row["result_label"] = RESULT_LABELS.get(row["result"], row["result"])
@@ -131,6 +215,8 @@ def source_record_detail(request: HttpRequest, subject_id: uuid.UUID) -> HttpRes
             "assessments": assessments,
             "findings": findings,
             "cases": cases,
+            "dispositions": dispositions,
+            "undoable": undoable,
         },
     )
 

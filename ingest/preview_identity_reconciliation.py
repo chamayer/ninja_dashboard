@@ -94,6 +94,9 @@ def run(*, tenant_id: int = 1) -> dict[str, Any]:
               FROM operations.entity_observation_current
              WHERE tenant_id = %s AND device_id IS NOT NULL
                AND entity_type = ANY(%s::text[])
+               -- Ninja's device-health companions carry no identity fields; the
+               -- matcher skips them, so previewing them only yields noise.
+               AND external_namespace <> 'device-health'
              ORDER BY observation_id
             """,
             (tenant_id, identity_types),

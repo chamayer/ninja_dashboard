@@ -61,6 +61,23 @@
   {% endif %}
 </div>
 
+{% if dispositions %}
+<div class="card" style="margin-bottom:1rem;">
+  <h2>Reassessment decisions</h2>
+  <table>
+    <thead><tr><th>Decided</th><th>Outcome</th><th>Reason</th><th>Status</th></tr></thead>
+    <tbody>
+    {% for d in dispositions %}
+      <tr><td>{{ d.decided_at|date:"Y-m-d H:i" }}</td><td>{{ d.outcome }}</td><td>{{ d.reason }}</td><td>{% if d.undone_at %}undone {{ d.undone_at|date:"Y-m-d" }}{% elif d.applied %}applied{% else %}recorded{% endif %}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% if undoable %}
+  <form method="post">{% csrf_token %}<input type="hidden" name="action" value="undo_disposition"><button type="submit">Undo the reassessment change</button></form>
+  {% endif %}
+</div>
+{% endif %}
+
 {% if cases %}
 <div class="card">
   <h2>Cases</h2>
