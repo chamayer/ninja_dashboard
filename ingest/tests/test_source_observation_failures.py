@@ -84,3 +84,82 @@ def test_empty_collection_is_recorded_as_not_complete(monkeypatch):
     ok, rows, error = recorded[0]
     assert (ok, rows) == (False, 0)
     assert "no records" in error and "not treated as a complete" in error
+
+
+def test_partial_intake_is_reported_failed_with_committed_row_count(monkeypatch):
+    recorded = []
+    monkeypatch.setitem(
+        source_observations._FETCHERS,
+        "Test",
+        lambda _source, _observed_at: [{"entity_key": "one"}],
+    )
+    monkeypatch.setattr(
+        source_observations,
+        "write_observations",
+        lambda *_args: (_ for _ in ()).throw(
+            source_observations.PartialIntakeError(1, 1)
+        ),
+    )
+    monkeypatch.setattr(
+        source_observations,
+        "_record_source_run",
+        lambda _source, _started, ok, rows, error="": recorded.append(
+            (ok, rows, error)
+        ),
+    )
+    source = SimpleNamespace(
+        platform="Test",
+        source_key="partial",
+        source_name="partial",
+        source_binding_id="binding",
+        entity_type="agent.test",
+    )
+
+    with pytest.raises(source_observations.SourceObservationFailure):
+        source_observations.run_source_observations(
+            [source], datetime.now(timezone.utc)
+        )
+
+    assert len(recorded) == 1
+    assert recorded[0][0:2] == (False, 1)
+    assert "snapshot was marked incomplete" in recorded[0][2]
+
+
+def test_intake_identity_error_requires_stable_record_and_container_keys():
+    shared = SimpleNamespace(entity_type="agent.test", is_shared=True)
+    assert (
+        source_observations._intake_identity_error(
+            {"external_namespace": "ninja", "entity_key": ""}, shared
+        )
+        == "missing stable source-record identity"
+    )
+    assert (
+        source_observations._intake_identity_error(
+            {
+                "_org_only": True,
+                "container_external_namespace": "ninja-group",
+                "container_external_id": "group-1",
+            },
+            shared,
+        )
+        == "missing stable container identity"
+    )
+    assert (
+        source_observations._intake_identity_error(
+            {"external_namespace": "ninja", "entity_key": "device-1"},
+            SimpleNamespace(entity_type="agent.test", is_shared=False),
+        )
+        == "missing stable container identity"
+    )
+    assert (
+        source_observations._intake_identity_error(
+            {
+                "external_namespace": "ninja",
+                "entity_key": "device-1",
+                "container_external_namespace": "ninja-group",
+                "container_external_id": "group-1",
+            },
+            SimpleNamespace(entity_type="agent.test", is_shared=False),
+        )
+        == ""
+    )

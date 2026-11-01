@@ -190,6 +190,48 @@ def _resolve_absent(
     )
 
 
+def _enqueue_reference_reassessments(
+    cur: Any, targets: set[tuple[uuid.UUID, str, str]]
+) -> None:
+    """Reassess only source records whose legacy Hudu owner is not current."""
+    if not targets:
+        return
+    cur.execute("SELECT to_regclass('operations.source_record_assessment_current') IS NOT NULL")
+    if not cur.fetchone()[0]:
+        return
+    source_instances, asset_ids, owners = zip(*sorted(targets), strict=True)
+    cur.execute(
+        """
+        SELECT subject.id
+          FROM unnest(%s::uuid[], %s::text[], %s::text[])
+               AS target(source_instance_id, asset_id, expected_owner)
+          JOIN operations.source_record_subjects subject
+            ON subject.tenant_id = %s AND subject.subject_kind = 'record'
+           AND subject.platform = 'Hudu' AND subject.entity_type = 'cmdb.asset'
+           AND subject.source_instance_id = target.source_instance_id
+           AND subject.external_id = target.asset_id
+          LEFT JOIN operations.source_record_assessment_current assessment
+            ON assessment.tenant_id = subject.tenant_id
+           AND assessment.target_kind = 'source_record'
+           AND assessment.target_id = subject.id
+           AND assessment.rule_key = 'record.reference'
+           AND assessment.dimension = 'hudu_device_reference'
+         WHERE assessment.target_id IS NULL
+            OR assessment.work_owner IS DISTINCT FROM target.expected_owner
+        """,
+        (list(source_instances), list(asset_ids), list(owners), TENANT_ID),
+    )
+    subject_ids = [row[0] for row in cur.fetchall()]
+    if subject_ids:
+        cur.execute(
+            """
+            SELECT operations.source_record_enqueue(%s, 'source_record', subject_id)
+              FROM unnest(%s::uuid[]) AS ids(subject_id)
+            """,
+            (TENANT_ID, subject_ids),
+        )
+
+
 def _record_stale_assessment(
     cur: Any,
     *,
@@ -263,7 +305,7 @@ SELECT eo.client_id,
 # Divergent pages, with the devices they resolve to, split by evidence.
 _DIVERGENT = """
 WITH div AS (
-  SELECT entity_key, client_id,
+  SELECT entity_key, source_instance_id, client_id,
          canonical_data->>'hostname'    AS page,
          canonical_data->>'hudu_layout' AS layout,
          canonical_data->>'hudu_url'    AS url,
@@ -280,7 +322,7 @@ WITH div AS (
     FROM div d, jsonb_array_elements(d.relayed) r
    WHERE r->>'resolved_device_id' IS NOT NULL
 )
-SELECT x.entity_key, x.client_id, x.page, x.layout, x.url,
+SELECT x.entity_key, x.source_instance_id, x.client_id, x.page, x.layout, x.url,
        count(DISTINCT dv.id)                                   AS devices,
        count(DISTINCT lower(coalesce(dv.canonical_hostname,''))) AS hostnames,
        count(DISTINCT coalesce(dv.canonical_serial,''))          AS serials,
@@ -289,7 +331,7 @@ SELECT x.entity_key, x.client_id, x.page, x.layout, x.url,
            'hostname',  dv.canonical_hostname,
            'serial',    dv.canonical_serial))                  AS devs
   FROM x JOIN operations.devices dv ON dv.id = x.dev AND dv.deleted_at IS NULL
- GROUP BY x.entity_key, x.client_id, x.page, x.layout, x.url
+ GROUP BY x.entity_key, x.source_instance_id, x.client_id, x.page, x.layout, x.url
 HAVING count(DISTINCT dv.id) > 1
 """
 
@@ -330,10 +372,14 @@ def evaluate(*, dry_run: bool = True) -> dict[str, int]:
         cur.execute(_STALE_ASSETS, (TENANT_ID, _PLATFORM))
         stale_rows = cur.fetchall()
         stale_keys = []
+        stale_reassessments: set[tuple[uuid.UUID, str, str]] = set()
         for (
             client_id, source_instance_id, source_binding_id, parent_external_id, external_id,
             name, layout, url, relayed,
         ) in stale_rows:
+            stale_reassessments.add(
+                (source_instance_id, str(external_id), "legacy:cmdb_asset_stale")
+            )
             key = _condition_key(
                 TENANT_ID, source_instance_id, parent_external_id, external_id,
                 "cmdb_asset_stale",
@@ -364,29 +410,53 @@ def evaluate(*, dry_run: bool = True) -> dict[str, int]:
                     source_binding_id=source_binding_id,
                     now=now,
                 )
+        if not dry_run:
+            _enqueue_reference_reassessments(cur, stale_reassessments)
         counts["cmdb_asset_stale"] = len(stale_rows)
         counts["cmdb_asset_stale_pages"] = len(stale_rows)
 
         # 2/3. divergent — split on evidence
         cur.execute(_DIVERGENT, (TENANT_ID, _PLATFORM))
         wrong_by_client: dict[Any, list] = {}
-        for entity_key, client_id, page, layout, url, _devs, hostnames, serials, devlist in cur.fetchall():
-            item = {"asset_id": entity_key, "name": page, "layout": layout,
-                    "url": url, "devices": devlist}
+        for entity_key, source_instance_id, client_id, page, layout, url, _devs, hostnames, serials, devlist in cur.fetchall():
+            item = {"asset_id": entity_key,
+                    "source_instance_id": str(source_instance_id),
+                    "name": page, "layout": layout, "url": url, "devices": devlist}
             if hostnames != 1 and serials > 1:
                 wrong_by_client.setdefault(client_id, []).append(item)
 
         wrong_keys = []
+        divergent_reassessments: set[tuple[uuid.UUID, str, str]] = set()
         for client_id, items in wrong_by_client.items():
             key = _condition_key(TENANT_ID, client_id, "cmdb_link_incorrect", _PLATFORM)
             wrong_keys.append(key)
+            divergent_reassessments.update(
+                (
+                    uuid.UUID(item["source_instance_id"]),
+                    str(item["asset_id"]),
+                    "legacy:cmdb_link_incorrect",
+                )
+                for item in items
+            )
             if not dry_run:
                 _upsert(
                     cur, tenant_id=TENANT_ID, finding_type_id=ft_wrong,
                     client_id=client_id, subject_type="client", subject_id=client_id,
                     condition_key=key, severity="medium", now=now,
-                    details={"page_count": len(items), "pages": items[:_MAX_DETAIL_ITEMS]},
+                    details={
+                        "page_count": len(items),
+                        "pages": items[:_MAX_DETAIL_ITEMS],
+                        "source_refs": [
+                            {
+                                "asset_id": item["asset_id"],
+                                "source_instance_id": item["source_instance_id"],
+                            }
+                            for item in items
+                        ],
+                    },
                 )
+        if not dry_run:
+            _enqueue_reference_reassessments(cur, divergent_reassessments)
         counts["cmdb_link_incorrect"] = len(wrong_keys)
         counts["cmdb_link_incorrect_pages"] = sum(len(v) for v in wrong_by_client.values())
 

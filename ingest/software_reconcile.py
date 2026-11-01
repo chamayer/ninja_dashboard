@@ -30,6 +30,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from ingest import db, software_capabilities, software_readiness
+from ingest.software_rules import compile_rules, never as _never
 from ingest.conditions import load_active_profile
 from ingest.config import settings
 from shared import software_coverage, software_settings
@@ -255,43 +256,6 @@ def condition_key(tenant_id: int, client_id: Any, device_id: Any, type_id: int, 
     return hashlib.sha256(raw.encode()).hexdigest()[:64]
 
 
-def compile_rules(rows: Iterable[tuple[str, str, bool]]) -> dict[str, Callable[[str], bool]]:
-    """rule_type -> predicate, matching the previous classifier's semantics."""
-    grouped: dict[str, list[tuple[str, bool]]] = defaultdict(list)
-    for rule_type, pattern, is_regex in rows:
-        grouped[rule_type].append((pattern, bool(is_regex)))
-
-    def predicate(rules: list[tuple[str, bool]]) -> Callable[[str], bool]:
-        compiled = []
-        literals = []
-        for pattern, is_regex in rules:
-            if is_regex:
-                try:
-                    compiled.append(re.compile(pattern, re.IGNORECASE))
-                except re.error:
-                    log.warning("software_reconcile: invalid rule pattern skipped: %r", pattern)
-            else:
-                literals.append(pattern.lower())
-
-        def matches(text: str) -> bool:
-            lowered = (text or "").lower()
-            return any(rule.search(lowered) for rule in compiled) or any(
-                literal in lowered for literal in literals if lowered
-            )
-
-        return matches
-
-    return {rule_type: predicate(rules) for rule_type, rules in grouped.items()}
-
-
-def _never(_text: str) -> bool:
-    return False
-
-
-def _approved(decision: str | None) -> bool:
-    return decision in ("approve", "approve_publisher")
-
-
 def silenced(
     finding_type: FindingType,
     title_decision: str | None,
@@ -304,11 +268,12 @@ def silenced(
     silences only when no other signal of concern exists on the title or
     installation, because a publisher string is set by the installer.
     """
-    if not finding_type.suppressed_by_approval:
-        return False
-    if _approved(title_decision):
-        return True
-    return title_decision is None and _approved(publisher_decision) and not other_concern
+    return software_capabilities.silenced_by_approval(
+        finding_type.suppressed_by_approval,
+        title_decision,
+        publisher_decision,
+        other_concern,
+    )
 
 
 def _recent(first_seen: datetime | None, now: datetime, days: int) -> bool:
@@ -649,17 +614,12 @@ def compute_desired(ctx: Context, report: RunReport) -> dict[str, list[Desired]]
 def _permitted(authorizations: dict, sanctioned: dict, client_id: Any, capability: str,
                product_uuid: Any) -> tuple[bool, str]:
     """Most specific first; deny before permit; required platform last (ADR-0018)."""
-    for scope, label in ((client_id, "client"), (None, "global")):
-        tier = authorizations.get(scope, {}).get(capability)
-        if not tier:
-            continue
-        if product_uuid in tier["deny"]:
-            return False, f"{label} deny"
-        if product_uuid in tier["permit"]:
-            return True, f"{label} permit"
-    if product_uuid in sanctioned.get(client_id, {}).get(capability, set()):
-        return True, "required platform"
-    return False, "no authorization and not mapped to a required platform"
+    allowed, basis = software_capabilities.permitted(
+        authorizations, sanctioned, client_id, capability, product_uuid
+    )
+    if not allowed and basis == "not authorized":
+        basis = "no authorization and not mapped to a required platform"
+    return allowed, basis
 
 
 # ── Loading ────────────────────────────────────────────────────────────

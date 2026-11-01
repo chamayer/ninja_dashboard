@@ -72,6 +72,45 @@ def test_rows_resolve_to_devices_and_collection_time_is_the_newest():
     assert (stream.seen, stream.unresolved, stream.complete) == (4, 1, True)
 
 
+def test_unattached_source_record_inventory_is_retained_for_later_risk_evaluation():
+    subject = uuid.uuid4()
+    batches = [([{"deviceId": 22, "name": "Risky App", "version": "2"}], True)]
+    source_rows = []
+    stream = software._Stream()
+    rows = list(software.stream_rows(
+        batches, {}, {}, stream, {"22": subject}, source_rows
+    ))
+    assert rows == []
+    assert source_rows[0][0:3] == (subject, "risky app", "Risky App")
+    assert source_rows[0][4] == "2"
+    assert stream.unresolved == 1
+
+
+def test_source_record_changes_trigger_software_read_model_refresh():
+    result = software.ApplyResult(source_changed=2)
+    assert result.material_changed
+    assert "2 source-record software rows changed" in result.describe("Fleet check")
+
+
+def test_source_record_inventory_participates_in_software_catalog_projection():
+    from ingest import software_catalog
+
+    assert "operations.source_record_software_current" in software_catalog._UPSERT_PRODUCTS
+    assert "operations.source_record_software_current" in software_catalog._UPSERT_VERSIONS
+
+
+def test_attached_source_record_inventory_is_also_retained_for_handover():
+    subject, device, client = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    source_rows = []
+    stream = software._Stream()
+    rows = list(software.stream_rows(
+        [([{"deviceId": 1, "name": "Managed App"}], True)],
+        {"1": (device, client)}, {}, stream, {"1": subject}, source_rows
+    ))
+    assert len(rows) == 1
+    assert source_rows[0][0] == subject
+
+
 # ── Removal guard ──────────────────────────────────────────────────
 
 

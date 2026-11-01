@@ -7,9 +7,9 @@ import logging
 import os
 import re
 import uuid
+from collections import Counter
 from dataclasses import dataclass
 from dataclasses import field as dataclass_field
-from collections import Counter
 from datetime import datetime, timedelta
 from datetime import timezone as dt_timezone
 from io import StringIO
@@ -47,6 +47,7 @@ from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 from django.utils.text import slugify
 from django.views.decorators.http import require_GET, require_POST
+
 from shared import client_evidence, software_coverage, software_settings
 from shared.jobs_registry import (
     EXECUTION_POOL_POLICIES,
@@ -69,6 +70,7 @@ from shared.patch_compliance import COMPLIANCE_MISSING_STATUSES, excluded_patch_
 from . import capability as capability_evidence
 from . import category as category_evidence
 from . import (
+    client_domains,
     computer_naming,
     finding_registry,
     issue_selection,
@@ -77,7 +79,6 @@ from . import (
     software_review,
 )
 from .capability_review_actions import decide_capability
-from . import client_domains
 from .client_workspace import (
     build_client_directory,
     build_client_workspace,
@@ -115,9 +116,9 @@ from .finding_actions import (
     can_manage_lifecycle,
     can_run_action,
 )
+from .findings_guard import guard_findings
 from .forms import ClientPolicyForm
 from .identity_actions import run_identity_action
-from .findings_guard import guard_findings
 from .models import (
     AdminFinding,
     Agent,
@@ -156,6 +157,7 @@ from .models import (
 from .remote_access_approval import approve_remote_access
 from .software_decision_actions import decide_software, decision_for
 from .software_display import preferred_software_display_names
+from .source_record_findings import associated_source_record_finding_ids
 from .templatetags.human_labels import client_conflict_summary, humanize_label
 
 
@@ -1797,19 +1799,12 @@ def org_index(request: HttpRequest, org_slug: str) -> HttpResponse:
         ctx["device_count"] = len(devices)
         ctx["type_summary"] = _type_summary(devices)
         ctx["client_links"] = client_source_references(client_id=client.id)
-        ctx["client_mapping_conflict_count"] = Finding.objects.filter(
-            tenant_id=1,
-            client=client,
-            finding_type__name__in=(
-                "client_name_conflict",
-                "client_link_collision",
-                "client_source_group_merge",
-                "client_unattached_group",
-                "unnamed_source_group",
-                "unmatched_source_group",
-            ),
-            status__in=_FINDING_ACTIVE_STATUSES,
-        ).count()
+        # Keep this dashboard total aligned with the Issues queue's distinct
+        # corrective-action count, including both open and paused work.
+        mapping_scope = issue_selection.Scope(
+            status="", types=issue_selection.mapping_types(), client=client.slug
+        )
+        ctx["client_mapping_conflict_count"] = issue_selection.count(mapping_scope)
         ctx["client_mapping_conflict_url"] = (
             f"{reverse('client_mappings')}?"
             + urlencode({"client_id": str(client.id)})
@@ -2849,10 +2844,20 @@ def device_detail(request: HttpRequest, org_slug: str, device_id: str) -> HttpRe
             [str(device.id)],
         )
         exposed_finding_ids = [row[0] for row in _cur.fetchall()]
+        # Source-record findings keep their native owner. Join through the
+        # association history and only include a record when its finding episode
+        # overlapped that Computer's association window.
+        associated_record_ids = associated_source_record_finding_ids(
+            _cur, 1, device.entity_id, _FINDING_ACTIVE_STATUSES
+        )
 
     active_findings = list(
         Finding.objects.filter(
             Q(subject_type=Finding.SubjectType.DEVICE, subject_id=device.id)
+            | Q(
+                subject_type=Finding.SubjectType.SOURCE_RECORD,
+                subject_id__in=associated_record_ids,
+            )
             | Q(id__in=exposed_finding_ids),
             tenant_id=1,
             status__in=_FINDING_ACTIVE_STATUSES,

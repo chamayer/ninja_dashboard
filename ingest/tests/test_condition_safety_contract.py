@@ -148,6 +148,15 @@ def test_cmdb_client_findings_require_resolved_client_evidence():
         assert "client_id IS NOT NULL" in query
 
 
+def test_cmdb_divergence_retains_exact_source_identity_for_handover():
+    source = (Path(__file__).parents[1] / "cmdb_findings.py").read_text()
+    query = source.split('_DIVERGENT = """', 1)[1].split('"""', 1)[0]
+    assert "source_instance_id" in query
+    assert '"source_refs"' in source
+    assert "source_record_assessment_current" in source
+    assert "assessment.work_owner IS DISTINCT FROM target.expected_owner" in source
+
+
 def test_evaluator_lifecycle_absent_closure_requires_current_clear_assessment():
     source = (Path(__file__).parents[1] / "evaluator.py").read_text()
     signature = source[source.index("def _resolve_lifecycle_findings_absent"):]

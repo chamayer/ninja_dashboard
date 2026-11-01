@@ -17,8 +17,11 @@ input of one rule is ``unknown`` for that rule, never a clean result:
 
 * ``record.role``: the record has a role, or ``unknown`` with ``record_role``.
 * ``record.presence``: present or withdrawn, as the source reports it.
-* ``identifier.validity`` (dimension ``serial``): the reported serial is usable
-  for identity, a placeholder (``contradicted``), or missing (``unknown``).
+* ``record.reference`` (dimension ``hudu_device_reference``): linked,
+  stale/conflicting, or unknown from Hudu's typed integrated-card evidence.
+* ``identifier.validity`` (dimensions ``serial`` and ``mac``): reported
+  identifiers are usable for identity, malformed/placeholder (``contradicted``),
+  or missing (``unknown``).
 * ``identity.association``: an attached record is ``supported`` by its
   confirmed link. An unattached present record whose keys reach two or more
   live Computers is ``contradicted`` (competing possibilities); one or none is
@@ -26,10 +29,10 @@ input of one rule is ``unknown`` for that rule, never a clean result:
   never breaks a tie.
 * ``case.duplicate`` (Stage C, ``ingest.source_record_cases``).
 
-Work ownership (§9.1): attached records' invalid serials belong to the
-Computer's ``placeholder_serial`` finding, and an unattached record with a pending
+Work ownership (§9.1): attached records' invalid serials and known junk MACs
+belong to their existing Computer findings. An unattached record with a pending
 identity candidate belongs to that candidate. The assessment records the owner
-instead of opening a second task. New native findings are never alertable.
+instead of opening duplicate work. New native findings are never alertable.
 """
 
 from __future__ import annotations
@@ -47,15 +50,28 @@ from typing import Any, Iterator
 import psycopg
 
 from ingest import db
+from ingest import software_capabilities
+from ingest.identity import identity_entity_types
+from ingest.identity.matching import (
+    load_identity_match_policies,
+    preview_match,
+    record_name_short,
+)
 from ingest.conditions import record_assessment
-from ingest.normalize import is_usable_serial, load_identity_value_rejections
+from ingest.normalize import (
+    is_junk_mac,
+    is_usable_serial,
+    load_identity_value_rejections,
+    normalize_mac,
+)
+from shared import software_coverage, software_settings
 from shared.conditions.contracts import Condition, EvaluationCoverage, Participant
 from shared.findings_contract import guard_findings_writes
 
 log = logging.getLogger(__name__)
 
 TENANT_ID = 1
-RULE_REVISION = 1
+RULE_REVISION = 8
 BATCH_SIZE = 200
 MAX_ATTEMPTS = 5
 _IDENTITY_ROLES = frozenset({"endpoint_agent", "virtual_machine", "virtual_host"})
@@ -218,7 +234,22 @@ def _load_records(cur: Any, tenant_id: int, subject_ids: list[uuid.UUID]) -> lis
         SELECT s.id, s.input_version, s.association_version, s.record_role, s.presence,
                s.platform, s.entity_type, s.source_instance_id, s.external_id,
                o.observation_id, o.client_id, o.canonical_data,
+               (
+                    SELECT CASE
+                             WHEN count(DISTINCT group_link.entity_id) = 1
+                             THEN min(group_link.entity_id::text)::uuid
+                           END
+                      FROM operations.entity_source_links group_link
+                     WHERE group_link.tenant_id = s.tenant_id
+                       AND group_link.source_instance_id = s.source_instance_id
+                       AND group_link.entity_class_id = 'client'
+                       AND group_link.external_id =
+                           o.canonical_data ->> 'platform_group_id'
+                       AND group_link.missing_since IS NULL
+                ) AS source_group_client_id,
+               meta.reported_online, meta.reported_last_contact_at,
                link.entity_id AS device_id,
+               d.client_id AS device_client_id,
                link.match_method,
                d.id IS NOT NULL AS device_live,
                coalesce(meta.restricted, false) AS restricted,
@@ -229,7 +260,30 @@ def _load_records(cur: Any, tenant_id: int, subject_ids: list[uuid.UUID]) -> lis
                           AND c.parent_external_namespace = s.parent_external_namespace
                           AND c.parent_external_id = s.parent_external_id
                           AND c.external_id = s.external_id
-                          AND c.status = 'pending') AS candidate_pending
+                          AND c.status = 'pending') AS candidate_pending,
+               EXISTS (
+                    SELECT 1 FROM operations.findings f
+                    JOIN operations.finding_types ft ON ft.id = f.finding_type_id
+                     WHERE f.tenant_id = s.tenant_id
+                       AND f.condition_namespace = 'entity'
+                       AND f.status IN ('open', 'acknowledged', 'investigating', 'suppressed')
+                       AND ft.name = 'cmdb_asset_stale'
+                       AND f.finding_details->>'asset_id' = s.external_id
+                       AND f.finding_details->>'source_instance_id' = s.source_instance_id::text
+                ) AS legacy_stale_reference,
+                EXISTS (
+                    SELECT 1 FROM operations.findings f
+                    JOIN operations.finding_types ft ON ft.id = f.finding_type_id
+                     WHERE f.tenant_id = s.tenant_id
+                       AND f.condition_namespace = 'entity'
+                       AND f.status IN ('open', 'acknowledged', 'investigating', 'suppressed')
+                       AND ft.name = 'cmdb_link_incorrect'
+                       AND f.client_id = o.client_id
+                       AND f.finding_details->'source_refs' @>
+                           jsonb_build_array(jsonb_build_object(
+                               'asset_id', s.external_id,
+                               'source_instance_id', s.source_instance_id::text))
+                ) AS legacy_divergent_reference
           FROM operations.source_record_subjects s
           LEFT JOIN operations.entity_observation_current o
             ON o.tenant_id = s.tenant_id AND o.observation_id = s.observation_id
@@ -326,7 +380,25 @@ def _result(
     }
 
 
-def evaluate_record(record: dict, candidates: dict[uuid.UUID, set[str]]) -> list[dict]:
+def evaluate_record(
+    record: dict,
+    candidates: dict[uuid.UUID, set[str]],
+    software_risks: list[dict] | None = None,
+    software_risk_enabled: bool = True,
+    software_severity_kev: str = "critical",
+    software_severity_high: str = "high",
+    rejected_software: list[dict] | None = None,
+    rejected_software_enabled: bool = True,
+    rejected_software_severity: str = "high",
+    software_policy_known: bool = True,
+    suspicious_software: list[dict] | None = None,
+    suspicious_software_enabled: bool = True,
+    malicious_software_hints: list[dict] | None = None,
+    malicious_software_enabled: bool = True,
+    unauthorized_tools: list[dict] | None = None,
+    capability_policy_known: bool = True,
+    identity_conflicts: dict[uuid.UUID, set[str]] | None = None,
+) -> list[dict]:
     """The rule results for one record. Pure: inputs in, results out."""
     data = record.get("canonical_data") or {}
     role = record["record_role"]
@@ -338,6 +410,98 @@ def evaluate_record(record: dict, candidates: dict[uuid.UUID, set[str]]) -> list
             evidence={"presence": record["presence"]},
         )
     ]
+    # Group/site attribution is retained as a source claim. Check the explicit
+    # source-group link, not observation.client_id: intake can fill that column
+    # from the attached Computer when no group mapping exists. The resolver owns
+    # group-level correction; keep missing mappings unknown without creating
+    # one actionable finding per member. Computer ownership conflicts stay a
+    # separate entity-level concern.
+    group_id = str(data.get("platform_group_id") or "").strip()
+    if not group_id:
+        results.append(_result("record.source_attribution", "not_applicable"))
+    elif record.get("source_group_client_id") is None:
+        results.append(
+            _result(
+                "record.source_attribution",
+                "unknown",
+                evidence={"platform_group_id": group_id},
+                missing=["source_group_mapping"],
+                owner="source_group_mapping",
+            )
+        )
+    else:
+        device_client_id = record.get("device_client_id")
+        group_client_id = record["source_group_client_id"]
+        if (
+            record.get("device_live")
+            and device_client_id is not None
+            and device_client_id != group_client_id
+        ):
+            results.append(
+                _result(
+                    "record.source_attribution",
+                    "contradicted",
+                    evidence={"platform_group_id": group_id},
+                    owner="legacy:computer_client_conflict",
+                )
+            )
+        else:
+            results.append(
+                _result(
+                    "record.source_attribution",
+                    "supported",
+                    evidence={"platform_group_id": group_id},
+                    owner="source_group_mapping",
+                )
+            )
+    if role == "endpoint_agent" and present:
+        reported_online = record.get("reported_online")
+        results.append(
+            _result(
+                "record.reported_status",
+                "unknown" if reported_online is None else "supported",
+                dimension="connectivity",
+                evidence=(
+                    {}
+                    if reported_online is None
+                    else {"reported_online": reported_online}
+                ),
+                missing=([] if reported_online is not None else ["reported_online"]),
+            )
+        )
+        last_contact = record.get("reported_last_contact_at")
+        results.append(
+            _result(
+                "record.reported_contact",
+                "unknown" if last_contact is None else "supported",
+                dimension="last_contact",
+                evidence=(
+                    {}
+                    if last_contact is None
+                    else {"reported_last_contact_at": last_contact.isoformat()}
+                ),
+                missing=(
+                    [] if last_contact is not None else ["reported_last_contact_at"]
+                ),
+            )
+        )
+    else:
+        results.extend(
+            [
+                _result(
+                    "record.reported_status",
+                    "not_applicable",
+                    dimension="connectivity",
+                    evidence={"role": role, "presence": record["presence"]},
+                ),
+                _result(
+                    "record.reported_contact",
+                    "not_applicable",
+                    dimension="last_contact",
+                    evidence={"role": role, "presence": record["presence"]},
+                ),
+            ]
+        )
     if role == "unclassified":
         results.append(
             _result(
@@ -349,6 +513,218 @@ def evaluate_record(record: dict, candidates: dict[uuid.UUID, set[str]]) -> list
         )
     else:
         results.append(_result("record.role", "supported", evidence={"role": role}))
+
+    if record["platform"] != "Hudu" or record["entity_type"] != "cmdb.asset":
+        results.append(
+            _result("record.reference", "not_applicable", evidence={"role": role})
+        )
+    else:
+        verdict = data.get("link_verdict")
+        if not present:
+            results.append(
+                _result(
+                    "record.reference",
+                    "not_applicable",
+                    evidence={"presence": "withdrawn"},
+                )
+            )
+        elif verdict == "linked":
+            results.append(
+                _result(
+                    "record.reference",
+                    "supported",
+                    dimension="hudu_device_reference",
+                    evidence={"verdict": verdict},
+                )
+            )
+        elif verdict == "unlinked":
+            results.append(
+                _result(
+                    "record.reference",
+                    "unknown",
+                    dimension="hudu_device_reference",
+                    missing=["integrated_device_card"],
+                    evidence={"verdict": verdict},
+                )
+            )
+        elif verdict == "stale" and bool(data.get("archived")):
+            results.append(
+                _result(
+                    "record.reference",
+                    "not_applicable",
+                    dimension="hudu_device_reference",
+                    evidence={"verdict": verdict, "archived": True},
+                )
+            )
+        elif verdict in {"stale", "divergent"}:
+            legacy_owner = (
+                "legacy:cmdb_asset_stale"
+                if verdict == "stale" and record.get("legacy_stale_reference")
+                else "legacy:cmdb_link_incorrect"
+                if verdict == "divergent" and record.get("legacy_divergent_reference")
+                else ""
+            )
+            results.append(
+                _result(
+                    "record.reference",
+                    "contradicted",
+                    dimension="hudu_device_reference",
+                    evidence={"verdict": verdict},
+                    owner=legacy_owner,
+                    finding=(
+                        None
+                        if legacy_owner
+                        else {
+                            "type": "source_record_reference_review",
+                            "severity": "medium",
+                        }
+                    ),
+                )
+            )
+        else:
+            results.append(
+                _result(
+                    "record.reference",
+                    "unknown",
+                    dimension="hudu_device_reference",
+                    missing=["hudu_link_verdict"],
+                )
+            )
+
+    risks = software_risks or []
+    if not software_risk_enabled:
+        results.append(
+            _result(
+                "software.vulnerability",
+                "unknown",
+                missing=["vulnerable_software_enabled"],
+            )
+        )
+    elif risks:
+        actionable = [risk for risk in risks if not risk.get("owned_by_computer")]
+        if actionable:
+            severity = (
+                software_severity_kev
+                if any(risk["kev"] for risk in actionable)
+                else software_severity_high
+            )
+            results.append(
+                _result(
+                    "software.vulnerability",
+                    "contradicted",
+                    evidence={
+                        "installations": actionable[:20],
+                        "count": len(actionable),
+                    },
+                    finding={
+                        "type": "source_record_vulnerable_software",
+                        "severity": severity,
+                    },
+                )
+            )
+        else:
+            results.append(
+                _result(
+                    "software.vulnerability",
+                    "contradicted",
+                    evidence={"installations": risks[:20], "count": len(risks)},
+                    owner="computer_software_finding",
+                )
+            )
+    else:
+        results.append(_result("software.vulnerability", "supported"))
+
+    rejected = rejected_software or []
+    if not rejected_software_enabled or not software_policy_known:
+        missing = (
+            ["rejected_installed_enabled"]
+            if not rejected_software_enabled
+            else ["client_software_policy"]
+        )
+        results.append(_result("software.decision", "unknown", missing=missing))
+    elif rejected:
+        results.append(
+            _result(
+                "software.decision",
+                "contradicted",
+                evidence={"installations": rejected[:20], "count": len(rejected)},
+                finding={
+                    "type": "source_record_rejected_software",
+                    "severity": rejected_software_severity,
+                },
+            )
+        )
+    else:
+        results.append(_result("software.decision", "supported"))
+
+    suspicious = suspicious_software or []
+    if not suspicious_software_enabled:
+        results.append(
+            _result(
+                "software.suspicious_name",
+                "unknown",
+                missing=["suspicious_name_enabled"],
+            )
+        )
+    elif suspicious:
+        results.append(
+            _result(
+                "software.suspicious_name",
+                "contradicted",
+                evidence={"installations": suspicious[:20], "count": len(suspicious)},
+                finding={
+                    "type": "source_record_suspicious_software",
+                    "severity": suspicious[0]["severity"],
+                },
+            )
+        )
+    else:
+        results.append(_result("software.suspicious_name", "supported"))
+
+    malicious = malicious_software_hints or []
+    if not malicious_software_enabled:
+        results.append(
+            _result(
+                "software.threat_intel",
+                "unknown",
+                missing=["known_malicious_hint_enabled"],
+            )
+        )
+    elif malicious:
+        results.append(
+            _result(
+                "software.threat_intel",
+                "contradicted",
+                evidence={"installations": malicious[:20], "count": len(malicious)},
+                finding={
+                    "type": "source_record_malicious_software_hint",
+                    "severity": malicious[0]["severity"],
+                },
+            )
+        )
+    else:
+        results.append(_result("software.threat_intel", "supported"))
+
+    tools = unauthorized_tools or []
+    if not capability_policy_known:
+        results.append(
+            _result(
+                "software.capability",
+                "unknown",
+                missing=["capability_policy_or_product_link"],
+            )
+        )
+    elif tools:
+        results.append(
+            _result(
+                "software.capability",
+                "contradicted",
+                evidence={"installations": tools[:20], "count": len(tools)},
+                finding={"type": "source_record_unauthorized_tool", "severity": "high"},
+            )
+        )
+    else:
+        results.append(_result("software.capability", "supported"))
 
     compares = role in _IDENTITY_ROLES
     attached = record["device_id"] is not None and record["device_live"]
@@ -398,6 +774,79 @@ def evaluate_record(record: dict, candidates: dict[uuid.UUID, set[str]]) -> list
                 )
             )
 
+    # identifier.validity / MAC
+    if not compares:
+        results.append(
+            _result(
+                "identifier.validity",
+                "not_applicable",
+                dimension="mac",
+                evidence={"role": role},
+            )
+        )
+    else:
+        mac_claims = data.get("macs")
+        if mac_claims in (None, []):
+            results.append(
+                _result(
+                    "identifier.validity",
+                    "unknown",
+                    dimension="mac",
+                    missing=["macs"],
+                )
+            )
+        else:
+            valid_shape = isinstance(mac_claims, list)
+            values = mac_claims if valid_shape else [mac_claims]
+            invalid = [
+                value
+                for value in values
+                if not valid_shape
+                or not isinstance(value, str)
+                or not normalize_mac(value)
+            ]
+            if not invalid:
+                results.append(
+                    _result(
+                        "identifier.validity",
+                        "supported",
+                        dimension="mac",
+                        evidence={"count": len(values)},
+                    )
+                )
+            else:
+                legacy_owned = attached and all(
+                    isinstance(value, str) and is_junk_mac(value) for value in invalid
+                )
+                evidence = {"invalid_count": len(invalid)}
+                if not valid_shape:
+                    evidence["invalid_shape"] = True
+                if not record["restricted"]:
+                    evidence["invalid_values"] = invalid[:20]
+                finding = (
+                    None
+                    if legacy_owned or not present
+                    else {
+                        "type": "source_record_identifier_invalid",
+                        "severity": "medium"
+                        if all(
+                            isinstance(value, str) and is_junk_mac(value)
+                            for value in invalid
+                        )
+                        else "high",
+                    }
+                )
+                results.append(
+                    _result(
+                        "identifier.validity",
+                        "contradicted",
+                        dimension="mac",
+                        evidence=evidence,
+                        owner="legacy:placeholder_mac" if legacy_owned else "",
+                        finding=finding,
+                    )
+                )
+
     # identity.association
     if not compares:
         results.append(
@@ -423,11 +872,11 @@ def evaluate_record(record: dict, candidates: dict[uuid.UUID, set[str]]) -> list
             )
         )
     else:
+        review = identity_conflicts or {}
         listed = {
-            str(device_id): sorted(families)
-            for device_id, families in candidates.items()
+            str(device_id): sorted(families) for device_id, families in review.items()
         }
-        if len(candidates) >= 2:
+        if review:
             owner = "entity_candidate" if record["candidate_pending"] else ""
             finding = (
                 None
@@ -451,7 +900,12 @@ def evaluate_record(record: dict, candidates: dict[uuid.UUID, set[str]]) -> list
                 _result(
                     "identity.association",
                     "unknown",
-                    evidence={"candidates": listed},
+                    evidence={
+                        "candidates": {
+                            str(device_id): sorted(families)
+                            for device_id, families in candidates.items()
+                        }
+                    },
                     missing=[
                         "unique_qualified_match" if candidates else "candidate_computer"
                     ],
@@ -468,6 +922,462 @@ def condition_key(
     return hashlib.sha256(raw.encode()).hexdigest()[:64]
 
 
+def _rejected_software_by_record(
+    cur: Any, tenant_id: int, records: list[dict], subject_ids: list[uuid.UUID]
+) -> tuple[dict[uuid.UUID, list[dict]], dict[uuid.UUID, bool]]:
+    """Read exact effective title/publisher decisions for source installations."""
+    if not subject_ids:
+        return {}, {}
+    cur.execute(
+        f"""
+        WITH installs AS (
+            SELECT i.source_record_id, i.canonical_name, i.publisher, i.version,
+                   COALESCE(d.client_id, o.client_id) AS client_id, link.entity_id AS device_id
+              FROM operations.source_record_software_current i
+              JOIN operations.source_record_subjects s
+                ON s.tenant_id = i.tenant_id AND s.id = i.source_record_id
+              LEFT JOIN operations.entity_observation_current o
+                ON o.tenant_id = s.tenant_id AND o.observation_id = s.observation_id
+              LEFT JOIN operations.entity_source_links link
+                ON link.tenant_id = s.tenant_id AND link.source_instance_id = s.source_instance_id
+               AND link.external_namespace = s.external_namespace
+               AND link.parent_external_namespace = s.parent_external_namespace
+               AND link.parent_external_id = s.parent_external_id
+               AND link.external_id = s.external_id AND link.entity_class_id = 'device'
+              LEFT JOIN operations.devices d
+                ON d.tenant_id = link.tenant_id AND d.id = link.entity_id AND d.deleted_at IS NULL
+             WHERE i.tenant_id = %s AND i.source_record_id = ANY(%s::uuid[])
+               AND i.stale_since IS NULL
+        )
+        SELECT i.source_record_id, i.canonical_name, i.publisher, i.version,
+               {software_coverage.TITLE_DECISION} AS title_decision,
+               {software_coverage.PUBLISHER_DECISION} AS publisher_decision
+          FROM installs i
+          LEFT JOIN operations.v_software_decision_keys title_device
+            ON title_device.tenant_id = %s AND title_device.match_kind = 'title'
+           AND title_device.scope = 'device' AND title_device.device_id = i.device_id
+           AND title_device.match_key = lower(i.canonical_name)
+          LEFT JOIN operations.v_software_decision_keys title_client
+            ON title_client.tenant_id = %s AND title_client.match_kind = 'title'
+           AND title_client.scope = 'client' AND title_client.client_id = i.client_id
+           AND title_client.match_key = lower(i.canonical_name)
+          LEFT JOIN operations.v_software_decision_keys title_global
+            ON title_global.tenant_id = %s AND title_global.match_kind = 'title'
+           AND title_global.scope = 'global' AND title_global.match_key = lower(i.canonical_name)
+          LEFT JOIN operations.v_software_decision_keys publisher_device
+            ON publisher_device.tenant_id = %s AND publisher_device.match_kind = 'publisher'
+           AND publisher_device.scope = 'device' AND publisher_device.device_id = i.device_id
+           AND publisher_device.match_key = lower(i.publisher)
+          LEFT JOIN operations.v_software_decision_keys publisher_client
+            ON publisher_client.tenant_id = %s AND publisher_client.match_kind = 'publisher'
+           AND publisher_client.scope = 'client' AND publisher_client.client_id = i.client_id
+           AND publisher_client.match_key = lower(i.publisher)
+          LEFT JOIN operations.v_software_decision_keys publisher_global
+            ON publisher_global.tenant_id = %s AND publisher_global.match_kind = 'publisher'
+           AND publisher_global.scope = 'global' AND publisher_global.match_key = lower(i.publisher)
+        """,
+        (tenant_id, subject_ids, *((tenant_id,) * 6)),
+    )
+    rejected: dict[uuid.UUID, list[dict]] = defaultdict(list)
+    policy_known = {record["id"]: record["client_id"] is not None for record in records}
+    for (
+        subject_id,
+        name,
+        publisher,
+        version,
+        title,
+        publisher_decision,
+    ) in cur.fetchall():
+        if title is not None or publisher_decision is not None:
+            policy_known[subject_id] = True
+        if title == "reject" or publisher_decision == "reject":
+            rejected[subject_id].append(
+                {
+                    "canonical_name": name,
+                    "publisher": publisher,
+                    "version": version,
+                    "decision": "reject",
+                }
+            )
+    return rejected, policy_known
+
+
+def _qualified_identity_conflicts(
+    cur: Any, tenant_id: int, records: list[dict]
+) -> dict[uuid.UUID, dict[uuid.UUID, set[str]]]:
+    """Return only competing strong matches or established identity conflicts.
+
+    Weak hostname/MAC similarity remains visible as unknown evidence. It does
+    not open a critical identity correction by itself.
+    """
+    subjects = [
+        record
+        for record in records
+        if record["record_role"] in _IDENTITY_ROLES
+        and record["presence"] == "present"
+        and not (record["device_id"] is not None and record["device_live"])
+        and record["observation_id"] is not None
+    ]
+    if not subjects:
+        return {}
+    policies = load_identity_match_policies(cur, tenant_id)
+    identity_types = sorted(identity_entity_types(cur))
+    conflicts: dict[uuid.UUID, dict[uuid.UUID, set[str]]] = {}
+    for record in subjects:
+        data = record.get("canonical_data") or {}
+        preview = preview_match(
+            cur,
+            tenant_id=tenant_id,
+            source_name=record["platform"],
+            external_id=record["external_id"],
+            entity_type=record["entity_type"],
+            serial=data.get("serial_number"),
+            vm_uuid=data.get("vm_uuid"),
+            hostname=record_name_short(
+                cur,
+                record["platform"],
+                record["entity_type"],
+                data.get("hostname") or data.get("guest_name"),
+                data.get("domain"),
+            )
+            or None,
+            macs=data.get("macs") or [],
+            client_id=record["client_id"],
+            source_instance_id=record["source_instance_id"],
+            policies=policies,
+            is_online=data.get("is_online"),
+            identity_types=identity_types,
+            excluded_observation_ids=(record["observation_id"],),
+        )
+        for attempt in preview.attempts:
+            established_conflict = any(
+                reason != "operator_exclusion" for reason in attempt.blockers.values()
+            )
+            strong_ambiguity = (
+                attempt.matcher in {"serial", "vm_uuid", "hostname_mac"}
+                and len(attempt.usable) > 1
+            )
+            if not established_conflict and not strong_ambiguity:
+                continue
+            conflicts[record["id"]] = defaultdict(set)
+            for device_id in attempt.candidates:
+                conflicts[record["id"]][device_id].add(attempt.matcher)
+                if device_id in attempt.blockers:
+                    conflicts[record["id"]][device_id].add(
+                        f"conflict:{attempt.blockers[device_id]}"
+                    )
+            break
+    return conflicts
+
+
+def _unauthorized_tools_by_record(
+    cur: Any, tenant_id: int, subject_ids: list[uuid.UUID]
+) -> tuple[dict[uuid.UUID, list[dict]], dict[uuid.UUID, bool]]:
+    """Evaluate alertable catalog capabilities with the Computer policy contract."""
+    from ingest.config import settings
+
+    if not subject_ids:
+        return {}, {}
+    if not settings.CAPABILITY_ENFORCEMENT_ENABLED:
+        return {}, {subject_id: False for subject_id in subject_ids}
+    if not software_capabilities.capability_schema_ready(cur):
+        return {}, {subject_id: False for subject_id in subject_ids}
+
+    capabilities = software_capabilities.load_effective_capabilities(cur)
+    authorizations = software_capabilities.load_authorizations(cur, tenant_id)
+    sanctioned = software_capabilities.load_sanctioned_product_identities(
+        cur, tenant_id
+    )
+    cur.execute(
+        f"""
+        WITH installs AS (
+            SELECT i.source_record_id, i.canonical_name, i.publisher, i.version,
+                   COALESCE(d.client_id, o.client_id) AS client_id, link.entity_id AS device_id
+              FROM operations.source_record_software_current i
+              JOIN operations.source_record_subjects s
+                ON s.tenant_id = i.tenant_id AND s.id = i.source_record_id
+              LEFT JOIN operations.entity_observation_current o
+                ON o.tenant_id = s.tenant_id AND o.observation_id = s.observation_id
+              LEFT JOIN operations.entity_source_links link
+                ON link.tenant_id = s.tenant_id AND link.source_instance_id = s.source_instance_id
+               AND link.external_namespace = s.external_namespace
+               AND link.parent_external_namespace = s.parent_external_namespace
+               AND link.parent_external_id = s.parent_external_id
+               AND link.external_id = s.external_id AND link.entity_class_id = 'device'
+              LEFT JOIN operations.devices d
+                ON d.tenant_id = link.tenant_id AND d.id = link.entity_id AND d.deleted_at IS NULL
+             WHERE i.tenant_id = %s AND i.source_record_id = ANY(%s::uuid[])
+               AND i.stale_since IS NULL
+        ), resolved AS (
+            SELECT i.*, product.product_uuid,
+                   {software_coverage.TITLE_DECISION} AS title_decision,
+                   {software_coverage.PUBLISHER_DECISION} AS publisher_decision
+              FROM installs i
+              LEFT JOIN LATERAL (
+                  SELECT alias.canonical_publisher
+                    FROM operations.publisher_aliases alias
+                   WHERE alias.enabled AND COALESCE(i.publisher, '') <> ''
+                     AND i.publisher ILIKE alias.raw_pattern
+                   LIMIT 1
+              ) resolved_publisher ON TRUE
+              LEFT JOIN catalog.publishers publisher
+                ON publisher.canonical_name =
+                   COALESCE(resolved_publisher.canonical_publisher, NULLIF(i.publisher, ''))
+              LEFT JOIN catalog.products product
+                ON product.canonical_name = i.canonical_name
+               AND product.publisher_id IS NOT DISTINCT FROM publisher.id
+              LEFT JOIN operations.v_software_decision_keys title_device
+                ON title_device.tenant_id = %s AND title_device.match_kind = 'title'
+               AND title_device.scope = 'device' AND title_device.device_id = i.device_id
+               AND title_device.match_key = lower(i.canonical_name)
+              LEFT JOIN operations.v_software_decision_keys title_client
+                ON title_client.tenant_id = %s AND title_client.match_kind = 'title'
+               AND title_client.scope = 'client' AND title_client.client_id = i.client_id
+               AND title_client.match_key = lower(i.canonical_name)
+              LEFT JOIN operations.v_software_decision_keys title_global
+                ON title_global.tenant_id = %s AND title_global.match_kind = 'title'
+               AND title_global.scope = 'global' AND title_global.match_key = lower(i.canonical_name)
+              LEFT JOIN operations.v_software_decision_keys publisher_device
+                ON publisher_device.tenant_id = %s AND publisher_device.match_kind = 'publisher'
+               AND publisher_device.scope = 'device' AND publisher_device.device_id = i.device_id
+               AND publisher_device.match_key = lower(i.publisher)
+              LEFT JOIN operations.v_software_decision_keys publisher_client
+                ON publisher_client.tenant_id = %s AND publisher_client.match_kind = 'publisher'
+               AND publisher_client.scope = 'client' AND publisher_client.client_id = i.client_id
+               AND publisher_client.match_key = lower(i.publisher)
+              LEFT JOIN operations.v_software_decision_keys publisher_global
+                ON publisher_global.tenant_id = %s AND publisher_global.match_kind = 'publisher'
+               AND publisher_global.scope = 'global' AND publisher_global.match_key = lower(i.publisher)
+        )
+        SELECT r.source_record_id, r.client_id, r.canonical_name, r.publisher, r.version,
+               r.product_uuid, e.capability, e.alertable, e.evidence_sources,
+               c.unauthorized_finding_type, ft.suppressed_by_approval,
+               r.title_decision, r.publisher_decision,
+               EXISTS (
+                   SELECT 1 FROM operations.findings f
+                   JOIN operations.finding_types other_type
+                     ON other_type.id = f.finding_type_id
+                    WHERE f.tenant_id = %s
+                      AND f.status IN ('open', 'acknowledged', 'investigating', 'suppressed')
+                      AND other_type.concern_signal
+                      AND lower(f.finding_details->>'canonical_name') = lower(r.canonical_name)
+               ) AS other_concern
+          FROM resolved r
+          LEFT JOIN catalog.v_product_capability_effective e
+            ON e.product_uuid = r.product_uuid AND e.alertable
+          LEFT JOIN catalog.capability c ON c.key = e.capability
+          LEFT JOIN operations.finding_types ft ON ft.name = c.unauthorized_finding_type
+        """,
+        (tenant_id, subject_ids, *((tenant_id,) * 7)),
+    )
+    risks: dict[uuid.UUID, list[dict]] = defaultdict(list)
+    known = {subject_id: False for subject_id in subject_ids}
+    saw_install: set[uuid.UUID] = set()
+    unlinked_products: set[uuid.UUID] = set()
+    for (
+        subject_id,
+        client_id,
+        name,
+        publisher,
+        version,
+        product_uuid,
+        capability,
+        alertable,
+        evidence_sources,
+        finding_name,
+        suppressed_by_approval,
+        title_decision,
+        publisher_decision,
+        other_concern,
+    ) in cur.fetchall():
+        saw_install.add(subject_id)
+        if product_uuid is None:
+            unlinked_products.add(subject_id)
+            continue
+        known[subject_id] = True
+        if not capability or not alertable or not finding_name:
+            continue
+        if not any(
+            item["capability"] == capability
+            and item["alertable"]
+            and item["finding_type"] == finding_name
+            for item in capabilities.get(product_uuid, [])
+        ):
+            continue
+        allowed, basis = software_capabilities.permitted(
+            authorizations,
+            sanctioned,
+            client_id,
+            capability,
+            product_uuid,
+        )
+        if allowed or software_capabilities.silenced_by_approval(
+            bool(suppressed_by_approval),
+            title_decision,
+            publisher_decision,
+            bool(other_concern),
+        ):
+            continue
+        risks[subject_id].append(
+            {
+                "canonical_name": name,
+                "publisher": publisher,
+                "version": version,
+                "capability": capability,
+                "not_permitted_basis": basis,
+                "evidence_sources": evidence_sources,
+            }
+        )
+    for subject_id in subject_ids:
+        known[subject_id] = (
+            subject_id in saw_install and subject_id not in unlinked_products
+        )
+    return risks, known
+
+
+def _software_signal_findings_by_record(
+    cur: Any,
+    tenant_id: int,
+    subject_ids: list[uuid.UUID],
+    config: dict[str, Any],
+    unauthorized_tools: dict[uuid.UUID, list[dict]],
+) -> tuple[dict[uuid.UUID, dict[str, list[dict]]], dict[str, bool]]:
+    """Evaluate title signals with the catalog rules and approval contract."""
+    from ingest.software_rules import compile_rules
+
+    enabled = {
+        "suspicious": bool(config["suspicious_name_enabled"]),
+        "threat": bool(config["known_malicious_hint_enabled"]),
+    }
+    if not subject_ids:
+        return {}, enabled
+
+    cur.execute(
+        "SELECT rule_type, pattern, is_regex FROM operations.software_classifier_rules "
+        "WHERE enabled AND rule_type IN ('suspicious_name', 'install_path_suspicious')"
+    )
+    rules = compile_rules(cur.fetchall())
+    suspicious_name = rules.get("suspicious_name", lambda _value: False)
+    suspicious_path = rules.get("install_path_suspicious", lambda _value: False)
+    cur.execute(
+        "SELECT name, default_severity, suppressed_by_approval "
+        "FROM operations.finding_types "
+        "WHERE name IN ('source_record_suspicious_software', "
+        "'source_record_malicious_software_hint')"
+    )
+    type_policy = {
+        name: (severity, bool(suppressed))
+        for name, severity, suppressed in cur.fetchall()
+    }
+    cur.execute(
+        f"""
+        WITH installs AS (
+            SELECT i.tenant_id, i.source_record_id, i.canonical_name, i.publisher,
+                   i.version, i.install_location,
+                   COALESCE(d.client_id, o.client_id) AS client_id,
+                   link.entity_id AS device_id
+              FROM operations.source_record_software_current i
+              JOIN operations.source_record_subjects s
+                ON s.tenant_id = i.tenant_id AND s.id = i.source_record_id
+              LEFT JOIN operations.entity_observation_current o
+                ON o.tenant_id = s.tenant_id AND o.observation_id = s.observation_id
+              LEFT JOIN operations.entity_source_links link
+                ON link.tenant_id = s.tenant_id AND link.source_instance_id = s.source_instance_id
+               AND link.external_namespace = s.external_namespace
+               AND link.parent_external_namespace = s.parent_external_namespace
+               AND link.parent_external_id = s.parent_external_id
+               AND link.external_id = s.external_id AND link.entity_class_id = 'device'
+              LEFT JOIN operations.devices d
+                ON d.tenant_id = link.tenant_id AND d.id = link.entity_id
+               AND d.deleted_at IS NULL
+             WHERE i.tenant_id = %s AND i.source_record_id = ANY(%s::uuid[])
+               AND i.stale_since IS NULL
+        ), resolved AS (
+            SELECT i.*,
+                   {software_coverage.TITLE_DECISION} AS title_decision,
+                   {software_coverage.PUBLISHER_DECISION} AS publisher_decision,
+                   COALESCE(title_hits.hits, 0) + COALESCE(publisher_hits.hits, 0) AS threat_hits,
+                   EXISTS (
+                       SELECT 1 FROM operations.findings f
+                       JOIN operations.finding_types ft ON ft.id = f.finding_type_id
+                        WHERE f.tenant_id = i.tenant_id
+                          AND f.status IN ('open', 'acknowledged', 'investigating', 'suppressed')
+                          AND ft.concern_signal
+                          AND lower(f.finding_details->>'canonical_name') = lower(i.canonical_name)
+                          AND ft.name NOT IN ('suspicious_name', 'source_record_suspicious_software')
+                   ) AS existing_concern
+              FROM installs i
+              {software_coverage.EFFECTIVE_DECISION_JOINS}
+              LEFT JOIN LATERAL (
+                  SELECT count(*) AS hits FROM operations.safety_signal s
+                   WHERE s.tenant_id = i.tenant_id AND s.signal_type = 'threat_hit'
+                     AND lower(s.canonical_name) = lower(i.canonical_name)
+              ) title_hits ON TRUE
+              LEFT JOIN LATERAL (
+                  SELECT count(*) AS hits FROM operations.safety_signal s
+                   WHERE s.tenant_id = i.tenant_id AND s.signal_type = 'threat_hit'
+                     AND lower(s.publisher) = lower(i.publisher)
+              ) publisher_hits ON TRUE
+        )
+        SELECT source_record_id, canonical_name, publisher, version, install_location,
+               title_decision, publisher_decision, threat_hits, existing_concern
+          FROM resolved
+        """,
+        (tenant_id, subject_ids, *((tenant_id,) * 6)),
+    )
+    findings: dict[uuid.UUID, dict[str, list[dict]]] = defaultdict(
+        lambda: {"suspicious": [], "threat": []}
+    )
+    minimum_hits = int(config["known_malicious_hint_min_hits"])
+    threat_severity = str(config["known_malicious_hint_severity"])
+    for (
+        subject_id,
+        name,
+        publisher,
+        version,
+        location,
+        title_decision,
+        publisher_decision,
+        threat_hits,
+        existing_concern,
+    ) in cur.fetchall():
+        threat_hits = int(threat_hits or 0)
+        other_concern = bool(existing_concern or threat_hits > 0)
+        other_concern = other_concern or any(
+            item.get("canonical_name", "").lower() == (name or "").lower()
+            for item in unauthorized_tools.get(subject_id, [])
+        )
+        other_concern = other_concern or suspicious_path(location or "")
+        if enabled["suspicious"] and suspicious_name(name or ""):
+            severity, suppressed = type_policy.get(
+                "source_record_suspicious_software", ("medium", True)
+            )
+            if not software_capabilities.silenced_by_approval(
+                suppressed, title_decision, publisher_decision, other_concern
+            ):
+                findings[subject_id]["suspicious"].append(
+                    {
+                        "canonical_name": name,
+                        "publisher": publisher,
+                        "version": version,
+                        "signal": "suspicious_name",
+                        "severity": severity,
+                    }
+                )
+        if enabled["threat"] and threat_hits >= minimum_hits:
+            findings[subject_id]["threat"].append(
+                {
+                    "canonical_name": name,
+                    "publisher": publisher,
+                    "version": version,
+                    "signal": "threat_hit",
+                    "threat_hit_count": threat_hits,
+                    "severity": threat_severity,
+                }
+            )
+    return findings, enabled
+
+
 def assess_records(
     cur: Any,
     tenant_id: int,
@@ -476,6 +1386,86 @@ def assess_records(
     now: datetime,
 ) -> None:
     records = _load_records(cur, tenant_id, subject_ids)
+    cur.execute(
+        "SELECT config FROM operations.evaluator_config "
+        "WHERE tenant_id = %s AND evaluator_name = 'software_classifier'",
+        (tenant_id,),
+    )
+    config_row = cur.fetchone()
+    software_config = software_settings.effective(
+        config_row[0] if config_row and isinstance(config_row[0], dict) else {}
+    )
+    cvss_cutoff = float(software_config["vulnerable_software_cvss_cutoff"])
+    vulnerable_enabled = bool(software_config["vulnerable_software_enabled"])
+    rejected_enabled = bool(software_config["rejected_installed_enabled"])
+    cur.execute(
+        """
+        SELECT i.source_record_id, i.canonical_name, i.version,
+               cve.cve_id, cve.cvss_v3, cve.kev_flag,
+               EXISTS (
+                   SELECT 1
+                     FROM operations.source_record_subjects s
+                     JOIN operations.entity_source_links link
+                       ON link.tenant_id = s.tenant_id
+                      AND link.source_instance_id = s.source_instance_id
+                      AND link.external_namespace = s.external_namespace
+                      AND link.parent_external_namespace = s.parent_external_namespace
+                      AND link.parent_external_id = s.parent_external_id
+                      AND link.external_id = s.external_id
+                      AND link.entity_class_id = 'device'
+                     JOIN operations.v_device_software_exposure exposure
+                       ON exposure.tenant_id = link.tenant_id
+                      AND exposure.device_id = link.entity_id
+                     JOIN operations.findings f
+                       ON f.tenant_id = exposure.tenant_id AND f.id = exposure.finding_id
+                     JOIN operations.finding_types ft ON ft.id = f.finding_type_id
+                    WHERE s.tenant_id = i.tenant_id AND s.id = i.source_record_id
+                      AND ft.name = 'vulnerable_software'
+                      AND f.status IN ('open', 'acknowledged', 'investigating', 'suppressed')
+                      AND lower(f.finding_details->>'canonical_name') = lower(i.canonical_name)
+               ) AS owned_by_computer
+          FROM operations.source_record_software_current i
+          JOIN operations.cve_match match
+            ON match.tenant_id = i.tenant_id
+           AND lower(match.canonical_name) = lower(i.canonical_name)
+          JOIN intel.cves cve ON cve.cve_id = match.cve_id
+         WHERE i.tenant_id = %s AND i.source_record_id = ANY(%s::uuid[])
+           AND i.stale_since IS NULL
+           AND (cve.kev_flag OR cve.cvss_v3 >= %s)
+         ORDER BY i.source_record_id, cve.kev_flag DESC, cve.cvss_v3 DESC
+        """,
+        (tenant_id, subject_ids, cvss_cutoff),
+    )
+    software_risks: dict[uuid.UUID, list[dict]] = defaultdict(list)
+    for (
+        subject_id,
+        name,
+        version,
+        cve_id,
+        cvss,
+        kev,
+        owned_by_computer,
+    ) in cur.fetchall():
+        software_risks[subject_id].append(
+            {
+                "canonical_name": name,
+                "version": version,
+                "cve": cve_id,
+                "cvss": float(cvss) if cvss is not None else None,
+                "kev": bool(kev),
+                "owned_by_computer": bool(owned_by_computer),
+            }
+        )
+    rejected_software, software_policy_known = _rejected_software_by_record(
+        cur, tenant_id, records, subject_ids
+    )
+    unauthorized_tools, capability_policy_known = _unauthorized_tools_by_record(
+        cur, tenant_id, subject_ids
+    )
+    software_signals, software_signal_enabled = _software_signal_findings_by_record(
+        cur, tenant_id, subject_ids, software_config, unauthorized_tools
+    )
+    identity_conflicts = _qualified_identity_conflicts(cur, tenant_id, records)
     candidates = _candidate_computers(
         cur,
         tenant_id,
@@ -489,7 +1479,25 @@ def assess_records(
     )
     type_ids = finding_type_ids(cur)
     for record in records:
-        results = evaluate_record(record, candidates.get(record["id"], {}))
+        results = evaluate_record(
+            record,
+            candidates.get(record["id"], {}),
+            software_risks.get(record["id"], []),
+            vulnerable_enabled,
+            str(software_config["vulnerable_software_severity_kev"]),
+            str(software_config["vulnerable_software_severity_high"]),
+            rejected_software.get(record["id"], []),
+            rejected_enabled,
+            str(software_config["rejected_installed_severity"]),
+            software_policy_known.get(record["id"], record["client_id"] is not None),
+            software_signals.get(record["id"], {}).get("suspicious", []),
+            software_signal_enabled["suspicious"],
+            software_signals.get(record["id"], {}).get("threat", []),
+            software_signal_enabled["threat"],
+            unauthorized_tools.get(record["id"], []),
+            capability_policy_known.get(record["id"], False),
+            identity_conflicts=identity_conflicts.get(record["id"]),
+        )
         for result in results:
             finding_id = publish_finding(
                 cur,
@@ -531,12 +1539,24 @@ _TYPE_NAMES = (
     "source_record_identity_review",
     "source_record_identifier_invalid",
     "source_record_duplicate_review",
-    "source_record_policy_incomplete",
+    "source_record_reference_review",
+    "source_record_vulnerable_software",
+    "source_record_rejected_software",
+    "source_record_suspicious_software",
+    "source_record_malicious_software_hint",
+    "source_record_unauthorized_tool",
 )
 _RULE_TYPES = {
     ("identity.association", ""): "source_record_identity_review",
     ("identifier.validity", "serial"): "source_record_identifier_invalid",
+    ("identifier.validity", "mac"): "source_record_identifier_invalid",
+    ("record.reference", "hudu_device_reference"): "source_record_reference_review",
     ("case.duplicate", ""): "source_record_duplicate_review",
+    ("software.vulnerability", ""): "source_record_vulnerable_software",
+    ("software.decision", ""): "source_record_rejected_software",
+    ("software.suspicious_name", ""): "source_record_suspicious_software",
+    ("software.threat_intel", ""): "source_record_malicious_software_hint",
+    ("software.capability", ""): "source_record_unauthorized_tool",
 }
 
 
@@ -572,6 +1592,12 @@ def publish_finding(
     key = condition_key(target_kind, target_id, result["rule"], result["dimension"])
     spec = result["finding"]
     if spec is None:
+        if result["result"] == "unknown" and (
+            result["rule"].startswith("software.")
+            or result["rule"] == "identifier.validity"
+            or result["rule"] == "record.reference"
+        ):
+            return None
         cur.execute(
             """
             UPDATE operations.findings

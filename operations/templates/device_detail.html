@@ -395,7 +395,7 @@
                         </a>
                     {% endif %}
                 </td>
-                <td class="muted">{% finding_detail_text f %}</td>
+                <td class="muted">{% finding_detail_text f %}{% if f.subject_type == "source_record" and f.finding_details.platform %}<div style="font-size:0.78rem;">Source: {{ f.finding_details.platform }}</div>{% endif %}</td>
                 <td>
                     <span class="badge badge-{{ f.condition_response }}">{{ f.condition_response|title }}</span>
                     {% if f.condition_assessment.blockers %}<span class="muted" title="{% for blocker in f.condition_assessment.blockers %}{{ blocker|humanize_label }}{% if not forloop.last %}, {% endif %}{% endfor %}">blocked</span>{% endif %}

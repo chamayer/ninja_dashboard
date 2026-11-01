@@ -74,32 +74,40 @@ _RESOLVED_PUBLISHER = """
     ) resolved ON TRUE
 """
 
+_CATALOG_INPUTS = """
+    SELECT canonical_name, publisher, version
+      FROM operations.software_installations_current
+     WHERE deleted_at IS NULL AND stale_since IS NULL
+    UNION ALL
+    SELECT canonical_name, publisher, version
+      FROM operations.source_record_software_current
+     WHERE stale_since IS NULL
+"""
+
 _UPSERT_PUBLISHERS = f"""
 INSERT INTO catalog.publishers (canonical_name)
 SELECT DISTINCT COALESCE(resolved.canonical_publisher, install.publisher)
-  FROM operations.software_installations_current install
+  FROM ({_CATALOG_INPUTS}) install
   {_RESOLVED_PUBLISHER}
  WHERE COALESCE(install.publisher, '') <> ''
-   AND install.deleted_at IS NULL
 ON CONFLICT (canonical_name) DO NOTHING
 """
 
 _UPSERT_PRODUCTS = f"""
 INSERT INTO catalog.products (publisher_id, canonical_name)
 SELECT DISTINCT publisher.id, install.canonical_name
-  FROM operations.software_installations_current install
+  FROM ({_CATALOG_INPUTS}) install
   {_RESOLVED_PUBLISHER}
   LEFT JOIN catalog.publishers publisher
     ON publisher.canonical_name
      = COALESCE(resolved.canonical_publisher, NULLIF(install.publisher, ''))
- WHERE install.deleted_at IS NULL
 ON CONFLICT (publisher_id, canonical_name) DO NOTHING
 """
 
 _UPSERT_VERSIONS = f"""
 INSERT INTO catalog.software_versions (product_id, version)
 SELECT DISTINCT product.id, COALESCE(install.version, '')
-  FROM operations.software_installations_current install
+  FROM ({_CATALOG_INPUTS}) install
   {_RESOLVED_PUBLISHER}
   LEFT JOIN catalog.publishers publisher
     ON publisher.canonical_name
@@ -107,7 +115,6 @@ SELECT DISTINCT product.id, COALESCE(install.version, '')
   JOIN catalog.products product
     ON product.canonical_name = install.canonical_name
    AND product.publisher_id IS NOT DISTINCT FROM publisher.id
- WHERE install.deleted_at IS NULL
 ON CONFLICT (product_id, version) DO NOTHING
 """
 

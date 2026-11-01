@@ -14,6 +14,10 @@
     <tr><th>VM UUID</th><td>{{ subject.vm_uuid|default:"—" }}</td></tr>
     {% endif %}
     <tr><th>Last seen</th><td>{{ subject.last_seen_at|date:"Y-m-d H:i"|default:"—" }}</td></tr>
+    {% if subject.record_role == "endpoint_agent" %}
+    <tr><th>Reported state</th><td>{{ subject.reported_state_label }}</td></tr>
+    <tr><th>Reported last contact</th><td>{{ subject.reported_last_contact_at|date:"Y-m-d H:i"|default:"Unknown" }}</td></tr>
+    {% endif %}
     <tr><th>Managed since</th><td>{{ subject.admitted_at|date:"Y-m-d H:i" }}</td></tr>
     <tr><th>Versions</th><td>input {{ subject.input_version }} · association {{ subject.association_version }}</td></tr>
   </table>

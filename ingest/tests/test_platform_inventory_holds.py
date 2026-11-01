@@ -49,3 +49,126 @@ def test_nothing_is_emitted_before_the_type_or_table_exists(monkeypatch):
     assert pf._eval_inventory_holds(_Cursor([]), None, NOW, counts, dry_run=False) == []
     assert pf._eval_inventory_holds(_Cursor([], table_exists=False), 77, NOW, counts,
                                     dry_run=False) == []
+
+
+def test_entity_link_divergence_emits_one_admin_finding(monkeypatch):
+    class Cursor(_Cursor):
+        def __init__(self):
+            self.results = [(True,), (3,)]
+            self.params = None
+
+        def fetchone(self):
+            return self.results.pop(0)
+
+        def execute(self, sql, params=None):
+            self.last = sql
+            self.params = params
+
+    emitted, assessed = [], []
+    monkeypatch.setattr(
+        pf, "_upsert_admin_finding", lambda cur, **kw: emitted.append(kw) or uuid.uuid4()
+    )
+    monkeypatch.setattr(
+        pf, "_record_platform_assessment", lambda *args, **kw: assessed.append(args[3])
+    )
+    counts = {"entity_link_divergence": 0}
+
+    cursor = Cursor()
+    keys = pf._eval_entity_link_divergence(cursor, 91, NOW, counts, dry_run=False)
+
+    assert keys == ["entity_link_divergence:device-projection"]
+    assert counts["entity_link_divergence"] == 1
+    assert emitted[0]["finding_type_id"] == 91
+    assert emitted[0]["details"]["divergent_projection_count"] == 3
+    assert emitted[0]["details"]["authority"] == "entity_source_links"
+    assert assessed == ["entity_link_divergence"]
+    assert "observation.tenant_id = %s" in cursor.last
+    assert cursor.params == (pf.TENANT_ID,)
+
+
+def test_clean_parity_refreshes_existing_finding_assessment(monkeypatch):
+    finding_id = uuid.uuid4()
+
+    class Cursor(_Cursor):
+        def __init__(self):
+            self.results = [(True,), (0,), (finding_id,)]
+
+        def fetchone(self):
+            return self.results.pop(0)
+
+    assessed = []
+    monkeypatch.setattr(
+        pf, "_record_platform_assessment", lambda *args, **kw: assessed.append(args)
+    )
+    counts = {"entity_link_divergence": 0}
+
+    keys = pf._eval_entity_link_divergence(Cursor(), 91, NOW, counts, dry_run=False)
+
+    assert keys == []
+    assert counts["entity_link_divergence"] == 0
+    assert assessed[0][1] == finding_id
+    assert assessed[0][2] == "entity_link_divergence:device-projection"
+
+
+def test_unclassified_records_make_one_source_instance_policy_finding(monkeypatch):
+    source_instance = uuid.uuid4()
+
+    class Cursor(_Cursor):
+        def __init__(self):
+            self.fetchone_results = [(True,)]
+            self.fetchall_results = [
+                [(source_instance, "Ninja", "unknown.agent", 17)],
+                [],
+            ]
+
+        def fetchone(self):
+            return self.fetchone_results.pop(0)
+
+        def fetchall(self):
+            return self.fetchall_results.pop(0)
+
+    emitted, assessed = [], []
+    monkeypatch.setattr(
+        pf, "_upsert_admin_finding", lambda cur, **kw: emitted.append(kw) or uuid.uuid4()
+    )
+    monkeypatch.setattr(
+        pf, "_record_platform_assessment", lambda *args, **kw: assessed.append(args[3])
+    )
+    counts = {"source_record_policy_incomplete": 0}
+
+    keys = pf._eval_source_record_policy_gaps(Cursor(), 92, NOW, counts, dry_run=False)
+
+    assert keys == [
+        f"source_record_policy_incomplete:{source_instance}:unknown.agent"
+    ]
+    assert counts["source_record_policy_incomplete"] == 1
+    assert emitted[0]["details"]["affected_record_count"] == 17
+    assert emitted[0]["details"]["record_role"] == "unclassified"
+    assert assessed == ["source_record_policy_incomplete"]
+
+
+def test_clean_source_role_assessment_refreshes_stale_admin_episode(monkeypatch):
+    finding_id, signal_id = uuid.uuid4(), uuid.uuid4()
+
+    class Cursor(_Cursor):
+        def __init__(self):
+            self.fetchone_results = [(True,)]
+            self.fetchall_results = [[], [(finding_id, "old-policy-key", str(signal_id))]]
+
+        def fetchone(self):
+            return self.fetchone_results.pop(0)
+
+        def fetchall(self):
+            return self.fetchall_results.pop(0)
+
+    assessed = []
+    monkeypatch.setattr(
+        pf, "_record_platform_assessment", lambda *args, **kw: assessed.append(args)
+    )
+    counts = {"source_record_policy_incomplete": 0}
+
+    keys = pf._eval_source_record_policy_gaps(Cursor(), 92, NOW, counts, dry_run=False)
+
+    assert keys == []
+    assert assessed[0][1] == finding_id
+    assert assessed[0][2] == "old-policy-key"

@@ -151,9 +151,19 @@ def normalize_mac(value: str | None) -> str:
     mac = value.strip().lower().replace("-", ":")
     if len(mac) == 12 and ":" not in mac:
         mac = ":".join(mac[i:i + 2] for i in range(0, 12, 2))
-    if not _MAC_RE.match(mac) or mac in _JUNK_MACS:
+    if not _MAC_RE.match(mac) or is_junk_mac(mac):
         return ""
     return mac
+
+
+def is_junk_mac(value: str | None) -> bool:
+    """Whether a MAC claim is one of the known non-identity placeholder values."""
+    if not value:
+        return False
+    mac = value.strip().lower().replace("-", ":")
+    if len(mac) == 12 and ":" not in mac:
+        mac = ":".join(mac[i:i + 2] for i in range(0, 12, 2))
+    return mac in _JUNK_MACS
 
 
 def extract_macs(raw: dict) -> list[str]:

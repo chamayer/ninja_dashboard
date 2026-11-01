@@ -12,7 +12,9 @@ from typing import Any
 
 # 5: PLAN-004 Stage B (0374) — links are the association authority; processes
 # built before it must not run against its guards.
-FINDING_CONTRACT = 5
+# 6: PLAN-036 (0376-0387) — record-first findings and the strict §5 matcher; new
+# workers must not run before its policy columns and condition definitions exist.
+FINDING_CONTRACT = 6
 
 
 def guard_findings_writes(cur: Any, tenant_id: int) -> None:

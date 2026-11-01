@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import importlib
 import uuid
+from datetime import UTC, datetime
 from pathlib import Path
+from types import SimpleNamespace
 
 from django.template.loader import get_template
+from django.utils import timezone as django_timezone
 
 from apps.core import views
 
@@ -82,6 +85,34 @@ def test_the_page_shows_name_group_links_reason_and_issues():
         "about this record",
     ):
         assert fragment in page, fragment
+
+
+def test_source_record_detail_shows_reported_agent_status_and_contact():
+    template = get_template("source_record_detail.html")
+    subject = SimpleNamespace(
+        reported_name="pc-1",
+        platform="Ninja",
+        entity_type="agent.rmm",
+        record_role="endpoint_agent",
+        presence="present",
+        restricted=False,
+        device_id=None,
+        match_method=None,
+        canonical_serial="SERIAL123",
+        vm_uuid=None,
+        last_seen_at=None,
+        reported_state_label="Offline",
+        reported_last_contact_at=datetime(2026, 10, 29, 14, 30, tzinfo=UTC),
+        admitted_at=datetime(2026, 10, 1, tzinfo=UTC),
+        input_version=1,
+        association_version=1,
+    )
+    with django_timezone.override("UTC"):
+        html = template.render(
+            {"subject": subject, "assessments": [], "findings": [], "cases": []}
+        )
+    assert "Reported state" in html and "Offline" in html
+    assert "Reported last contact" in html and "2026-10-29 14:30" in html
 
 
 def test_the_reason_filter_and_the_column_name_the_same_reasons():

@@ -108,6 +108,8 @@ def evaluate(*, dry_run: bool = True) -> dict[str, int]:
         "jobs_registry_mismatch": 0,
         "jobs_unmet_dependency": 0,
         "software_inventory_held": 0,
+        "entity_link_divergence": 0,
+        "source_record_policy_incomplete": 0,
     }
 
     with db.findings_transaction(TENANT_ID) as cur:
@@ -137,10 +139,24 @@ def evaluate(*, dry_run: bool = True) -> dict[str, int]:
         held_row = cur.fetchone()
         ft_held = held_row[0] if held_row else None
         held_keys = _eval_inventory_holds(cur, ft_held, now, counts, dry_run)
+        ft_divergence = _finding_type_id(cur, "entity_link_divergence")
+        divergence_keys = _eval_entity_link_divergence(
+            cur, ft_divergence, now, counts, dry_run
+        )
+        ft_source_policy = _finding_type_id(cur, "source_record_policy_incomplete")
+        source_policy_keys = _eval_source_record_policy_gaps(
+            cur, ft_source_policy, now, counts, dry_run
+        )
 
         if not dry_run:
             # A None type (not registered yet) is a no-op in _resolve_admin_absent.
             _resolve_admin_absent(cur, ft_held, held_keys, now, assessment_required=True)
+            _resolve_admin_absent(
+                cur, ft_divergence, divergence_keys, now, assessment_required=True
+            )
+            _resolve_admin_absent(
+                cur, ft_source_policy, source_policy_keys, now, assessment_required=True
+            )
             _resolve_admin_absent(
                 cur, ft_failure, failure_keys, now, assessment_required=True
             )
@@ -322,6 +338,166 @@ def _eval_inventory_holds(
         _record_platform_assessment(
             cur, finding_id, key, "software_inventory_held", subject_id, now, measured=True
         )
+    return keys
+
+
+def _eval_entity_link_divergence(
+    cur: Any,
+    finding_type_id: int | None,
+    now: datetime,
+    counts: dict[str, int],
+    dry_run: bool,
+) -> list[str]:
+    """Report projection drift without repairing the confirmed-link authority."""
+    cur.execute("SELECT to_regclass('operations.entity_observation_current') IS NOT NULL")
+    if not cur.fetchone()[0]:
+        return []
+    cur.execute(
+        """
+        SELECT count(*)
+          FROM operations.entity_observation_current observation
+          LEFT JOIN operations.entity_source_links link
+            ON link.tenant_id = observation.tenant_id
+           AND link.source_instance_id = observation.source_instance_id
+           AND link.external_namespace = observation.external_namespace
+           AND link.parent_external_namespace = observation.parent_external_namespace
+           AND link.parent_external_id = observation.parent_external_id
+           AND link.external_id = observation.external_id
+         WHERE observation.tenant_id = %s
+           AND ((observation.device_id IS NOT NULL AND
+                 (link.id IS NULL OR link.entity_class_id <> 'device'
+                  OR link.entity_id <> observation.device_id))
+                OR (observation.device_id IS NULL AND link.entity_class_id = 'device'))
+        """,
+        (TENANT_ID,),
+    )
+    divergent = int(cur.fetchone()[0] or 0)
+    key = "entity_link_divergence:device-projection"
+    if divergent <= 0:
+        if not dry_run and finding_type_id is not None:
+            cur.execute(
+                """
+                SELECT id FROM operations.findings
+                 WHERE tenant_id = %s AND condition_namespace = 'admin'
+                   AND finding_type_id = %s AND condition_key = %s
+                   AND status IN ('open', 'acknowledged')
+                """,
+                (TENANT_ID, finding_type_id, key),
+            )
+            existing = cur.fetchone()
+            if existing is not None:
+                subject_id = _subject("platform_control", "entity_link_divergence")
+                _record_platform_assessment(
+                    cur, existing[0], key, "entity_link_divergence", subject_id,
+                    now, measured=True,
+                )
+        return []
+    counts["entity_link_divergence"] += 1
+    if finding_type_id is None:
+        raise RuntimeError("Finding type is missing: entity_link_divergence")
+    if not dry_run:
+        subject_id = _subject("platform_control", "entity_link_divergence")
+        finding_id = _upsert_admin_finding(
+            cur,
+            finding_type_id=finding_type_id,
+            condition_key=key,
+            severity="high",
+            now=now,
+            subject_ref={"signal_kind": "platform", "signal_id": str(subject_id)},
+            details={
+                "divergent_projection_count": divergent,
+                "authority": "entity_source_links",
+                "repair": "review_association_history",
+            },
+        )
+        _record_platform_assessment(
+            cur, finding_id, key, "entity_link_divergence", subject_id, now,
+            measured=True,
+        )
+    return [key]
+
+
+def _eval_source_record_policy_gaps(
+    cur: Any,
+    finding_type_id: int | None,
+    now: datetime,
+    counts: dict[str, int],
+    dry_run: bool,
+) -> list[str]:
+    """One actionable configuration finding per source instance and unknown type."""
+    cur.execute(
+        "SELECT to_regclass('operations.source_record_subjects') IS NOT NULL"
+    )
+    if not cur.fetchone()[0]:
+        return []
+    cur.execute(
+        """
+        SELECT source_instance_id, platform, entity_type, count(*)
+          FROM operations.source_record_subjects
+         WHERE tenant_id = %s AND subject_kind = 'record'
+           AND record_role = 'unclassified' AND presence = 'present'
+         GROUP BY source_instance_id, platform, entity_type
+         ORDER BY source_instance_id, entity_type
+        """,
+        (TENANT_ID,),
+    )
+    rows = cur.fetchall()
+    keys: list[str] = []
+    for source_instance_id, platform, entity_type, affected_count in rows:
+        key = f"source_record_policy_incomplete:{source_instance_id}:{entity_type}"
+        keys.append(key)
+        counts["source_record_policy_incomplete"] += 1
+        if dry_run:
+            continue
+        if finding_type_id is None:
+            raise RuntimeError("Finding type is missing: source_record_policy_incomplete")
+        subject_id = _subject(
+            "source_record_policy", f"{source_instance_id}:{entity_type}"
+        )
+        finding_id = _upsert_admin_finding(
+            cur,
+            finding_type_id=finding_type_id,
+            condition_key=key,
+            severity="medium",
+            now=now,
+            subject_ref={"signal_kind": "platform", "signal_id": str(subject_id)},
+            details={
+                "source_instance_id": str(source_instance_id),
+                "platform": platform,
+                "entity_type": entity_type,
+                "record_role": "unclassified",
+                "affected_record_count": int(affected_count),
+            },
+        )
+        _record_platform_assessment(
+            cur, finding_id, key, "source_record_policy_incomplete", subject_id,
+            now, measured=True,
+        )
+
+    if not dry_run and finding_type_id is not None:
+        cur.execute(
+            """
+            SELECT id, condition_key, subject_ref->>'signal_id'
+              FROM operations.findings
+             WHERE tenant_id = %s AND condition_namespace = 'admin'
+               AND finding_type_id = %s
+               AND status IN ('open', 'acknowledged')
+            """,
+            (TENANT_ID, finding_type_id),
+        )
+        active = cur.fetchall()
+        current = set(keys)
+        for finding_id, key, signal_id in active:
+            if key in current or not signal_id:
+                continue
+            try:
+                subject_id = uuid.UUID(signal_id)
+            except (TypeError, ValueError):
+                continue
+            _record_platform_assessment(
+                cur, finding_id, key, "source_record_policy_incomplete", subject_id,
+                now, measured=True,
+            )
     return keys
 
 

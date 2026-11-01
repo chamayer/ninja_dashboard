@@ -21,10 +21,18 @@ RESULT_LABELS = {
 }
 RULE_LABELS = {
     "record.presence": "Present at the source",
+    "record.reported_status": "Source-reported connectivity",
+    "record.reported_contact": "Source-reported last contact",
     "record.role": "Record role",
-    "identifier.validity": "Identifier is usable",
+    "record.reference": "Source reference validity",
+    "identifier.validity": "Identifier validity",
     "identity.association": "Attached to one Computer",
     "case.duplicate": "Duplicate entries",
+    "software.vulnerability": "Vulnerable software",
+    "software.decision": "Software policy",
+    "software.suspicious_name": "Suspicious software name",
+    "software.threat_intel": "Software threat signals",
+    "software.capability": "Software capability policy",
 }
 
 
@@ -41,6 +49,7 @@ def load_subject(cur, tenant_id: int, subject_id: uuid.UUID) -> dict | None:
                s.intake_error, s.source_instance_id,
                meta.reported_name, meta.canonical_serial, meta.vm_uuid, meta.restricted,
                meta.last_seen_at, meta.withdrawn_at, meta.external_id,
+               meta.reported_online, meta.reported_last_contact_at,
                link.entity_id AS device_id, link.match_method,
                d.canonical_hostname AS device_name, c.slug AS client_slug,
                c.display_name AS client_name
@@ -67,6 +76,13 @@ def load_subject(cur, tenant_id: int, subject_id: uuid.UUID) -> dict | None:
     if subject["restricted"]:
         subject["reported_name"] = subject["canonical_serial"] = subject["vm_uuid"] = None
         subject["external_id"] = None
+    subject["reported_state_label"] = (
+        "Online"
+        if subject["reported_online"] is True
+        else "Offline"
+        if subject["reported_online"] is False
+        else "Unknown"
+    )
     return subject
 
 

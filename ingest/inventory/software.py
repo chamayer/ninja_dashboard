@@ -95,6 +95,7 @@ class ApplyResult:
     devices: int = 0
     new: int = 0
     changed: int = 0
+    source_changed: int = 0
     unchanged: int = 0
     removed: int = 0
     held_devices: int = 0
@@ -103,12 +104,19 @@ class ApplyResult:
 
     @property
     def material_changed(self) -> bool:
-        return bool(self.new or self.changed or self.removed or self.relinked)
+        return bool(
+            self.new
+            or self.changed
+            or self.source_changed
+            or self.removed
+            or self.relinked
+        )
 
     def summary(self) -> str:
         return (
             f"seen={self.seen} unresolved={self.unresolved} devices={self.devices} "
-            f"new={self.new} changed={self.changed} unchanged={self.unchanged} "
+            f"new={self.new} changed={self.changed} source_changed={self.source_changed} "
+            f"unchanged={self.unchanged} "
             f"removed={self.removed} relinked={self.relinked} "
             f"held_devices={self.held_devices} complete={self.complete}"
         )
@@ -116,6 +124,8 @@ class ApplyResult:
     def describe(self, scope: str) -> str:
         """One plain-English line for the Jobs pages."""
         if not self.devices:
+            if self.source_changed:
+                return f"{scope}: {self.source_changed:,} source-record software rows changed."
             return f"{scope}: no computer reported a software list."
         text = (
             f"{scope}: {self.devices:,} computers refreshed. Programs: {self.new:,} new, "
@@ -123,6 +133,8 @@ class ApplyResult:
         )
         if self.relinked:
             text += f" {self.relinked:,} version links corrected."
+        if self.source_changed:
+            text += f" {self.source_changed:,} source-record software rows changed."
         if self.held_devices:
             text += f" {self.held_devices:,} computers held for review."
         if self.unresolved:
@@ -137,6 +149,7 @@ class ApplyResult:
             "computers": self.devices,
             "new": self.new,
             "changed": self.changed,
+            "source_record_changed": self.source_changed,
             "removed": self.removed,
             "unchanged": self.unchanged,
             "version_links_corrected": self.relinked,
@@ -266,6 +279,8 @@ def stream_rows(
     device_map: Mapping[str, tuple[uuid.UUID, uuid.UUID]],
     collected: dict[uuid.UUID, datetime],
     stream: _Stream,
+    source_record_map: Mapping[str, uuid.UUID] | None = None,
+    source_rows: list[tuple] | None = None,
 ) -> Iterator[tuple]:
     """Resolved rows in ``LISTING_COLUMNS`` order; per-device collection times."""
     seq = 0
@@ -273,11 +288,40 @@ def stream_rows(
         stream.complete = complete
         for item in results:
             stream.seen += 1
-            resolution = device_map.get(str(item.get("deviceId", "")))
+            ninja_id = str(item.get("deviceId", ""))
+            subject_id = (source_record_map or {}).get(ninja_id)
+            source_row = normalize(item)
+            if (
+                subject_id is not None
+                and source_row is not None
+                and source_rows is not None
+            ):
+                source_rows.append(
+                    (
+                        subject_id,
+                        *(
+                            source_row[c]
+                            for c in (
+                                "canonical_name",
+                                "display_name",
+                                "publisher",
+                                "version",
+                                "install_location",
+                                "install_date",
+                                "product_code",
+                                "size_bytes",
+                                "is_system_component",
+                                "material_hash",
+                            )
+                        ),
+                        collected_time(item.get("timestamp")),
+                    )
+                )
+            resolution = device_map.get(ninja_id)
             if resolution is None:
                 stream.unresolved += 1
                 continue
-            row = normalize(item)
+            row = source_row
             if row is None:
                 continue
             device_id, client_id = resolution
@@ -318,6 +362,99 @@ def hold_reason(
         f"Removals wait for an administrator because the list shrank by "
         f"{shrink}% or more."
     )
+
+
+def _apply_source_record_rows(cur: Any, rows: list[tuple], at: datetime) -> int:
+    """Apply source-scoped installations without inferring Computer identity."""
+    if not rows:
+        return 0
+    cur.execute(
+        "CREATE TEMP TABLE source_software_input ("
+        "source_record_id uuid, canonical_name text, display_name text, publisher text, "
+        "version text, install_location text, install_date text, product_code text, "
+        "size_bytes bigint, is_system_component boolean, material_hash bytea, "
+        "collected_at timestamptz) ON COMMIT DROP"
+    )
+    with cur.copy("COPY source_software_input FROM STDIN") as copy:
+        copy.set_types(
+            [
+                "uuid",
+                "text",
+                "text",
+                "text",
+                "text",
+                "text",
+                "text",
+                "text",
+                "int8",
+                "bool",
+                "bytea",
+                "timestamptz",
+            ]
+        )
+        for row in rows:
+            copy.write_row(row)
+    cur.execute(
+        """
+        WITH changed AS (
+            SELECT i.* FROM source_software_input i
+            LEFT JOIN operations.source_record_software_current c
+              ON c.tenant_id = %s AND c.source_record_id = i.source_record_id
+             AND c.canonical_name = i.canonical_name
+            WHERE c.source_record_id IS NULL OR c.material_hash IS DISTINCT FROM i.material_hash
+               OR c.stale_since IS NOT NULL
+        ), closed AS (
+            UPDATE operations.source_record_software_history h
+               SET effective_to = %s, active = FALSE
+              FROM changed d
+             WHERE h.tenant_id = %s AND h.source_record_id = d.source_record_id
+               AND h.canonical_name = d.canonical_name AND h.effective_to IS NULL
+        )
+        INSERT INTO operations.source_record_software_history (
+            tenant_id, source_record_id, canonical_name, display_name, publisher,
+            version, install_location, install_date, product_code, size_bytes,
+            is_system_component, material_hash, effective_from, last_seen_at,
+            received_at, active)
+        SELECT %s, d.source_record_id, d.canonical_name, d.display_name, d.publisher,
+               d.version, d.install_location, NULLIF(d.install_date, '')::date,
+               d.product_code, d.size_bytes, d.is_system_component, d.material_hash,
+               %s, %s, %s, TRUE FROM changed d
+        """,
+        (TENANT_ID, at, TENANT_ID, TENANT_ID, at, at, at),
+    )
+    material_changes = int(cur.rowcount)
+    cur.execute(
+        """
+        INSERT INTO operations.source_record_software_current (
+            tenant_id, source_record_id, canonical_name, display_name, publisher,
+            version, install_location, install_date, product_code, size_bytes,
+            is_system_component, material_hash, first_observed_at, last_observed_at,
+            refreshed_at, stale_since, stale_reason)
+        SELECT %s, i.source_record_id, i.canonical_name, i.display_name, i.publisher,
+               i.version, i.install_location, NULLIF(i.install_date, '')::date,
+               i.product_code, i.size_bytes, i.is_system_component, i.material_hash,
+               %s, COALESCE(i.collected_at, %s), %s, NULL, ''
+          FROM source_software_input i
+        ON CONFLICT (tenant_id, source_record_id, canonical_name) DO UPDATE SET
+            display_name = EXCLUDED.display_name, publisher = EXCLUDED.publisher,
+            version = EXCLUDED.version, install_location = EXCLUDED.install_location,
+            install_date = EXCLUDED.install_date, product_code = EXCLUDED.product_code,
+            size_bytes = EXCLUDED.size_bytes,
+            is_system_component = EXCLUDED.is_system_component,
+            material_hash = EXCLUDED.material_hash,
+            last_observed_at = EXCLUDED.last_observed_at, refreshed_at = EXCLUDED.refreshed_at,
+            stale_since = NULL, stale_reason = ''
+        """,
+        (TENANT_ID, at, at, at),
+    )
+    cur.execute(
+        """
+        SELECT operations.source_record_enqueue(%s, 'source_record', subject_id)
+          FROM (SELECT DISTINCT source_record_id AS subject_id FROM source_software_input) changed
+        """,
+        (TENANT_ID,),
+    )
+    return material_changes
 
 
 # ── Apply ──────────────────────────────────────────────────────────
@@ -576,6 +713,7 @@ def apply(
     device_map: Mapping[str, tuple[uuid.UUID, uuid.UUID]],
     *,
     listed_by: str,
+    source_record_map: Mapping[str, uuid.UUID] | None = None,
     observed_at: datetime | None = None,
 ) -> ApplyResult:
     """Stream Ninja pages into a temp table and apply them in one transaction."""
@@ -590,6 +728,7 @@ def apply(
     }
     collected: dict[uuid.UUID, datetime] = {}
     stream = _Stream()
+    source_rows: list[tuple] = []
     result = ApplyResult()
     with db.transaction() as cur:
         cur.execute(_GUC)
@@ -604,10 +743,26 @@ def apply(
             f"COPY inventory_raw ({', '.join(LISTING_COLUMNS)}) FROM STDIN"
         ) as copy:
             copy.set_types(list(_LISTING_TYPES))
-            for row in stream_rows(batches, device_map, collected, stream):
+            for row in stream_rows(
+                batches,
+                device_map,
+                collected,
+                stream,
+                source_record_map,
+                source_rows,
+            ):
                 copy.write_row(row)
         result.seen, result.unresolved = stream.seen, stream.unresolved
         result.complete = stream.complete
+        unique_source_rows: dict[tuple[uuid.UUID, str], tuple] = {}
+        for row in source_rows:
+            key = (row[0], row[1])
+            prior = unique_source_rows.get(key)
+            if prior is None or (row[-1] or at) >= (prior[-1] or at):
+                unique_source_rows[key] = row
+        source_rows = list(unique_source_rows.values())
+        if source_rows:
+            result.source_changed = _apply_source_record_rows(cur, source_rows, at)
         cur.execute(LISTING_SQL)
         cur.execute(
             "CREATE INDEX ON inventory_listing (device_id, client_id, canonical_name)"
@@ -678,6 +833,34 @@ def load_device_map() -> dict[str, tuple[uuid.UUID, uuid.UUID]]:
         }
 
 
+def load_source_record_map() -> dict[str, uuid.UUID]:
+    """Map Ninja API node IDs to admitted source-record subjects.
+
+    ``ninja_node_id`` is preserved in canonical observation data even when a
+    VMware guest uses its organization-qualified VMX path as external identity.
+    This map therefore keys API responses to the source record, not the Computer
+    link or the source record's possibly different natural key.
+    """
+    with db.transaction() as cur:
+        cur.execute(_GUC)
+        cur.execute(
+            """
+            SELECT o.canonical_data->>'ninja_node_id', s.id
+              FROM operations.source_record_subjects s
+              JOIN operations.entity_observation_current o
+                ON o.tenant_id = s.tenant_id AND o.observation_id = s.observation_id
+             WHERE s.tenant_id = %s
+               AND s.source_instance_id = (
+                   SELECT source_instance_id FROM operations.source_bindings
+                    WHERE id = %s AND tenant_id = %s)
+               AND s.subject_kind = 'record'
+               AND NULLIF(o.canonical_data->>'ninja_node_id', '') IS NOT NULL
+            """,
+            (TENANT_ID, NINJA_SOURCE_BINDING_ID, TENANT_ID),
+        )
+        return {str(node_id): subject_id for node_id, subject_id in cur.fetchall()}
+
+
 def fleet_check(
     client: Any, count: Callable[[int, int | None, str], None] | None = None
 ) -> ApplyResult:
@@ -687,6 +870,7 @@ def fleet_check(
     """
     with run_log("inventory.software") as stats:
         device_map = load_device_map()
+        source_record_map = load_source_record_map()
         if not device_map:
             raise RuntimeError(
                 "No Ninja-linked computers; the fleet check has nothing to map"
@@ -698,9 +882,15 @@ def fleet_check(
                 received, total, "software rows from Ninja"
             )
         )
-        result = apply(pages(client, on_page=on_page), device_map, listed_by="fleet")
+        result = apply(
+            pages(client, on_page=on_page),
+            device_map,
+            listed_by="fleet",
+            source_record_map=source_record_map,
+        )
         stats["rows_upserted"] = result.new + result.changed + result.unchanged
         stats["rows_inserted"] = result.new
+        stats["source_record_rows_changed"] = result.source_changed
         log.info("inventory.software fleet check: %s", result.summary())
         if not result.complete:
             raise RuntimeError(
@@ -780,10 +970,12 @@ def device_refresh(
     device_map: Mapping[str, tuple[uuid.UUID, uuid.UUID]],
 ) -> ApplyResult:
     """Fetch and apply the lists of the given Ninja devices in one request."""
+    source_record_map = load_source_record_map()
     result = apply(
         pages(client, {"df": device_filter(ninja_device_ids)}),
         device_map,
         listed_by="device",
+        source_record_map=source_record_map,
     )
     if not result.complete:
         raise RuntimeError(

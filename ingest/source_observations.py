@@ -74,6 +74,18 @@ class SourceObservationFailure(RuntimeError):
         self.counts = dict(counts)
 
 
+class PartialIntakeError(RuntimeError):
+    """A committed source run contained rows that could not be identified."""
+
+    def __init__(self, written_rows: int, rejected_rows: int) -> None:
+        super().__init__(
+            f"{rejected_rows} row(s) lacked stable source identity; "
+            "the snapshot was marked incomplete and no records were withdrawn."
+        )
+        self.written_rows = written_rows
+        self.rejected_rows = rejected_rows
+
+
 # Sources outside the identity-signal set carry no independent identity
 # evidence: they either already know their device or have none. Gating here
 # rather than branching per platform means any future non-identity source
@@ -147,7 +159,11 @@ def run_source_observations(
         except Exception as exc:
             failures += 1
             _record_source_run(
-                source, observed_at, ok=False, rows=0, error=str(exc)[:2000]
+                source,
+                observed_at,
+                ok=False,
+                rows=(exc.written_rows if isinstance(exc, PartialIntakeError) else 0),
+                error=str(exc)[:2000],
             )
             log.exception(
                 "source_observations: source %s failed — continuing", source.source_name
@@ -291,10 +307,36 @@ def write_observations(
             raise RuntimeError(
                 "source binding resolved to an unexpected source instance"
             )
+        intake_errors: list[tuple[int, str, str]] = []
+        valid_rows: list[dict[str, Any]] = []
+        for ordinal, row in enumerate(rows):
+            reason = _intake_identity_error(row, source)
+            if reason:
+                intake_errors.append(
+                    (
+                        ordinal,
+                        reason,
+                        str(
+                            row.get("entity_type")
+                            if isinstance(row, dict) and row.get("entity_type")
+                            else source.entity_type or ""
+                        ),
+                    )
+                )
+            else:
+                valid_rows.append(row)
+        _persist_intake_errors(
+            cur,
+            _TENANT_ID,
+            source_instance_id,
+            run_id,
+            source.platform,
+            intake_errors,
+        )
         link_map = _load_client_links(cur, source)
         placeholder_names = _load_placeholder_names(cur)
         identity_policies = load_identity_match_policies(cur, _TENANT_ID)
-        for row in rows:
+        for row in valid_rows:
             if row.get("_org_only"):
                 # Container-only record (e.g. a group with zero devices) —
                 # registers the group for the org observation, no device row.
@@ -437,6 +479,7 @@ def write_observations(
                     client_id=client_id,
                     policies=identity_policies,
                     is_online=canonical_data.get("is_online"),
+                    source_instance_id=source_instance_id,
                 )
             else:
                 # Non-identity source: the connector already knows its device
@@ -598,11 +641,20 @@ def write_observations(
             name_changed_attachments(
                 cur, attached_before, attachments(cur, current_rows)
             )
-        is_complete_snapshot = not getattr(source, "is_partial_snapshot", False)
+        is_complete_snapshot = (
+            not getattr(source, "is_partial_snapshot", False) and not intake_errors
+        )
         complete_run(
             cur,
             run_id,
             written,
+            failed_rows=len(intake_errors),
+            error=(
+                f"{len(intake_errors)} row(s) lacked stable source identity; "
+                "durable intake-error subjects were recorded."
+                if intake_errors
+                else ""
+            ),
             is_complete_snapshot=is_complete_snapshot,
             identity_rows=current_rows,
         )
@@ -612,7 +664,72 @@ def write_observations(
             for gid in resolved_groups:
                 unmatched_groups.pop(gid, None)
             _record_unmatched_groups(cur, source, unmatched_groups, placeholder_names)
+    if intake_errors:
+        raise PartialIntakeError(written, len(intake_errors))
     return len(obs_rows)
+
+
+def _intake_identity_error(row: Any, source: SourceConfig) -> str:
+    """Return a safe reason when a row cannot be admitted under a stable key."""
+    if not isinstance(row, dict):
+        return "source row is not an object"
+    if row.get("_org_only"):
+        group_id = str(row.get("platform_group_id") or "").strip()
+        namespace = str(row.get("container_external_namespace") or "").strip()
+        external_id = str(row.get("container_external_id") or group_id).strip()
+        return (
+            "missing stable container identity"
+            if not group_id or not namespace or not external_id
+            else ""
+        )
+    entity_key = str(
+        row.get("entity_key") or row.get("platform_device_id") or ""
+    ).strip()
+    if not entity_key:
+        return "missing stable source-record identity"
+    entity_type = str(row.get("entity_type") or source.entity_type or "").strip()
+    if not entity_type:
+        return "missing source-record type"
+    if not str(row.get("external_namespace") or "").strip():
+        return "missing stable source namespace"
+    group_id = str(row.get("platform_group_id") or "").strip()
+    if group_id or not source.is_shared:
+        namespace = str(row.get("container_external_namespace") or "").strip()
+        external_id = str(row.get("container_external_id") or group_id).strip()
+        if not namespace or not external_id:
+            return "missing stable container identity"
+    return ""
+
+
+def _persist_intake_errors(
+    cur: Any,
+    tenant_id: int,
+    source_instance_id: uuid.UUID,
+    run_id: uuid.UUID,
+    platform: str,
+    errors: list[tuple[int, str, str]],
+) -> None:
+    """Persist safe row-level intake outcomes under their run ordinal."""
+    for ordinal, reason, entity_type in errors:
+        cur.execute(
+            """
+            INSERT INTO operations.source_record_subjects (
+                tenant_id, subject_kind, source_instance_id, source_run_id,
+                item_ordinal, intake_error, platform, entity_type
+            ) VALUES (%s, 'intake_error', %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (tenant_id, source_run_id, item_ordinal)
+                WHERE subject_kind = 'intake_error' DO NOTHING
+            """,
+            (
+                tenant_id,
+                source_instance_id,
+                run_id,
+                ordinal,
+                reason,
+                platform[:80],
+                entity_type[:80],
+            ),
+        )
 
 
 # Kept private-name compatible for focused callers/tests during the transition

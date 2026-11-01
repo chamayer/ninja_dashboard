@@ -11,6 +11,45 @@ them when capability enforcement is enabled.
 from __future__ import annotations
 
 
+def permitted(
+    authorizations: dict,
+    sanctioned: dict,
+    client_id,
+    capability: str,
+    product_uuid,
+) -> tuple[bool, str]:
+    """Apply the shared most-specific deny/permit/required-platform policy."""
+    for scope, label in ((client_id, "client"), (None, "global")):
+        tier = authorizations.get(scope, {}).get(capability)
+        if not tier:
+            continue
+        if product_uuid in tier["deny"]:
+            return False, f"{label} deny"
+        if product_uuid in tier["permit"]:
+            return True, f"{label} permit"
+    if product_uuid in sanctioned.get(client_id, {}).get(capability, set()):
+        return True, "required platform"
+    return False, "not authorized"
+
+
+def silenced_by_approval(
+    suppressed_by_approval: bool,
+    title_decision: str | None,
+    publisher_decision: str | None,
+    other_concern: bool,
+) -> bool:
+    """Apply the shared software approval exception (ADR-0039 / design D9)."""
+    if not suppressed_by_approval:
+        return False
+    if title_decision in ("approve", "approve_publisher"):
+        return True
+    return (
+        title_decision is None
+        and publisher_decision in ("approve", "approve_publisher")
+        and not other_concern
+    )
+
+
 def _column_exists(cur, qualified_table: str, column: str) -> bool:
     """Catalog probe, so the optional column is never queried blindly.
 
