@@ -29,11 +29,14 @@ last_detected_at are updated on repeat detections.
 
 from __future__ import annotations
 
+import functools
 import hashlib
 import json
 import logging
+import time
 import uuid
 from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -95,29 +98,106 @@ def _apply_requirement_overrides(baseline: list[tuple], overrides: list[tuple]) 
 
 @contextmanager
 def _evaluation_transaction(tenant_id: int):
-    """Serialize before taking the repeatable-read evaluation snapshot.
+    """Serialize evaluators, then run the evaluation in guarded batches.
 
-    A session lock survives the short acquisition transaction. Taking a
+    Session locks survive the short acquisition transactions. Taking a
     transaction lock inside repeatable read would freeze a snapshot *before*
-    waiting for the preceding evaluator to finish. Always release the lock
-    before returning the connection to the pool, including on rollback.
+    waiting for the preceding evaluator or guard holder to finish. Always
+    release both locks before returning the connection to the pool, including
+    on rollback. Yields the cursor; ``_checkpoint`` may commit in between.
     """
     lock = int.from_bytes(hashlib.sha256(f"platform-evaluate:{tenant_id}".encode()).digest()[:8],
                           "big", signed=True)
     with db.pool.connection() as conn:
+        batches = _EvaluationBatches(conn, tenant_id)
+        token = _BATCHES.set(batches)
         try:
             with conn.transaction(), conn.cursor() as cur:
                 cur.execute("SELECT pg_advisory_lock(%s)", (lock,))
-                # The findings tenant guard, held for the session for the same reason.
-                lock_tenant_session(cur, tenant_id)
-            with conn.transaction(), conn.cursor() as cur:
-                cur.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ")
-                declare_findings_contract(cur, tenant_id)
-                yield cur
+            batches.begin()
+            yield batches.cur
+            batches.conn.commit()
+        except BaseException:
+            conn.rollback()
+            raise
         finally:
+            _BATCHES.reset(token)
             with conn.transaction(), conn.cursor() as cur:
-                unlock_tenant_session(cur, tenant_id)
+                if batches.guarded:
+                    unlock_tenant_session(cur, tenant_id)
                 cur.execute("SELECT pg_advisory_unlock(%s)", (lock,))
+            log.info("evaluator: committed in %d batch(es)", batches.count)
+
+
+class _EvaluationBatches:
+    """One evaluation committed in short batches, each under the tenant guard.
+
+    Holding the exclusive guard for a whole run made every other findings
+    writer wait for it: operator Issue actions (which fail at the 60-second web
+    timeout) and ingest steps. ``checkpoint`` commits the batch, lets queued
+    writers take the guard, and starts the next batch with a new snapshot. It
+    runs only between whole findings (``_batch_unit``) and between phases, so a
+    finding's writes commit together. Closing what a run did not see happens
+    only after every phase has finished, since a failure raises first.
+    """
+
+    def __init__(self, conn: Any, tenant_id: int) -> None:
+        self.conn = conn
+        self.tenant_id = tenant_id
+        self.cur = conn.cursor()
+        self.guarded = False
+        self.depth = 0
+        self.count = 0
+        self.started = 0.0
+
+    def begin(self) -> None:
+        lock_tenant_session(self.cur, self.tenant_id)
+        self.guarded = True
+        self.conn.commit()
+        self.cur.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ")
+        declare_findings_contract(self.cur, self.tenant_id)
+        self.cur.execute(
+            "SELECT set_config('operations.tenant_id', %s, true)", (str(self.tenant_id),)
+        )
+        self.count += 1
+        self.started = time.monotonic()
+
+    def checkpoint(self, *, force: bool = False) -> None:
+        if self.depth or not (force or time.monotonic() - self.started >= _BATCH_SECONDS):
+            return
+        self.conn.commit()
+        unlock_tenant_session(self.cur, self.tenant_id)
+        self.guarded = False
+        self.conn.commit()
+        self.begin()
+
+
+_BATCH_SECONDS = 2.0
+_BATCHES: ContextVar[_EvaluationBatches | None] = ContextVar("evaluator_batches", default=None)
+
+
+def _checkpoint(*, force: bool = False) -> None:
+    batches = _BATCHES.get()
+    if batches is not None:
+        batches.checkpoint(force=force)
+
+
+def _batch_unit(function):
+    """Mark one whole finding write: a batch may end before it, never inside it."""
+
+    @functools.wraps(function)
+    def wrapper(*args, **kwargs):
+        batches = _BATCHES.get()
+        if batches is None:
+            return function(*args, **kwargs)
+        batches.checkpoint()
+        batches.depth += 1
+        try:
+            return function(*args, **kwargs)
+        finally:
+            batches.depth -= 1
+
+    return wrapper
 
 
 @dataclass(frozen=True)
@@ -248,38 +328,54 @@ def evaluate(tenant_id: int, device_id: uuid.UUID | None = None) -> int:
             now = datetime.now(timezone.utc)
             cur.execute(f"SET LOCAL operations.tenant_id = {tenant_id}")
             source_problems = _source_failure_guard(cur, tenant_id, now)
+            _checkpoint()
             lifecycle, lifecycle_devices = _load_lifecycle_results(
                 cur, tenant_id, now, device_id, source_problems
             )
+            _checkpoint()
             affected += _apply_lifecycle_results(
                 cur, tenant_id, now, evaluator_run_id, lifecycle
             )
+            _checkpoint()
             affected += _sync_lifecycle_status(
                 cur, tenant_id, now, evaluator_run_id, skip=set(lifecycle),
                 per_device={subject: item for subject, item in lifecycle_devices.items()
                             if lifecycle[subject].target != "retired"}, device_id=device_id,
             )
+            _checkpoint()
             if device_id is None:
                 affected += _sync_device_roles(cur, tenant_id, now)
+                _checkpoint()
                 affected += _evaluate_unknown_entities(cur, tenant_id, now)
+                _checkpoint()
                 affected += _evaluate_change_history_registry(cur, tenant_id, now)
+                _checkpoint()
                 affected += _evaluate_source_name_kinds(cur, tenant_id, now)
+                _checkpoint()
                 affected += _evaluate_duplicate_records(cur, tenant_id, now)
+                _checkpoint()
                 affected += identity_findings.evaluate(cur, tenant_id, now)
+                _checkpoint()
             corroborated = _load_corroborated_devices(cur, tenant_id)
+            _checkpoint()
             affected += _evaluate_coverage(
                 cur, tenant_id, device_id, now, source_problems, corroborated, lifecycle
             )
+            _checkpoint()
             affected += _evaluate_unenrolled(cur, tenant_id, device_id, now)
+            _checkpoint()
             affected += _evaluate_device_lifecycle(
                 cur, tenant_id, device_id, now, source_problems, lifecycle
             )
+            _checkpoint()
             affected += sync_windows_servicing(
                 cur, tenant_id, device_id, now=now
             )
             # cross_client_conflict emitter removed 2026-07-14 — see
             # BLUEPRINT §1.7 for design rationale. Existing findings
             # closed in migration 0034.
+            # Every phase has committed; close only what this finished run did not see.
+            _checkpoint(force=True)
             affected += _auto_resolve(cur, tenant_id, device_id, now)
     except Exception as exc:
         error_msg = str(exc)[:2000]
@@ -382,6 +478,7 @@ def _source_failure_guard(
     return problems
 
 
+@_batch_unit
 def _upsert_admin_finding(
     cur: Any,
     tenant_id: int,
@@ -847,6 +944,7 @@ _LIFECYCLE_FINDING_ACTIVE_STATUSES = (
 )
 
 
+@_batch_unit
 def _upsert_lifecycle_finding(
     cur: Any,
     tenant_id: int,
@@ -2687,6 +2785,7 @@ def _condition_key(
     return hashlib.sha256(raw.encode()).hexdigest()[:64]
 
 
+@_batch_unit
 def _upsert_finding(
     cur: Any,
     tenant_id: int,
