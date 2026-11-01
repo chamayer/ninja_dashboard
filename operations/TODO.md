@@ -12,7 +12,10 @@
       the distinction in data ownership without making operators learn internal
       subject plumbing. Define layout and acceptance when activated.
 
-- [ ] **PLAN-004 R4 production follow-ups** (2026-10-30; continuation approved):
+- [x] **PLAN-004 R4 production follow-ups** (2026-10-30; closed 2026-11-01: the
+      row review was replaced by recorded dispositions in 0.139.0, and the
+      post-release timing/queue check found and fixed the evaluator lock time
+      and the blocked relationship projection in 0.139.2–0.140.0):
       PLAN-036 now registers a durable divergence finding (migration 0383).
       Local PostgreSQL validation of durable `intake_error` subjects and
       failed-snapshot behavior is complete under PLAN-036. Remaining: review the
@@ -219,7 +222,8 @@
       record-type-to-kind mapping table (admin data), classes `location` and
       `service` plus `asset.kind`, relationships, inventory by kind. Interim:
       Source records shows why each record is unlinked (0344).
-- [ ] **PLAN-003 client-mapping issue counts/status:** resolve the measured
+- [x] **PLAN-003 client-mapping issue counts/status** (done under PLAN-036,
+      released 0.138.0–0.139.1): resolve the measured
       dashboard/Issues discrepancy as one distinct-corrective-action contract;
       see the single resolution item in `docs/plans/PLAN-003-current-design.md`.
       PLAN-004 retains resolver lifecycle cleanup: after resolver runs, close

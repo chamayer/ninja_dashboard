@@ -2,6 +2,24 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.140.0] — 2026-11-01 — Evaluation in short batches
+
+### Changed
+
+- Platform evaluation commits in batches of about two seconds, between whole
+  findings and between phases, and releases the findings tenant guard at each
+  commit. Operator Issue actions (which fail at the 60-second web timeout) and
+  ingest findings writers now wait seconds instead of a whole run. A finding's
+  writes still commit together, and auto-resolve runs only after every phase has
+  finished.
+
+### Added
+
+- The Issue review page shows OS installations that equally trusted sources
+  place on different Computers, for the issue's Computer and its candidate
+  Computers, and which Computer shows it now. This usually means one Computer
+  holds two machines' records; it clears once they are split or reassigned.
+
 ## [0.139.2] — 2026-11-01 — Evaluator lock time and relationship projection
 
 ### Fixed

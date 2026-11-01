@@ -1566,7 +1566,25 @@ standing staleness and cleanup rules own them.
   (`superseded`); a tie keeps the current edge, and the others become `conflict`.
 - Host tests: 3 real-Postgres projector cases plus the 0394 check passed; Django
   migration state is clean; owners pre-checked on production.
-**Deferred (TODO.md):** an operator finding for relationship `conflict` rows.
+**Verified 2026-11-01:** first evaluator run on 0.139.2 (20:05 UTC) took 6.8 min
+(from ~30). Relationship queue drain awaits the first post-restart collection cycle.
+**User decisions 2026-11-01 (next work):**
+1. Relationship `conflict` rows: do not merge the Computers (the paired Computers
+   have different hostnames/serials; the cause is a Computer holding two machines'
+   records). Attach the conflicting installation as evidence on that Computer's
+   existing identity issue (two machines on one computer, identity conflict, shared
+   serial); no new issue type.
+2. Platform evaluation: commit in bounded batches, each taking the tenant guard, so
+   operator issue actions (60 s web timeout) and ingest writers wait seconds, not a
+   whole run. Auto-resolve must then close only what a finished run did not see.
+**0.140.0 (both decisions implemented):** `_EvaluationBatches` commits about every 2 s
+at `_batch_unit` boundaries (whole finding upserts) and between phases, releasing the
+session guard each time; auto-resolve follows a forced checkpoint after all phases.
+The Issue review page lists `conflict` OS installations for the subject and candidate
+Computers (`_os_installation_disagreements`; query checked read-only on production).
+Host tests: the evaluator Postgres suites have no new failures against the pre-change
+evaluator (41 vs 43 failing; the 41 are pre-existing fixtures without
+`condition_namespace`, and only the 2 new batching tests differ).
 
 **Hotfix 0.138.2 (2026-11-01):** 0387 had copied label/category/type into two schema 2
 definitions, so `parse_profile` rejected the active policy and **no condition assessment
