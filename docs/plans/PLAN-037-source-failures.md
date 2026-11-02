@@ -1,6 +1,6 @@
 # PLAN-037 — Source collection failures
 
-**Status: defined.** Registered 2026-11-01 from the post-release check of
+**Status: active.** Registered 2026-11-01 from the post-release check of
 0.140.0. Each remaining step needs the user's approval.
 
 ## Goal
@@ -48,8 +48,12 @@ source; host tests for any collector or guard change.
   so its Issue closes (Issues 3–9 closed); 0.140.3 (migration 0396) closes the four
   pre-binding per-step Ninja failures (`core.devices`, `core.device_health`,
   `core.custom_fields`, `patch_cycle`, last seen 09-16).
-- Open: ThreatFox (Step 2). Steps 4 and 5 are not started.
+- 0.142.0 ships Step 2 (ThreatFox authenticated API) and a Step 5 candidate
+  (Ninja locations and policies load before devices). Both await a post-deploy
+  check: a completed ThreatFox run, and no new failed `devices` steps.
+- Step 4 is not started.
 
 ## Next action
 
-User approval for Step 2 (ThreatFox endpoint) or Step 4 (deploy-interrupted runs).
+Verify 0.142.0 read-only (ThreatFox run, Ninja `devices` step), then user
+approval for Step 4 (deploy-interrupted runs).

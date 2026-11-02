@@ -56,7 +56,7 @@
 - Section: PLAN-037 — Source collection failures
 - Related plans: PLAN-036 owns the admin-finding clear assessments the guard uses; PLAN-019 F09 and the TODO Ninja collection-gap item overlap Step 5.
 - Resume gate: Each step needs user approval; Step 1 is read-only.
-- Last checked: 2026-11-01 (registered after the 0.140.0 post-release check; 7 open source-failure Issues measured read-only).
+- Last checked: 2026-11-02 (Steps 1 and 3 shipped in 0.140.1–0.140.3; 0.142.0 ships Step 2 and a Step 5 candidate, pending post-deploy verification; Step 4 not started).
 
 ## PLAN-036 — Record-first findings and consistent identity decisions
 

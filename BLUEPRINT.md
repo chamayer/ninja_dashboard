@@ -25,11 +25,12 @@ validation results, or completed-plan summaries here.
   [plan](docs/plans/PLAN-026-source-configuration-ui.md).
 
 - **PLAN-029 — active.** Next: renew scheduler heartbeat independently of
-  scheduled work and collect Ninja reference data before devices. See the
+  scheduled work. Ninja reference data now loads before devices (0.142.0). See the
   [plan](docs/plans/PLAN-029-jobs-readiness-and-first-ingest.md).
 
-- **PLAN-007 — active.** Next: verify current implementation and migration
-  `0335` against the [registry entry](docs/records/PLAN_REGISTRY.md#plan-007-ingest-domain-separation) before resuming.
+- **PLAN-037 — active.** Next: verify 0.142.0 read-only (a completed ThreatFox
+  run, no new failed Ninja `devices` steps), then approval for Step 4. See the
+  [plan](docs/plans/PLAN-037-source-failures.md).
 - **PLAN-012 — active, gated.** Next: reconstruct and confirm the missing
   consumer ledger, design, affected-file inventory, and resumable slices in
   the [checkpoint](docs/records/PLAN-012-computer-read-checkpoint.md).
@@ -41,8 +42,6 @@ validation results, or completed-plan summaries here.
   and [Operations checkpoint](operations/BLUEPRINT.md).
 - **PLAN-019 — active, approval-gated.** Step 3 is next; each step requires
   separate explicit approval. See the [plan](docs/plans/PLAN-019-data-pipeline-correctness-and-retention.md).
-- **PLAN-022 — active.** Wave A is complete. Design each Wave B item and obtain
-  its separate approval before execution. See the [plan](docs/plans/PLAN-022-legacy-data-cleanup.md).
 
 Completed and ready plans remain in the registry; their details stay in their
 registered source documents. Update this index only when active status,

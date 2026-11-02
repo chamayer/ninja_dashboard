@@ -2,6 +2,34 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.142.0] — 2026-11-02 — ThreatFox API, Ninja device lookups first, recovered page fixes
+
+### Fixed
+
+- ThreatFox is collected through abuse.ch's authenticated community API
+  (`get_iocs`, 7 days, `ABUSECH_AUTH_KEY`). The recent-export URL has returned
+  `410 Gone` since 2026-10-21 (PLAN-037 Step 2).
+- The Ninja device cycle loads organizations, locations and policies before
+  devices, and skips the device upsert when a prerequisite fails. Devices
+  reference locations and policies, which were refreshed only by the later
+  enrichment cycle (PLAN-037 Step 5 candidate).
+- Patching role, device type and OS filters narrow tiles and findings to the
+  same current Computer population as the posture summary and stay in tile links.
+
+### Added
+
+- Source records search also matches serial and VM UUID; global search shows
+  the readable record type.
+- A client candidate's detail page links to its client.
+- PostgreSQL tests for the counterfactual identity preview; the plan-registry
+  validator runs in the governance workflow.
+
+### Documentation
+
+- Recovered uncommitted closeouts: PLAN-002, 013, 014, 021, 030, 031 and 032
+  are completed; PLAN-012 checkpoint restored; deferred source-record plans
+  renumbered PLAN-039/040; PLAN-035 superseded by PLAN-038.
+
 ## [0.141.2] — 2026-11-02 — Close the old activity-queue alert
 
 ### Fixed
