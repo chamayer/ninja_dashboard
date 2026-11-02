@@ -32,7 +32,7 @@ reviewed migration.
 | 2 | U04 | Generation fence on software reclassification targets: column, three producer conflict clauses, fenced acknowledgment; map F06's publication stages alongside, fencing a stage only where its race is confirmed | Phase 4 prototype, Phase 2 checks 5–6 |
 | 3 | F08 | Separate sites snapshot scope, completed only when the sites fetch succeeds | Phase 4 prototype (option B) |
 | 3 | F02 fix | Bounded per-filter continuation (design in the Phase 5 triage); prototype on the Phase 2 activity harness first. Until it ships the risk of losing events behind the cursor in a backlog over the cap is accepted | Phase 2 check 3 |
-| 4 | Retention (ADR 0045) | First-observed anchor with basis and precision, then the significant-change trail after measuring which fields drive interval churn | Phase 2 check 10; new measurement needs approval |
+| 4 | Retention (ADR 0045) | First-observed anchor with basis and precision, then the significant-change trail after measuring which fields drive interval churn | Phase 2 check 10; new measurement needs approval. Gate: after PLAN-038 (released 0.141.0), so the measurement sees one Ninja device record with its health companion; health fields are candidates for the significant set |
 
 ## Progress
 

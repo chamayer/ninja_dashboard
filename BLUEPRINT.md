@@ -30,6 +30,10 @@ validation results, or completed-plan summaries here.
   [Operations handoff](operations/BLUEPRINT.md#r4-implementation-started-2026-10-30-branch-plan003-r3-base-7a8b67b)
   and [final design](operations/docs/plans/PLAN-004-source-record-final-design.md).
 
+- **PLAN-038 — active; released in 0.141.0.** Ninja device health is a companion
+  data set of the device record (ADR-0051). Next: read-only production check after
+  deploy, then complete. See the [plan](docs/plans/PLAN-038-ninja-device-health-as-record-detail.md).
+
 - **PLAN-026 — active, approval-gated.** PLAN-025 is complete; next obtain
   explicit approval to implement the source configuration UI using its
   documented source/binding contract. See the

@@ -84,7 +84,9 @@ def test_normal_health_collection_does_not_write_legacy_snapshots() -> None:
     )
 
 
-def test_health_links_through_the_ninja_source_instance(monkeypatch) -> None:
+def test_health_attaches_to_its_present_ninja_device_record(monkeypatch) -> None:
+    """PLAN-038: health is detail of the device record, never linked on its own."""
+
     class Cursor:
         def __init__(self):
             self.executed: list[tuple[str, object]] = []
@@ -97,17 +99,21 @@ def test_health_links_through_the_ninja_source_instance(monkeypatch) -> None:
 
         @staticmethod
         def fetchall():
-            return [("42", device_id, client_id)]
+            return [("42", client_id)]
 
     cursor = Cursor()
-    device_id = uuid4()
     client_id = uuid4()
     source_instance_id = uuid4()
     run_id = uuid4()
+    written: list[dict] = []
 
     @contextmanager
     def transaction():
         yield cursor
+
+    def write_current_rows(_cur, rows):
+        written.extend(rows)
+        return len(rows)
 
     monkeypatch.setattr(device_health.db, "transaction", transaction)
     monkeypatch.setattr(
@@ -115,24 +121,33 @@ def test_health_links_through_the_ninja_source_instance(monkeypatch) -> None:
         "begin_run",
         lambda *_args, **_kwargs: (run_id, source_instance_id),
     )
-    monkeypatch.setattr(
-        device_health, "write_current_rows", lambda _cur, rows: len(rows)
-    )
+    monkeypatch.setattr(device_health, "write_current_rows", write_current_rows)
     monkeypatch.setattr(device_health, "complete_run", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(device_health, "reconcile_complete_run", lambda *_args: None)
 
     observed_at = datetime(2026, 10, 22, 12, tzinfo=timezone.utc)
+    unowned = {**_health_record(), "deviceId": 43}
     assert (
         device_health._write_health_observations(
-            [device_health._to_row(_health_record(), observed_at)],
-            {42: _health_record()},
-            {42: "WINDOWS_WORKSTATION"},
+            [
+                device_health._to_row(_health_record(), observed_at),
+                device_health._to_row(unowned, observed_at),
+            ],
+            {42: _health_record(), 43: unowned},
+            {42: "WINDOWS_WORKSTATION", 43: "WINDOWS_WORKSTATION"},
             observed_at,
         )
         == 1
     )
 
-    source_query, params = cursor.executed[-1]
-    assert "o.source_instance_id = %s" in source_query
-    assert "o.source_id" not in source_query
-    assert params == (1, source_instance_id, ["42"])
+    assert [
+        (row["external_id"], row["device_id"], row["client_id"]) for row in written
+    ] == [("42", None, client_id)]
+    owner_query, params = next(
+        (sql, p) for sql, p in cursor.executed if "ninja_node_id" in sql
+    )
+    assert "o.source_instance_id = %s" in owner_query
+    assert "operations.devices" not in owner_query
+    assert params == (1, source_instance_id, ["42", "43"])
+    statements = [sql for sql, _ in cursor.executed]
+    assert any("attach_source_record_companions" in sql for sql in statements)

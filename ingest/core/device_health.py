@@ -190,15 +190,15 @@ def _write_health_observations(
                 expected_rows=len(rows),
             )
             device_ids = [str(row["device_id"]) for row in rows]
+            # Health is detail of the Ninja device record (PLAN-038): it is
+            # stored only for a device whose record is present, and it is
+            # attached to that record instead of being linked on its own.
             cur.execute(
                 """
                 SELECT DISTINCT ON (o.canonical_data ->> 'ninja_node_id')
                        o.canonical_data ->> 'ninja_node_id' AS ninja_node_id,
-                       o.device_id,
-                       d.client_id
+                       o.client_id
                   FROM operations.entity_observation_current o
-                  JOIN operations.devices d
-                    ON d.id = o.device_id AND d.tenant_id = o.tenant_id
                  WHERE o.tenant_id = %s
                    AND o.source_instance_id = %s
                    AND o.active
@@ -209,13 +209,14 @@ def _write_health_observations(
                 """,
                 (_TENANT_ID, source_instance_id, device_ids),
             )
-            link_map = {row[0]: (row[1], row[2]) for row in cur.fetchall()}
+            owner_clients = {row[0]: row[1] for row in cur.fetchall()}
 
             current_rows: list[dict[str, Any]] = []
             for row in rows:
                 external_id = str(row["device_id"])
-                linked = link_map.get(external_id)
-                ops_device_id, client_id = linked if linked else (None, None)
+                if external_id not in owner_clients:
+                    continue
+                client_id = owner_clients[external_id]
                 entity_type = entity_type_for_node_class(
                     known_devices[row["device_id"]]
                 )
@@ -232,7 +233,7 @@ def _write_health_observations(
                         "external_id": external_id,
                         "collector_instance_id": INTERNAL_COLLECTOR_INSTANCE_ID,
                         "client_id": client_id,
-                        "device_id": ops_device_id,
+                        "device_id": None,
                         "entity_type": entity_type,
                         "parent_source_key": "",
                         "entity_key": _legacy_health_entity_key(external_id),
@@ -253,7 +254,21 @@ def _write_health_observations(
                     }
                 )
 
+            if not current_rows:
+                raise RuntimeError(
+                    "No health row matches a present Ninja device record; refusing "
+                    "to reconcile current evidence"
+                )
+            if len(current_rows) < len(rows):
+                log.info(
+                    "Skipped %d health rows whose Ninja device record is not present",
+                    len(rows) - len(current_rows),
+                )
             written = write_current_rows(cur, current_rows)
+            cur.execute(
+                "SELECT operations.attach_source_record_companions(%s, %s)",
+                (_TENANT_ID, source_instance_id),
+            )
             complete_run(
                 cur,
                 run_id,

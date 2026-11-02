@@ -16467,7 +16467,7 @@ def sources_status(request: HttpRequest) -> HttpResponse:
                 """
                 SELECT source_instance_id, entity_type, entity_class,
                        current_count, active_count, withdrawn_count, last_seen_at
-                  FROM operations.v_source_instance_entity_counts
+                  FROM operations.v_source_instance_record_counts
                  WHERE tenant_id = %s
                  ORDER BY source_instance_id, entity_class, entity_type
                 """,
@@ -16609,8 +16609,13 @@ def sources_status(request: HttpRequest) -> HttpResponse:
                 "last_rows": last_success_rows if last_success_rows is not None else last_run_rows,
                 "last_error": last_error,
                 "last_observed": last_observed,
-                "current_record_count": current_record_count,
-                "active_record_count": active_record_count,
+                # Records only: companion data sets (PLAN-038) are not records.
+                "current_record_count": sum(
+                    c["current_count"] for c in counts_by_instance.get(source_instance_id, [])
+                ),
+                "active_record_count": sum(
+                    c["active_count"] for c in counts_by_instance.get(source_instance_id, [])
+                ),
                 "entity_counts": counts_by_instance.get(source_instance_id, []),
                 "is_stale": is_stale,
             }

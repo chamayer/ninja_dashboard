@@ -23,6 +23,18 @@
   </table>
 </div>
 
+{% for companion in companions %}
+<div class="card" style="margin-bottom:1rem;">
+  <h2>{% if companion.external_namespace == "device-health" %}Device health{% else %}{{ companion.external_namespace }}{% endif %}</h2>
+  <p class="muted">{{ companion.description }} · {% if companion.active %}current, collected {{ companion.last_seen_at|date:"Y-m-d H:i" }}{% else %}withdrawn{% if companion.withdrawn_at %} {{ companion.withdrawn_at|date:"Y-m-d" }}{% endif %}{% endif %} · changed {{ companion.observed_at|date:"Y-m-d H:i" }}</p>
+  <table>
+    {% for label, value in companion.fields %}
+    <tr><th>{{ label }}</th><td>{% if value is None %}—{% else %}{{ value }}{% endif %}</td></tr>
+    {% endfor %}
+  </table>
+</div>
+{% endfor %}
+
 <div class="card" style="margin-bottom:1rem;">
   <h2>Assessments</h2>
   {% if assessments %}

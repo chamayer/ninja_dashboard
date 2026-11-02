@@ -2,6 +2,29 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.141.0] — 2026-11-02 — Ninja device health is part of the device record
+
+### Changed
+
+- Ninja device health is no longer a source record of its own. It was stored as a
+  second record per Ninja device, typed like the device (`agent.rmm`) and linked
+  to a Computer by itself. It is now a companion data set of the Ninja device
+  record (PLAN-038): never admitted as a record, never linked on its own, kept
+  only while its device record is present and withdrawn with it. Its values
+  reach the Computer through the device record's link; a field the device
+  record itself reports (`offline`) comes from the device record only.
+- The source-record page of a Ninja device shows its device health; the Sources
+  page counts records only.
+
+### Migration
+
+- 0397 adds the admin-managed companion-stream registry, the companion
+  attachments and their rules, and edits the attribute projector. One-time
+  cleanup: attaches the health data to its device records, ends the 7,330 health
+  links through `set_source_association` (link history kept) and removes the
+  8,513 health source records with their derived assessments. Backup:
+  `~/backups/plan038-20261102T150553Z` on the host.
+
 ## [0.140.3] — 2026-11-02 — Close the old per-step Ninja failures
 
 ### Fixed

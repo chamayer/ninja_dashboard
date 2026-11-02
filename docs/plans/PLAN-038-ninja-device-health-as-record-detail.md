@@ -1,7 +1,9 @@
 # PLAN-038 — Ninja device health as detail of the device record
 
-**Status: defined.** Registered 2026-11-02 at the user's request ("it needs to
-be changed"). Implementation needs the user's approval of the design below.
+**Status: active — released in 0.141.0 (migration 0397); production
+verification after deploy.** Registered 2026-11-02 at the user's request; the
+user approved implementing and completing it the same day. Decision:
+[ADR-0051](../../operations/docs/decisions/0051-companion-data-sets-of-a-source-record.md).
 
 ## Problem
 
@@ -41,44 +43,54 @@ No new table is needed for the values:
 The defect is only that the health observation is admitted, typed and shown as
 a source record of its own.
 
-## Design (user direction 2026-11-02: one record, health enriches it)
+## Design (user decisions 2026-11-02)
 
-Values reach a Computer only as claims projected from a source record's
-observation (ADR-0012; `entity_attribute_claim_current.observation_id` is a
-foreign key), so "enrich the Computer" means the health fields become part of
-the Ninja device record:
+Health is a companion data set of the Ninja device record: it has no life of its
+own but is linked to the device record (ADR-0051).
 
-1. **The Ninja device collection fetches `/queries/device-health`** and writes each
-   device's health fields into that device's own observation. The health claims
-   are then attributed to the device record; no second record exists.
-2. **Health joins the device record's material fields** (Ninja device material
-   projection version 5), so health changes produce history the way the health
-   stream does today. Confirm that identity comparison and source-record
-   reassessment key only on identity fields, so health changes do not re-run them.
-3. **A failed health fetch does not fail the device collection.** Decide whether
-   the device record keeps the previous health values or marks health as not
-   reported; it must not silently drop them.
-4. **Retire the health stream:** remove the `device-health` writer from the hourly
-   Ninja enrichment collection, withdraw its observations, and retire the 8,513
-   health source records after a read-only check that none has a case,
-   disposition, Issue or lookup key. Repoint `ninja_device_health_current_shadow`
-   and the PLAN-033 readers at the device record, and remove the
-   `device-health:%` page filters; the Sources page double count goes away.
+- **Never a record:** the admission trigger skips companion streams
+  (admin-managed `source_record_companion_streams`; Ninja `device-health`, owner
+  key `ninja_node_id`). No link of its own; `device_id` stays empty.
+- **Attached:** `attach_source_record_companions` (called by the health writer in
+  its transaction) records the owner in `source_record_companions`. The writer
+  stores health only for a device whose record is present.
+- **Lifecycle:** an active companion needs a present owner at commit
+  (`check_companion_owner`); withdrawing the owner withdraws its companions and
+  closes their history (`withdraw_companions_with_owner`). History ages out under
+  the existing 90-day retention; the long-term trail is PLAN-019 Step 4.
+- **Values:** the claim projector attributes companion claims through the owner's
+  link; a field the owner reports itself (`offline`) is claimed from the owner
+  only. Records without an owner keep their projection hash.
+- **Readers:** the source-record page of a Ninja device shows its device health;
+  the Sources page counts records only (`v_source_instance_record_counts`). The
+  existing `device-health:%` filters stay; they are now redundant, not needed.
+- Rejected: merging health into the device collection or the device row (ADR-0051).
 
-Considered and rejected: writing the health fields into the device observation
-from the separate hourly enrichment run. Two collections would then rewrite one
-row, and each complete snapshot would erase or have to merge the other's fields.
+## One-time cleanup (migration 0397)
 
-Trade-off: health refreshes at the device collection's cadence instead of hourly,
-and the device collection makes one more paged API call.
+Attach all health observations to their owners (all 5,611 active ones have a
+present owner); end the 7,330 health links through `set_source_association`
+(link history closed and kept); remove the 8,513 health source records with their
+132,368 derived assessments and 8,513 queue rows. Backup before release:
+`~/backups/plan038-20261102T150553Z` on the host (CSV with SHA256SUMS).
 
 ## Validation
 
-Read-only production counts before and after (source records by namespace,
-health claims, Issues); host tests for the admission change and the retirement
-migration; check the PLAN-033 health readers and the Computer page still show
-the values.
+- Schema-only clone of production on the host (roles, schema, configuration
+  tables; synthetic rows), migration run as `operations_migrate`, writer steps as
+  `ninja_ingest` under RLS. All checks passed: health records removed and links
+  ended with history kept; each health attached to its device record; ordinary
+  records keep their projection hash; mismatched health now feeds its device's
+  Computer; `offline` only from the device record and device claims unchanged;
+  new health not admitted; health withdrawn with its device and history closed;
+  orphan health refused; Sources counts records only.
+- The clone caught one defect before release: a NULL owner made the field filter
+  NULL and would have withdrawn every source's claims; fixed with `COALESCE`.
+- Local: `test_migration_0397.py` (4) and `test_device_health.py` (5) pass; ruff
+  clean on changed files; the source-record template renders.
 
 ## Next action
 
-User approval to implement; first read-only step: measure the device collection cadence and the health fetch time, and read the reassessment triggers for Step 2.
+After deploy: read-only production check (0 health records and links, 5,611
+companions, health claims re-projected, `offline` conflicts gone), then mark
+complete.

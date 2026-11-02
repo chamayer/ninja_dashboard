@@ -193,6 +193,7 @@ def source_record_detail(request: HttpRequest, subject_id: uuid.UUID) -> HttpRes
             (tenant_id, subject_id),
         )
         dispositions = _rows(cur)
+        companions = companion_details(cur, subject_id)
     from apps.core.finding_actions import can_manage_lifecycle
 
     undoable = bool(
@@ -217,8 +218,39 @@ def source_record_detail(request: HttpRequest, subject_id: uuid.UUID) -> HttpRes
             "cases": cases,
             "dispositions": dispositions,
             "undoable": undoable,
+            "companions": companions,
         },
     )
+
+
+# Fields of a companion data set that only describe where it came from.
+_COMPANION_CONTEXT_FIELDS = {"platform", "entity_type"}
+
+
+def companion_details(cur, subject_id: uuid.UUID) -> list[dict]:
+    """Data sets that are detail of this record (PLAN-038), e.g. Ninja device health."""
+    cur.execute("SELECT to_regclass('operations.v_source_record_companion_detail') IS NOT NULL")
+    if not cur.fetchone()[0]:
+        return []
+    cur.execute(
+        """
+        SELECT external_namespace, description, active, observed_at, last_seen_at,
+               withdrawn_at, canonical_data
+          FROM operations.v_source_record_companion_detail
+         WHERE owner_subject_id = %s
+         ORDER BY external_namespace
+        """,
+        (subject_id,),
+    )
+    companions = _rows(cur)
+    for companion in companions:
+        data = companion.pop("canonical_data") or {}
+        companion["fields"] = [
+            (key.replace("_", " ").capitalize(), value)
+            for key, value in sorted(data.items())
+            if key not in _COMPANION_CONTEXT_FIELDS and not isinstance(value, dict | list)
+        ]
+    return companions
 
 
 def case_memberships(cur, tenant_id: int, subject_id: uuid.UUID) -> list[dict]:

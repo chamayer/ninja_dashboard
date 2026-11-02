@@ -6,6 +6,14 @@
 
 ## Current Operations backlog
 
+- [ ] **Slim withdrawn source records after a while** (raised 2026-11-02 in
+      PLAN-038). Withdrawn records stay in `entity_observation_current`
+      indefinitely, raw payload included (Ninja: 2,441 withdrawn device records
+      back to 06-05). Keep them (they are the long-term trace that a source
+      reported a device, and the Computer is never deleted), but consider keeping
+      only identity, client, dates and last state after a period. Platform-wide;
+      decide together with the ADR-0045 change trail (PLAN-019 Step 4).
+
 - [ ] **Computer findings page presentation** (deferred from ADR-0050, 2026-10-30):
       redesign the page so the combined machine view remains easy to scan while
       showing contributing source names unobtrusively in finding details. Preserve
@@ -169,7 +177,7 @@
       most recent record when a source has several; the Computer's
       Observations tab as fallback. Needs a verified deep-link format per
       source from an administrator.
-- [ ] **Sources page: per-type counts double-count Ninja devices** (found
+- [x] **Sources page: per-type counts double-count Ninja devices** — resolved by PLAN-038 (0.141.0): health is no longer a record. (found
       2026-10-22). `v_source_instance_entity_counts` counts current-observation
       rows, and every Ninja device has two: an identity record (`device`
       namespace, or `vmware_guest_vmx_path` for VMware guests) and a health
