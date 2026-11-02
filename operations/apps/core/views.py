@@ -11322,8 +11322,9 @@ def devices_page(request: HttpRequest) -> HttpResponse:
                    COUNT(*) FILTER (WHERE device_role = 'server') AS servers,
                    COUNT(*) FILTER (WHERE device_role = 'workstation') AS workstations,
                    COUNT(*) FILTER (WHERE effective_patching_scope = 'Included') AS in_patch_scope,
-                   COUNT(*) FILTER (WHERE lifecycle_status <> 'retired'
-                                     AND last_contact_at >= NOW() - INTERVAL '{active_device_days} days') AS active,
+                   COUNT(*) FILTER (
+                       WHERE last_contact_at >= NOW() - INTERVAL '{active_device_days} days'
+                   ) AS active,
                    COUNT(*) FILTER (WHERE last_contact_at IS NULL
                                     OR last_contact_at < NOW() - INTERVAL '{active_device_days} days') AS stale
             FROM operations.v_device
@@ -11368,9 +11369,9 @@ def devices_page(request: HttpRequest) -> HttpResponse:
 
         # OS group breakdown for chip strip
         cur.execute(
-            """
+            f"""
             SELECT os_group, COUNT(*) FROM operations.v_device
-            WHERE tenant_id = 1 AND lifecycle_status <> 'retired'
+            WHERE tenant_id = 1 AND {current_computer_sql()}
             GROUP BY os_group ORDER BY COUNT(*) DESC
             """
         )
@@ -11825,37 +11826,53 @@ def patching_queue(request: HttpRequest) -> HttpResponse:
         # showing global counts under a mistyped slug.
         base_qs = base_qs.none()
 
-    # Role filter: constrains device-subject findings to devices with
-    # the chosen device_role. Client-subject findings (e.g.
-    # patch_approval_backlog) are hidden when a role filter is set
-    # since they aggregate across the client's whole fleet — mixing
-    # them into a role view is misleading.
-    if role_filter:
-        role_device_ids = Device.objects.filter(
-            tenant_id=1,
-            device_role=role_filter,
-            deleted_at__isnull=True,
+    # Device-slice filters constrain finding rows to the same current
+    # Computer population as the summary. Client-subject findings (for
+    # example patch_approval_backlog) cannot truthfully be assigned to a
+    # role, device type, or OS slice, so hide them while one is selected.
+    device_slice_filter_active = bool(
+        role_filter or device_type_filter or os_family_filter
+    )
+    if device_slice_filter_active:
+        device_scope_filters: dict[str, object] = {
+            "tenant_id": 1,
+            "deleted_at__isnull": True,
+        }
+        if filtered_client_ids:
+            device_scope_filters["client_id__in"] = filtered_client_ids
+        if role_filter:
+            device_scope_filters["device_role"] = role_filter
+        if device_type_filter:
+            device_scope_filters["device_type"] = device_type_filter
+        if os_family_filter:
+            device_scope_filters["os_family"] = os_family_filter
+        scoped_device_ids = current_computers(
+            Device.objects.filter(**device_scope_filters)
         ).values("id")
         base_qs = base_qs.filter(
             subject_type=Finding.SubjectType.DEVICE,
-            subject_id__in=role_device_ids,
+            subject_id__in=scoped_device_ids,
         )
 
-    # Per-type tile counts (respects status + client filters).
+    # Per-type tile counts respect every current filter.
     tile_counts = {
         row["finding_type__name"]: row["cnt"]
         for row in (base_qs.values("finding_type__name").annotate(cnt=Count("id")))
     }
 
     def _type_tile_href(ftname: str) -> str:
-        parts = [f"type={ftname}"]
+        params: list[tuple[str, str]] = [("type", ftname)]
         if client_filter:
-            parts.append(f"client={','.join(client_filter)}")
+            params.append(("client", ",".join(client_filter)))
         if status_filter != "active":
-            parts.append(f"status={status_filter}")
+            params.append(("status", status_filter))
         if role_filter:
-            parts.append(f"role={role_filter}")
-        return "?" + "&".join(parts)
+            params.append(("role", role_filter))
+        if device_type_filter:
+            params.append(("device_type", device_type_filter))
+        if os_family_filter:
+            params.append(("os_family", os_family_filter))
+        return "?" + urlencode(params)
 
     tiles = [
         {
@@ -11909,7 +11926,7 @@ def patching_queue(request: HttpRequest) -> HttpResponse:
     # Status overview.  Keep the three ideas deliberately separate:
     # device freshness (active), patching policy (Included), and evidence of
     # patch work (a recent Ninja state observation or install outcome).
-    posture_where = ["v.tenant_id = %s", "v.lifecycle_status <> 'retired'"]
+    posture_where = ["v.tenant_id = %s", current_computer_sql("v")]
     posture_params: list = [1]
     if filtered_client_ids:
         posture_where.append("v.client_id = ANY(%s::uuid[])")

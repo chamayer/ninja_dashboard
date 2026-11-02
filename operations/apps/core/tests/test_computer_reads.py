@@ -145,6 +145,27 @@ def test_dashboard_uses_the_shared_current_computer_selector_for_its_counts():
     assert "AND {current_computer_sql()}" in section
 
 
+def test_patching_posture_uses_the_shared_current_computer_selector():
+    views = Path(__file__).parents[1].joinpath("views.py").read_text(encoding="utf-8")
+    start = views.index("def patching_queue(")
+    end = views.find("\n\n@login_required\ndef ", start)
+    section = views[start : end if end >= 0 else len(views)]
+
+    assert 'posture_where = ["v.tenant_id = %s", current_computer_sql("v")]' in section
+
+
+def test_patching_device_slice_filters_scope_tiles_and_findings_together():
+    views = Path(__file__).parents[1].joinpath("views.py").read_text(encoding="utf-8")
+    start = views.index("def patching_queue(")
+    end = views.find("\n\n@login_required\ndef ", start)
+    section = views[start : end if end >= 0 else len(views)]
+
+    assert "device_slice_filter_active = bool(" in section
+    assert "current_computers(\n            Device.objects.filter(**device_scope_filters)" in section
+    assert 'params.append(("device_type", device_type_filter))' in section
+    assert 'params.append(("os_family", os_family_filter))' in section
+
+
 def test_computer_overview_issue_chips_name_their_governed_issue_populations():
     views = Path(__file__).parents[1].joinpath("views.py").read_text(encoding="utf-8")
     template = Path(__file__).parents[3].joinpath("templates", "devices_page.html").read_text(
