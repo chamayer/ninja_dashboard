@@ -6,9 +6,9 @@ current source on 2026-11-02 and replaces it.
 
 ## Active checkpoint — 2026-11-02
 
-**Status:** Stage 1 committed locally (not released). Item 4 migration 0400
-drafted, uncommitted. Approved 2026-11-02: 0400 rehearsal on a production
-schema clone and Stage 2 read-only measurements.
+**Status:** Stage 1 committed locally (`1d5939bc`, not released). Stage 2
+measurements and the 0400 rehearsal done 2026-11-02. Uncommitted: two Stage 2
+code fixes (tile offline map, Source Records page shape) and migration 0400.
 **Decision (2026-11-02, owner delegated):** A read model/projection is not a
 goal in itself. Stage 2 production measurements decide among an ordering
 index, a read model, or neither; any migration needs its own approval. This
@@ -26,7 +26,8 @@ the same 8 fail at HEAD `4c9fcc15`. Ingest non-Postgres suite 644 passed,
 load; Ruff error count for `views.py` unchanged (97, pre-existing). Tests ran
 in a scratch virtualenv with `shared` on `PYTHONPATH` (no pytest in the dev
 containers). Postgres-backed tests, browser checks and live data were not run.
-**Next action:** run the approved 0400 rehearsal and Stage 2 measurements.
+**Next action:** owner approval to commit the Stage 2 fixes and 0400; then an
+approved release. PLAN-012 completes when 0400 is released and verified.
 
 ### Completion gate status
 
@@ -52,13 +53,16 @@ containers). Postgres-backed tests, browser checks and live data were not run.
    reader remains. OS installations have named readers (Computer page,
    Issue review). Retirement of the two tables is proposed in `TODO.md`,
    not approved.
-6. **Stage 2.** Re-measure Source Records and Computers in production.
+6. **Closed 2026-11-02 (read-only production measurements, see "Stage 2
+   results").** No read model and no ordering index: neither addresses the
+   measured cost. Source Records needs a view redesign (backlog).
 7. **Done locally.** Demonstrated from the view definition:
    `v_cmdb_inventory_evidence_current` has one row per relayed card, so
    `_device_source_records` listed a multi-card Hudu asset once per card on
    the Computer page and merge review. It now reads one row per record. The
    Computer-page Hudu panel and Coverage already grouped by record.
-   Production count of multi-card assets is a Stage 2 check.
+   Production: 1,528 of 10,612 Hudu assets have more than one card (max
+   128), affecting 1,057 Computer pages.
 
 ### Item 4 design — association change refreshes Computer values
 
@@ -107,6 +111,18 @@ Computers per call), not fleet size. To measure on the dev database at
 smallest scope before proposing release; bulk resolver runs call it once per
 moved record.
 
+**Rehearsal (2026-11-02, schema-only clone of production on the host,
+synthetic rows, dropped afterwards):** 0400 applied as `operations_migrate`
+(ownership compatible). As `operations_app`: linking and moving a record
+refreshed the target Computer in the same call (placeholder to Windows 11 /
+Windows / workstation); a no-op call left claim history unchanged; the value
+queue drained; with the claim lock held elsewhere the move committed, warned
+"deferred" and did not block, and the periodic projection then caught up; the
+reverse restored the originals. Cost: about 1 s for a session's first call
+(function compilation), about 350 ms per call after; the scoped claim lookup
+on production data is an index scan (4 ms). Production evidence: 460 of 905
+Computers created in the last 30 days opened `os_unknown_coverage` on their
+first day.
 **Draft (uncommitted):**
 `operations/apps/core/migrations/0400_association_refreshes_computer_values.py`
 (functions only), `ingest/device_cache_projector.py` (uses the database
@@ -124,6 +140,28 @@ as PLAN-038 did for 0397 (needs approval): move, no-change, busy-deferral and
 reverse checks as `operations_migrate`/`ninja_ingest`, per-call timing, and a
 read-only EXPLAIN of the scoped claim scan on real data; then release with
 explicit migration approval.
+
+### Stage 2 results (read-only production, 2026-11-02)
+
+- Source Records first page: 14.2 s (October 4.9 s). The planner rescanned
+  the security-barrier `v_entity_observation_admin_metadata` once per source
+  instance (17 times) and recomputed `v_client_source_mapping_effective` per
+  row. Fixed in code (page first, mapping once): about 8 s. The remainder is
+  the view deriving JSON fields for all 42,448 rows before the limit; an
+  ordered index is not used through the view (rehearsal, 50,000 rows), so the
+  fix is a view or projection redesign (backlog).
+- Source Records count: 2.8 s cold, about 75 ms warm (cache; no code change).
+- `entity_observation_current`: 1.57 GB heap plus 1.1 GB TOAST for about
+  78,000 live rows (3.5 M writes), i.e. bloat. `device_session_current`: dead
+  rows equal live (10.9 M writes). `device_requirement_state`: 17.7 M writes
+  for 20,380 rows. Backlog.
+- Computers tiles: 20 to 25 ms warm with the Stage 2 map fix (the Stage 1
+  per-row client lookup cost 280 ms; fixed). Computers table page: 1.7 to
+  2.8 s, dominated by the severe-findings lookup (11,113 findings through
+  `idx_findings_status_severity`, cold). No client currently sets
+  `offline_after_days`.
+- No read model: Computer costs are individual queries, not a missing
+  projection.
 
 ### Consumer ledger (reconstructed 2026-11-02, `views.py`)
 

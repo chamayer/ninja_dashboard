@@ -16730,7 +16730,24 @@ def source_records(
             {"id": str(row[0]), "slug": row[1], "name": row[2]} for row in cur.fetchall()
         ]
 
+        # Pick the page from the view first, then join the extras to those rows
+        # only, and evaluate the group-mapping view once. Joining first made the
+        # planner rescan the security-barrier view once per source instance and
+        # recompute the mapping view per row (14 s first page on production,
+        # 2026-11-02; PLAN-012 item 6).
         records_sql = f"""
+            WITH page AS MATERIALIZED (
+                SELECT observation.*
+                  FROM operations.v_entity_observation_admin_metadata observation
+                 WHERE {where_sql}
+                 ORDER BY observation.last_seen_at DESC NULLS LAST, observation.observation_id
+                 {{limit}}
+            ),
+            group_mapping AS MATERIALIZED (
+                SELECT tenant_id, source_id, external_id, observed_name
+                  FROM operations.v_client_source_mapping_effective
+                 WHERE tenant_id = %s
+            )
             SELECT observation.observation_id, source.name, observation.entity_type,
                    observation.external_id, observation.parent_external_id,
                    observation.active, observation.observed_at,
@@ -16747,7 +16764,7 @@ def source_records(
                    -- Operations proposed this record as something other than a Computer.
                    {_PROPOSED_OTHER_SQL},
                    observation.restricted, observation.reported_online
-              FROM operations.v_entity_observation_admin_metadata observation
+              FROM page observation
               JOIN operations.source_instances instance
                 ON instance.tenant_id = observation.tenant_id AND instance.id = observation.source_instance_id
               JOIN operations.sources source ON source.id = instance.source_id
@@ -16755,19 +16772,18 @@ def source_records(
                 ON device.tenant_id = observation.tenant_id AND device.id = observation.device_id
               LEFT JOIN operations.clients client
                 ON client.tenant_id = observation.tenant_id AND client.id = observation.client_id
-              LEFT JOIN operations.v_client_source_mapping_effective group_mapping
+              LEFT JOIN group_mapping
                 ON group_mapping.tenant_id = observation.tenant_id
                AND group_mapping.source_id = instance.source_id
                AND group_mapping.external_id = observation.platform_group_id
-             WHERE {where_sql}
              ORDER BY observation.last_seen_at DESC NULLS LAST, observation.observation_id
         """
         if wants_csv(request):
-            cur.execute(records_sql, params)
+            cur.execute(records_sql.replace("{limit}", ""), [*params, tenant_id])
         else:
             cur.execute(
-                records_sql + " LIMIT %s OFFSET %s",
-                [*params, page_size, (page_number - 1) * page_size],
+                records_sql.replace("{limit}", "LIMIT %s OFFSET %s"),
+                [*params, page_size, (page_number - 1) * page_size, tenant_id],
             )
         records = [
             {

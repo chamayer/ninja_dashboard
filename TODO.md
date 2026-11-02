@@ -31,6 +31,33 @@ Read Inbox at the start of every session.
       `active` (docs/plans/PLAN-019-data-pipeline-correctness-and-retention.md);
       Step 1 done; F09 decided (no daily presence); Step 2 (U04) built.
       F04 stays with PLAN-012 item 4.
+- [ ] **PLAN-012 item 4 follow-ups (2026-11-02):** design chosen and
+      migration 0400 drafted (see the PLAN-012 checkpoint). Remove the inline
+      `_TARGET_SQL` fallback in
+      `ingest/device_cache_projector.py` once every deployment has 0400.
+- [ ] **Source Records page still about 8 s (PLAN-012 Stage 2, 2026-11-02):**
+      the security-barrier `v_entity_observation_admin_metadata` derives JSON
+      fields (contact-time validation, restricted layout) for every row before
+      ORDER BY/LIMIT; an ordered index is not used through it (rehearsal).
+      Options: a SECURITY DEFINER page function that limits on the base table
+      first, or store the derived fields at write time. Needs a design and
+      approval.
+- [ ] **Write churn and bloat (PLAN-012 Stage 2, 2026-11-02):**
+      `entity_observation_current` 1.57 GB heap for about 78k rows (3.5 M
+      writes); `device_session_current` dead equals live (10.9 M writes); the
+      evaluator rewrites `device_requirement_state` (17.7 M writes, 20k rows).
+      Investigate unchanged-row writes before any VACUUM FULL or repack
+      (exclusive lock; needs approval).
+- [ ] **Computers table severe-findings lookup (PLAN-012 Stage 2):** 2.4 s
+      cold reading 11,113 findings through `idx_findings_status_severity` for a
+      100-row page; consider a subject-first index. Not approved.
+- [ ] **Retire `operations.assets` and `operations.agent_instances` (PLAN-012
+      item 5, 2026-11-02):** no reader in Operations code, templates, SQL views
+      or bootstrap, and Metabase is retired (PLAN-008). The identity resolver
+      (`_sync_device_attributes`, promotion) is the only writer; both have
+      field-history triggers. Before proposing a migration, confirm the
+      layered-entity purpose they were built for (0050) is delivered by the
+      entity/attribute model. Not approved.
 - [ ] **Software title/catalog publication trigger (PLAN-019 F06 map):**
       `software_title_current` and the catalog projection refresh only when
       the same inventory run changed something; if that refresh fails, they
@@ -39,17 +66,6 @@ Read Inbox at the start of every session.
 - [ ] **Ninja collection gaps (PLAN-019 F09, 2026-10-26):** on 7 of 147
       days no Ninja daily presence was written at all (2026-10-24 among
       them), which suggests days without a successful Ninja collection.
-- [ ] **PLAN-012 item 4 follow-ups (2026-11-02):** design chosen and
-      migration 0400 drafted (see the PLAN-012 checkpoint). Remove the inline
-      `_TARGET_SQL` fallback in
-      `ingest/device_cache_projector.py` once every deployment has 0400.
-- [ ] **Retire `operations.assets` and `operations.agent_instances` (PLAN-012
-      item 5, 2026-11-02):** no reader in Operations code, templates, SQL views
-      or bootstrap, and Metabase is retired (PLAN-008). The identity resolver
-      (`_sync_device_attributes`, promotion) is the only writer; both have
-      field-history triggers. Before proposing a migration, confirm the
-      layered-entity purpose they were built for (0050) is delivered by the
-      entity/attribute model. Not approved.
       Investigate in the run history.
 - [ ] **PLAN-033 — Patching and device-health reporting gaps:** `deferred`
       (docs/plans/PLAN-033-patching-and-device-health-reporting.md).

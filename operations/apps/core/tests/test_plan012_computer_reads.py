@@ -21,7 +21,9 @@ class _Client:
 
 def test_sql_reads_the_client_column_with_the_tenant_default():
     sql = offline_days_sql("v.client_id", 7)
-    assert "oc.offline_after_days" in sql and "oc.id = v.client_id" in sql
+    assert "jsonb_object_agg(oc.id::text, oc.offline_after_days)" in sql
+    assert "->> v.client_id::text" in sql
+    assert "oc.id = v.client_id" not in sql  # no per-row lookup
     assert sql.endswith(", 7)")
     recent = recent_contact_sql("v.last_contact_at", "v.client_id", 7)
     assert recent.startswith("v.last_contact_at >= NOW() - make_interval(days => ")
@@ -74,3 +76,13 @@ def test_computer_source_records_list_a_multi_card_hudu_asset_once():
     body = _VIEWS[start : _VIEWS.index("def _device_process_monitors(", start)]
     assert "LEFT JOIN LATERAL" in body and "LIMIT 1" in body
     assert "LEFT JOIN operations.v_cmdb_inventory_evidence_current hudu" not in body
+
+
+def test_source_records_page_is_picked_before_the_joins():
+    # PLAN-012 item 6: joining first rescanned the view per source instance.
+    start = _VIEWS.index("def source_records(")
+    body = _VIEWS[start : _VIEWS.index("@login_required", start)]
+    assert "WITH page AS MATERIALIZED (" in body
+    assert "group_mapping AS MATERIALIZED (" in body
+    assert "FROM page observation" in body
+    assert "LEFT JOIN operations.v_client_source_mapping_effective group_mapping" not in body
