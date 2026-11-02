@@ -115,6 +115,7 @@ class _Cursor:
                     False,
                     True,
                     EVALUATED_AT,
+                    None,
                 ),
                 (
                     "device-2",
@@ -129,6 +130,7 @@ class _Cursor:
                     True,
                     True,
                     EVALUATED_AT,
+                    None,
                 ),
             ],
             [

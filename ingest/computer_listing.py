@@ -7,7 +7,7 @@ through ``v_device_source_record_lifecycle_current``: a current Hudu asset is
 current record (agent, monitor, network device, running VM) is evidence.
 
 "Reporting" means an evidence record that is online, or whose source last
-contacted the machine within 30 days, or a running VM. Silent agents are
+contacted the machine within the review period, or a running VM. Silent agents are
 evidence but not reporting; they stay with the offline handling.
 
 States, with the Computer's lifecycle and finding:
@@ -37,6 +37,9 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any
 
+# Fallback only. The window is the tenant's "review for retirement" days
+# (``device_status_settings``), so a machine is not called unlisted on a
+# different clock from the one that sends it to review (PLAN-012 item 1).
 REPORTING_WINDOW = timedelta(days=30)
 
 CONTACT_POLICY_STATES = frozenset({"reporting", "silent", "archived_but_reporting"})
@@ -133,14 +136,21 @@ class Listing:
         return "nothing_listed"
 
 
-def load(cur: Any, tenant_id: int, now: datetime, device_id: uuid.UUID | None = None) -> list[Listing]:
+def load(
+    cur: Any,
+    tenant_id: int,
+    now: datetime,
+    device_id: uuid.UUID | None = None,
+    review_days: int | None = None,
+) -> list[Listing]:
+    window_days = review_days if review_days and review_days > 0 else REPORTING_WINDOW.days
     cur.execute(
         LISTING_SQL,
         {
             "tenant": tenant_id,
             "device": device_id,
             "now": now,
-            "window": f"{REPORTING_WINDOW.days} days",
+            "window": f"{window_days} days",
         },
     )
     return [Listing(*row) for row in cur.fetchall()]

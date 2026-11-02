@@ -321,7 +321,7 @@
             {% for row in coverage_policy_rows %}
             <tr>
                 <td><strong>{{ row.platform }}</strong><br><span class="muted">{{ row.entity_type|humanize_exemption }}</span></td>
-                <td>{% if row.exempt %}<strong>Exempt</strong>{% if row.reason %}<br><span class="muted">{{ row.reason }}</span>{% endif %}{% if can_manage_lifecycle %}<form method="post" action="{% url 'device_exemption_clear' org_slug=device.client.slug device_id=device.id %}" style="margin-top:.35rem;">{% csrf_token %}<input type="hidden" name="entity_type" value="{{ row.entity_type }}"><button type="submit">Remove</button></form>{% endif %}{% else %}<strong>Required</strong>{% endif %}</td>
+                <td>{% if row.exempt %}<strong>Exempt</strong>{% if row.reason %}<br><span class="muted">{{ row.reason }}</span>{% endif %}{% if can_manage_lifecycle %}<form method="post" action="{% url 'device_exemption_clear' org_slug=device.client.slug device_id=device.id %}" style="margin-top:.35rem;">{% csrf_token %}<input type="hidden" name="entity_type" value="{{ row.entity_type }}"><button type="submit">Remove</button></form>{% endif %}{% else %}<strong>{{ row.status }}</strong>{% endif %}</td>
             </tr>
             {% endfor %}
         </tbody></table>

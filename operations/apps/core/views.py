@@ -102,7 +102,12 @@ from .csv_export import csv_response, wants_csv
 from .decorators import require_admin
 from .device_status import DEFAULTS as DEVICE_STATUS_DEFAULTS
 from .device_status import POLICY_NAME as DEVICE_STATUS_POLICY_NAME
-from .device_status import get_device_status_policy
+from .device_status import (
+    get_client_device_status_policy,
+    get_device_status_policy,
+    recent_contact_sql,
+    stale_contact_sql,
+)
 from .finding_actions import (
     APPROVE_REMOTE_ACCESS_ALL,
     APPROVE_REMOTE_ACCESS_CLIENT,
@@ -912,7 +917,7 @@ def home(request: HttpRequest) -> HttpResponse:  # noqa: PLR0912, PLR0915
             f"""
             SELECT COUNT(*)::int,
                    COUNT(*) FILTER (
-                       WHERE last_contact_at >= NOW() - INTERVAL '{active_device_days} days'
+                       WHERE {recent_contact_sql("last_contact_at", "client_id", active_device_days)}
                    )::int
             FROM operations.v_device
             WHERE tenant_id = 1
@@ -1786,7 +1791,8 @@ def _type_summary(devices: list) -> list[tuple[str, str, int]]:
 @login_required
 def org_index(request: HttpRequest, org_slug: str) -> HttpResponse:
     """Summary hub for a client or the fleet."""
-    device_policy = get_device_status_policy()
+    # A client's own "offline after" days replace the tenant default here.
+    device_policy = get_client_device_status_policy(getattr(request, "current_client", None))
     active_device_days = device_policy["active_device_days"]
     ctx: dict = {}
     if getattr(request, "current_client", None):
@@ -1816,76 +1822,9 @@ def org_index(request: HttpRequest, org_slug: str) -> HttpResponse:
             .order_by("category")
         )
 
-        _PLATFORM_SEVERITY = {
-            "Ninja": "critical",
-            "SentinelOne": "critical",
-            "ScreenConnect": "high",
-            "LogMeIn": "high",
-        }
         with transaction.atomic():
             with connection.cursor() as cur:
                 cur.execute("SET LOCAL operations.tenant_id = 1")
-
-                # Total devices per scope. Device type is form factor only;
-                # coverage applicability comes from requirements/entity_type.
-                cur.execute(
-                    """
-                    SELECT od.device_role AS scope, COUNT(*)::int
-                    FROM operations.devices od
-                    WHERE od.tenant_id = 1 AND od.client_id = %s AND od.deleted_at IS NULL
-                      AND od.lifecycle_status != 'retired'
-                    GROUP BY 1
-                    """,
-                    [str(client.id)],
-                )
-                scope_totals = dict(cur.fetchall())  # {'server': N, 'workstation': M, ...}
-                total_all = sum(scope_totals.values())
-
-                # Presence per platform per scope.
-                cur.execute(
-                    f"""
-                    SELECT ap.platform, ap.entity_type, od.device_role AS scope,
-                           COUNT(DISTINCT ap.device_id)::int AS present,
-                           MAX(ap.last_observed_at) AS last_seen
-                    FROM operations.device_agent_presence_current ap
-                    JOIN operations.devices od
-                         ON od.id = ap.device_id AND od.deleted_at IS NULL
-                    WHERE ap.tenant_id = 1 AND ap.client_id = %s
-                      AND ap.last_observed_at > NOW() - INTERVAL '{active_device_days} days'
-                      AND od.lifecycle_status != 'retired'
-                    GROUP BY 1, 2, 3
-                    """,
-                    [str(client.id)],
-                )
-                presence_rows = cur.fetchall()
-
-                # Deduplicated requirements: client-specific beats global;
-                # suppress 'all' when per-scope reqs exist for same platform.
-                cur.execute(
-                    """
-                    WITH deduped AS (
-                        SELECT DISTINCT ON (platform, entity_type, device_scope)
-                            platform, entity_type, device_scope, severity
-                        FROM operations.coverage_requirements
-                        WHERE tenant_id = %s AND enabled = TRUE
-                          AND (client_id = %s OR client_id IS NULL)
-                        ORDER BY platform, entity_type, device_scope,
-                                 (client_id IS NULL)
-                    )
-                    SELECT platform, entity_type, device_scope, severity
-                    FROM deduped r
-                    WHERE device_scope != 'all'
-                       OR NOT EXISTS (
-                           SELECT 1 FROM deduped r2
-                           WHERE r2.platform = r.platform
-                             AND r2.entity_type = r.entity_type
-                             AND r2.device_scope != 'all'
-                       )
-                    ORDER BY platform, device_scope
-                    """,
-                    [1, str(client.id)],
-                )
-                req_rows = cur.fetchall()
 
                 cur.execute(
                     """
@@ -1897,59 +1836,6 @@ def org_index(request: HttpRequest, org_slug: str) -> HttpResponse:
                 )
                 ctx["software_count"] = cur.fetchone()[0]
 
-        # Build lookup: (platform, entity_type, scope) → {present, last_seen}
-        presence_map: dict = {}
-        for platform, etype, scope, present, last_seen in presence_rows:
-            presence_map[(platform, etype, scope)] = {
-                "present": present,
-                "last_seen": last_seen,
-            }
-
-        def _scope_total(scope: str) -> int:
-            if scope == "all":
-                return total_all
-            return scope_totals.get(scope, 0)
-
-        def _scope_present(platform: str, etype: str, scope: str):
-            if scope == "all":
-                count = sum(
-                    v["present"]
-                    for (p, e, _), v in presence_map.items()
-                    if p == platform and e == etype
-                )
-                last = max(
-                    (
-                        v["last_seen"]
-                        for (p, e, _), v in presence_map.items()
-                        if p == platform and e == etype and v["last_seen"]
-                    ),
-                    default=None,
-                )
-                return count, last
-            v = presence_map.get((platform, etype, scope), {})
-            return v.get("present", 0), v.get("last_seen")
-
-        platform_coverage: dict = {}
-        for platform, etype, scope, severity in req_rows:
-            present, last_seen = _scope_present(platform, etype, scope)
-            total = _scope_total(scope)
-            entry = platform_coverage.setdefault(
-                platform,
-                {
-                    "severity": _PLATFORM_SEVERITY.get(platform, severity),
-                    "scopes": {},
-                },
-            )
-            scope_label = "all devices" if scope == "all" else scope + "s"
-            entry["scopes"][scope_label] = {
-                "total": total,
-                "present": present,
-                "gap": max(0, total - present),
-                "last_seen": last_seen,
-                "role": "" if scope == "all" else scope,
-                "entity_type": etype,
-            }
-        ctx["platform_coverage"] = platform_coverage
         ctx["active_finding_count"] = Finding.objects.filter(
             tenant_id=1, client=client, status__in=_FINDING_ACTIVE_STATUSES
         ).count()
@@ -2206,7 +2092,6 @@ def org_index(request: HttpRequest, org_slug: str) -> HttpResponse:
 def org_devices(request: HttpRequest, org_slug: str) -> HttpResponse:
     """Device list for a specific client with server-side search/filter."""
     client = _get_client_by_slug(org_slug)
-    active_device_days = get_device_status_policy()["active_device_days"]
     base_qs = current_computers(
         Device.objects.filter(tenant_id=1, client=client, deleted_at__isnull=True)
     )
@@ -2241,18 +2126,22 @@ def org_devices(request: HttpRequest, org_slug: str) -> HttpResponse:
         # Coverage-gap drilldown for the requirement's entity type/platform.
         with transaction.atomic(), connection.cursor() as cur:
             cur.execute("SET LOCAL operations.tenant_id = 1")
+            # Stored evaluator verdicts are the requirement authority
+            # (ADR-0035); this list must not recompute applicability.
             cur.execute(
-                f"""
-                SELECT DISTINCT device_id
-                FROM operations.device_agent_presence_current
-                WHERE tenant_id = 1 AND client_id = %s AND platform = %s
-                  AND entity_type = %s
-                  AND last_observed_at > NOW() - INTERVAL '{active_device_days} days'
+                """
+                SELECT DISTINCT state.device_id
+                FROM operations.device_requirement_state state
+                JOIN operations.devices d
+                  ON d.tenant_id = state.tenant_id AND d.id = state.device_id
+                WHERE state.tenant_id = 1 AND d.client_id = %s
+                  AND state.platform = %s AND state.entity_type = %s
+                  AND state.verdict IN ('missing', 'stale')
                 """,
                 [str(client.id), missing_platform, missing_entity_type],
             )
-            present_ids = [r[0] for r in cur.fetchall()]
-        devices_qs = devices_qs.exclude(id__in=present_ids).exclude(
+            missing_ids = [r[0] for r in cur.fetchall()]
+        devices_qs = devices_qs.filter(id__in=missing_ids).exclude(
             lifecycle_status=Device.LifecycleStatus.RETIRED
         )
     else:
@@ -2511,66 +2400,33 @@ def _raw_value_display(value) -> tuple[str, bool]:
     return str(value), False
 
 
-def _coverage_policy_rows(device: Device, exemptions: dict) -> list[dict]:
-    """Return the effective required platform rows for one Computer.
+_POLICY_VERDICT_LABELS = {
+    "satisfied": "Required",
+    "missing": "Required",
+    "stale": "Required",
+    "os_unknown": "Not applied: OS unknown",
+    "pending_cleanup": "Not applied: in cleanup",
+    "outside_coverage": "Not applied: outside coverage",
+}
 
-    This intentionally follows the same explicit-profile/default/client precedence as
-    the Computers inventory reader.  Exemptions stay policy decisions; they
-    do not remove the requirement from this display.
+
+def _coverage_policy_rows(device: Device, exemptions: dict) -> list[dict]:
+    """Return the requirement rows for one Computer from stored evaluator verdicts.
+
+    ``device_requirement_state`` is the requirement authority (ADR-0035,
+    PLAN-012 item 2); this reader does not recompute profile/client precedence
+    or OS applicability. Exemptions stay operator decisions: one recorded
+    without a matching verdict is still listed so it can be removed.
     """
     with transaction.atomic(), connection.cursor() as cur:
         cur.execute("SET LOCAL operations.tenant_id = 1")
         cur.execute(
             """
-            WITH device AS (
-                SELECT d.id, d.tenant_id, d.client_id, d.device_role, d.os_group,
-                       COALESCE(c.requirement_profile_id, default_profile.id)
-                           AS effective_profile_id
-                  FROM operations.devices d
-                  JOIN operations.clients c ON c.id = d.client_id
-                  JOIN operations.requirement_profiles default_profile
-                    ON default_profile.tenant_id = c.tenant_id
-                   AND default_profile.is_tenant_default
-                 WHERE d.tenant_id = 1 AND d.id = %s
-            ), baseline AS (
-                SELECT item.entity_type, item.platform, item.applicable_os_groups
-                  FROM device d
-                  JOIN operations.requirement_profile_items item
-                    ON item.tenant_id = d.tenant_id
-                   AND item.profile_id = d.effective_profile_id
-                   AND (item.device_scope = d.device_role OR (
-                        item.device_scope = 'all' AND NOT EXISTS (
-                            SELECT 1 FROM operations.requirement_profile_items role_item
-                             WHERE role_item.tenant_id = d.tenant_id
-                               AND role_item.profile_id = d.effective_profile_id
-                               AND role_item.device_scope = d.device_role)))
-            ), client_override AS (
-                SELECT DISTINCT ON (requirement.entity_type, requirement.platform)
-                       requirement.entity_type, requirement.platform,
-                       requirement.applicable_os_groups, requirement.enabled
-                  FROM device d
-                  JOIN operations.coverage_requirements requirement
-                    ON requirement.tenant_id = d.tenant_id
-                   AND requirement.client_id = d.client_id
-                   AND requirement.device_scope IN ('all', d.device_role)
-                 ORDER BY requirement.entity_type, requirement.platform,
-                          CASE WHEN requirement.device_scope = d.device_role THEN 0 ELSE 1 END
-            ), effective AS (
-                SELECT * FROM baseline
-                 WHERE NOT EXISTS (
-                     SELECT 1 FROM client_override override
-                      WHERE override.entity_type = baseline.entity_type
-                        AND override.platform = baseline.platform)
-                UNION ALL
-                SELECT entity_type, platform, applicable_os_groups
-                  FROM client_override WHERE enabled
-            )
-            SELECT DISTINCT ON (effective.platform, effective.entity_type)
-                   effective.platform, effective.entity_type
-              FROM effective CROSS JOIN device d
-             WHERE effective.applicable_os_groups IS NULL
-                OR effective.applicable_os_groups ? d.os_group
-             ORDER BY effective.platform, effective.entity_type
+            SELECT DISTINCT ON (state.platform, state.entity_type)
+                   state.platform, state.entity_type, state.verdict
+              FROM operations.device_requirement_state state
+             WHERE state.tenant_id = 1 AND state.device_id = %s
+             ORDER BY state.platform, state.entity_type
             """,
             [str(device.id)],
         )
@@ -2579,10 +2435,11 @@ def _coverage_policy_rows(device: Device, exemptions: dict) -> list[dict]:
         {
             "platform": platform or "Any platform",
             "entity_type": entity_type,
-            "exempt": entity_type in exemptions,
+            "exempt": verdict == "exempt" or entity_type in exemptions,
             "reason": exemptions.get(entity_type, ""),
+            "status": _POLICY_VERDICT_LABELS.get(verdict, "Required"),
         }
-        for platform, entity_type in rows
+        for platform, entity_type, verdict in rows
     ]
     effective_types = {row["entity_type"] for row in policy_rows}
     for entity_type, reason in exemptions.items():
@@ -2593,6 +2450,7 @@ def _coverage_policy_rows(device: Device, exemptions: dict) -> list[dict]:
                     "entity_type": entity_type,
                     "exempt": True,
                     "reason": reason,
+                    "status": "Exempt",
                 }
             )
     return policy_rows
@@ -11323,10 +11181,11 @@ def devices_page(request: HttpRequest) -> HttpResponse:
                    COUNT(*) FILTER (WHERE device_role = 'workstation') AS workstations,
                    COUNT(*) FILTER (WHERE effective_patching_scope = 'Included') AS in_patch_scope,
                    COUNT(*) FILTER (
-                       WHERE last_contact_at >= NOW() - INTERVAL '{active_device_days} days'
+                       WHERE {recent_contact_sql("last_contact_at", "client_id", active_device_days)}
                    ) AS active,
-                   COUNT(*) FILTER (WHERE last_contact_at IS NULL
-                                    OR last_contact_at < NOW() - INTERVAL '{active_device_days} days') AS stale
+                   COUNT(*) FILTER (
+                       WHERE {stale_contact_sql("last_contact_at", "client_id", active_device_days)}
+                   ) AS stale
             FROM operations.v_device
             WHERE tenant_id = 1 AND {current_computer_sql()}
             """
@@ -11403,11 +11262,11 @@ def devices_page(request: HttpRequest) -> HttpResponse:
             where.append("NOT v.is_online_any")
         if state_filter == "active":
             where.append(
-                f"v.last_contact_at >= NOW() - INTERVAL '{active_device_days} days'"
+                recent_contact_sql("v.last_contact_at", "v.client_id", active_device_days)
             )
         elif state_filter == "not-reporting":
             where.append(
-                f"(v.last_contact_at IS NULL OR v.last_contact_at < NOW() - INTERVAL '{active_device_days} days')"
+                stale_contact_sql("v.last_contact_at", "v.client_id", active_device_days)
             )
         if client_filter:
             where.append(
@@ -11487,7 +11346,8 @@ def devices_page(request: HttpRequest) -> HttpResponse:
                    p.is_online_any, p.online_sources, p.last_contact_at,
                    p.effective_patching_scope,
                    c.display_name AS client_name, c.slug AS client_slug,
-                   COALESCE(df.n, 0) + COALESCE(de.n, 0) AS severe_issues
+                   COALESCE(df.n, 0) + COALESCE(de.n, 0) AS severe_issues,
+                   c.offline_after_days
             FROM page p
             LEFT JOIN operations.clients c ON c.id = p.client_id
             LEFT JOIN device_findings df ON df.device_id = p.device_id
@@ -11514,6 +11374,7 @@ def devices_page(request: HttpRequest) -> HttpResponse:
             client_name,
             client_slug,
             severe,
+            client_offline_days,
         ) = row
         # Traffic-light health per row
         if severe and severe > 0:
@@ -11523,7 +11384,7 @@ def devices_page(request: HttpRequest) -> HttpResponse:
         else:
             health = "green"
         if last_contact is None or last_contact < timezone.now() - timedelta(
-            days=active_device_days
+            days=client_offline_days or active_device_days
         ):
             state_label = "Not reporting"
         elif is_online:
@@ -11979,7 +11840,7 @@ def patching_queue(request: HttpRequest) -> HttpResponse:
         ), device_posture AS (
             SELECT sd.*, pa.last_patch_activity_at,
                    COALESCE(ps.ever_installed, FALSE) AS ever_installed,
-                   sd.last_contact_at >= NOW() - INTERVAL '{active_device_days} days' AS is_active,
+                   {recent_contact_sql("sd.last_contact_at", "sd.client_id", active_device_days)} AS is_active,
                    pa.last_patch_activity_at >= NOW() - INTERVAL '{patch_activity_days} days'
                        AS has_recent_patch_activity
             FROM scoped_devices sd
@@ -14000,7 +13861,7 @@ def patch_evidence_page(request: HttpRequest) -> HttpResponse:
     if online_filter not in {"", "online", "offline"} | source_names_set:
         online_filter = ""
     os_group_choices = list(
-        Device.objects.filter(tenant_id=1, deleted_at__isnull=True)
+        current_computers(Device.objects.filter(tenant_id=1, deleted_at__isnull=True))
         .exclude(os_group="")
         .order_by("os_group")
         .values_list("os_group", flat=True)
@@ -15051,7 +14912,12 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
     """Show every known Computer with its product records and required state."""
     compact_source_observations = not wants_csv(request)
     active_device_days = get_device_status_policy()["active_device_days"]
-    active_since = timezone.now() - timedelta(days=active_device_days)
+    coverage_now = timezone.now()
+
+    def active_since(row: dict) -> datetime:
+        """Start of the row's offline window; a client may set its own days."""
+        days = row.get("offline_after_days") or active_device_days
+        return coverage_now - timedelta(days=days)
     client_filters = list(dict.fromkeys(value for value in request.GET.getlist("client") if value))
     device_query = (request.GET.get("device") or "").strip().lower()
     agents_query = (request.GET.get("agents") or "").strip().lower()
@@ -15235,7 +15101,8 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
                        COALESCE(decision.value, '{}'::jsonb) ? 'agent.edr'
                            AS s1_exempt,
                        COALESCE(session.is_online_any, FALSE) AS is_online_any,
-                       session.last_contact_at
+                       session.last_contact_at,
+                       c.offline_after_days
                 FROM operations.devices d
                 JOIN operations.clients c ON c.id = d.client_id
                 LEFT JOIN operations.device_operator_decisions decision
@@ -15370,6 +15237,7 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
             "s1_exempt": bool(row[9]),
             "is_online_any": bool(row[10]),
             "last_contact_at": row[11],
+            "offline_after_days": row[12],
         }
         for row in computer_rows
     }
@@ -15708,7 +15576,7 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
         observation = row["source_observations"].get(platform)
 
         record_status = _inventory_record_status(
-            platform, row, source_status, observation, source_contact_at, active_since
+            platform, row, source_status, observation, source_contact_at, active_since(row)
         )
 
         record_age = ""
@@ -15845,7 +15713,7 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
                     cell["record_status"] == "Offline" for cell in named_products.values()
                 ),
                 **{
-                    scope: _computer_reporting_scope(row, active_since) == scope
+                    scope: _computer_reporting_scope(row, active_since(row)) == scope
                     for scope in ("online_anywhere", "offline_recent", "not_reporting")
                 },
                 "no_product_records": not has_named_record,
@@ -15919,7 +15787,7 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
     )
     operations_counts = dict.fromkeys((scope for _, scope in operations_statuses), 0)
     for inventory_row in inventory_rows:
-        operations_counts[_computer_reporting_scope(inventory_row, active_since)] += 1
+        operations_counts[_computer_reporting_scope(inventory_row, active_since(inventory_row))] += 1
     operations_card = {
         "computer_total": len(inventory_rows),
         "total_url": _coverage_filter_url(),
@@ -15961,7 +15829,7 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
                     else "Offline"
                     if (
                         inventory_row["last_contact_at"] is not None
-                        and inventory_row["last_contact_at"] >= active_since
+                        and inventory_row["last_contact_at"] >= active_since(inventory_row)
                     )
                     else "Stale"
                 ] += 1
@@ -18866,10 +18734,16 @@ def _device_source_records(cur, device_ids) -> dict[str, list[tuple]]:
           LEFT JOIN operations.v_entity_observation_admin_metadata metadata
             ON metadata.tenant_id = evidence.tenant_id
            AND metadata.observation_id = evidence.observation_id
-          LEFT JOIN operations.v_cmdb_inventory_evidence_current hudu
-            ON hudu.tenant_id = evidence.tenant_id
-           AND hudu.observation_id = evidence.observation_id
-           AND hudu.source_name = 'Hudu'
+          -- The cmdb view has one row per relayed card; read one row per
+          -- record so a multi-card Hudu asset is listed once (PLAN-012 item 7).
+          LEFT JOIN LATERAL (
+              SELECT cmdb.source_url
+                FROM operations.v_cmdb_inventory_evidence_current cmdb
+               WHERE cmdb.tenant_id = evidence.tenant_id
+                 AND cmdb.observation_id = evidence.observation_id
+                 AND cmdb.source_name = 'Hudu'
+               LIMIT 1
+          ) hudu ON TRUE
          WHERE evidence.tenant_id = %s AND evidence.device_id = ANY(%s::uuid[])
          ORDER BY evidence.source_name, evidence.entity_type,
                   evidence.observation_last_seen_at DESC

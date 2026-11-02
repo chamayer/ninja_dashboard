@@ -39,6 +39,17 @@ Read Inbox at the start of every session.
 - [ ] **Ninja collection gaps (PLAN-019 F09, 2026-10-26):** on 7 of 147
       days no Ninja daily presence was written at all (2026-10-24 among
       them), which suggests days without a successful Ninja collection.
+- [ ] **PLAN-012 item 4 follow-ups (2026-11-02):** design chosen and
+      migration 0400 drafted (see the PLAN-012 checkpoint). Remove the inline
+      `_TARGET_SQL` fallback in
+      `ingest/device_cache_projector.py` once every deployment has 0400.
+- [ ] **Retire `operations.assets` and `operations.agent_instances` (PLAN-012
+      item 5, 2026-11-02):** no reader in Operations code, templates, SQL views
+      or bootstrap, and Metabase is retired (PLAN-008). The identity resolver
+      (`_sync_device_attributes`, promotion) is the only writer; both have
+      field-history triggers. Before proposing a migration, confirm the
+      layered-entity purpose they were built for (0050) is delivered by the
+      entity/attribute model. Not approved.
       Investigate in the run history.
 - [ ] **PLAN-033 — Patching and device-health reporting gaps:** `deferred`
       (docs/plans/PLAN-033-patching-and-device-health-reporting.md).

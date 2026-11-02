@@ -414,8 +414,8 @@ do not open competing blueprints for the same work.
 - Blueprint: BLUEPRINT.md
 - Source: docs/records/PLAN-012-computer-read-checkpoint.md
 - Section: PLAN-012 — Computer reads and inventory checkpoint
-- Resume gate: Re-measure the deployed Computers page, then design the rebuildable, existing-authority-owned inventory read model and its refresh_derived() hook; preserve tenant/RLS, filters, cards, CSV, and source/coverage/Hudu semantics. Requirement-rule changes belong to PLAN-014.
-- Last checked: 2026-10-21 (prerequisite cc5d936 and page fixes 453c41c and ccae6da deployed; the read model, refresh function, re-measurement, and parity validation are not started).
+- Resume gate: Stage 1 (completion-gate items 1, 2, 3, 5 and 7) is committed locally, not released. Item 4: migration 0400 is drafted; its rehearsal on a production schema clone is approved (2026-11-02) and precedes any release. Stage 2 needs approval for read-only production queries: re-measure Source Records and Computers (item 6), and count multi-card Hudu assets. A read model is built only if those measurements justify it (owner-delegated decision, 2026-11-02); any index or migration needs separate approval. Requirement-rule changes belong to PLAN-014.
+- Last checked: 2026-11-02 (Stage 1 local validation: Operations and ingest non-Postgres suites show only failures that also fail at HEAD 4c9fcc15; no production access, migration, commit, or push).
 
 ## PLAN-013 — Operations sign-in page
 

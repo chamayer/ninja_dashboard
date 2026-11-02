@@ -227,7 +227,7 @@ class LifecycleResult:
 def _load_lifecycle_results(cur, tenant_id, now, device_id, source_problems):
     offline_days, review_days = device_status_settings.load(cur, tenant_id)
     overrides = device_status_settings.client_overrides(cur, tenant_id)
-    listings = computer_listing.load(cur, tenant_id, now, device_id)
+    listings = computer_listing.load(cur, tenant_id, now, device_id, review_days)
     devices = _load_lifecycle_evidence(
         cur, tenant_id, [item.device_id for item in listings], include_retired=True
     )

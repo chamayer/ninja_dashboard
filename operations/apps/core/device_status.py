@@ -36,3 +36,42 @@ def get_device_status_policy(tenant_id: int = 1) -> dict[str, int]:
         policy["retire_review_days"], policy["active_device_days"] + 1
     )
     return policy
+
+
+# A client may set its own "offline after" days (``clients.offline_after_days``).
+# Ingest applies it to lifecycle aging, the offline finding, stale agents and
+# readiness (``ingest/device_status_settings.py``); these helpers apply the same
+# rule to Operations readers so a page and its findings agree (PLAN-012 item 1).
+
+
+def get_client_device_status_policy(client, tenant_id: int = 1) -> dict[str, int]:
+    """Tenant policy with ``active_device_days`` replaced by the client's own value."""
+    policy = get_device_status_policy(tenant_id)
+    days = getattr(client, "offline_after_days", None) if client is not None else None
+    if days:
+        policy["active_device_days"] = int(days)
+    return policy
+
+
+def offline_days_sql(client_column: str, default_days: int) -> str:
+    """SQL for the "offline after" days of the Computer whose client is ``client_column``."""
+    return (
+        "COALESCE((SELECT oc.offline_after_days FROM operations.clients oc "
+        f"WHERE oc.id = {client_column}), {int(default_days)})"
+    )
+
+
+def recent_contact_sql(contact_column: str, client_column: str, default_days: int) -> str:
+    """SQL predicate: last contact is within the Computer's effective offline window."""
+    return (
+        f"{contact_column} >= NOW() - make_interval(days => "
+        f"{offline_days_sql(client_column, default_days)})"
+    )
+
+
+def stale_contact_sql(contact_column: str, client_column: str, default_days: int) -> str:
+    """SQL predicate: no contact, or last contact older than the effective window."""
+    return (
+        f"({contact_column} IS NULL OR NOT "
+        f"{recent_contact_sql(contact_column, client_column, default_days)})"
+    )
