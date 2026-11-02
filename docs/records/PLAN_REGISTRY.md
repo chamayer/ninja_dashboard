@@ -73,6 +73,20 @@
 - Last checked: 2026-10-30 in `plan003-r3` at `253db218`. Core ADR-0050 implementation is locally validated (evidence in handoff). Follow-up implementation aligns the client dashboard's unresolved mapping count with the Issues independent-action selection and closes stale per-group `client_unattached_group`, `unnamed_source_group`, and non-topology `client_link_collision` findings with closure reasons. Admin findings require current-observation clear assessments; unnamed entity findings close only open/acknowledged episodes when source state no longer meets the condition. 60 focused ingest tests and 21 focused Operations queue/client-mapping tests pass; Python compilation, scoped Ruff for changed ingest files, and `git diff --check` pass. Whole-file Ruff on the large views module still reports existing findings; the full Operations suite was not run. `scripts/validate_plan_registry.py` is absent from this checkout, so registry structure was manually reconciled. PLAN-004 production reassessment review and R4-2 post-release timing/queue observation remain outstanding and gated; no production, commit, push or deployment action occurred. See the handoff for scope, decisions, and evidence.
 - Last checked: 2026-11-02 (production read-only: source-record queue drained, 0 intake errors, resolver 51/51 completed in 24 h, relationship and attribute queues empty, active policy conditions-registry-14, evaluations 5–8 min, 0 open health Issues without a current assessment).
 
+## PLAN-035 — Health enrichment evidence classification
+
+- Scope: Give Ninja health observations a dedicated non-identity evidence type, preserve health claims and consumers, and consistently exclude enrichment from Computer source-record populations.
+- Status: superseded
+- Defined: 2026-10-29
+- Started: —
+- Completed: —
+- Blueprint: —
+- Source: docs/plans/PLAN-035-health-enrichment-evidence-classification.md
+- Section: PLAN-035 — Health enrichment evidence classification
+- Related plans: PLAN-007 owns collection/enrichment separation; PLAN-012 owns broader inventory populations, including Hudu relevance; PLAN-004 owns identity and record maintenance; PLAN-019 owns observation history and publication safeguards. Agree ownership and sequence with those plans before modifying shared writers, readers, policies, or history. This plan does not resume their gated work.
+- Resume gate: Superseded by PLAN-038 on 2026-11-02: health became a companion data set of the Ninja device record (ADR-0051) instead of a dedicated evidence type. Do not resume; preserve this source for provenance.
+- Last checked: 2026-10-29. Local architecture/writer review and read-only aggregate production investigation completed; plan created without runtime changes. Current checkpoint and validation requirements are in the source document.
+
 ## PLAN-034 — Post-cleanup housekeeping: notification settings and rollback archives
 
 - Scope: Rename the host `.env` `AGENT_COMPLIANCE_*` notification delivery keys to `NOTIFY_*`, and decide retention for the PLAN-022 and Metabase rollback archives.
