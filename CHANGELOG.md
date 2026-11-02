@@ -2,6 +2,16 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.140.3] — 2026-11-02 — Close the old per-step Ninja failures
+
+### Fixed
+
+- Four source-failure Issues from before failures were tracked per source
+  (`core.devices`, `core.device_health`, `core.custom_fields`, `patch_cycle`)
+  stayed open after 2026-09-16 and were shown as if they were separate sources.
+  These are steps of the NinjaOne collection, which now reports under the
+  NinjaOne source's own failure; migration 0396 closes them with that reason.
+
 ## [0.140.2] — 2026-11-01 — Recovery assessment that can clear
 
 ### Fixed

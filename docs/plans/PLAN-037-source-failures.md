@@ -1,7 +1,7 @@
 # PLAN-037 — Source collection failures
 
 **Status: defined.** Registered 2026-11-01 from the post-release check of
-0.140.0. No fix is approved yet; each step needs the user's approval.
+0.140.0. Each remaining step needs the user's approval.
 
 ## Goal
 
@@ -42,6 +42,14 @@ close in that evaluation, which is Step 1's question.
 Read-only production checks before and after each step; the Issue count by
 source; host tests for any collector or guard change.
 
+## Status (2026-11-02)
+
+- Steps 1 and 3 are done. 0.140.1/0.140.2 record a recovered source's assessment
+  so its Issue closes (Issues 3–9 closed); 0.140.3 (migration 0396) closes the four
+  pre-binding per-step Ninja failures (`core.devices`, `core.device_health`,
+  `core.custom_fields`, `patch_cycle`, last seen 09-16).
+- Open: ThreatFox (Step 2). Steps 4 and 5 are not started.
+
 ## Next action
 
-User approval for Step 1 (read-only investigation).
+User approval for Step 2 (ThreatFox endpoint) or Step 4 (deploy-interrupted runs).
