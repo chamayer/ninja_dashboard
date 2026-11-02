@@ -201,7 +201,7 @@ validated source group), not arbitrary SQL expressions or undocumented
 type-name branches.
 PLAN-004 revision 8 adds no case-equivalence Covers matcher. It uses simple
 one-key cases and audited duplicate references; shared members alone do not cover
-independent work. Case combining is deferred to PLAN-033.
+independent work. Case combining is deferred to PLAN-039.
 
 `finding_relationships`: tenant_id, parent_id, child_id, kind, rule_id,
 scope/evidence fingerprint, validity/provenance and computed_at. Composite FKs
@@ -270,7 +270,7 @@ producers remain unchanged. Do not introduce parallel findings for the exact sam
 legacy-owned correction or expand payload context. No source-specific dispatcher,
 route-identity, reserve/send/record, alias, cutoff, sweep or catch-up redesign is in
 this release. Common-store changes still retain PLAN-003's own coordinated artifact,
-role/conservation checks and approval gates. PLAN-033/034 are separate deferred
+role/conservation checks and approval gates. PLAN-039/040 are separate deferred
 plans, to be refined when activated; they do not block the smaller PLAN-004 scope.
 
 ### Live action guard

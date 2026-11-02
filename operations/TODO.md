@@ -41,8 +41,8 @@
       until an explicit source-role threshold is established. See
       [PLAN-036](../docs/plans/PLAN-036-record-first-findings.md).
 - [ ] **PLAN-004 deferred capabilities** (2026-10-29):
-      [PLAN-033: case combining](docs/plans/PLAN-033-source-record-case-combining.md)
-      and [PLAN-034: source-record notifications](docs/plans/PLAN-034-source-record-notifications.md)
+      [PLAN-039: case combining](docs/plans/PLAN-039-source-record-case-combining.md)
+      and [PLAN-040: source-record notifications](docs/plans/PLAN-040-source-record-notifications.md)
       are brief deferred plans. Improve their use cases, scope, decisions and
       acceptance/validation when activated; no implementation is authorized now.
 - [ ] **PLAN-004 measured optimization options** (2026-10-29): revisit per-key

@@ -1,7 +1,7 @@
 # PLAN-004 — Final managed-record evaluation design
 
 Status: Revision 8 accepted by the user after independent review, 2026-10-29.
-Case combining (PLAN-033) and source-record notifications (PLAN-034) are deferred.
+Case combining (PLAN-039) and source-record notifications (PLAN-040) are deferred.
 Acceptance approves this design only; implementation, migrations and production
 operations each still need separate authorization.
 The [handoff](PLAN-004-source-record-review.md) owns the current checkpoint;
@@ -347,7 +347,7 @@ is not a defect, and membership never proves transitive physical identity.
 Show related cases side by side with provenance, opposing/missing facts and exact
 membership. Page large sets; do not materialize every pair or publish a truncated
 aggregate as complete. No fixed anchor/member count thresholds. Case combine and
-split mechanisms are deferred to [PLAN-033](PLAN-033-source-record-case-combining.md).
+split mechanisms are deferred to [PLAN-039](PLAN-039-source-record-case-combining.md).
 
 Member withdrawal re-evaluates the case. Closure requires its own rule's verified
 closure test; closing X cannot close overlapping Z. History and old UUID links
@@ -490,7 +490,7 @@ or silently restore the removed coordination machinery.
 | Existing source-subject natural keys/history | Reuse stable identity semantics; introduce durable native subject UUID without claiming source identity is physical identity. ADR-0045 remains history authority |
 | Generic projection shadow paths | Preserve current authority until explicit audited conversion, as above; no architecture promotion hidden inside this change |
 | `entity_observation_current.device_id` as attachment authority, derived links sync | Invert: links become the single confirmed-association authority, `device_id` a protected projection (§2.1). Justified because operator decisions already write links directly, so two authorities exist today |
-| Notification fingerprint from `condition_key`, `device_id` rule/suppression match | Keep the mechanism; do not retarget/re-key legacy findings in this release. New native types are UI-only; future notification continuity is PLAN-034 (§9.1) |
+| Notification fingerprint from `condition_key`, `device_id` rule/suppression match | Keep the mechanism; do not retarget/re-key legacy findings in this release. New native types are UI-only; future notification continuity is PLAN-040 (§9.1) |
 
 This is a local code/design reconciliation, not a claim that current production
 policy rows or all external consumers were audited. The approved stopped-discovery
@@ -549,12 +549,12 @@ send new context, default to minimal non-sensitive text and a permission-checked
 link; a route called MSP-only is not sufficient authorization to disclose metadata.
 Existing route security findings, if discovered, need separate scoped correction.
 
-[PLAN-034](PLAN-034-source-record-notifications.md) owns future source-record alerts:
+[PLAN-040](PLAN-040-source-record-notifications.md) owns future source-record alerts:
 authorized MSP destinations, baseline/eligibility and material changes, delayed
 assessment, suppressions, visibility, no-route policy and conversion continuity if
 needed. Do not enable the new types merely by toggling alertability or use first-opened
 time as an already-approved eligibility policy. Case combining is separately
-[PLAN-033](PLAN-033-source-record-case-combining.md); neither plan blocks this UI-only
+[PLAN-039](PLAN-039-source-record-case-combining.md); neither plan blocks this UI-only
 release, and neither has implementation approval.
 
 Rollback uses the reviewed compatible stage checkpoint and retains history/decisions.
@@ -583,7 +583,7 @@ No production mutation tests or copying live payloads into fixtures. Ordinary mi
 policy defaults remain unknown; preserve purpose/severity/age semantics in §§4–5.
 
 Accepted 2026-10-29 after independent review of this contract, the ADR amendments,
-PLAN-003 integration and the PLAN-033/034 deferrals. PLAN-003 owns the tenant guard
+PLAN-003 integration and the PLAN-039/040 deferrals. PLAN-003 owns the tenant guard
 helper and common findings foundation; Stage A builds on it (handoff: ownership and
 order). Load checks must keep complete input freshness, never a target-only check.
 Documentation consistency is not implementation, runtime, load or deployment evidence.

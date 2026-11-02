@@ -1,5 +1,35 @@
 # Plan registry
 
+## PLAN-040 — Source-record notifications
+
+- Scope: Enable useful alerts for PLAN-004's native record/case findings without migration spam, restricted-context disclosure, lost ongoing alerts or unreviewed policy changes.
+- Status: deferred
+- Defined: 2026-10-29
+- Started: —
+- Completed: —
+- Blueprint: —
+- Source: operations/docs/plans/PLAN-040-source-record-notifications.md
+- Section: PLAN-040 — Source-record notifications
+- Related plans: Deferred from PLAN-004 revision 8; coordinate PLAN-003 and the other PLAN-039/040 follow-up before overlapping changes. Neither follow-up blocks the smaller PLAN-004 release.
+- Resume gate: PLAN-004 foundations available and explicit user approval to resume this concrete follow-up; reconcile current implementation and approve requirements/design before implementation or production execution.
+- Last checked: 2026-10-29 (plan defined only; no implementation, tests or production operations).
+- Renumbered: 2026-11-02 from PLAN-034 (collision with the registry's PLAN-034); PLAN-003/004 design records written before 2026-11-02 were updated to the new number.
+
+## PLAN-039 — Source-record case combining
+
+- Scope: Combine related source-record investigations only when operators need one same-problem/same-action workspace beyond PLAN-004's related-case display.
+- Status: deferred
+- Defined: 2026-10-29
+- Started: —
+- Completed: —
+- Blueprint: —
+- Source: operations/docs/plans/PLAN-039-source-record-case-combining.md
+- Section: PLAN-039 — Source-record case combining
+- Related plans: Deferred from PLAN-004 revision 8; coordinate PLAN-003 and the other PLAN-039/040 follow-up before overlapping changes. Neither follow-up blocks the smaller PLAN-004 release.
+- Resume gate: PLAN-004 foundations available and explicit user approval to resume this concrete follow-up; reconcile current implementation and approve requirements/design before implementation or production execution.
+- Last checked: 2026-10-29 (plan defined only; no implementation, tests or production operations).
+- Renumbered: 2026-11-02 from PLAN-033 (collision with the registry's PLAN-033); PLAN-003/004 design records written before 2026-11-02 were updated to the new number.
+
 ## PLAN-038 — Ninja device health as detail of the device record
 
 - Scope: Ninja device health becomes a companion data set of the Ninja device record (ADR-0051): never a source record or link of its own, attached to and withdrawn with its device record; retire the 8,513 health records and 7,330 links; show health on the device record.
@@ -246,7 +276,7 @@ do not open competing blueprints for the same work.
 - Blueprint: operations/BLUEPRINT.md
 - Source: operations/docs/plans/PLAN-004-source-record-review.md
 - Section: Computer identity and platform change history (2026-10-16); How a Computer is named — ADR-0034 proposal (2026-10-19)
-- Resume gate: None; complete. Deferred PLAN-004 items (PLAN-033/034 plans, measured optimizations) stay in operations/TODO.md.
+- Resume gate: None; complete. Deferred PLAN-004 items (PLAN-039/040 plans, measured optimizations) stay in operations/TODO.md.
 - Last checked: 2026-10-20 (live). Identity relations are present; 32 merges occurred in seven days and seven name collisions remain. This confirms activity, not completion of the follow-up plan.
 - Last checked: 2026-10-30. R4 (final design rev 8) released: 0.135.0 managed subjects/rules (+0.135.1 Jobs resource-limit hotfix), 0.136.0 one-key cases, 0.137.0 link authority in a drained window with backup; one-time reassessment run (results in operations/BLUEPRINT.md). Follow-ups in operations/TODO.md.
 - Follow-up added 2026-10-26, implemented locally under PLAN-036 on 2026-10-30: reconcile `client_unattached_group`, `unnamed_source_group`, and per-group `client_link_collision` at the end of each client-resolver run when a group is assigned, inactive, gone, renamed, or no longer matches two or more clients. Record a closure reason. Topology collision findings are preserved; entity-candidate withdrawal remains tracked separately under PLAN-021.

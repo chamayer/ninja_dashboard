@@ -5,7 +5,7 @@ Status: Supporting integration inventory, 2026-10-29. The
 and resolves earlier model, type, policy-default and rollout alternatives below.
 Revision 8 narrows the release to simple cases and silent native types; older
 lock, policy, conversion and notification proposals below are historical inventory,
-not requirements. PLAN-033/034 are deferred placeholders to refine on activation.
+not requirements. PLAN-039/040 are deferred placeholders to refine on activation.
 This inventory connects it to the
 [domain design](PLAN-004-source-record-design.md) and
 [rule/action contracts](PLAN-004-source-record-rule-contracts.md).

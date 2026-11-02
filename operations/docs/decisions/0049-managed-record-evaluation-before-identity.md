@@ -51,9 +51,9 @@ of shared physical identity. ADR-0012's evidence/projector and tenant rules rema
 | Decision 1 association authority/reassessment | Retained; remove notification cutoff/sweep coupling and invented drain target |
 | Decision 2 lock order | Retain tenant-before-row ordering and shared/exclusive guard; remove bucket/anchor advisory plans, ticket options and numeric throughput/hold targets |
 | Decision 3 fresh publication | Retained with coarse tenant input generation, current rule/config revision and action checks |
-| Decision 4 inclusive combined investigations/redirects | Narrow initial scope to one-key related cases; combining deferred to PLAN-033 |
-| Decision 5 mixed notification suppression/context | Deferred with new notifications to PLAN-034; access controls remain required now |
-| Decisions 6–7 activation baseline/material release/delayed sweep | Deferred to PLAN-034; no replacement first-opened-time policy is approved |
+| Decision 4 inclusive combined investigations/redirects | Narrow initial scope to one-key related cases; combining deferred to PLAN-039 |
+| Decision 5 mixed notification suppression/context | Deferred with new notifications to PLAN-040; access controls remain required now |
+| Decisions 6–7 activation baseline/material release/delayed sweep | Deferred to PLAN-040; no replacement first-opened-time policy is approved |
 
 | Decision 3 shared guard for input-only writes | **Amended R4-1 (user, 2026-10-30):** intake, association and presence writers take no guard. An observation trigger admits the subject and enqueues work in the intake transaction. A deferred subject trigger advances the tenant generation at commit. Publication holds the exclusive guard plus a share lock on the generation row, so input commits wait one bounded batch ([design §3/§7.2](../plans/PLAN-004-source-record-final-design.md#72-minimal-locking-and-bounded-transactions)) |
 | Decision 3 "validate load before rollout" | **Waived R4-2 (user, 2026-10-30):** no representative load run. Watch ingest timings, queue depth and oldest dirty revision after release |
@@ -72,8 +72,8 @@ Per-key locking/counters, a policy JSON engine, case-combine lifecycle and notif
 conversion/activation subsystems exceed the initial need. Revisit only with concrete
 workload or operator evidence, not by restoring the previous design wholesale.
 
-- [PLAN-033](../plans/PLAN-033-source-record-case-combining.md): case combining.
-- [PLAN-034](../plans/PLAN-034-source-record-notifications.md): source-record alerts.
+- [PLAN-039](../plans/PLAN-039-source-record-case-combining.md): case combining.
+- [PLAN-040](../plans/PLAN-040-source-record-notifications.md): source-record alerts.
 - [Operations backlog](../../TODO.md): smaller evidence-driven optimization options.
 
 ## Enforcement and review

@@ -46,9 +46,9 @@ cannot produce any messages.
 
 ## Deferred plans and amended decisions
 
-- [PLAN-033](../plans/PLAN-033-source-record-case-combining.md): brief case-combining
+- [PLAN-039](../plans/PLAN-039-source-record-case-combining.md): brief case-combining
   placeholder; refine requirements and validation when explicitly activated.
-- [PLAN-034](../plans/PLAN-034-source-record-notifications.md): brief notification
+- [PLAN-040](../plans/PLAN-040-source-record-notifications.md): brief notification
   placeholder; decide eligibility, visibility and continuity at activation.
 - [Backlog](../../TODO.md): revisit coordination/policy complexity only on measured need.
 

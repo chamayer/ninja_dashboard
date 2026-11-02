@@ -67,7 +67,7 @@ Combine maintenance windows only after including all prerequisites and
 successfully rehearsing the combined recovery. Moving an approved M5 change
 earlier requires updating the migration/package contract so no other M5
 migration ships. Each step keeps its own checks, release, push/deployment and
-operation approvals. PLAN-033/034, other M5 conversions and M6 stay deferred.
+operation approvals. PLAN-039/040, other M5 conversions and M6 stay deferred.
 
 ## Page and interaction contract
 
