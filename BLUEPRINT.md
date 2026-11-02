@@ -32,8 +32,8 @@ validation results, or completed-plan summaries here.
   scheduled work. Ninja reference data now loads before devices (0.142.0). See the
   [plan](docs/plans/PLAN-029-jobs-readiness-and-first-ingest.md).
 
-- **PLAN-037 — active.** Next: verify 0.142.0 read-only (a completed ThreatFox
-  run, no new failed Ninja `devices` steps), then approval for Step 4. See the
+- **PLAN-037 — active.** Steps 1–3 done; Step 5 failures have stopped. Next:
+  approval for Step 4 (deploy-interrupted runs). See the
   [plan](docs/plans/PLAN-037-source-failures.md).
 - **PLAN-012 — active, gated.** Next: reconstruct and confirm the missing
   consumer ledger, design, affected-file inventory, and resumable slices in

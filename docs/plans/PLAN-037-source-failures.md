@@ -48,12 +48,16 @@ source; host tests for any collector or guard change.
   so its Issue closes (Issues 3–9 closed); 0.140.3 (migration 0396) closes the four
   pre-binding per-step Ninja failures (`core.devices`, `core.device_health`,
   `core.custom_fields`, `patch_cycle`, last seen 09-16).
-- 0.142.0 ships Step 2 (ThreatFox authenticated API) and a Step 5 candidate
-  (Ninja locations and policies load before devices). Both await a post-deploy
-  check: a completed ThreatFox run, and no new failed `devices` steps.
-- Step 4 is not started.
+- Step 2 is done. 0.142.0 collects ThreatFox through the authenticated API; the
+  first run on it (requested 17:36, completed 17:53 UTC on 2026-11-02) completed
+  without error after every run since 10-21 had failed with `410 Gone`.
+- Step 5: no failed `devices` steps since 2026-11-01 17:36 UTC; the failures stopped
+  before 0.142.0, cause not confirmed. 0.142.0 now loads Ninja locations and
+  policies before devices (the device table references both); the first run on it
+  completed without error in 23.5 minutes (17:57–18:20 UTC).
+- Step 4 is not started. Evidence today: the 0.142.1 deploy restarted the Jobs
+  worker at 17:56 UTC and stalled the running SentinelOne and LogMeIn refreshes.
 
 ## Next action
 
-Verify 0.142.0 read-only (ThreatFox run, Ninja `devices` step), then user
-approval for Step 4 (deploy-interrupted runs).
+User approval for Step 4 (deploy-interrupted runs).
