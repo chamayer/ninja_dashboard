@@ -354,8 +354,8 @@ do not open competing blueprints for the same work.
 - Started: 2026-10-21
 - Completed: —
 - Blueprint: BLUEPRINT.md
-- Source: BLUEPRINT.md
-- Section: Computers full-fleet inventory contract
+- Source: docs/records/PLAN-012-computer-read-checkpoint.md
+- Section: PLAN-012 — Computer reads and inventory checkpoint
 - Resume gate: Re-measure the deployed Computers page, then design the rebuildable, existing-authority-owned inventory read model and its refresh_derived() hook; preserve tenant/RLS, filters, cards, CSV, and source/coverage/Hudu semantics. Requirement-rule changes belong to PLAN-014.
 - Last checked: 2026-10-21 (prerequisite cc5d936 and page fixes 453c41c and ccae6da deployed; the read model, refresh function, re-measurement, and parity validation are not started).
 
