@@ -24,9 +24,18 @@
 
 ## Remaining intentional workspace material
 
-- Root `.work/` still contains unclassified October research notes and August
-  SQL/Python probes. They were left in place because their current task value
-  has not been verified; classify them in a later, separate review.
+- Root `.work/` contains two preserved classes of material, classified on
+  2026-10-20:
+  - Ten tracked October design notes record the software/finding and central
+    work-queue workstreams. They remain in place because active repository
+    references (including ADR-0030 and finding-state migration/model
+    documentation) still point to them. Move them only as a coordinated
+    archival change that updates those references.
+  - Twenty-one untracked July-August SQL/Python diagnostics (`probe_*` and
+    `bootstrap_intel.py`) have no live repository references. They remain
+    local, temporary research artifacts and must not be treated as handoff or
+    backlog material.
+- No root `.work/` artifact was deleted or rewritten during classification.
 
 ## Validation
 
