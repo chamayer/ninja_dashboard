@@ -81,6 +81,25 @@ Select checks based on the changed area:
 
 Report any check that cannot run locally.
 
+### Local development machine limits
+
+The local development stack (`docker-compose.dev.yml`, the dev Postgres
+container and any scratch databases cloned from it) runs on the user's own
+workstation. Use it only to check that code works and does not crash: migrations
+apply and roll back, functions and triggers behave, a producer or page runs once,
+unit tests and small targeted PostgreSQL tests pass.
+
+- Do not run heavy processing locally: full evaluator or reconciliation passes,
+  full-fleet rebuilds or backfills, repeated runs for timing, performance or
+  before/after baseline comparisons, or anything that holds the database busy for
+  minutes. Stop a local run that is still working after a few minutes.
+- Exercise a producer on the smallest scope it supports (one device, one client
+  or a small synthetic fixture) rather than the whole dataset.
+- Keep at most one throwaway scratch database at a time and drop it when the
+  check is done; remove temporary Git worktrees and Compose projects you create.
+- Measure performance, volume, lock waits and run time only in an authorized
+  rehearsal environment or production copy, never on the workstation.
+
 ## Definition of done
 
 - The requested behavior is wired through all affected ingest, storage,
@@ -109,11 +128,61 @@ Report any check that cannot run locally.
 
 ## Module work-state routing
 
-For Operations work, root `BLUEPRINT.md` is the cross-service checkpoint and
-router. The detailed active handoff, session history, and deferred backlog are
-respectively `operations/BLUEPRINT.md`, `operations/SESSIONS.md`, and
-`operations/TODO.md`. Root `SESSIONS.md` and `TODO.md` receive only concise
-cross-project pointers when Operations work affects repository-level status.
+Root `BLUEPRINT.md` is an index and cross-service router, not a second plan
+document. For Operations work, the detailed active handoff, session history,
+and deferred backlog belong in `operations/BLUEPRINT.md`,
+`operations/SESSIONS.md`, and `operations/TODO.md`, respectively. Root
+`SESSIONS.md` and `TODO.md` receive only concise cross-project pointers when
+Operations work affects repository-level status. The plan registry owns plan
+status; the linked plan or record owns its durable scope, decisions, and
+evidence.
 
 Machine-specific command permissions belong in untracked local tool settings,
 not repository instructions.
+
+## Plan-status routing
+
+- `docs/records/PLAN_REGISTRY.md` is the status authority for substantial
+  repository plans. Read it before opening nontrivial work.
+- Create or update the relevant registry entry before starting a nontrivial
+  blueprint, and identify its `PLAN-###` ID in that blueprint.
+- Record when each plan was defined, started, and completed; write `—` when a
+  lifecycle event has not occurred and state an unknown historical date rather
+  than inventing one.
+- A plan marked `active` must name the current root or module blueprint;
+  `ready` and `verify` plans must retain an explicit resume gate.
+- Multiple plans may be active only when their scopes are independent. For
+  overlapping scopes, the registry entry must name the related plan and state
+  the dependency or execution order before work starts.
+- Run `python scripts/validate_plan_registry.py` with the usual documentation
+  validation. It is not yet enforced by the governance workflow.
+
+## Blueprint maintenance
+
+- A blueprint is a current resume checkpoint, never a transcript, history, or
+  duplicate plan. Keep it at or below 4,000 characters, including headings.
+- The root `BLUEPRINT.md` may contain only: (1) a brief repository-wide
+  checkpoint, (2) each active plan ID with its status, one next action, and a
+  link to its detailed handoff, and (3) cross-service dependencies that cannot
+  be understood from those linked sources. Do not put completed-plan
+  summaries, implementation narratives, file-by-file detail, test results,
+  production evidence, or durable decisions there. Remove a plan's root entry
+  when it is complete; the registry retains its status and the plan record
+  retains its history and evidence.
+- The detailed active handoff belongs in the module blueprint for module work
+  (`operations/BLUEPRINT.md` for Operations) or in the designated plan document
+  for cross-service work. That source retains goal, scope, affected files,
+  steps, decisions, validation, checkpoint, and next action. The plan registry
+  owns lifecycle status and dates. `SESSIONS.md` owns chronological history;
+  records own durable evidence and audit detail; `TODO.md` or the registered
+  backlog owns deferred work. Link to these sources; do not copy their details
+  into a blueprint.
+- Before starting nontrivial work, identify the correct detailed handoff and
+  update it. At milestones and when resuming, reconcile it against Git status,
+  diffs, and current files. Before removing duplicated or stale detail, first
+  preserve any unique decision, evidence, limitation, or recovery instruction
+  in its authoritative source.
+- If a blueprint exceeds 4,000 characters, shorten it immediately by routing
+  detail to the sources above. Do not keep appending sections or preserve
+  completed-plan narratives to avoid losing history; link to the authoritative
+  record instead.
