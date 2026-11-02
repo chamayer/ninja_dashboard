@@ -2,7 +2,7 @@
 
 ## PLAN-038 — Ninja device health as detail of the device record
 
-- Scope: Stop admitting Ninja device-health observations as separate source records typed as agents; keep them as supplementary evidence of the Ninja device record, retire the 8,513 health records, and show health on the device record.
+- Scope: Remove the second Ninja source record per device: the device collection writes device-health fields into the device record itself, the separate device-health stream and its 8,513 source records are retired, and health readers use the device record.
 - Status: defined
 - Defined: 2026-11-02
 - Started: —
