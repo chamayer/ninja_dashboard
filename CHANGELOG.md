@@ -2,6 +2,24 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.142.2] — 2026-11-02 — Bound expensive vulnerability lookups
+
+### Fixed
+
+- Split large CPE-to-CVE lookups into batches of 500 and deduplicate their
+  union. Large candidate arrays could make PostgreSQL abandon the GIN index
+  and scan the full CVE table. Matching scope and per-version results remain
+  unchanged; the matcher still performs a full refresh to withdraw stale matches.
+- Reuse identical CPE candidate pools within each full matcher run, bounded
+  to 20,000 rows and 256 pools. Oversized pools are used in full but not cached;
+  no cached evidence survives into another run.
+
+### Added
+
+- Aggregate cache-reuse and slow CVE-lookup diagnostics, without software names
+  or query parameter values, and regression checks for version separation,
+  result equivalence, memory bounds, failed queries, and withdrawals.
+
 ## [0.142.1] — 2026-11-02 — Bounded CPU investigation diagnostics
 
 ### Added

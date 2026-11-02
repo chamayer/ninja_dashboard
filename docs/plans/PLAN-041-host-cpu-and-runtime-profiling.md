@@ -2,43 +2,58 @@
 
 ## Status and goal
 
-Active. Attribute live resource use and identify the measured dominant Ninja
-phase before changing its queries or scheduling. Commit and push approved
-2026-11-02; prepare release 0.142.1. No new ingest or Django migrations.
+Active implementation. Finish the Ninja CPU fix, release it, and measure a
+complete matcher run. The user requested continuation through the fix; existing
+CPU-task commit/push authorization continues. No migrations, new dependencies,
+host tuning, or matching-rule changes are included.
 
 ## Scope and affected files
 
-- `ingest/evaluator.py`, `ingest/identity/matching.py`: private-data-free timings.
-- `ingest/tests/test_cpu_diagnostics.py`: behavior and diagnostic privacy checks.
-- `VERSION`, `CHANGELOG.md`: paired release metadata.
-- Root routing, registry, backlog pointer, and the
+- `ingest/intel/matcher.py`: bounded CPE reuse and CVE operand batches.
+- `ingest/tests/test_matcher_candidate_cache.py`: output equivalence, versions,
+  cache bounds, failures, and subsequent-run withdrawals.
+- `VERSION`, `CHANGELOG.md`, registry/routing, and the retained
   [measurement record](../records/HOST-CPU-2026-11-02.md).
-- Sibling DMARC repository owns the lightweight health probe, monitoring
-  retirement, and independent parser HTTP checker.
+- Earlier phase diagnostics are deployed in 0.142.1 `573851c1`.
+- DMARC `03ddf01` is deployed and healthy; its combined probe runs inside
+  Manager, with no host units or Zabbix parser monitor.
 
-## Steps and decisions
+## Decisions and steps
 
-1. Attribute container/process CPU and pressure; follow a full processing cycle.
-2. Add elapsed phase/cache-miss diagnostics without matching or data changes.
-3. Review migration parity, commit and push origin then the required mirror.
-4. Verify the automatic deployment and collect phase timings in a subsequent
-   cycle; use that evidence to select a bounded optimization.
+1. Retain a full matcher rebuild, version filtering, lexical precision, input
+   selection, withdrawal behavior, and the existing fallback cap.
+2. Cache identical CPE queries within one run only, bounded to 20,000 rows and
+   256 pools. Oversized pools are used in full, not truncated or cached.
+3. Split CVE any-key arrays into batches of at most 500 and deduplicate the
+   union. This preserves matching while avoiding full CVE scans for large
+   arrays. No persistent planner setting or index changes.
+4. Release 0.142.2, verify the automatic rollout, then measure completed-run
+   duration, lookup reuse, output material changes, and host CPU.
 
-No new dependencies, schema changes, data rebuilds, or host tuning. Do not use
-Zabbix to monitor the parser. The excluded-record cache hypothesis was ruled
-out; matching rules and cache behavior remain intact.
+## Confirmed evidence and validation
 
-## Validation and checkpoint
+The catalogue estimate found 13,005 lookups and 2,410 pools. A bounded simulation
+reused 6,347 lookups. This is not a completed matcher-run benchmark.
+Live read-only repeated-pool samples returned identical 500-row results, with
+10 queries reduced to one (0.215→0.034 s and 0.159→0.014 s).
 
-24 focused tests passed; compilation, scoped Ruff, and whitespace checks passed.
-The ingest image includes both changed modules. Live comparison found no
-pending SQL or Operations Django migrations before this release. Full-cycle
-timings and competing host workloads are in the measurement record; elapsed
-time includes API and lock waits and is not CPU time.
+CVE EXPLAIN switched from GIN at 500/2,048 candidates to a full scan at 8,192.
+The read-only original 8,192-candidate lookup exceeded a three-second limit;
+17 batches finished in 0.508 s with the same eight CVEs as the original query
+forced through its existing index in that diagnostic session. No global setting
+changed. A real matcher membership query was observed running over three minutes.
 
-## Next action
+16 focused matcher/index tests passed. Broader checks: 49 passed and one
+existing source-string assertion failed in `test_software_reconcile.py`; the
+referenced `operator_job_queue.py` is unchanged. Scoped Ruff, compilation,
+registry, and whitespace checks pass. The software aggregation plan is recorded;
+no speculative aggregation rewrite is included.
 
-Commit the reviewed scope, push origin then the mirror without an intervening
-deployment check, and verify the automatic Portainer rollout. Do not request a
-separate Ninja redeploy. Preserve unrelated workspace files. Record deployed
-hashes in the existing evidence record without a hash-only follow-up commit.
+## Checkpoint and next action
+
+Release 0.142.2 is prepared. Prior completed matcher baseline: 1,368 seconds and
+648,106 match rows. Whole-job improvement is not yet claimed. Next: finish staged
+review, confirm migration parity, commit and push origin then a-m-rose, verify
+Portainer's automatic rollout, and follow a full optimized matcher run. Do not
+trigger a separate redeploy. Preserve unrelated work and capture actual results
+in the measurement record before marking this plan complete.

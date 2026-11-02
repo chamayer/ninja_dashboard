@@ -2,7 +2,7 @@
 
 ## PLAN-041 — Host CPU and runtime profiling
 
-- Scope: Attribute live host CPU, replace expensive DMARC health checks in its sibling repository, and add bounded Ninja phase/query timings before selecting an optimization.
+- Scope: Attribute live host CPU, replace expensive DMARC health checks in its sibling repository, and reduce Ninja matcher work through bounded candidate reuse and indexed CVE lookup batches.
 - Status: active
 - Defined: 2026-11-02
 - Started: 2026-11-02
@@ -11,8 +11,8 @@
 - Source: docs/plans/PLAN-041-host-cpu-and-runtime-profiling.md
 - Section: PLAN-041 — Host CPU and runtime profiling
 - Related plans: PLAN-003/004 own findings guards and identity semantics; this plan adds diagnostics only and does not alter their contracts. DMARC health/monitoring retirement is prepared in the sibling repository.
-- Resume gate: Commit and push approved 2026-11-02. No new migrations. Host parser-health unit installation requires its separate approval; query rewrites or host configuration tuning need reviewed evidence and approval where applicable.
-- Last checked: 2026-11-02 (full source-processing cycle observed; 24 focused tests, syntax, Ruff, and whitespace checks passed; release 0.142.1 being prepared).
+- Resume gate: Existing CPU-task implementation/commit/push authorization continues after the user's request to finish the fix. Release 0.142.2 has no migrations or dependencies; preserve matching scope and withdrawals. No host tuning, systemd parser units, or Zabbix parser monitor.
+- Last checked: 2026-11-02 (0.142.1 and DMARC `03ddf01` deployed and healthy. Actual matcher fixes prepared: bounded CPE reuse and 500-CPE CVE batches; live read-only equivalence/performance probes passed; whole matcher-run validation follows deployment).
 
 ## PLAN-040 — Source-record notifications
 

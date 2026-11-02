@@ -57,6 +57,8 @@ from __future__ import annotations
 
 import logging
 import re
+import time
+from collections import OrderedDict
 
 from ingest import db
 from ingest.config import settings
@@ -70,6 +72,9 @@ _TOKEN_SPLIT_RE = re.compile(r"[^a-z0-9]+")
 _MIN_DISTINCTIVE_LEN = 4
 _VERSION_YEAR_RE = re.compile(r"\b(20[1-3][0-9])\b")
 _VERSION_SEMVER_RE = re.compile(r"\b(\d+(?:\.\d+){1,3})\b")
+_CPE_CACHE_MAX_ROWS = 20_000
+_CPE_CACHE_MAX_ENTRIES = 256
+_CVE_LOOKUP_BATCH_SIZE = 500
 
 _STOP_TOKENS: frozenset[str] = frozenset({
     "core", "sdk", "app", "apps", "tool", "tools", "server", "client",
@@ -173,15 +178,33 @@ def _cves_for(
     hit = cache.get(key)
     if hit is not None:
         return hit
-    cur.execute(
-        """
-        SELECT cve_id
-          FROM intel.cves
-         WHERE affected_cpes ?| %s::text[]
-        """,
-        (cpe_candidates,),
-    )
-    found = [row[0] for row in cur.fetchall()]
+    # Large arrays make the planner abandon the GIN index for a full CVE
+    # scan. The union of bounded any-key lookups has exactly the same matches.
+    # Deduplicate across batches: one CVE may affect CPEs in several batches.
+    started = time.monotonic()
+    found: list[str] = []
+    seen: set[str] = set()
+    for offset in range(0, len(cpe_candidates), _CVE_LOOKUP_BATCH_SIZE):
+        cur.execute(
+            """
+            SELECT cve_id
+              FROM intel.cves
+             WHERE affected_cpes ?| %s::text[]
+            """,
+            (cpe_candidates[offset:offset + _CVE_LOOKUP_BATCH_SIZE],),
+        )
+        for (cve_id,) in cur.fetchall():
+            if cve_id not in seen:
+                seen.add(cve_id)
+                found.append(cve_id)
+    elapsed = time.monotonic() - started
+    if elapsed >= 1:
+        log.info(
+            "Intel matcher CVE lookup: candidates=%d queries=%d rows=%d elapsed_seconds=%.3f",
+            len(cpe_candidates),
+            (len(cpe_candidates) + _CVE_LOOKUP_BATCH_SIZE - 1) // _CVE_LOOKUP_BATCH_SIZE,
+            len(found), elapsed,
+        )
     cache[key] = found
     return found
 
@@ -208,6 +231,81 @@ def _version_prefixes(version: str) -> list[str]:
     for i in range(len(parts), 0, -1):
         out.append(".".join(parts[:i]))
     return out
+
+
+class _CpeCandidateCache:
+    """Reuse identical CPE queries within one full matcher refresh.
+
+    Bound both rows and entries: a large candidate pool is still used in full,
+    but is not retained when it would exceed the cache's row budget. Empty
+    results are cached too. No result survives into the next matcher run.
+    """
+
+    def __init__(
+        self,
+        max_rows: int = _CPE_CACHE_MAX_ROWS,
+        max_entries: int = _CPE_CACHE_MAX_ENTRIES,
+    ) -> None:
+        self.max_rows = max_rows
+        self.max_entries = max_entries
+        self.rows = 0
+        self.hits = 0
+        self.misses = 0
+        self.evictions = 0
+        self._entries: OrderedDict[tuple, tuple[tuple[str, str | None], ...]] = OrderedDict()
+
+    def lookup(
+        self,
+        cur,
+        tier1_pairs: set[tuple[str, str]],
+        tier2_products: set[str],
+    ) -> tuple[tuple[str, str | None], ...]:
+        if tier1_pairs:
+            key = ("tier1", tuple(sorted(tier1_pairs)))
+        else:
+            key = ("tier2", tuple(sorted(tier2_products)))
+        cached = self._entries.get(key)
+        if cached is not None:
+            self.hits += 1
+            self._entries.move_to_end(key)
+            return cached
+
+        self.misses += 1
+        if tier1_pairs:
+            # Preserve positional pairs and both leading index columns.
+            pairs = sorted(tier1_pairs)
+            cur.execute(
+                """
+                SELECT c.cpe23, c.version
+                  FROM intel.cpes c
+                  JOIN unnest(%s::text[], %s::text[]) AS k(vendor, product)
+                    ON LOWER(c.vendor) = k.vendor
+                   AND LOWER(c.product) = k.product
+                """,
+                ([v for v, _ in pairs], [p for _, p in pairs]),
+            )
+        else:
+            cur.execute(
+                """
+                SELECT cpe23, version FROM intel.cpes
+                 WHERE LOWER(product) = ANY(%s::text[])
+                 LIMIT 500
+                """,
+                (list(tier2_products),),
+            )
+        rows = tuple(cur.fetchall())
+        if len(rows) > self.max_rows or self.max_entries <= 0:
+            return rows
+        while self._entries and (
+            self.rows + len(rows) > self.max_rows
+            or len(self._entries) >= self.max_entries
+        ):
+            _, removed = self._entries.popitem(last=False)
+            self.rows -= len(removed)
+            self.evictions += 1
+        self._entries[key] = rows
+        self.rows += len(rows)
+        return rows
 
 
 def _match_and_upsert() -> int:
@@ -270,6 +368,7 @@ def _match_and_upsert() -> int:
     # the move from title to product+version would roughly double the query
     # count against intel.cves for no new information.
     cve_cache: dict[tuple[str, ...], list[str]] = {}
+    candidate_cache = _CpeCandidateCache()
     with db.transaction() as cur:
         cur.execute(
             """
@@ -328,44 +427,16 @@ def _match_and_upsert() -> int:
             if not tier1_pairs and not tier2_products:
                 continue
 
-            # Fetch the CPE candidate pool once per title, unfiltered. The
-            # version filter is applied per installed version below, so
-            # filtering here would throw away the rows other versions need.
-            cpe_rows: list[tuple[str, str | None]] = []
-            if tier1_pairs:
-                # Joined on the two columns separately, NOT on
-                # `LOWER(vendor) || '|' || LOWER(product)`. The concatenated
-                # form is a different expression from the index
-                # `cpes_vendor_product_idx ON (lower(vendor), lower(product))`,
-                # so PostgreSQL could not use it and fell back to a parallel
-                # sequential scan of the whole table -- once per title, ~21k
-                # times per run. That was survivable at 164,860 CPE rows and
-                # stopped being so when the d0b8aea backfill took the table to
-                # 1,799,966. Measured 2026-08-12 on the same input: seq scan
-                # over 1.79M rows versus a 20 ms index scan, returning an
-                # identical 9,662 rows.
-                pairs = sorted(tier1_pairs)
-                cur.execute(
-                    """
-                    SELECT c.cpe23, c.version
-                      FROM intel.cpes c
-                      JOIN unnest(%s::text[], %s::text[]) AS k(vendor, product)
-                        ON LOWER(c.vendor) = k.vendor
-                       AND LOWER(c.product) = k.product
-                    """,
-                    ([v for v, _ in pairs], [p for _, p in pairs]),
+            # Reuse unfiltered pools across titles with identical lookups.
+            # Version filtering stays per installed version below; filtering
+            # the shared pool would discard evidence other versions need.
+            cpe_rows = candidate_cache.lookup(cur, tier1_pairs, tier2_products)
+            lookups = candidate_cache.hits + candidate_cache.misses
+            if lookups % 1000 == 0:
+                log.info(
+                    "Intel matcher CPE progress: lookups=%d queries=%d reused=%d cached_rows=%d",
+                    lookups, candidate_cache.misses, candidate_cache.hits, candidate_cache.rows,
                 )
-                cpe_rows.extend(cur.fetchall())
-            if tier2_products:
-                cur.execute(
-                    """
-                    SELECT cpe23, version FROM intel.cpes
-                     WHERE LOWER(product) = ANY(%s::text[])
-                     LIMIT 500
-                    """,
-                    (list(tier2_products),),
-                )
-                cpe_rows.extend(cur.fetchall())
             if not cpe_rows:
                 continue
 
@@ -498,6 +569,11 @@ def _match_and_upsert() -> int:
                     (_TENANT_ID, _TENANT_ID, _TENANT_ID),
                 )
 
+    log.info(
+        "Intel matcher CPE lookups: queries=%d reused=%d evictions=%d cached_rows=%d",
+        candidate_cache.misses, candidate_cache.hits, candidate_cache.evictions,
+        candidate_cache.rows,
+    )
     log.info(
         "Intel matcher: %d titles matched (%d product+version pairs), "
         "%d sub-components ignored, %d cve_match rows.",
