@@ -1,5 +1,19 @@
 # Plan registry
 
+## PLAN-043 — Useful issue review
+
+- Scope: Explain issues, display safe source-record identity evidence and comparisons, and expose existing permission-checked resolution paths on the review page.
+- Status: completed
+- Defined: 2026-11-02
+- Started: 2026-11-02
+- Completed: 2026-11-02
+- Blueprint: operations/BLUEPRINT.md
+- Source: operations/docs/plans/PLAN-043-issue-review.md
+- Section: PLAN-043 — Useful issue review
+- Related plans: PLAN-003/004 supply completed finding/action and source-record contracts; PLAN-015 owns identity repairs and PLAN-016 owns the SQL explorer. This plan only reads their data and does not change those mechanisms.
+- Resume gate: Local UI implementation complete. Release 0.143.2 commit and push approved 2026-11-02, including automatic deployment. No pending migrations, schema, identity-policy or production-data changes.
+- Last checked: 2026-11-02 (14 new tests pass; focused run 49 passed and one pre-existing source-text failure; staged read-only render of linked finding succeeds with two Computers and four source records. Evidence and limitations retained in the plan).
+
 ## PLAN-041 — Host CPU and runtime profiling
 
 - Scope: Attribute live host CPU, replace expensive DMARC health checks in its sibling repository, and reduce Ninja matcher work through bounded candidate reuse and indexed CVE lookup batches.
@@ -135,7 +149,7 @@
 - Started: 2026-10-28
 - Completed: 2026-10-28
 - Blueprint: operations/BLUEPRINT.md
-- Source: operations/BLUEPRINT.md
+- Source: operations/docs/records/OPERATIONS-CHECKPOINT-2026-11-02.md
 - Section: PLAN-032 — Per-instance source display titles
 - Related plans: PLAN-025 established the ScreenConnect source contract; PLAN-026 remains the separate source-configuration UI plan. This label correction is independent of PLAN-030 bulk candidate acceptance.
 - Resume gate: Complete. AMROSE is configured as `AMROSE ScreenConnect`; the Sources page uses each instance display name and keeps catalog identity for mapping filters. Commit `9aef8fc` is an ancestor of both `origin/master` and `a-m-rose/master`. No migration was required.
@@ -163,7 +177,7 @@
 - Started: 2026-10-28
 - Completed: 2026-10-30
 - Blueprint: operations/BLUEPRINT.md
-- Source: operations/BLUEPRINT.md
+- Source: operations/docs/records/OPERATIONS-CHECKPOINT-2026-11-02.md
 - Section: PLAN-030 — Bulk accept discovered client candidates
 - Related plans: PLAN-004 retains identity matching policy; PLAN-029 surfaced the local first-ingest candidate backlog. This plan only batches the existing operator-approved accept-as-new action and does not change matching or mapping rules.
 - Resume gate: None. Released in 0.133.0 (`020cf560`) with the findings guard added for PLAN-003 R2; deployed to origin and the mirror, Operations healthy, contract 4, routes resolve.
@@ -234,7 +248,7 @@
 - Started: 2026-10-27
 - Completed: 2026-10-28
 - Blueprint: operations/BLUEPRINT.md
-- Source: operations/BLUEPRINT.md
+- Source: operations/docs/records/OPERATIONS-CHECKPOINT-2026-11-02.md
 - Section: PLAN-025 — Shared ScreenConnect and Operations inventory summary
 - Related plans: PLAN-012 owns broader inventory semantics; this bounded addition reuses its current Computer population and status filters without resuming its gated redesign. PLAN-004/007/019 retain identity, writer, and pipeline policy; preserve their contracts and existing dirty edits.
 - Resume gate: Implement and validate locally after read-only discovery. Source configuration writes, migrations, commits, pushes, and deployment retain separate approval.
@@ -425,7 +439,7 @@ do not open competing blueprints for the same work.
 - Started: 2026-10-21
 - Completed: 2026-10-26
 - Blueprint: operations/BLUEPRINT.md
-- Source: operations/BLUEPRINT.md
+- Source: operations/docs/records/OPERATIONS-CHECKPOINT-2026-11-02.md
 - Section: PLAN-013 — Operations sign-in page
 - Resume gate: No action. Deployed authentication flow verified in the browser.
 - Last checked: 2026-10-26 (user-reported browser verification). Sign-in and sign-out passed; the authenticated password-change form displayed its current/new/confirmation fields; after sign-out, `/account/password/` redirected to login. The password was not changed. Operations container was healthy after deployment `b1d3772`, with migrations 0352 and 0353 applied.
@@ -564,7 +578,7 @@ do not open competing blueprints for the same work.
 - Started: 2026-10-27
 - Completed: 2026-10-27
 - Blueprint: operations/BLUEPRINT.md
-- Source: operations/BLUEPRINT.md
+- Source: operations/docs/records/OPERATIONS-CHECKPOINT-2026-11-02.md
 - Section: PLAN-023 — Software installations layout repair
 - Resume gate: Local implementation complete. Independent of other active plans; no shared view, data, schema, or identity changes. Commit and deployment require separate approval.
 - Last checked: 2026-10-27 (four existing tests, Django checks, synthetic Edge layout/interaction checks at four viewport widths, registry, governance and whitespace pass; live deployment unverified).
@@ -578,7 +592,7 @@ do not open competing blueprints for the same work.
 - Completed: 2026-10-27
 - Reopened: 2026-10-27 (user expanded scope to all human-visible software names)
 - Blueprint: operations/BLUEPRINT.md
-- Source: operations/BLUEPRINT.md
+- Source: operations/docs/records/OPERATIONS-CHECKPOINT-2026-11-02.md
 - Section: PLAN-024 — Preserve Ninja software display names
 - Resume gate: Local implementation is complete. Python compilation, focused Ruff, registry validation, and `git diff --check` pass. Django/template checks and live behavior remain unverified because Django is not installed locally. Commit authorized 2026-10-27. Origin push approval must explicitly include pending migration 0354 and its automatic Portainer deployment; push origin before the required secondary mirror.
 - Last checked: 2026-10-27 (Ninja spelling is wired across human-facing Operations product labels, findings, approvals/review, client/Computer views, exports, and software admin lists; canonical values remain keys).

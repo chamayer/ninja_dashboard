@@ -6,6 +6,12 @@
 
 ## Current Operations backlog
 
+- [ ] **Update stale source-record SQL assertion** (found during PLAN-043,
+      2026-11-02). `test_findings_queue.py:253` expects an old `LEFT JOIN LATERAL`
+      source-presence fragment that is absent from HEAD. Replace the assertion
+      with coverage of the current query's uniqueness/contact contract; do not
+      restore obsolete SQL merely to satisfy the source-text check.
+
 - [ ] **Slim withdrawn source records after a while** (raised 2026-11-02 in
       PLAN-038). Withdrawn records stay in `entity_observation_current`
       indefinitely, raw payload included (Ninja: 2,441 withdrawn device records

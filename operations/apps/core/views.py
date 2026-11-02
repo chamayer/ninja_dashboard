@@ -5915,13 +5915,15 @@ def _os_installation_disagreements(finding: Finding, details: dict) -> list[dict
 @login_required
 @require_GET
 def finding_review(request: HttpRequest, finding_id: str) -> HttpResponse:
-    """Show an operator-safe, one-click review path for any Issue."""
+    """Explain an Issue with safe evidence and existing resolution paths."""
+    from apps.core.finding_review import review_context
+
     finding = get_object_or_404(
         Finding.objects.select_related("finding_type", "client"),
         id=finding_id,
         tenant_id=1,
     )
-    details = finding.finding_details or {}
+    details = _raw_json_object(finding.finding_details)
     canonical_title = details.get("canonical_name") or ""
     if canonical_title:
         display_names = preferred_software_display_names([canonical_title])
@@ -6013,6 +6015,19 @@ def finding_review(request: HttpRequest, finding_id: str) -> HttpResponse:
                 }
             )
 
+    review = review_context(finding, request.user, tenant_id=1)
+    if review.get("subject_url"):
+        subject_label = review["subject_label"]
+        subject_url = review["subject_url"]
+        review_links = [
+            {
+                "label": "Open source record"
+                if finding.subject_type == "source_record"
+                else "Open investigation",
+                "url": subject_url,
+            }
+        ]
+
     if not review_links:
         review_links.append({"label": "Check source health", "url": reverse("sources_status")})
 
@@ -6021,12 +6036,15 @@ def finding_review(request: HttpRequest, finding_id: str) -> HttpResponse:
         "finding_review.html",
         {
             "finding": finding,
-            "os_disagreements": _os_installation_disagreements(finding, details),
+            "os_disagreements": []
+            if review.get("record_limited")
+            else _os_installation_disagreements(finding, details),
             # Back to the exact Issues state (view, group, filters, sort, page).
             "return_to": _issues_return_url(request.GET.get("return")),
             "subject_label": subject_label,
             "subject_url": subject_url,
             "review_links": review_links,
+            "review": review,
         },
     )
 

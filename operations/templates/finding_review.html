@@ -6,21 +6,53 @@
 {% block content %}
 <div class="card">
     <p style="margin:0 0 .6rem;"><a href="{{ return_to|default:'/findings/' }}">← Back to Issues</a></p>
-    <h1 style="margin:0;">Review: {{ finding.finding_type.name|humanize_label }}</h1>
+    <h1 style="margin:0;">{{ finding.finding_type.display_name|default:finding.finding_type.name }}</h1>
     <p class="muted" style="margin:.4rem 0 0;">{{ finding.get_severity_display }} · {{ finding.get_status_display }}</p>
+    <p class="muted">First detected {{ finding.first_seen_at|date:"Y-m-d H:i"|default:"Unknown" }} · Last detected {{ finding.last_detected_at|date:"Y-m-d H:i"|default:"Unknown" }}</p>
+    {% if finding.status == "resolved" %}<p>This issue is resolved. The evidence at detection is retained for reference.</p>{% endif %}
 </div>
 
 <div class="card">
-    <h2>What to review</h2>
+    <h2>What was detected</h2>
     <p><strong>Subject:</strong> {% if subject_url %}<a href="{{ subject_url }}">{{ subject_label }}</a>{% else %}{{ subject_label }}{% endif %}</p>
-    {% finding_detail_text finding as evidence %}
-    {% if evidence %}<p>{{ evidence }}</p>{% else %}<p>Review the linked records and current information before deciding how to handle this issue.</p>{% endif %}
+    <p>{{ review.summary }}</p>
+    {% if review.explanation and review.explanation != review.summary %}<p>{{ review.explanation }}</p>{% endif %}
+    {% if review.attachment_changed %}<p><strong>The attachment has changed since detection.</strong> The comparison labels distinguish the recorded attachment from the current one. The issue may await a new assessment.</p>{% endif %}
+    {% if review.currently_unattached %}<p>This record is currently unattached.</p>{% endif %}
+    {% if review.facts %}
+    <table><tbody>
+        {% for fact in review.facts %}<tr><th scope="row">{{ fact.label }}</th><td style="overflow-wrap:anywhere;">{{ fact.value }}</td></tr>{% endfor %}
+    </tbody></table>
+    {% endif %}
     <div style="display:flex; flex-wrap:wrap; gap:.45rem; margin-top:.8rem;">
         {% for link in review_links %}
         <a class="btn btn-secondary" href="{{ link.url }}"{% if link.label == "Open Hudu record" %} target="_blank" rel="noopener"{% endif %}>{{ link.label }}</a>
         {% endfor %}
     </div>
 </div>
+
+{% if review.computers %}
+<div class="card">
+    <h2>Compare the Computers</h2>
+    <p class="muted">Computer roles and matching identifiers at detection are labeled below. Source records and their identifiers show the current information.</p>
+    {% if review.comparison_limited %}<p>Showing up to 10 Computers. Open the source record for the rest of the investigation.</p>{% endif %}
+    {% for computer in review.computers %}
+    <h3>{% if computer.url %}<a href="{{ computer.url }}?tab=details#source-records">{{ computer.label }}</a>{% else %}{{ computer.label }}{% endif %}</h3>
+    <p>{{ computer.roles|join:" · " }}{% if computer.families %} · Matched by {{ computer.families|join:", " }}{% endif %}</p>
+    {% if computer.records %}
+    <div style="overflow-x:auto;">
+    <table>
+        <thead><tr><th>Source record</th><th>Source</th><th>Serial number</th><th>VM UUID</th><th>Presence</th></tr></thead>
+        <tbody>{% for record in computer.records %}
+            <tr><td><a href="{{ record.url }}">{{ record.label }}</a></td><td>{{ record.platform|default:"—" }}</td><td style="overflow-wrap:anywhere;">{{ record.serial|default:"—" }}</td><td style="overflow-wrap:anywhere;">{{ record.vm_uuid|default:"—" }}</td><td>{{ record.presence }}</td></tr>
+        {% endfor %}</tbody>
+    </table>
+    </div>
+    {% else %}<p class="muted">No current source records are shown for this Computer. Open the Computer to check its availability and history.</p>{% endif %}
+    {% if computer.records_limited %}<p class="muted">The comparison is limited to 50 source records in total. Open each Computer for its full record list.</p>{% endif %}
+    {% endfor %}
+</div>
+{% endif %}
 
 {% if os_disagreements %}
 <div class="card">
@@ -35,5 +67,25 @@
     </ul>
 </div>
 {% endif %}
+
+<div class="card">
+    <h2>How to handle this issue</h2>
+    <ol>{% for step in review.steps %}<li>{{ step }}</li>{% endfor %}</ol>
+    {% if review.actions %}
+    <form method="post" action="{% url 'findings_bulk_action' %}">
+        {% csrf_token %}
+        <input type="hidden" name="ids" value="{{ finding.id }}">
+        <input type="hidden" name="next" value="{{ request.get_full_path }}">
+        <label for="review-reason">Reason{% if not review.reason_required %} (optional){% endif %}</label>
+        <input id="review-reason" name="reason" maxlength="400"{% if review.reason_required %} required{% endif %} style="display:block;width:100%;max-width:40rem;margin:.5rem 0 1rem;">
+        {% for action in review.actions %}
+        <div style="margin:.8rem 0;">
+            <button type="submit" name="action" value="{{ action.key }}" onclick="return confirm('{{ action.confirmation|escapejs }}');">{{ action.label }}</button>
+            {% if action.eligibility_hint %}<p class="muted" style="margin:.4rem 0;">{{ action.eligibility_hint }}</p>{% endif %}
+        </div>
+        {% endfor %}
+    </form>
+    {% endif %}
+</div>
 
 {% endblock %}

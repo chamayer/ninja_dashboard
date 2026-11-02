@@ -2,6 +2,17 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.143.2] — 2026-11-02 — Useful issue review
+
+### Fixed
+
+- Issue review explains source-record identity conflicts and compares the
+  current source records on the attached and proposed Computers. Recorded
+  evidence is distinguished from current attachments, and restricted records
+  keep their names and identifiers hidden.
+- Review pages show detection dates, handling steps, the correct source-record
+  or investigation destination, and existing permission-checked decisions.
+
 ## [0.143.1] — 2026-11-02 — Source-record detail repair
 
 ### Fixed
