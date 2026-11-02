@@ -42,24 +42,24 @@ separate operational actions. Validate customer-field population, Ninja group
 overlap, ambiguous groups, and source/Computer counts before enabling scheduled
 collection. Keep credentials and raw customer payloads out of reports and tests.
 
-## Restored shared instance — connection draft
+## Restored shared instance — active, scheduled every four hours
 
 Read-only inspection on 2026-10-28 confirmed that `https://support.amrose.it/`
 responds successfully. Its published field labels identify Custom Property 1 as
 Company, 2 as Site, 3 as Department, and 4 as Device Type. The Host page requires
 login. The label confirms the Company field number, not that ScreenConnect's
-session groups are keyed by this property. Actual session values, group
-definitions, and Ninja name overlap still require authenticated read-only
-verification before activation.
+session groups are keyed by this property. Actual session values and Ninja
+organization-name overlap were verified with authenticated read-only
+inspection; the separate container/group definitions remain unavailable.
 
-Proposed config for a **new, initially disabled** ScreenConnect source instance
-with no assigned client:
+The production ScreenConnect source instance is named **AMROSE ScreenConnect** and is
+configured with no assigned client. Its current config is:
 
 ```json
 {
   "platform": "ScreenConnect",
   "source_key": "sc_amrose",
-  "source_name": "ScreenConnect shared",
+  "source_name": "AMROSE ScreenConnect",
   "base_url": "https://support.amrose.it",
   "is_shared": true,
   "screenconnect_group_field": "CustomProperty1",
@@ -68,21 +68,37 @@ with no assigned client:
 }
 ```
 
-Those environment names are the private runtime references for the AMROSE
-connection; secret values are never stored here.
-Read-only inspection through the private ingest-host profile found one enabled
-ScreenConnect instance assigned to a client, with a different base URL, and no
-separate shared instance for this URL. The user subsequently added the proposed
-AMROSE GUID/key runtime references and corrected the extension ID. Read-only
-retrieval returned 4,511 Access sessions (4,506 active hosts). Company
-(`CustomProperty1`) was populated on 4,422 active hosts; 83 of its 125 distinct values matched
-Ninja organization names case-insensitively, and 85 matched after
-punctuation-insensitive normalization. The response had no explicit
-session-group-named field. A direct `GetSessionGroups` call to the RESTful API
-Manager endpoint returned HTTP 500 without definitions. Company is verified as
+Those environment names are private runtime references for the AMROSE
+connection; secret values are never stored in Operations. Both references were
+confirmed present in the ingest runtime. The source instance and its
+`internal-ingest` binding are enabled, and the user saved `interval:240`
+(every four hours) from `/sources/`. The source creation and activation are
+recorded in change history. The existing client-scoped ScreenConnect instance,
+which uses a different base URL, was left unchanged. The first refresh run
+`5e27a49b-db4a-45b5-b9aa-93baf9b5adc4` completed with 4,632 rows touched, zero
+failed rows, and a complete snapshot of 4,507 sessions. Safe aggregate
+observation metadata showed Company on 4,424 sessions and blank on 83; it
+produced 125 nonempty Company groups, no empty-name groups, 97 groups with a
+client, and 28 unassigned groups. Thus blank Company sessions remain evidence
+without creating an empty-name container or group-based mapping. The dependent
+identity resolver completed at 21:22 UTC, resolving 417 records. Platform
+evaluation is stalled because its coalesced Ninja workflow also requires
+Ninja enrichment → patches → patch classification. The Ninja-enrichment run
+stopped before reporting a terminal result at 21:27 UTC, leaving those
+dependent runs and evaluation stalled. Portainer logged a successful stack
+deployment at 21:27, and Docker events show the Operations, ingest, and Jobs
+containers were replaced around 21:27:32. The initiating actor/trigger is not
+in retained logs. All are healthy now. Replay-safe recovery automatically
+retried Ninja enrichment, which completed at 21:32 UTC. Its recovery patches
+and patch classification completed at 21:33 UTC; platform evaluation completed
+at 21:39:15 with 5,874 rows touched and no error. The original interrupted
+chain remains stalled in history. The source refresh also logged an
+opportunistic generic relationship-projection cardinality error and continued.
+Company is verified as
 populated customer metadata with substantial Ninja-name overlap; it is not
-verified as the separate Host-page container membership. Review unmatched
-Company values and obtain a supported read path for group definitions/membership
-before enabling collection. Do not reuse the client-specific credential pair
-against this instance. Source/binding creation and collection activation remain
-separate production operations.
+verified as the separate Host-page container membership. The response had no
+explicit session-group-named field, and a direct `GetSessionGroups` call to the
+RESTful API Manager endpoint returned HTTP 500 without definitions. Do not
+reuse the client-specific credential pair against this instance. Each
+scheduled refresh uses the normal Jobs workflow, including identity resolution
+and platform evaluation.
