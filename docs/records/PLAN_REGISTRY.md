@@ -3,16 +3,16 @@
 ## PLAN-038 — Ninja device health as detail of the device record
 
 - Scope: Ninja device health becomes a companion data set of the Ninja device record (ADR-0051): never a source record or link of its own, attached to and withdrawn with its device record; retire the 8,513 health records and 7,330 links; show health on the device record.
-- Status: active
+- Status: complete
 - Defined: 2026-11-02
 - Started: 2026-11-02
-- Completed: —
+- Completed: 2026-11-02
 - Blueprint: —
 - Source: docs/plans/PLAN-038-ninja-device-health-as-record-detail.md
 - Section: PLAN-038 — Ninja device health as detail of the device record
 - Related plans: PLAN-004 owns source records (migration 0370 admission); PLAN-033 reads device health; the TODO Sources page double-count item is folded in.
-- Resume gate: Released in 0.141.0; production verification after deploy, then complete.
-- Last checked: 2026-11-02 (production read-only: 8,513 health records, 0 lookup keys, 0 open Issues, about 134,000 health attribute claims).
+- Resume gate: None; complete.
+- Last checked: 2026-11-02 (0.141.0 `6a6355ac` deployed; 0 health records and links, 6,090 attached, health claims on the device record's Computer, first health run attached 5,608).
 
 ## PLAN-037 — Source collection failures
 

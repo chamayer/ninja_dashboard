@@ -1,7 +1,6 @@
 # PLAN-038 — Ninja device health as detail of the device record
 
-**Status: active — released in 0.141.0 (migration 0397); production
-verification after deploy.** Registered 2026-11-02 at the user's request; the
+**Status: complete (2026-11-02, 0.141.0 `6a6355ac`).** Registered 2026-11-02 at the user's request; the
 user approved implementing and completing it the same day. Decision:
 [ADR-0051](../../operations/docs/decisions/0051-companion-data-sets-of-a-source-record.md).
 
@@ -89,8 +88,20 @@ present owner); end the 7,330 health links through `set_source_association`
 - Local: `test_migration_0397.py` (4) and `test_device_health.py` (5) pass; ruff
   clean on changed files; the source-record template renders.
 
+## Production result (read-only, 2026-11-02)
+
+- Migration 0397 applied 15:11 UTC: 0 health records, 0 health links, no health
+  observation with a Computer of its own; 6,090 health data sets attached.
+- Claim recalculation (triggered by the user): 7,419 observations processed;
+  5,611 health `offline` claims withdrawn; active claims 307,255 → 301,644, the
+  difference being exactly those; Ninja device-record claims unchanged (80,032).
+  Health claims on a different Computer than their device record: 0 (was 38);
+  without an owner link: 0.
+- `offline` conflicts 29 → 5; the remaining 5 are between two Ninja device records
+  on one Computer (pre-existing identity question), none involves health.
+- First health run on the new code (15:23): complete, 5,608 written and attached,
+  no new records or links.
+
 ## Next action
 
-After deploy: read-only production check (0 health records and links, 5,611
-companions, health claims re-projected, `offline` conflicts gone), then mark
-complete.
+None. PLAN-019 Step 4 (change trail) is next to use this record shape.
