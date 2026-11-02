@@ -245,6 +245,9 @@ def companion_details(cur, subject_id: uuid.UUID) -> list[dict]:
     companions = _rows(cur)
     for companion in companions:
         data = companion.pop("canonical_data") or {}
+        # Django's raw cursor returns JSONB as text; other cursors may decode it.
+        if isinstance(data, str):
+            data = json.loads(data)
         companion["fields"] = [
             (key.replace("_", " ").capitalize(), value)
             for key, value in sorted(data.items())

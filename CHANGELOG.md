@@ -2,6 +2,13 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.143.1] — 2026-11-02 — Source-record detail repair
+
+### Fixed
+
+- Source-record detail pages decode companion JSON data before displaying its
+  fields, preventing a server error when Django returns the data as text.
+
 ## [0.143.0] — 2026-11-02 — Computer values refresh on association; reader fixes
 
 ### Fixed
