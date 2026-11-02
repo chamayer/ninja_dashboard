@@ -33,7 +33,7 @@
 ## PLAN-038 — Ninja device health as detail of the device record
 
 - Scope: Ninja device health becomes a companion data set of the Ninja device record (ADR-0051): never a source record or link of its own, attached to and withdrawn with its device record; retire the 8,513 health records and 7,330 links; show health on the device record.
-- Status: complete
+- Status: completed
 - Defined: 2026-11-02
 - Started: 2026-11-02
 - Completed: 2026-11-02
@@ -47,11 +47,11 @@
 ## PLAN-037 — Source collection failures
 
 - Scope: Make every open source-failure Issue reflect a current failure: find why completed collections leave Issues open, fix or retire the ThreatFox collector (410 Gone), close the retired agent_compliance failure, stop deploy-interrupted runs from raising failures, and review Ninja's failed required steps.
-- Status: defined
+- Status: active
 - Defined: 2026-11-01
-- Started: —
+- Started: 2026-11-01
 - Completed: —
-- Blueprint: —
+- Blueprint: docs/plans/PLAN-037-source-failures.md
 - Source: docs/plans/PLAN-037-source-failures.md
 - Section: PLAN-037 — Source collection failures
 - Related plans: PLAN-036 owns the admin-finding clear assessments the guard uses; PLAN-019 F09 and the TODO Ninja collection-gap item overlap Step 5.
@@ -438,7 +438,7 @@ do not open competing blueprints for the same work.
 - Defined: 2026-10-21
 - Started: 2026-10-21
 - Completed: —
-- Blueprint: —
+- Blueprint: operations/BLUEPRINT.md
 - Source: operations/docs/plans/PLAN-015-identity-reconciliation.md
 - Section: PLAN-015 — One-time source-record identity reconciliation
 - Resume gate: The preview is read-only; any reattachment, merge or derived-data refresh needs its own approval. Coordinates shared identity code with PLAN-004.
@@ -451,7 +451,7 @@ do not open competing blueprints for the same work.
 - Defined: 2026-10-21
 - Started: 2026-10-21
 - Completed: —
-- Blueprint: —
+- Blueprint: operations/BLUEPRINT.md
 - Source: operations/docs/plans/PLAN-016-admin-sql-explorer.md
 - Section: PLAN-016 — Admin read-only SQL explorer
 - Resume gate: Implementation and deployment need user approval.
