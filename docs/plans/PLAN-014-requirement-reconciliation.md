@@ -1,15 +1,14 @@
 # PLAN-014 — Requirement and lifecycle reconciliation design
 
-Status: baseline deployed as `0af8aac` (release 0.129.3); acceptance resumed at
-the user's request to finish PLAN-014. The explicit-confirmed-use policy was
-accepted on 2026-10-27. Current diagnosis and validation are in the
-[acceptance record](../records/PLAN-014-acceptance-2026-10-27.md). The user approved
-preparing the reported-state fallback for the remaining contactless Computers;
-the candidate and migration 0357 are locally validated, not deployed. Earlier
-test results do not establish production acceptance of this candidate.
+Status: complete. The baseline deployed as `0af8aac` (0.129.3); the reviewed
+reported-state fallback shipped in `79088db` (0.129.4, migration 0357). The
+read-only production acceptance result and limitations are in the
+[acceptance record](../records/PLAN-014-acceptance-2026-10-27.md). The
+explicit-confirmed-use policy was accepted on 2026-10-27, and the reported-state
+fallback was approved and verified after deployment on 2026-10-28.
 Deployment provenance: [build checkpoint](../records/PLAN-014-build-2026-10-27.md).
 
-Registry: [PLAN-014](../records/PLAN_REGISTRY.md). Active handoff:
+Registry: [PLAN-014](../records/PLAN_REGISTRY.md). Completed checkpoint:
 [`ingest/BLUEPRINT.md`](../../ingest/BLUEPRINT.md). Prior local evidence:
 [validation record](../records/PLAN-014-validation-2026-10-27.md).
 Policy amendment: [ADR-0047](../../operations/docs/decisions/0047-requirement-lifecycle-reconciliation.md).

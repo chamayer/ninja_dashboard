@@ -375,17 +375,17 @@ do not open competing blueprints for the same work.
 ## PLAN-014 — Requirement applicability
 
 - Scope: Evaluator coverage rules and Computers requirement display
-- Status: active
+- Status: completed
 - Defined: 2026-10-21
 - Started: 2026-10-21
-- Completed: —
+- Completed: 2026-10-28
 - Blueprint: ingest/BLUEPRINT.md
 - Source: ingest/BLUEPRINT.md
 - Section: PLAN-014 — Requirement applicability
-- Design: docs/plans/PLAN-014-requirement-reconciliation.md. Release `0af8aac` (0.129.3, migration 0356) is deployed per the build checkpoint. Acceptance continuation and the scoped diagnostic correction are recorded in docs/records/PLAN-014-acceptance-2026-10-27.md.
+- Design: docs/plans/PLAN-014-requirement-reconciliation.md. Release `79088db` (0.129.4, migration 0357) was pushed to origin then the mirror; origin push triggered automatic deployment. Acceptance continuation and current evidence are recorded in docs/records/PLAN-014-acceptance-2026-10-27.md.
 - Execution order: PLAN-014 repairs evaluator requirement reconciliation before PLAN-003 changes shared finding persistence/relationships. PLAN-003 retains that shared redesign. PLAN-012's ADR-0035 resolution-reader follow-up is handled here only for requirement finding resolution; page readers remain PLAN-012.
-- Resume gate: User approved the scoped 0.129.4 commit and push, including migration 0357 and automatic origin deployment. Push origin before the mirror; do not trigger a separate redeploy. Start post-deployment acceptance in a fresh session. Production recalculation retains its own approval. Complete only after current zero-unexplained-drift evidence, preserving guarded history.
-- Last checked: 2026-10-27 (read-only diagnosis and local candidate validation). Current and recorded drift agree on 109 entries; candidate summary explains 64 and leaves 45 contactless entries on 20 Computers. User approved preparing reported-state fallback. Its read-only preview qualifies all 45 and affects 102 Computers fleet-wide (62 online, 40 offline with unknown duration). Final ingest batch: 135 passed; Operations coverage/migration tests: 43 passed. Django/migration-state checks and focused Ruff pass. Candidate and migration 0357 are locally validated; production acceptance remains pending. Evidence: docs/records/PLAN-014-acceptance-2026-10-27.md.
+- Resume gate: Complete. Commit `79088db` (0.129.4) is on both remotes; origin deployment applied migration 0357. Read-only production verification on 2026-10-28 confirmed healthy stack services, matching deployed file hashes, and zero unexplained drift. No production recalculation was triggered. Browser, stress, and representative synthetic performance checks remain unverified.
+- Last checked: 2026-10-28 (latest platform run succeeded; 79 distinct disagreements match recorded drift and are all retained by current guards, with zero requiring review or other disagreement types. Covered findings have active same-tenant/same-subject parents; 100 actionable unknown-OS findings remain within the original estimate. Evidence: docs/records/PLAN-014-acceptance-2026-10-27.md.)
 
 ## PLAN-015 — One-time source-record identity reconciliation
 

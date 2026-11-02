@@ -2,10 +2,10 @@
 
 ## Status, goal and scope
 
-Active; release 0.129.4 is approved for a scoped commit and push, including
-migration 0357 and automatic origin deployment. Baseline `0af8aac` is deployed;
-both remotes matched it when checked. Preserve unrelated work. Keep PLAN-014
-open until deployed acceptance records zero unexplained drift.
+Complete; commit `79088db` (0.129.4, migration 0357) is deployed on origin and
+the mirror. Read-only production verification confirmed healthy service
+containers, migration 0357 applied, deployed files matching the commit, and
+zero unexplained drift. See the [acceptance record](../docs/records/PLAN-014-acceptance-2026-10-27.md).
 
 Goal: reconcile lifecycle, stored requirement verdicts, findings, recovery and
 honest audit explanations without deleting retained history or bypassing guards.
@@ -31,32 +31,30 @@ inventory readers; identity policy stays with PLAN-004/015/021.
 
 ## Confirmed checkpoint and validation
 
-Read-only tenant-1 evidence: 109 distinct disagreements across 114 findings,
-matching recorded drift. No missing/stale-without-finding remains. The candidate
-summary explains 64 entries and leaves 45 lacking registered contact evidence.
-Those 45 affect 20 Computers: 12 ScreenConnect and eight R-U-ON. The read-only
-fallback preview qualifies all 45 (30 associated with online state, 15 with
-offline state of unknown duration). Across the fleet, 102 Computers gain state:
-62 online and 40 offline; qualified-contact Computers are unchanged. This is a
-preview, not proof of production reconciliation.
+Read-only tenant-1 evidence (2026-10-28): 79 distinct disagreements match
+recorded drift; all are retained by current guards, with zero requiring review
+and zero other disagreement types. The latest platform evaluation succeeded.
+Current covered findings have active same-tenant/same-subject parents, and the
+100 actionable unknown-OS findings remain within the original estimate.
 
 Final ingest batch: 135 passed on synthetic PostgreSQL 16 with real assessment,
 verdict and cover functions, runtime roles, repeat runs, full/single scope,
 retirement/source guards, migration reversal/precondition and snapshot/lock
 rollback. Final PostgreSQL batch used JIT off for disposable test execution.
 Operations: 43 coverage/migration tests pass. Django checks, migration-state
-consistency and focused Ruff pass. Full-stack/browser, stress and production
-candidate acceptance remain unverified. See the evidence record for earlier
+consistency and focused Ruff pass. Production acceptance is verified. Full-stack
+browser behavior, stress tests and a representative synthetic full-fleet
+performance benchmark remain unverified. See the evidence record for earlier
 fixture failures, exact limits and remaining governance checks.
 
 ## Next action
 
-Current checkpoint: release files include VERSION/CHANGELOG; stage only PLAN-014
-hunks in the shared registry. Commit the scoped files and push origin, then the
-mirror. Origin push triggers deployment; no separate redeploy. Recommend a fresh
-session for post-deployment verification of both runtimes, migration 0357 and
-current evaluation/drift. Obtain separate approval for recalculation if needed.
-Require zero unexplained drift before closing; preserve uncertainty and history.
+Current checkpoint: commit `79088db` is on both remotes; origin deployment is
+verified. Read-only checks confirmed healthy runtimes, applied migration 0357,
+current successful evaluation and zero unexplained drift. No recalculation was
+triggered. PLAN-014 is complete; preserve uncertainty and history. Remaining
+browser, stress and performance checks are outside this plan's completed
+production acceptance gate.
 
 Authorities: [design](../docs/plans/PLAN-014-requirement-reconciliation.md),
 [current acceptance](../docs/records/PLAN-014-acceptance-2026-10-27.md),

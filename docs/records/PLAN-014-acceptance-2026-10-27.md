@@ -1,9 +1,10 @@
 # PLAN-014 — Acceptance continuation
 
-Status: active; local candidate validated. Release `0af8aac` is the baseline;
-the user approved preparing reported-state fallback after the diagnosis below.
-No production write, recalculation, migration,
-deployment, commit or push was performed in this continuation.
+Status: complete; release `79088db` (0.129.4, migration 0357) is pushed to both
+remotes and verified in production. The origin push triggered automatic
+deployment. Read-only runtime, migration, release-integrity and current drift
+checks completed on 2026-10-28. No recalculation or production data operation
+was performed by this verification.
 
 ## Current production diagnosis
 
@@ -104,27 +105,28 @@ parent. Actionable unknown-OS findings total 100, within the original approximat
 91–183 estimate. The old 2,232 covered total (875 missing, 1,357 stale) is a
 historical fleet snapshot, not a fixed target for current source processing.
 
-## Reviewed rollout and recovery boundaries
+## Deployment checkpoint and fresh-session handoff
 
-Review the scoped diff, then obtain commit approval separately from production
-push. Release preparation must update VERSION and CHANGELOG together. The push
-approval must name migration 0357 and the automatic Portainer deployment;
-push origin before the required mirror, without a separate redeploy. Confirm
-the migration and both relevant application runtimes before functional
-acceptance. An old ingest runtime does not recognize the new mode and can
-temporarily block contactless evaluation during a mixed-version interval;
-that interval cannot establish acceptance. Wait for normal evaluation or obtain
-explicit authorization to trigger it. Rollback and manual migration retain
-their own approval boundary; restoring contact-only policy does not undo audit
-history or lifecycle changes already made by normal evaluation.
+Commit `79088db` (release 0.129.4) was pushed to origin, then to `a-m-rose`;
+both Git push commands succeeded. The origin push triggered the configured
+Portainer deployment. No separate redeploy, manual migration, production
+recalculation or data operation was issued. Migration 0357 is included in the
+approved deployment, but its application and both service runtimes remain
+unverified here.
 
-Root `AGENTS.md` says the origin push automatically deploys and forbids an
-extra redeploy; `docs/operations.md` still describes an immediate manual
-trigger. The explicit repository instruction governs the proposed rollout;
-this continuation invoked neither. Unrelated ScreenConnect grouping and
-coverage-card edits appeared in the shared worktree during validation and were
-preserved outside this candidate. Shared registry/checkpoint files require
-scoped staging when a commit is approved.
+Start a fresh session for post-deployment acceptance. The root `AGENTS.md` says
+origin push automatically deploys and forbids an extra redeploy; `docs/operations.md`
+still describes an immediate manual trigger. The explicit repository instruction
+governed this release, and no extra trigger was run. Read-only external
+post-deployment validation was not requested with the push. Production
+recalculation, manual migration and rollback require separate approval.
+
+Unrelated ScreenConnect grouping, coverage-card work, other active-plan updates,
+and existing untracked tools were preserved outside the commit. The committed
+registry contains only the PLAN-014 update; its other dirty entries remain in
+the worktree. The root blueprint remains 6,794 bytes against the governance
+workflow's 4,000-byte limit. The local ingest blueprint records the fresh-session
+next action; it is updated after the release commit and remains unstaged.
 
 ## Validation checkpoint
 
@@ -154,8 +156,29 @@ scoped staging when a commit is approved.
   candidate acceptance remain unverified. The read-only full-fleet lifecycle
   preview is functional impact evidence, not a performance benchmark.
 
-Production completion still requires approved deployment and current
-zero-unexplained-drift evidence after evaluation. A diagnostic reclassification alone cannot
-complete PLAN-014. The original covered-finding/impact baseline remains in the
+Production completion required confirmed runtime health, migration
+application, and current zero-unexplained-drift evidence after evaluation. The
+original covered-finding/impact baseline remains in the
 [build record](PLAN-014-build-2026-10-27.md); changing fleet counts are not fixed
 acceptance targets.
+
+## Post-deployment read-only verification — 2026-10-28
+
+- Commit `79088db` is at HEAD and on both `origin` and `a-m-rose`. The deployed
+  VERSION, evaluator, requirement-state module, Operations models and migration
+  0357 hashes match the commit. Django reports migration 0357 applied.
+- Ingest, Operations, Jobs worker and Postgres containers are healthy with zero
+  restarts. Operations `/healthz` is `ok`; ingest `/readyz` is `ready`.
+- The latest normal platform evaluation succeeded (4,295 rows; 14:08–14:10 UTC).
+  A preceding run at 14:04 UTC failed; the later successful run is the latest.
+- Read-only tenant-1 audit: 79 distinct disagreements and 79 recorded uncleared
+  drift entries, all classified `retained_by_current_guard`; zero require review
+  and zero have another disagreement type. This meets the zero-unexplained-drift
+  gate while retaining guarded history.
+- Current covered findings: 2,099 across 789 Computers, with zero missing an
+  active same-tenant/same-subject parent. Actionable unknown-OS findings: 100,
+  within the original approximate 91–183 estimate.
+- Verification used read-only database transactions and health/hash/migration
+  inspection. It did not trigger evaluation, recalculate production data, or
+  write records. Browser behavior, stress tests and a representative synthetic
+  full-fleet performance benchmark remain unverified.
