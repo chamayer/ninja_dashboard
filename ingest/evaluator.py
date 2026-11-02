@@ -310,6 +310,21 @@ def _apply_lifecycle_results(cur, tenant_id, now, run_id, results):
     return affected
 
 
+def _timed_phase(function, *args, **kwargs):
+    """Measure phase elapsed time without logging records or query parameters."""
+    started = time.monotonic()
+    completed = False
+    try:
+        result = function(*args, **kwargs)
+        completed = True
+        return result
+    finally:
+        log.info(
+            "evaluator: phase=%s.%s elapsed_seconds=%.3f completed=%s",
+            function.__module__, function.__name__, time.monotonic() - started, completed,
+        )
+
+
 def evaluate(tenant_id: int, device_id: uuid.UUID | None = None) -> int:
     """Evaluate coverage gaps and lifecycle events for a tenant.
 
@@ -327,48 +342,56 @@ def evaluate(tenant_id: int, device_id: uuid.UUID | None = None) -> int:
         with _evaluation_transaction(tenant_id) as cur:
             now = datetime.now(timezone.utc)
             cur.execute(f"SET LOCAL operations.tenant_id = {tenant_id}")
-            source_problems = _source_failure_guard(cur, tenant_id, now)
+            source_problems = _timed_phase(_source_failure_guard, cur, tenant_id, now)
             _checkpoint()
-            lifecycle, lifecycle_devices = _load_lifecycle_results(
+            lifecycle, lifecycle_devices = _timed_phase(
+                _load_lifecycle_results,
                 cur, tenant_id, now, device_id, source_problems
             )
             _checkpoint()
-            affected += _apply_lifecycle_results(
+            affected += _timed_phase(
+                _apply_lifecycle_results,
                 cur, tenant_id, now, evaluator_run_id, lifecycle
             )
             _checkpoint()
-            affected += _sync_lifecycle_status(
+            affected += _timed_phase(
+                _sync_lifecycle_status,
                 cur, tenant_id, now, evaluator_run_id, skip=set(lifecycle),
                 per_device={subject: item for subject, item in lifecycle_devices.items()
                             if lifecycle[subject].target != "retired"}, device_id=device_id,
             )
             _checkpoint()
             if device_id is None:
-                affected += _sync_device_roles(cur, tenant_id, now)
+                affected += _timed_phase(_sync_device_roles, cur, tenant_id, now)
                 _checkpoint()
-                affected += _evaluate_unknown_entities(cur, tenant_id, now)
+                affected += _timed_phase(_evaluate_unknown_entities, cur, tenant_id, now)
                 _checkpoint()
-                affected += _evaluate_change_history_registry(cur, tenant_id, now)
+                affected += _timed_phase(
+                    _evaluate_change_history_registry, cur, tenant_id, now
+                )
                 _checkpoint()
-                affected += _evaluate_source_name_kinds(cur, tenant_id, now)
+                affected += _timed_phase(_evaluate_source_name_kinds, cur, tenant_id, now)
                 _checkpoint()
-                affected += _evaluate_duplicate_records(cur, tenant_id, now)
+                affected += _timed_phase(_evaluate_duplicate_records, cur, tenant_id, now)
                 _checkpoint()
-                affected += identity_findings.evaluate(cur, tenant_id, now)
+                affected += _timed_phase(identity_findings.evaluate, cur, tenant_id, now)
                 _checkpoint()
-            corroborated = _load_corroborated_devices(cur, tenant_id)
+            corroborated = _timed_phase(_load_corroborated_devices, cur, tenant_id)
             _checkpoint()
-            affected += _evaluate_coverage(
+            affected += _timed_phase(
+                _evaluate_coverage,
                 cur, tenant_id, device_id, now, source_problems, corroborated, lifecycle
             )
             _checkpoint()
-            affected += _evaluate_unenrolled(cur, tenant_id, device_id, now)
+            affected += _timed_phase(_evaluate_unenrolled, cur, tenant_id, device_id, now)
             _checkpoint()
-            affected += _evaluate_device_lifecycle(
+            affected += _timed_phase(
+                _evaluate_device_lifecycle,
                 cur, tenant_id, device_id, now, source_problems, lifecycle
             )
             _checkpoint()
-            affected += sync_windows_servicing(
+            affected += _timed_phase(
+                sync_windows_servicing,
                 cur, tenant_id, device_id, now=now
             )
             # cross_client_conflict emitter removed 2026-07-14 — see
@@ -376,7 +399,7 @@ def evaluate(tenant_id: int, device_id: uuid.UUID | None = None) -> int:
             # closed in migration 0034.
             # Every phase has committed; close only what this finished run did not see.
             _checkpoint(force=True)
-            affected += _auto_resolve(cur, tenant_id, device_id, now)
+            affected += _timed_phase(_auto_resolve, cur, tenant_id, device_id, now)
     except Exception as exc:
         error_msg = str(exc)[:2000]
         raise

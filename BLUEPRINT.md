@@ -19,6 +19,10 @@ validation results, or completed-plan summaries here.
 
 ## Next action — active plan routing
 
+- **PLAN-041 — active.** Release phase timings and collect the next cycle's
+  evidence. DMARC fixes are in the sibling repository. See the
+  [handoff](docs/plans/PLAN-041-host-cpu-and-runtime-profiling.md).
+
 - **PLAN-026 — active, approval-gated.** PLAN-025 is complete; next obtain
   explicit approval to implement the source configuration UI using its
   documented source/binding contract. See the

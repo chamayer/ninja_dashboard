@@ -7,6 +7,12 @@ Read Inbox at the start of every session.
 
 ## Inbox
 
+- [ ] **Host resource tuning after CPU attribution (2026-11-02):** review
+      Zabbix SNMP polling cadence, SentinelOne agent CPU, and Graylog/UniFi
+      memory budgets with their owners. Measurements and limits are in
+      `docs/records/HOST-CPU-2026-11-02.md`. No polling, security, JVM, or database
+      configuration change is approved. Keep Zabbix independent of parser monitoring.
+
 - [ ] **Operator finding for relationship conflicts (0.139.2 follow-up):** the
       projector now marks a one-target tuple `conflict` (`targets_disagree`) when
       sources at equal authority name different targets, and keeps the current

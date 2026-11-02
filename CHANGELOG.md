@@ -2,6 +2,16 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.142.1] — 2026-11-02 — Bounded CPU investigation diagnostics
+
+### Added
+
+- Evaluator logs identify each phase's elapsed time and completion, while
+  identity matching logs history-query cache-miss duration and row count.
+  Diagnostics omit records, client identifiers, and query parameter values.
+- Retained live CPU attribution and a complete source-processing cycle in
+  PLAN-041. Matching, scheduling, and findings behavior are unchanged.
+
 ## [0.142.0] — 2026-11-02 — ThreatFox API, Ninja device lookups first, recovered page fixes
 
 ### Fixed

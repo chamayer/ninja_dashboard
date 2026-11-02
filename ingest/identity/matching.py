@@ -28,6 +28,7 @@ candidate selection:
 
 from __future__ import annotations
 
+import logging
 import re
 import time
 import uuid
@@ -35,6 +36,8 @@ from dataclasses import dataclass, field
 from decimal import Decimal
 
 from ingest.normalize import is_usable_serial
+
+log = logging.getLogger(__name__)
 
 _MATCHERS = frozenset(
     {"source_identity", "serial", "vm_uuid", "hostname_mac", "hostname"}
@@ -737,6 +740,7 @@ def _history_names(
     now = time.monotonic()
     if cached and now - cached[0] < _HISTORY_TTL:
         return cached[1]
+    started = time.monotonic()
     cur.execute(
         _HISTORY_NAMES,
         {
@@ -747,6 +751,10 @@ def _history_names(
         },
     )
     rows = cur.fetchall()
+    log.info(
+        "identity matching: query=history_names elapsed_seconds=%.3f rows=%d",
+        time.monotonic() - started, len(rows),
+    )
     _history_cache[cache_key] = (now, rows)
     return rows
 
