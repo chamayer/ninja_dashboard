@@ -76,6 +76,8 @@ def test_source_records_is_a_generic_observation_reader_with_explicit_relationsh
     section = views[start : next_view if next_view >= 0 else len(views)]
     assert "operations.v_entity_observation_admin_metadata observation" in section
     assert "operations.entity_observation_current observation" not in section
+    assert "observation.canonical_serial" in section
+    assert "observation.vm_uuid::text" in section
     assert "source_instance_id: uuid.UUID | None = None" in views
     assert "observation.device_id IS NOT NULL" in views
     assert "observation.client_id IS NOT NULL" in views
@@ -104,6 +106,7 @@ def test_global_search_keeps_source_records_as_a_separate_result_population():
     assert "source_records = _search_source_records(q)" in views
     assert "Source records (" in template
     assert "inventory_source_records" in template
+    assert "entity_type_label" in template
 
 
 def test_computer_inventory_does_not_render_unlinked_source_records_as_computers():

@@ -4091,6 +4091,7 @@ def _search_source_records(q: str) -> list[dict[str, object]]:
         return [
             {
                 "source_instance_id": row[0], "source_name": row[1], "entity_type": row[2],
+                "entity_type_label": _source_record_type_label(row[2]),
                 "external_id": row[3], "parent_external_id": row[4],
                 "reported_name": row[5], "canonical_hostname": row[6],
                 "canonical_serial": row[7], "vm_uuid": row[8], "active": row[9],
@@ -16770,9 +16771,11 @@ def source_records(
         clauses.append(
             "(observation.external_id ILIKE %s OR observation.parent_external_id ILIKE %s "
             "OR COALESCE(observation.canonical_hostname, '') ILIKE %s "
-            "OR COALESCE(observation.reported_name, '') ILIKE %s)"
+            "OR COALESCE(observation.reported_name, '') ILIKE %s "
+            "OR COALESCE(observation.canonical_serial, '') ILIKE %s "
+            "OR COALESCE(observation.vm_uuid::text, '') ILIKE %s)"
         )
-        params.extend([f"%{query}%"] * 4)
+        params.extend([f"%{query}%"] * 6)
     where_sql = " AND ".join(clauses)
 
     with transaction.atomic(), connection.cursor() as cur:

@@ -31,7 +31,7 @@
       <option value="has_relationship"{% if relationship == "has_relationship" %} selected{% endif %}>Has any relationship</option>
       <option value="no_relationship"{% if relationship == "no_relationship" %} selected{% endif %}>No resolved relationship</option>
     </select></label>
-    <label>Search<br><input type="search" name="q" value="{{ query }}" placeholder="Name or external ID"></label>
+    <label>Search<br><input type="search" name="q" value="{{ query }}" placeholder="Name, serial, VM UUID, or ID"></label>
     <button type="submit">Apply</button>
   </form>
 </div>

@@ -34,7 +34,7 @@
             <tbody>{% for record in source_records %}
                 <tr>
                     <td>{{ record.source_name }}</td>
-                    <td><code>{{ record.entity_type }}</code></td>
+                    <td>{{ record.entity_type_label }}</td>
                     <td><a href="{% url 'inventory_source_records' %}?source={{ record.source_instance_id }}&amp;q={{ q|urlencode }}"><code>{{ record.external_id }}</code></a></td>
                     <td>{% if record.active %}<span class="badge badge-low">Present</span>{% else %}<span class="badge badge-high">Withdrawn</span>{% endif %}</td>
                     <td>{% if record.reported_online == True %}Online{% elif record.reported_online == False %}Offline{% else %}—{% endif %}</td>
