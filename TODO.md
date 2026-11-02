@@ -16,6 +16,11 @@ Read Inbox at the start of every session.
       an identity finding would put them in Issues. Needs a new condition
       definition (policy version), so not yet approved. Target-cardinality-one
       types (none exist) would still raise in the tuple trigger.
+- [ ] **Ingest runs as a database superuser (found in PLAN-003 R2, 2026-10-29):**
+      production ingest logs in as `ninja` (SUPERUSER, BYPASSRLS), so row-level
+      security and revoked privileges do not apply to it; R2 enforces the findings
+      writer contract with triggers instead. Candidate: a dedicated non-superuser
+      ingest login with explicit grants. Needs credential/role design and approval.
 - [ ] **PLAN-019 — Data pipeline correctness and source-record retention:**
       `active` (docs/plans/PLAN-019-data-pipeline-correctness-and-retention.md);
       Step 1 done; F09 decided (no daily presence); Step 2 (U04) built.
