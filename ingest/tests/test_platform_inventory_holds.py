@@ -47,8 +47,9 @@ def test_nothing_is_emitted_before_the_type_or_table_exists(monkeypatch):
     monkeypatch.setattr(pf, "_upsert_admin_finding", lambda *a, **k: 1 / 0)
     counts = {"software_inventory_held": 0}
     assert pf._eval_inventory_holds(_Cursor([]), None, NOW, counts, dry_run=False) == []
+    # Not measured (None), so nothing is resolved as recovered either.
     assert pf._eval_inventory_holds(_Cursor([], table_exists=False), 77, NOW, counts,
-                                    dry_run=False) == []
+                                    dry_run=False) is None
 
 
 def test_entity_link_divergence_emits_one_admin_finding(monkeypatch):
@@ -172,3 +173,36 @@ def test_clean_source_role_assessment_refreshes_stale_admin_episode(monkeypatch)
     assert keys == []
     assert assessed[0][1] == finding_id
     assert assessed[0][2] == "old-policy-key"
+
+
+def test_an_absent_condition_records_its_measured_recovery(monkeypatch):
+    """PLAN-036 follow-up: a recovered condition gets a clearing assessment."""
+    recorded = []
+    monkeypatch.setattr(
+        pf, "_record_platform_assessment", lambda *a, **k: recorded.append((a, k))
+    )
+    signal = uuid.uuid4()
+
+    class Cur:
+        def __init__(self):
+            self.rows = [[("jobs_timeout",)], [
+                (uuid.uuid4(), "jobs_timeout:a", "platform_signal", signal),
+                (uuid.uuid4(), "jobs_timeout:b", "legacy_context", None),
+            ]]
+
+        def execute(self, sql, params=None):
+            self.params = params
+
+        def fetchone(self):
+            return self.rows.pop(0)[0]
+
+        def fetchall(self):
+            return self.rows.pop(0)
+
+    cur = Cur()
+    assert pf.record_absent_recoveries(cur, 5, ["jobs_timeout:c"], NOW) == 2
+    assert cur.params == (pf.TENANT_ID, 5, ["jobs_timeout:c"])
+    subjects = [args[4] for args, _ in recorded]
+    assert subjects == [signal, pf._subject("jobs_timeout", "jobs_timeout:b")]
+    assert all(kwargs == {"measured": True} for _, kwargs in recorded)
+    assert pf.record_absent_recoveries(cur, None, [], NOW) == 0

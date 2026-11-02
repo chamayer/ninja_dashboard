@@ -2,6 +2,22 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.141.1] — 2026-11-02 — Recovered health Issues close
+
+### Fixed
+
+- A platform-health Issue whose condition recovered never closed: evaluators
+  assess only conditions that are present, and the close needs a current
+  clearing assessment (0.140.2 fixed this for source failures only). Every
+  admin-health family now records the measured recovery before its close, so
+  the 34 stale Issues (old Jobs timeouts and dependencies, duplicate records,
+  stalled-queue alerts) close. A condition that could not be measured (missing
+  table, unmeasurable queue, a slow-run scope with too few runs) is not treated
+  as recovered.
+- 0398 registers the per-source software tables added in 0.138.0 in the
+  change-history registry, closing their two `change_history_unclassified`
+  Issues.
+
 ## [0.141.0] — 2026-11-02 — Ninja device health is part of the device record
 
 ### Changed

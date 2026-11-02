@@ -1465,6 +1465,9 @@ def _evaluate_unknown_entities(cur: Any, tenant_id: int, now: datetime) -> int:
             {"recent_observations": n},
         )
         count += 1
+    # A condition that is no longer present is not assessed above; record the
+    # measured recovery so the close below can clear it (PLAN-036 follow-up).
+    platform_findings.record_absent_recoveries(cur, ft_id, present_keys, now)
     cur.execute(
         """
         UPDATE operations.findings
@@ -1517,6 +1520,9 @@ def _evaluate_change_history_registry(cur: Any, tenant_id: int, now: datetime) -
             {"table": f"operations.{table}"},
             measured=True,
         )
+    # A condition that is no longer present is not assessed above; record the
+    # measured recovery so the close below can clear it (PLAN-036 follow-up).
+    platform_findings.record_absent_recoveries(cur, ft_id, present_keys, now)
     cur.execute(
         """
         UPDATE operations.findings
@@ -1566,6 +1572,9 @@ def _evaluate_source_name_kinds(cur: Any, tenant_id: int, now: datetime) -> int:
             {"platform": platform, "record_type": record_type, "records": records},
             measured=True,
         )
+    # A condition that is no longer present is not assessed above; record the
+    # measured recovery so the close below can clear it (PLAN-036 follow-up).
+    platform_findings.record_absent_recoveries(cur, ft_id, present_keys, now)
     cur.execute(
         """
         UPDATE operations.findings
@@ -1700,6 +1709,9 @@ def _evaluate_duplicate_records(cur: Any, tenant_id: int, now: datetime) -> int:
             measured=True,
         )
         count += 1
+    # A condition that is no longer present is not assessed above; record the
+    # measured recovery so the close below can clear it (PLAN-036 follow-up).
+    platform_findings.record_absent_recoveries(cur, ft_id, present_keys, now)
     cur.execute(
         """
         UPDATE operations.findings

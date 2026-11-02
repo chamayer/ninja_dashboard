@@ -177,8 +177,15 @@ def evaluate(*, dry_run: bool = True) -> dict[str, int]:
             _resolve_admin_absent(
                 cur, ft_source_policy, source_policy_keys, now, assessment_required=True
             )
+            # A scope with too few recent runs is not measured, so its finding
+            # still waits for a clearing assessment instead of a recorded recovery.
             _resolve_admin_absent(
-                cur, ft_slow, slow_keys, now, assessment_required=True
+                cur,
+                ft_slow,
+                slow_keys,
+                now,
+                assessment_required=True,
+                record_recovery=False,
             )
             _resolve_admin_absent(
                 cur, ft_failure, failure_keys, now, assessment_required=True
@@ -196,20 +203,69 @@ def evaluate(*, dry_run: bool = True) -> dict[str, int]:
     return counts
 
 
+def record_absent_recoveries(
+    cur: Any, finding_type_id: int | None, present_keys: list[str], now: datetime
+) -> int:
+    """Record the measured recovery of open admin findings whose condition is absent.
+
+    Evaluators assess only conditions that are present, so a recovered one was
+    never reassessed and its close waited forever for a clearing assessment
+    (0.140.2 fixed this for source failures only). Call only after a complete
+    measurement: ``present_keys`` must hold every condition that is still present.
+    """
+    if finding_type_id is None:
+        return 0
+    cur.execute(
+        "SELECT name FROM operations.finding_types WHERE id = %s", (finding_type_id,)
+    )
+    row = cur.fetchone()
+    if row is None:
+        return 0
+    type_name = row[0]
+    cur.execute(
+        """
+        SELECT id, condition_key, subject_type, subject_id FROM operations.findings
+         WHERE tenant_id = %s AND condition_namespace = 'admin'
+           AND finding_type_id = %s AND status IN ('open', 'acknowledged')
+           AND NOT (condition_key = ANY(%s::text[]))
+        """,
+        (TENANT_ID, finding_type_id, present_keys),
+    )
+    rows = cur.fetchall()
+    for finding_id, condition_key, subject_type, subject_id in rows:
+        # One participant, so the policy's ``parent_open`` rule has a signal.
+        subject = (
+            subject_id
+            if subject_type == "platform_signal" and subject_id
+            else _subject(type_name, condition_key)
+        )
+        _record_platform_assessment(
+            cur, finding_id, condition_key, type_name, subject, now, measured=True
+        )
+    return len(rows)
+
+
 def _resolve_admin_absent(
     cur: Any,
     finding_type_id: int | None,
-    keys: list[str],
+    keys: list[str] | None,
     now: datetime,
     *,
     assessment_required: bool = True,
+    record_recovery: bool = True,
 ) -> None:
-    """Resolve absent platform findings only with a current admin assessment."""
-    if finding_type_id is None or not assessment_required:
+    """Resolve absent platform findings only with a current admin assessment.
+
+    ``keys`` is None when the condition could not be measured; nothing is
+    resolved then.
+    """
+    if finding_type_id is None or keys is None or not assessment_required:
         return
     cur.execute("SELECT to_regclass('operations.condition_assessments') IS NOT NULL")
     if not cur.fetchone()[0]:
         return
+    if record_recovery:
+        record_absent_recoveries(cur, finding_type_id, keys, now)
     cur.execute(
         """
         UPDATE operations.findings finding
@@ -318,7 +374,7 @@ def _eval_inventory_holds(
     now: datetime,
     counts: dict[str, int],
     dry_run: bool,
-) -> list[str]:
+) -> list[str] | None:
     """One finding per computer whose software removals are held.
 
     The inventory holds a computer's removals when its list from Ninja suddenly
@@ -333,7 +389,7 @@ def _eval_inventory_holds(
         "SELECT to_regclass('operations.software_inventory_devices') IS NOT NULL"
     )
     if not cur.fetchone()[0]:
-        return keys
+        return None
     cur.execute(INVENTORY_HOLDS_SQL, (TENANT_ID,))
     for (
         device_id,
@@ -390,13 +446,13 @@ def _eval_entity_link_divergence(
     now: datetime,
     counts: dict[str, int],
     dry_run: bool,
-) -> list[str]:
+) -> list[str] | None:
     """Report projection drift without repairing the confirmed-link authority."""
     cur.execute(
         "SELECT to_regclass('operations.entity_observation_current') IS NOT NULL"
     )
     if not cur.fetchone()[0]:
-        return []
+        return None
     cur.execute(
         """
         SELECT count(*)
@@ -478,11 +534,11 @@ def _eval_source_record_policy_gaps(
     now: datetime,
     counts: dict[str, int],
     dry_run: bool,
-) -> list[str]:
+) -> list[str] | None:
     """One actionable configuration finding per source instance and unknown type."""
     cur.execute("SELECT to_regclass('operations.source_record_subjects') IS NOT NULL")
     if not cur.fetchone()[0]:
-        return []
+        return None
     cur.execute(
         """
         SELECT source_instance_id, platform, entity_type, count(*)
@@ -642,6 +698,8 @@ def _eval_stalled_queues(
             )
             continue
         if not _queue_is_measurable(cur, table_name):
+            # Not measured is not recovered: keep its finding out of the close.
+            keys.append(f"software_queue_stalled:{queue_key}")
             counts["queues_skipped"] += 1
             log.warning(
                 "platform findings: queue %s (%s) not measurable — skipped",
