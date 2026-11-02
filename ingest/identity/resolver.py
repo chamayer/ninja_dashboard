@@ -1599,9 +1599,11 @@ def _create_device_for_group(
     cur.execute(
         """
         -- ADR-0012: promotion creates the identity anchor only. The five
-        -- cache columns are NOT NULL, so they get neutral placeholders here
-        -- and `device_cache_projector` fills them later in this same resolver
-        -- cycle.
+        -- cache columns are NOT NULL, so they get neutral placeholders here.
+        -- Associating records to it (set_source_association) refreshes their
+        -- claims, effective values and these columns in the same transaction
+        -- (migration 0400, PLAN-012 item 4); before 0400 they stayed
+        -- placeholders until the next collection.
         INSERT INTO operations.devices
             (id, version, tenant_id, client_id, entity_id, canonical_hostname,
              canonical_serial, canonical_vm_uuid, device_type, device_role,

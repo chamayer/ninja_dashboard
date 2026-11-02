@@ -45,7 +45,9 @@ def refresh_after_collection(reason: str) -> None:
     try:
         effective_sync = effective_attributes.project_all()
     except Exception:
-        # E3 remains a shadow projection until typed consumers pass E5 parity.
+        # Effective values feed the Computer cache (device_cache_projector).
+        # A failure here leaves dirty keys for the next refresh; association
+        # changes refresh their own entities (migration 0400).
         effective_sync = {"status": "failed"}
         log.exception("Operations effective attribute projection failed — continuing")
     try:

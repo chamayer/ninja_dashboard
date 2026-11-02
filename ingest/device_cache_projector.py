@@ -159,6 +159,20 @@ _CHANGED_PREDICATE = """
 """
 
 
+# Migration 0400 moved the target rule into the database so the association
+# procedure can refresh the Computers it changes (PLAN-012 item 4). The inline
+# copy above is the fallback until that migration is present; remove it once
+# every deployment has 0400.
+_DB_TARGET_SQL = "SELECT * FROM operations.device_cache_targets(%(tenant)s, NULL)"
+
+
+def _has_db_projector(cur) -> bool:
+    cur.execute(
+        "SELECT to_regprocedure('operations.project_device_cache(bigint, uuid[])') IS NOT NULL"
+    )
+    return bool(cur.fetchone()[0])
+
+
 def project(*, dry_run: bool = True, tenant_id: int = TENANT_ID) -> dict[str, int]:
     """Project cache columns from the effective contract.
 
@@ -168,10 +182,12 @@ def project(*, dry_run: bool = True, tenant_id: int = TENANT_ID) -> dict[str, in
     params = {"tenant": tenant_id}
     with db.transaction() as cur:
         cur.execute(f"SET LOCAL operations.tenant_id = {int(tenant_id)}")
+        in_database = _has_db_projector(cur)
+        target_sql = _DB_TARGET_SQL if in_database else _TARGET_SQL
 
         cur.execute(
             f"""
-            WITH target AS ({_TARGET_SQL})
+            WITH target AS ({target_sql})
             SELECT
                 count(*) FILTER (WHERE t.os_name     IS DISTINCT FROM d.os_name),
                 count(*) FILTER (WHERE t.os_family   IS DISTINCT FROM d.os_family),
@@ -218,10 +234,15 @@ def project(*, dry_run: bool = True, tenant_id: int = TENANT_ID) -> dict[str, in
             "rows_written": 0,
         }
 
-        if not dry_run:
+        if not dry_run and in_database:
+            cur.execute(
+                "SELECT operations.project_device_cache(%(tenant)s, NULL)", params
+            )
+            counts["rows_written"] = cur.fetchone()[0] or 0
+        elif not dry_run:
             cur.execute(
                 f"""
-                WITH target AS ({_TARGET_SQL})
+                WITH target AS ({target_sql})
                 UPDATE operations.devices d
                    SET os_name        = t.os_name,
                        os_family      = t.os_family,
