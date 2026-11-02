@@ -474,16 +474,16 @@ do not open competing blueprints for the same work.
 ## PLAN-021 — Generic entity candidate lifecycle reconciliation
 
 - Scope: Reconcile generic entity candidates with current source-observation activity and entity source links, including an auditable withdrawal state and verification/backfill for existing stale candidates.
-- Status: active
+- Status: completed
 - Defined: 2026-10-26
 - Started: 2026-10-27
-- Completed: —
+- Completed: 2026-10-27
 - Blueprint: BLUEPRINT.md
 - Source: operations/docs/plans/PLAN-021-entity-candidate-lifecycle.md
 - Section: Generic entity candidate lifecycle reconciliation
 - Related plan: PLAN-004 covers client resolver findings; PLAN-021 concerns the separate generic `entity_candidates` projection and state machine.
-- Resume gate: Local implementation and validation are complete. A push to `origin` must be separately approved and explicitly include automatic Portainer deployment and pending migration 0355; push the same approved commit to the secondary mirror afterward.
-- Last checked: 2026-10-27 (read-only verification found 77 linked, non-attached observed-only candidates; all had active observations, matching material hashes, and source-link classes that differ from the candidate's proposed class. Seventy-six observations were newer than the candidate snapshot. Review evidence is aggregate-only in `docs/records/PLAN-021-candidate-review-2026-10-27/`.)
+- Resume gate: Complete. Commit `6add50f` was pushed to `origin` then `a-m-rose`; origin deployment applied migration 0355. The bounded production projector completed one changed batch; read-only aggregate validation confirmed all stale actionable states withdrawn with audit events.
+- Last checked: 2026-10-27 (669 withdrawals and events: 592 inactive-unlinked and 77 linked-class conflicts; zero inactive-unlinked actionable candidates, active withdrawn unlinked candidates, or linked class mismatches among pending/observed-only candidates. Sixteen attached-class mismatches remain preserved. Initial aggregate review is in `docs/records/PLAN-021-candidate-review-2026-10-27/`.)
 
 ## PLAN-022 — Legacy data and code cleanup
 

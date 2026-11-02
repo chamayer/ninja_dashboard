@@ -60,8 +60,8 @@ under the resolved-entity composite class constraint.
 
 ## Checkpoint
 
-Defined 2026-10-26; implementation started 2026-10-27 after user direction to
-complete PLAN-021. Migration 0355 adds `withdrawn` and versioned projector
+**Complete 2026-10-27.** Defined 2026-10-26; implementation started 2026-10-27
+after user direction to complete PLAN-021. Migration 0355 adds `withdrawn` and versioned projector
 `sync_entity_candidates_v2`; ingest defers until the new function exists,
 and the legacy three-column function remains a compatibility wrapper,
 preserving startup and rollback compatibility. The projector emits append-only
@@ -73,8 +73,12 @@ unrelated existing admin failure was excluded; the passing tests include five
 PostgreSQL lifecycle/security cases against an isolated Testcontainers
 database. The excluded test imports missing `ConditionPolicyActivationForm`
 from `apps.core.admin`. Django system checks and migration autodetection pass.
-Production database migration and data application were not run. Next: commit
-the scoped implementation; any `origin` push must be separately approved and
-explicitly include automatic deployment and migration 0355, then the same
-commit goes to the secondary mirror. No production migration or data operation
-has run.
+Commit `6add50f` was pushed to `origin` and then `a-m-rose`. Migration 0355 and
+Operations health are verified. The scoped production projector completed one
+changed batch: 669 withdrawn, zero created/reopened/attached. Tenant-scoped
+read-only validation confirmed 669 corresponding withdrawal events (592
+inactive-unlinked; 77 linked-class conflicts), zero inactive-unlinked
+actionable candidates, zero active withdrawn unlinked candidates, and zero
+linked class mismatches among pending/observed-only candidates. Sixteen
+attached-class mismatches remain preserved in attached history. No further
+PLAN-021 action remains.
