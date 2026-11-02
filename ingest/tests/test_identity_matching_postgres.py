@@ -19,7 +19,7 @@ import pytest
 
 from ingest import normalize
 from ingest.identity import matching
-from ingest.identity.matching import IdentityMatchPolicy, resolve_match
+from ingest.identity.matching import IdentityMatchPolicy, preview_match, resolve_match
 
 NOW = datetime(2026, 10, 16, 12, 0, tzinfo=UTC)
 CLIENT = uuid.UUID("00000000-0000-4000-8000-0000000000c1")
@@ -391,3 +391,64 @@ def test_placeholder_serials_never_match(cur):
     pc = computer(cur, "ws-1")
     record(cur, pc, "Ninja", serial_number="Default string")
     assert match(cur, "other", platform="SentinelOne", serial="Default string") is None
+
+
+def counterfactual_match(cur, *, device_id, platform, key, hostname, online=None):
+    cur.execute(
+        """SELECT observation_id FROM operations.entity_observation_current
+             WHERE device_id = %s AND platform = %s AND entity_key = %s""",
+        (device_id, platform, key),
+    )
+    observation_id = cur.fetchone()[0]
+    matching.invalidate_client_names()
+    return preview_match(
+        cur,
+        tenant_id=1,
+        source_name=platform,
+        external_id=key,
+        entity_type="agent.rmm" if platform == "Ninja" else "agent.remote_access",
+        serial=None,
+        vm_uuid=None,
+        hostname=hostname,
+        macs=[],
+        client_id=CLIENT,
+        policies=POLICIES,
+        is_online=online,
+        excluded_observation_ids=(observation_id,),
+    )
+
+
+def test_preview_ignores_its_own_attached_observation(cur):
+    original = computer(cur, "solo-pc")
+    key = record(cur, original, "Ninja")
+    preview = counterfactual_match(
+        cur, device_id=original, platform="Ninja", key=key, hostname="solo-pc"
+    )
+    assert preview.result is None
+    assert any(attempt.matcher == "hostname" for attempt in preview.attempts)
+
+
+def test_preview_proposes_a_unique_independent_hostname_match(cur):
+    old = computer(cur, "dev-sql2")
+    key = record(cur, old, "Ninja")
+    current = computer(cur, "dev-sql2")
+    record(cur, current, "SentinelOne")
+    preview = counterfactual_match(
+        cur, device_id=old, platform="Ninja", key=key, hostname="dev-sql2"
+    )
+    assert preview.result is not None
+    assert preview.result.device_id == current
+    assert preview.result.matcher == "hostname"
+
+
+def test_preview_reports_a_live_same_source_blocker(cur):
+    old = computer(cur, "server")
+    key = record(cur, old, "Ninja", is_online=True)
+    current = computer(cur, "server")
+    record(cur, current, "Ninja", is_online=True)
+    preview = counterfactual_match(
+        cur, device_id=old, platform="Ninja", key=key, hostname="server", online=True
+    )
+    assert preview.result is None
+    hostname_attempt = next(attempt for attempt in preview.attempts if attempt.matcher == "hostname")
+    assert hostname_attempt.blockers == {current: "same_source_live"}
