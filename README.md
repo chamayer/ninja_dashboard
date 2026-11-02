@@ -33,29 +33,97 @@ The full stack is designed to run through Docker Compose. Production services
 run on an internal Docker host and can be automatically redeployed after an
 approved push.
 
+### Full local development stack
+
+Use `docker-compose.dev.yml` for a separate local Postgres, ingest service,
+Jobs worker, and Operations app. It uses the `ninja_dev` database, its own
+Docker volume, and loopback-only ports; it does not mount production files or
+connect to the production database. Scheduled Jobs are disabled. Notification
+settings come from `.env.dev`, so manually triggered Jobs can use live source
+and notification integrations if their production credentials are copied.
+
+1. Copy `.env.dev.example` to `.env.dev` and set local database, Django, and
+   admin credentials. Keep those local values when importing production
+   settings. Never copy production database credentials into `.env.dev`.
+2. Start the stack:
+
+   ```powershell
+   docker compose -p ninja-dashboard-dev -f docker-compose.dev.yml up --build -d
+   ```
+
+   If workstation HTTPS inspection re-signs PyPI traffic, use the local-only
+   BuildKit CA secret described above and add
+   `-f docker-compose.dev.workstation-ca.yml` to the command. This passes the
+   certificate only during dependency installation and keeps TLS verification
+   enabled.
+3. Open Operations at <http://localhost:3003>. The initial admin password is
+   `OPERATIONS_INITIAL_ADMIN_PASSWORD` from `.env.dev`.
+4. Configure local source instances and bindings in Django Admin at
+   <http://localhost:3003/admin/>. Keep the source and binding enabled, and
+   leave its schedule blank for manual-only use. Run its initial collection
+   from the Sources page; later refreshes are operator-triggered there too.
+
+To copy production application settings into `.env.dev`, merge non-local
+settings by variable name instead of appending duplicate lines. Keep local
+database, host, Django secret, and admin-password values. The local Compose
+configuration forces `SCHEDULED_JOBS_ENABLED=false`; manual jobs still use
+copied credentials. Manual Jobs may read production sources or send messages,
+tickets, or webhooks to their configured live destinations.
+If a PowerShell merge rewrites `.env.dev`, write it with LF line endings:
+Operations' startup reader uses a POSIX shell parser that treats CRLF's `\r`
+as part of a value.
+
+```powershell
+$envPath = (Resolve-Path -LiteralPath '.env.dev').Path
+$envText = [System.IO.File]::ReadAllText($envPath) -replace '\r\n?', "`n"
+[System.IO.File]::WriteAllText($envPath, $envText, [System.Text.UTF8Encoding]::new($false))
+```
+
+Ingest and Django apply their normal pending migrations to this local database
+on startup. Validate changes here before pushing code. The approved `origin`
+push still triggers production deployment and applies pending migrations
+there; the local database itself is never promoted or copied to production.
+
+To stop the services while preserving local data, run:
+
+```powershell
+docker compose -p ninja-dashboard-dev -f docker-compose.dev.yml down
+```
+
+To erase the local database and start from scratch, stop the stack and remove
+only its named local volume:
+
+```powershell
+docker volume rm ninja-dashboard-dev_ninja-dev-postgres-data
+```
+
+Review the exact volume name with `docker volume ls` first if the Compose
+project name was changed. Source-specific refreshes are triggered from the
+Sources page; other scheduled Jobs can be run manually from the Jobs page.
+
 Local Docker Desktop with the WSL 2 backend may be used for disposable Compose
 dependencies and PostgreSQL integration tests. Local containers must use
 test-created data only and must never be configured to target a deployed
 database or service.
 
-If workstation HTTPS inspection re-signs PyPI traffic, the application
-Dockerfiles accept an optional BuildKit secret named `workstation_ca`. Export
-the trusted inspection root as a PEM certificate outside the repository, then
-build with TLS verification still enabled:
+If workstation HTTPS inspection re-signs PyPI traffic, export the trusted
+inspection root as a PEM certificate outside the repository and start the dev
+stack with its optional BuildKit CA secret. TLS verification stays enabled:
 
 ```powershell
-$env:NINJA_LOCAL_CA_PEM = Get-Content "$env:USERPROFILE\.docker\ninja-dashboard\workstation-ca.crt" -Raw
-docker compose -f docker-compose.yml -f docker-compose.workstation-ca.yml build ingest operations
-Remove-Item Env:NINJA_LOCAL_CA_PEM
+$env:NINJA_LOCAL_CA_PEM = Get-Content -LiteralPath (Join-Path $env:USERPROFILE '.docker/ninja-dashboard/workstation-ca.crt') -Raw
+try {
+  docker compose -p ninja-dashboard-dev -f docker-compose.dev.yml -f docker-compose.dev.workstation-ca.yml up --build -d
+} finally {
+  Remove-Item Env:NINJA_LOCAL_CA_PEM -ErrorAction SilentlyContinue
+}
 ```
 
-The explicitly selected override passes the certificate only to those two
-builds through that temporary environment secret; Portainer and ordinary
-Compose use only `docker-compose.yml`. The certificate is mounted only during
-dependency installation, removed in the same image layer, and is neither
-copied into the final image nor required by normal or production builds. Never
-commit the certificate or replace this with disabled certificate verification
-or trusted-host exceptions.
+The local-only override passes the certificate to dependency-install builds
+through a temporary environment secret. It is mounted only during dependency
+installation and is neither copied into the final image nor required by normal
+or production builds. Never commit the certificate or disable certificate
+verification.
 
 Read:
 
