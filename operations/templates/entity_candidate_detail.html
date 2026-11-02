@@ -12,7 +12,7 @@
     <dt>Record type</dt><dd>{{ candidate.external_namespace|humanize_label }}</dd>
     <dt>Source identity</dt><dd>{{ candidate.external_id }}</dd>
     <dt>Proposed class</dt><dd>{{ candidate.proposed_entity_class.display_name }}</dd>
-    <dt>Client</dt><dd>{{ candidate.client.display_name|default:"—" }}</dd>
+    <dt>Client</dt><dd>{% if candidate.client %}<a href="{% url 'org_index' org_slug=candidate.client.slug %}">{{ candidate.client.display_name }}</a>{% else %}—{% endif %}</dd>
     <dt>Status</dt><dd>{{ candidate.status|humanize_label }}</dd>
     <dt>Last observed</dt><dd>{{ candidate.last_observed_at|date:"Y-m-d H:i" }}</dd>
     <dt>Latest decision</dt><dd>{{ candidate.latest_decision|default:"—"|humanize_label }}</dd>
