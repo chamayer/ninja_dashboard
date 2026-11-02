@@ -105,3 +105,53 @@ def test_patch_cycle_releases_lock_after_exception(monkeypatch) -> None:
     with pytest.raises(RuntimeError, match="boom"):
         main.run_patching_once()
     assert pool.cursor.statements[-1][0] == "SELECT pg_advisory_unlock(%s)"
+
+
+class _NinjaClient:
+    def __init__(self, **_kwargs):
+        pass
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_args):
+        return False
+
+
+def _device_cycle(monkeypatch, failing: str | None = None) -> list[str]:
+    calls: list[str] = []
+
+    def step(name: str):
+        def run(*_args):
+            calls.append(name)
+            if name == failing:
+                raise RuntimeError(f"{name} failed")
+
+        return run
+
+    monkeypatch.setattr(main.db, "pool", _Pool(acquired=True))
+    monkeypatch.setattr(main, "run_log", _run_log)
+    monkeypatch.setattr(main, "NinjaClient", _NinjaClient)
+    monkeypatch.setattr(main.organizations, "run", step("organizations"))
+    monkeypatch.setattr(main.locations, "run", step("locations"))
+    monkeypatch.setattr(main.policies, "run", step("policies"))
+    monkeypatch.setattr(main.devices, "run", step("devices"))
+    monkeypatch.setattr(main, "refresh_after_collection", step("derived_refresh"))
+    monkeypatch.setattr(main, "run_windows_servicing_once", step("windows_servicing"))
+    return calls
+
+
+def test_device_cycle_loads_device_lookups_before_devices(monkeypatch) -> None:
+    calls = _device_cycle(monkeypatch)
+
+    assert main.run_ninja_devices_once() is True
+    assert calls[:4] == ["organizations", "locations", "policies", "devices"]
+
+
+def test_device_cycle_skips_devices_when_a_lookup_fails(monkeypatch) -> None:
+    calls = _device_cycle(monkeypatch, failing="locations")
+
+    with pytest.raises(RuntimeError, match="locations"):
+        main.run_ninja_devices_once()
+    assert "policies" not in calls
+    assert "devices" not in calls

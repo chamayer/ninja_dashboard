@@ -82,9 +82,9 @@ def run_once() -> None:
 def run_ninja_devices_once() -> bool:
     """Collect the Ninja identity snapshot and publish shared device evidence.
 
-    Organizations and devices are the only Ninja inputs that can establish a
-    Computer, attach a source record to a client, or change inventory state.
-    The device writer projects them through the shared source-observation
+    Organizations, locations, and policies are loaded before devices because
+    the source device rows have foreign keys to those lookup tables. The device
+    writer projects the snapshot through the shared source-observation
     contract before this job reports success.
     """
     with db.pool.connection() as lock_conn, lock_conn.cursor() as lock_cur:
@@ -106,10 +106,20 @@ def run_ninja_devices_once() -> bool:
                     client_secret=settings.NINJA_CLIENT_SECRET.get_secret_value(),
                     scope=settings.NINJA_SCOPE,
                 ) as client:
-                    for failure in (
-                        _safe("organizations", organizations.run, client),
-                        _safe("devices", devices.run, client, snapshot_at),
+                    # Devices reference these three Ninja lookup tables. Do
+                    # not attempt the device upsert until each prerequisite
+                    # collection succeeds on a fresh local database.
+                    for name, collect in (
+                        ("organizations", lambda: organizations.run(client)),
+                        ("locations", lambda: locations.run(client)),
+                        ("policies", lambda: policies.run(client)),
                     ):
+                        failure = _safe(name, collect)
+                        if failure:
+                            failures.append(failure)
+                            break
+                    if not failures:
+                        failure = _safe("devices", devices.run, client, snapshot_at)
                         if failure:
                             failures.append(failure)
                 for failure in (
