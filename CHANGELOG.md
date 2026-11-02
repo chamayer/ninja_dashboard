@@ -2,6 +2,14 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.141.2] — 2026-11-02 — Close the old activity-queue alert
+
+### Fixed
+
+- 0399 closes the pre-ledger `software_queue_stalled:software.activity` Issue
+  (entity namespace, last detected 2026-09-29, queue empty), which the admin
+  evaluator never reassesses. With 0.141.1 this clears all 45 stale health Issues.
+
 ## [0.141.1] — 2026-11-02 — Recovered health Issues close
 
 ### Fixed
