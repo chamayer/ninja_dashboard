@@ -1398,7 +1398,7 @@ and [registry](../docs/records/PLAN_REGISTRY.md). No further PLAN-021 action
 remains.
 ## PLAN-004 — Identity and source-record maintenance review
 
-**R4 implementation released; PLAN-004 remains in verification.** Revision 8
+**R4 implementation released; PLAN-004 complete (2026-11-02).** The two remaining checks below were closed by 0.139.0 dispositions and the 0.139.2–0.140.0 timing/queue fixes. Revision 8
 design and release results are in the [handoff](docs/plans/PLAN-004-source-record-review.md).
 PLAN-003 owns shared finding storage and queue presentation; PLAN-004 owns
 matching, source-record maintenance and detection. Local intake failure

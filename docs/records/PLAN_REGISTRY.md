@@ -31,16 +31,17 @@
 ## PLAN-036 — Record-first findings and consistent identity decisions
 
 - Scope: Finalize ADR-0050; implement automatic source-record risk findings and consistent PLAN-004 §5 association decisions, with the related findings presentation and handover.
-- Status: active
+- Status: completed
 - Defined: 2026-10-30
 - Started: 2026-10-30
-- Completed: —
+- Completed: 2026-11-02 (released 0.138.0–0.139.1; follow-ups 0.141.1–0.141.2 register the per-source software tables and let recovered health Issues close; verified read-only 2026-11-02)
 - Blueprint: docs/plans/PLAN-036-record-first-findings.md
 - Source: docs/plans/PLAN-036-record-first-findings.md
 - Section: PLAN-036 — Record-first findings and consistent identity decisions
 - Related plans: PLAN-003 owns common findings and queue; PLAN-004 owns source records and identity. This continuation completes their identified gaps, with record-level findings before stricter association policy.
-- Resume gate: Local implementation and validation are complete. Remaining: authorized-host reassessment-row review and R4-2 post-release timing/queue observation; these require explicit approval. Commit, push, and deployment also require separate approval.
+- Resume gate: None; complete.
 - Last checked: 2026-10-30 in `plan003-r3` at `253db218`. Core ADR-0050 implementation is locally validated (evidence in handoff). Follow-up implementation aligns the client dashboard's unresolved mapping count with the Issues independent-action selection and closes stale per-group `client_unattached_group`, `unnamed_source_group`, and non-topology `client_link_collision` findings with closure reasons. Admin findings require current-observation clear assessments; unnamed entity findings close only open/acknowledged episodes when source state no longer meets the condition. 60 focused ingest tests and 21 focused Operations queue/client-mapping tests pass; Python compilation, scoped Ruff for changed ingest files, and `git diff --check` pass. Whole-file Ruff on the large views module still reports existing findings; the full Operations suite was not run. `scripts/validate_plan_registry.py` is absent from this checkout, so registry structure was manually reconciled. PLAN-004 production reassessment review and R4-2 post-release timing/queue observation remain outstanding and gated; no production, commit, push or deployment action occurred. See the handoff for scope, decisions, and evidence.
+- Last checked: 2026-11-02 (production read-only: source-record queue drained, 0 intake errors, resolver 51/51 completed in 24 h, relationship and attribute queues empty, active policy conditions-registry-14, evaluations 5–8 min, 0 open health Issues without a current assessment).
 
 ## PLAN-034 — Post-cleanup housekeeping: notification settings and rollback archives
 
@@ -238,17 +239,18 @@ do not open competing blueprints for the same work.
 
 - Scoped repair: operations/docs/plans/PLAN-004-source-record-status.md — per-record status/contact is complete locally; scoped commit approved, push/deployment remain gated.
 - Scope: Operations identity lifecycle
-- Status: verify
+- Status: completed
 - Defined: 2026-10-16
 - Started: 2026-10-16
-- Completed: —
+- Completed: 2026-11-02 (R4 released 0.135.0–0.137.0; reassessment rows recorded as dispositions in 0.139.0 — 1,271 kept, none moved; post-release timing/queue check found and fixed the evaluator lock time and relationship projection in 0.139.2–0.140.0; verified read-only 2026-11-02)
 - Blueprint: operations/BLUEPRINT.md
 - Source: operations/docs/plans/PLAN-004-source-record-review.md
 - Section: Computer identity and platform change history (2026-10-16); How a Computer is named — ADR-0034 proposal (2026-10-19)
-- Resume gate: Review the 2026-10-30 reassessment's changed, ambiguous, and unmatched rows on the authorized host; complete the R4-2 post-release timing/queue observation. Do not rerun the reassessment. Both checks require explicit operational approval.
+- Resume gate: None; complete. Deferred PLAN-004 items (PLAN-033/034 plans, measured optimizations) stay in operations/TODO.md.
 - Last checked: 2026-10-20 (live). Identity relations are present; 32 merges occurred in seven days and seven name collisions remain. This confirms activity, not completion of the follow-up plan.
 - Last checked: 2026-10-30. R4 (final design rev 8) released: 0.135.0 managed subjects/rules (+0.135.1 Jobs resource-limit hotfix), 0.136.0 one-key cases, 0.137.0 link authority in a drained window with backup; one-time reassessment run (results in operations/BLUEPRINT.md). Follow-ups in operations/TODO.md.
 - Follow-up added 2026-10-26, implemented locally under PLAN-036 on 2026-10-30: reconcile `client_unattached_group`, `unnamed_source_group`, and per-group `client_link_collision` at the end of each client-resolver run when a group is assigned, inactive, gone, renamed, or no longer matches two or more clients. Record a closure reason. Topology collision findings are preserved; entity-candidate withdrawal remains tracked separately under PLAN-021.
+- Last checked: 2026-11-02 (production read-only: source-record queue drained, 0 intake errors, resolver 51/51 completed in 24 h, relationship and attribute queues empty, active policy conditions-registry-14, evaluations 5–8 min, 0 open health Issues without a current assessment).
 
 ## PLAN-005 — Jobs observability and schedule authority
 

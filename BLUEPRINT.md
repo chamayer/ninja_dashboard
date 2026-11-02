@@ -19,17 +19,6 @@ validation results, or completed-plan summaries here.
 
 ## Next action — active plan routing
 
-- **PLAN-036 — active.** Released through 0.139.1; the reassessment review is
-  replaced by recorded dispositions. Next: the user's final testing, then close-out.
-  See the [handoff](docs/plans/PLAN-036-record-first-findings.md).
-
-- **PLAN-004 — active; R4 Stages A, C and B released 2026-10-30 (0.135.0–0.137.0).**
-  0.139.0 replaces row-by-row reassessment review with standing rules and recorded
-  per-row dispositions (user decisions 2026-11-01); the disposition run kept 1,271
-  rows and moved none. Next: the R4 follow-ups in `operations/TODO.md`. See the
-  [Operations handoff](operations/BLUEPRINT.md#r4-implementation-started-2026-10-30-branch-plan003-r3-base-7a8b67b)
-  and [final design](operations/docs/plans/PLAN-004-source-record-final-design.md).
-
 - **PLAN-026 — active, approval-gated.** PLAN-025 is complete; next obtain
   explicit approval to implement the source configuration UI using its
   documented source/binding contract. See the

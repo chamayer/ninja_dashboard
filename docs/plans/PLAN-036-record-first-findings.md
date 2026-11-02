@@ -1,8 +1,10 @@
 # PLAN-036 — Record-first findings and consistent identity decisions
 
-**Status:** Active for approval-gated PLAN-004 verification. ADR-0050 was approved
-by the user 2026-10-30. All authorized local implementation and validation are
-complete; remaining host checks are recorded below.
+**Status:** Complete (2026-11-02). Released 0.138.0–0.139.1; follow-ups 0.141.1
+(recovered health Issues close; per-source software tables registered for change
+history) and 0.141.2. Verified read-only on production 2026-11-02: source-record
+queue drained, no intake errors, resolver and evaluations healthy, no open health
+Issue without a current assessment.
 
 **Goal:** Ensure actionable source-record risks are evaluated without waiting for
 Computer attachment, then apply a consistent association policy across writers

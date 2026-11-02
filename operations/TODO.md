@@ -190,8 +190,8 @@
       "Source records: active · total" line has the same effect. The
       "Records" label (run_log `rows`, the devices Ninja returned) should also
       say what it counts. Display-only — no data change needed.
-- [ ] **PLAN-004 — Computer identity, history, and naming:** verify remaining
-      post-ADR-0034 follow-ups before reopening implementation.
+- [x] **PLAN-004 — Computer identity, history, and naming:** complete 2026-11-02
+      (R4 superseded the post-ADR-0034 follow-ups; see the plan registry).
 - [ ] **PLAN-005 — Jobs observability and schedule authority:** verify the
       remaining health and schedule follow-ups against current behavior.
 - [ ] **Ninja device collection: phase and count progress** (observed
