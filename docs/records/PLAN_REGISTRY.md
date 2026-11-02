@@ -72,44 +72,44 @@
 ## PLAN-032 — Per-instance source display titles
 
 - Scope: Display the configured source-instance name on the Sources page while retaining the catalog name for shared source-mapping identity.
-- Status: active
+- Status: completed
 - Defined: 2026-10-28
 - Started: 2026-10-28
-- Completed: —
+- Completed: 2026-10-28
 - Blueprint: operations/BLUEPRINT.md
 - Source: operations/BLUEPRINT.md
 - Section: PLAN-032 — Per-instance source display titles
-- Related plans: PLAN-025 established the ScreenConnect source contract; PLAN-026 remains the separate source-creation UI plan. This label correction is independent of PLAN-030 bulk candidate acceptance.
-- Resume gate: Local implementation is authorized. AMROSE config `source_name` is updated to `AMROSE ScreenConnect` with a named change action. Commit and `origin` push require separate approval; the push automatically deploys through Portainer, with no migration pending.
-- Last checked: 2026-10-28. The Sources page view uses `source_instances.config.source_name`, and the client-mapping link retains the catalog name. Python compilation, registry validation, and scoped whitespace checks pass; tests were not run. The production GUI still runs the previous code until an approved push/deployment.
+- Related plans: PLAN-025 established the ScreenConnect source contract; PLAN-026 remains the separate source-configuration UI plan. This label correction is independent of PLAN-030 bulk candidate acceptance.
+- Resume gate: Complete. AMROSE is configured as `AMROSE ScreenConnect`; the Sources page uses each instance display name and keeps catalog identity for mapping filters. Commit `9aef8fc` is an ancestor of both `origin/master` and `a-m-rose/master`. No migration was required.
+- Last checked: 2026-10-28. Python compilation and staged whitespace validation passed; tests were not run. Remote tips were verified read-only. Live browser verification remains unconfirmed.
 
 ## PLAN-031 — Source record and reported states
 
 - Scope: Distinguish source-record presence from each record's reported online state in Operations.
-- Status: active
+- Status: completed
 - Defined: 2026-10-28
 - Started: 2026-10-28
-- Completed: —
-- Blueprint: operations/BLUEPRINT.md
-- Source: operations/BLUEPRINT.md
+- Completed: 2026-10-28
+- Blueprint: —
+- Source: operations/docs/records/PLAN-031-source-record-states.md
 - Section: PLAN-031 — Source record and reported states
 - Related plans: PLAN-012 owns broader source-record reads and performance; this change appends one safe metadata field and preserves its existing query contract.
-- Resume gate: Implement the approved view migration and page; production migration, commit, and deployment require separate authorization.
-
+- Resume gate: Complete; authenticated browser review remains unverified.
+- Last checked: 2026-10-28. Commit `b393c57` deployed; migrations 0358–0360 applied, application check passed, and source-specific online states were verified under the runtime role. See the record for limitations.
 
 ## PLAN-030 — Bulk accept discovered client candidates
 
 - Scope: Let Operations users create new clients from a selected set of open source-client candidates in one reviewed, audited action.
-- Status: active
+- Status: completed
 - Defined: 2026-10-28
 - Started: 2026-10-28
-- Completed: —
+- Completed: 2026-10-30
 - Blueprint: operations/BLUEPRINT.md
 - Source: operations/BLUEPRINT.md
 - Section: PLAN-030 — Bulk accept discovered client candidates
 - Related plans: PLAN-004 retains identity matching policy; PLAN-029 surfaced the local first-ingest candidate backlog. This plan only batches the existing operator-approved accept-as-new action and does not change matching or mapping rules.
-- Resume gate: Implementation is authorized. Keep the action scoped to explicitly selected open candidates; preview before acceptance; use the existing client creation, source attachment, and audit behavior. No production deployment, commit, or push is authorized.
-- Last checked: 2026-10-28. Local refresh was approved; Operations now runs bulk acceptance from Inventory → Clients and Client mappings at port 3003. Migrations 0358/0359 applied to the isolated dev database; Operations, Postgres, ingest, and Jobs worker are healthy/running; login HTTP 200 and Django system check pass. No candidate acceptance or source collection ran; manual UI review is pending.
+- Resume gate: None. Released in 0.133.0 (`020cf560`) with the findings guard added for PLAN-003 R2; deployed to origin and the mirror, Operations healthy, contract 4, routes resolve.
+- Last checked: 2026-10-30. Production deploy of 0.133.0 verified: Operations, ingest and Jobs worker healthy; Inventory → Clients, Client mappings and the bulk-accept route respond (sign-in redirect). Operations unit suite shows only failures pre-existing on master. No candidate was accepted during verification.
 
 ## PLAN-029 — Jobs readiness and first ingest
 
@@ -212,15 +212,15 @@ do not open competing blueprints for the same work.
 ## PLAN-002 — Source-driven collection and Jobs recovery
 
 - Scope: Cross-service collection and Jobs
-- Status: verify
+- Status: completed
 - Defined: 2026-10-08
 - Started: 2026-10-08
-- Completed: —
+- Completed: 2026-10-26
 - Blueprint: —
 - Source: docs/archive/workspace-cleanup-2026-10-20/plan.md
 - Section: Active plan — source-driven collection
-- Resume gate: Reconcile the October recovery checkpoint with current Jobs code, decisions, and deployed evidence.
-- Last checked: 2026-10-20 (live). Six source bindings are enabled/scheduled; R-U-ON, Hudu, ScreenConnect, LogMeIn, and SentinelOne had no failed runs in seven days, while Ninja had 39 failed runs of 167.
+- Resume gate: No action. The recovered Ninja source refresh completed and published output after the worker remained healthy; source-specific endpoint health is tracked separately. Newer pipeline-correctness findings remain with PLAN-019.
+- Last checked: 2026-10-26 (read-only production verification). The Ninja source refresh requested at 21:36 UTC started at 21:43 and completed at 22:07 with a published output. Its Jobs worker had been healthy since 21:12 UTC with zero container restarts. The earlier run and its single recovery retry both recorded worker shutdown interruption, consistent with redeploys. The separate `reference.abusech` endpoint failure is tracked independently. See `docs/records/PLAN-002-verification-2026-10-26.md`.
 
 ## PLAN-003 — Central work queue and finding state
 
@@ -362,15 +362,15 @@ do not open competing blueprints for the same work.
 ## PLAN-013 — Operations sign-in page
 
 - Scope: Operations authentication pages
-- Status: active
+- Status: completed
 - Defined: 2026-10-21
 - Started: 2026-10-21
-- Completed: —
+- Completed: 2026-10-26
 - Blueprint: operations/BLUEPRINT.md
 - Source: operations/BLUEPRINT.md
 - Section: PLAN-013 — Operations sign-in page
-- Resume gate: Independent of PLAN-012 (no shared files). Verify the blueprint checkpoint against the working tree before continuing.
-- Last checked: 2026-10-21 (committed and pushed; deployed sign-in not yet verified).
+- Resume gate: No action. Deployed authentication flow verified in the browser.
+- Last checked: 2026-10-26 (user-reported browser verification). Sign-in and sign-out passed; the authenticated password-change form displayed its current/new/confirmation fields; after sign-out, `/account/password/` redirected to login. The password was not changed. Operations container was healthy after deployment `b1d3772`, with migrations 0352 and 0353 applied.
 
 ## PLAN-014 — Requirement applicability
 
