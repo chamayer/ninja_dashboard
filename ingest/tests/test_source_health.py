@@ -36,6 +36,25 @@ def test_failed_source_refresh_becomes_a_binding_scoped_problem():
     assert problem.reason == "The latest collection attempt did not finish."
 
 
+def test_a_first_deploy_interruption_is_not_the_latest_collection_attempt():
+    cur = _RecordingCursor()
+    collection_problems(cur, 1, datetime(2026, 10, 8, 11, tzinfo=UTC))
+    sql = " ".join(cur.sql.split())
+    assert (
+        "AND NOT (status = 'stalled' AND terminal_reason IS NOT DISTINCT FROM "
+        "'worker_interrupted' AND trigger_kind IS DISTINCT FROM 'recovery')"
+    ) in sql
+
+
+class _RecordingCursor(_Cursor):
+    def __init__(self):
+        super().__init__([])
+        self.sql = ""
+
+    def execute(self, sql, *_args, **_kwargs):
+        self.sql = sql
+
+
 def test_only_overdue_successful_sources_become_problems():
     now = datetime(2026, 10, 8, 12, tzinfo=UTC)
     problems = collection_problems(

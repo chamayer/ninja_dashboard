@@ -55,9 +55,22 @@ source; host tests for any collector or guard change.
   before 0.142.0, cause not confirmed. 0.142.0 now loads Ninja locations and
   policies before devices (the device table references both); the first run on it
   completed without error in 23.5 minutes (17:57–18:20 UTC).
-- Step 4 is not started. Evidence today: the 0.142.1 deploy restarted the Jobs
-  worker at 17:56 UTC and stalled the running SentinelOne and LogMeIn refreshes.
+- Step 4 approved 2026-11-02 and implemented locally, not yet released. Evidence:
+  the 0.142.1 deploy restarted the Jobs worker at 17:56 UTC and stalled the running
+  SentinelOne and LogMeIn refreshes. `source-refresh` is already replay-safe, and
+  `replay_interrupted_runs` requests an interrupted run again once at worker
+  start. The Issue came from `source_health.collection_problems` taking that
+  stalled run as the latest attempt. Decision: skip a first-attempt
+  `worker_interrupted` stall when choosing the latest attempt. A replay that is
+  interrupted again (`trigger_kind = 'recovery'`), any other stall or failure, an
+  earlier failure, and the freshness window still raise. No migration, and
+  open Issues are unchanged until the next evaluation. Validation: unit and
+  synthetic-PostgreSQL tests in `test_source_health*.py`, and the replay and
+  condition-safety tests, pass. Ruff passes.
 
 ## Next action
 
-User approval for Step 4 (deploy-interrupted runs).
+Ship Step 4 with the next approved release (committed after 0.142.2 was pushed;
+that release's changelog needs its entry). Then verify read-only that a deploy
+during a collection leaves no new source-failure Issue and that the replay
+completes.

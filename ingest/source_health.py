@@ -56,6 +56,13 @@ def collection_problems(
                  AND job_key = 'source-refresh'
                  AND scope_identity = 'source-binding:' || binding.id::text
                  AND status IN ('completed', 'failed', 'stalled', 'cancelled')
+                 -- A worker restart (deploy) interrupting a first attempt is not a
+                 -- source failure: the worker replays it once (replay_interrupted_runs).
+                 -- An interrupted replay still counts, and the freshness window below
+                 -- still catches a source that stops providing data (PLAN-037 Step 4).
+                 AND NOT (status = 'stalled'
+                          AND terminal_reason IS NOT DISTINCT FROM 'worker_interrupted'
+                          AND trigger_kind IS DISTINCT FROM 'recovery')
                ORDER BY requested_at DESC, id DESC
                LIMIT 1
           ) terminal ON TRUE
