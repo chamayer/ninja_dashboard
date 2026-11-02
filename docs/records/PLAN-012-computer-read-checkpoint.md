@@ -6,9 +6,8 @@ current source on 2026-11-02 and replaces it.
 
 ## Active checkpoint — 2026-11-02
 
-**Status:** Stage 1 committed locally (`1d5939bc`, not released). Stage 2
-measurements and the 0400 rehearsal done 2026-11-02. Uncommitted: two Stage 2
-code fixes (tile offline map, Source Records page shape) and migration 0400.
+**Status:** Released in 0.143.0 (commits `1d5939bc`, `ab06c6f2`,
+`be604373`); post-deploy verification pending.
 **Decision (2026-11-02, owner delegated):** A read model/projection is not a
 goal in itself. Stage 2 production measurements decide among an ordering
 index, a read model, or neither; any migration needs its own approval. This
@@ -26,8 +25,9 @@ the same 8 fail at HEAD `4c9fcc15`. Ingest non-Postgres suite 644 passed,
 load; Ruff error count for `views.py` unchanged (97, pre-existing). Tests ran
 in a scratch virtualenv with `shared` on `PYTHONPATH` (no pytest in the dev
 containers). Postgres-backed tests, browser checks and live data were not run.
-**Next action:** owner approval to commit the Stage 2 fixes and 0400; then an
-approved release. PLAN-012 completes when 0400 is released and verified.
+**Next action:** verify the 0.143.0 deployment read-only (containers, 0400
+applied, functions present, new Computers get OS values), then complete
+PLAN-012 in the registry.
 
 ### Completion gate status
 

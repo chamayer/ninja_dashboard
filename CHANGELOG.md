@@ -2,6 +2,42 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.143.0] — 2026-11-02 — Computer values refresh on association; reader fixes
+
+### Fixed
+
+- A Computer's OS, OS group, role and type are refreshed when a source
+  record is linked to, moved to, or removed from it, in the same transaction
+  (migration 0400, functions only). New Computers no longer sit at "Unknown"
+  until the next collection, which had opened an `os_unknown_coverage` Issue
+  on the first day for about half of new Computers. If the periodic projector
+  is busy, the refresh defers to it with a database warning (PLAN-012 item 4).
+- A Hudu asset with several linked cards is listed once in a Computer's
+  source records and in merge review, not once per card (1,057 Computers
+  affected).
+- The Source Records list picks its page before joining source, client and
+  group-mapping details, and evaluates the group mapping once (first page
+  14 s to about 8 s on production data).
+- A deploy that interrupts a source refresh no longer opens a source-failure
+  Issue; an interrupted replay and other failures still do (PLAN-037 Step 4).
+
+### Changed
+
+- Home, Computers, Coverage, Patching and client pages apply a client's own
+  "offline after" days, as ingest already did; the tenant value remains the
+  default.
+- The Computer page's agent requirements and the client missing-agent list read
+  the stored evaluator verdicts; requirements not applied show the reason.
+- The listing "reporting" window follows the tenant's review-for-retirement
+  days (default 30, unchanged).
+- Removed an unrendered client-page coverage calculation; Patch evidence OS
+  choices exclude retired Computers.
+
+### Added
+
+- `docs/reference/source-contact-semantics.md`: what each source's online and
+  contact fields mean.
+
 ## [0.142.2] — 2026-11-02 — Bound expensive vulnerability lookups
 
 ### Fixed
