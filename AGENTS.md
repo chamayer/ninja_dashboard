@@ -155,7 +155,7 @@ not repository instructions.
   overlapping scopes, the registry entry must name the related plan and state
   the dependency or execution order before work starts.
 - Run `python scripts/validate_plan_registry.py` with the usual documentation
-  validation. It is not yet enforced by the governance workflow.
+  validation. The governance workflow enforces its structural checks.
 
 ## Blueprint maintenance
 

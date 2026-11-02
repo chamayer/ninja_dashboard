@@ -20,6 +20,7 @@ jobs:
           grep -Eiq '^#{1,2}[[:space:]].*goal' BLUEPRINT.md
           grep -Eiq '^#{1,2}[[:space:]].*scope' BLUEPRINT.md
           grep -Eiq '^#{1,2}[[:space:]].*status' BLUEPRINT.md
+          python scripts/validate_plan_registry.py
           version="$(tr -d '\r\n' < VERSION)"
           [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]
           grep -Eq "^## \[$version\]( |$)" CHANGELOG.md
