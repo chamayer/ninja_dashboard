@@ -1,10 +1,8 @@
-"""abuse.ch MalwareBazaar + ThreatFox dump-file ingest → safety_signal.
+"""abuse.ch MalwareBazaar and ThreatFox ingest → safety_signal.
 
-Following the abuse.ch 2026-07 fair-use notice, we pull the recent
-dump files (single HTTPS GET each) instead of hammering the API. Both
-give per-hash records with signer subjects, filenames, and family tags.
-We match on publisher (signer_subject) and canonical filename tokens
-against our fleet.
+MalwareBazaar uses its recent JSON export. ThreatFox requires its authenticated
+community API, which returns recent IOCs with malware families and tags. We
+match those records against tracked publishers and canonical software names.
 """
 
 from __future__ import annotations
@@ -23,7 +21,7 @@ from ingest.intel.status import record_run
 log = logging.getLogger(__name__)
 
 _MB_RECENT = "https://bazaar.abuse.ch/export/json/recent/"
-_TF_RECENT = "https://threatfox.abuse.ch/export/json/recent/"
+_TF_API = "https://threatfox-api.abuse.ch/api/v1/"
 
 
 def run_once() -> int:
@@ -82,14 +80,14 @@ def _pull_bazaar() -> int:
 
 
 def _pull_threatfox() -> int:
-    entries = _fetch_json(_TF_RECENT)
+    entries = _fetch_threatfox()
     if not entries:
         return 0
     canonicals, publishers = _tracked_names()
     matched: list[tuple] = []
-    for entry_list in entries.values():
+    for entry_list in entries:
         for entry in _iter(entry_list):
-            ioc = _lc(entry.get("ioc_value", ""))
+            ioc = _lc(entry.get("ioc_value") or entry.get("ioc", ""))
             tags = entry.get("tags") or []
             malware = _lc(entry.get("malware_printable", ""))
             for c in canonicals:
@@ -97,7 +95,7 @@ def _pull_threatfox() -> int:
                     matched.append((
                         1, c, "", "threatfox",
                         json.dumps({
-                            "ioc": entry.get("ioc_value"),
+                            "ioc": entry.get("ioc_value") or entry.get("ioc"),
                             "malware": entry.get("malware_printable"),
                             "tags": tags,
                         }),
@@ -115,6 +113,28 @@ def _pull_threatfox() -> int:
                     break
     rows = _upsert_rows(matched)
     return MaterialCount(rows, material_changed=rows > 0)
+
+
+def _fetch_threatfox() -> list[dict[str, Any]]:
+    auth_key = settings.ABUSECH_AUTH_KEY.get_secret_value()
+    if not auth_key:
+        raise RuntimeError("ThreatFox requires ABUSECH_AUTH_KEY to be configured")
+
+    with httpx.Client(timeout=60.0) as client:
+        response = client.post(
+            _TF_API,
+            headers={"Auth-Key": auth_key},
+            json={"query": "get_iocs", "days": 7},
+        )
+        response.raise_for_status()
+        payload = response.json()
+
+    query_status = payload.get("query_status")
+    if query_status == "no_result":
+        return []
+    if query_status != "ok" or not isinstance(payload.get("data"), list):
+        raise RuntimeError("ThreatFox API returned an unsuccessful or invalid response")
+    return payload["data"]
 
 
 def _fetch_json(url: str) -> dict[str, Any]:
