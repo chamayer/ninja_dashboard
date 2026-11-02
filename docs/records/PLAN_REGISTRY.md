@@ -1,5 +1,19 @@
 # Plan registry
 
+## PLAN-038 — Ninja device health as detail of the device record
+
+- Scope: Stop admitting Ninja device-health observations as separate source records typed as agents; keep them as supplementary evidence of the Ninja device record, retire the 8,513 health records, and show health on the device record.
+- Status: defined
+- Defined: 2026-11-02
+- Started: —
+- Completed: —
+- Blueprint: —
+- Source: docs/plans/PLAN-038-ninja-device-health-as-record-detail.md
+- Section: PLAN-038 — Ninja device health as detail of the device record
+- Related plans: PLAN-004 owns source records (migration 0370 admission); PLAN-033 reads device health; the TODO Sources page double-count item is folded in.
+- Resume gate: User approval of the design.
+- Last checked: 2026-11-02 (production read-only: 8,513 health records, 0 lookup keys, 0 open Issues, about 134,000 health attribute claims).
+
 ## PLAN-037 — Source collection failures
 
 - Scope: Make every open source-failure Issue reflect a current failure: find why completed collections leave Issues open, fix or retire the ThreatFox collector (410 Gone), close the retired agent_compliance failure, stop deploy-interrupted runs from raising failures, and review Ninja's failed required steps.
