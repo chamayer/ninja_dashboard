@@ -31,10 +31,6 @@ Read Inbox at the start of every session.
       `active` (docs/plans/PLAN-019-data-pipeline-correctness-and-retention.md);
       Step 1 done; F09 decided (no daily presence); Step 2 (U04) built.
       F04 stays with PLAN-012 item 4.
-- [ ] **PLAN-012 item 4 follow-ups (2026-11-02):** design chosen and
-      migration 0400 drafted (see the PLAN-012 checkpoint). Remove the inline
-      `_TARGET_SQL` fallback in
-      `ingest/device_cache_projector.py` once every deployment has 0400.
 - [ ] **Source Records page still about 8 s (PLAN-012 Stage 2, 2026-11-02):**
       the security-barrier `v_entity_observation_admin_metadata` derives JSON
       fields (contact-time validation, restricted layout) for every row before
