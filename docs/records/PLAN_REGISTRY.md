@@ -1,5 +1,75 @@
 # Plan registry
 
+## PLAN-051 — Retire the device layer tables
+
+- Scope: Stop writing and then retire assets, os_instances, agent_instances and their field-history tables (ADR-0013), keeping the data-quality Issues that share the resolver step and archiving the data before the drop.
+- Status: ready
+- Defined: 2026-11-03
+- Started: —
+- Completed: —
+- Blueprint: docs/plans/PLAN-051-retire-device-layer-tables.md
+- Source: docs/plans/PLAN-051-retire-device-layer-tables.md
+- Section: PLAN-051 — Retire the device layer tables
+- Related plans: Found by PLAN-012 gate item 5. PLAN-045 edits the same resolver promotion code (rebase after it lands); PLAN-034 owns archive retention; PLAN-008 retired Metabase.
+- Resume gate: Step 1 (release A: separate the data-quality Issues, remove the layer writers) needs implementation approval; each release, the archive and the drop are separately approved.
+- Last checked: 2026-11-03 (no readers, foreign keys, dependent views or findings references; resolver writes about 1,700 rows in 13 days; _sync_device_attributes also raises four data-quality Issue types).
+
+## PLAN-050 — Database memory and host capacity
+
+- Scope: Size PostgreSQL memory to the Ninja Dashboard working set on a host with enough headroom not to swap; configuration managed in the repository; any change applied only in an approved maintenance window.
+- Status: ready
+- Defined: 2026-11-03
+- Started: —
+- Completed: —
+- Blueprint: docs/plans/PLAN-050-database-memory-and-host-capacity.md
+- Source: docs/plans/PLAN-050-database-memory-and-host-capacity.md
+- Section: PLAN-050 — Database memory and host capacity
+- Related plans: Found by PLAN-049. PLAN-047 and PLAN-048 shrink the working set first; PLAN-042/PLAN-044 timings were taken under the current settings; PLAN-041 owns host CPU.
+- Resume gate: Step 1 (read-only host and database measurements) needs read-only production approval; every configuration or host change and any restart is separately approved.
+- Last checked: 2026-11-03 (shared_buffers 128 MB for a 31 GB database; host 35 GB with about 4.7 GB available and swap fully used; host shared with Zabbix and Graylog).
+
+## PLAN-049 — Index active findings by subject
+
+- Scope: Partial index on active findings by subject (migration 0404) and a page-id probe in the /devices/ Computers page so severe-Issue counts read only active findings.
+- Status: active
+- Defined: 2026-11-03
+- Started: 2026-11-03
+- Completed: —
+- Blueprint: docs/plans/PLAN-049-active-findings-index.md
+- Source: docs/plans/PLAN-049-active-findings-index.md
+- Section: PLAN-049 — Index active findings by subject
+- Related plans: Found by PLAN-012's follow-up review. PLAN-042/PLAN-044 own the Coverage-view (/inventory/computers/) performance, not /devices/. Migration 0404 depends on PLAN-045's 0403. PLAN-019 F05 owns closed-finding retention.
+- Resume gate: Implemented, validated locally and committed on branch plan049-active-findings-index (4cb502e0, worktree .work/plan049); not merged. Next: merge after PLAN-045's migrations land, then release with explicit approval of migration 0404 and a read-only post-deploy plan check.
+- Last checked: 2026-11-03 (devices_page severe-findings subquery 2.3 s reading all 29,557 active severe findings; Operations suite failures identical to the branch base).
+
+## PLAN-048 — Source records report typed facts, not JSON parsed on read
+
+- Scope: Derive a source record's reported facts as typed columns when it is written (ADR-0055) so that v_entity_observation_admin_metadata and its six readers never parse the record JSON on read.
+- Status: ready
+- Defined: 2026-11-03
+- Started: —
+- Completed: —
+- Blueprint: docs/plans/PLAN-048-record-reported-facts.md
+- Source: docs/plans/PLAN-048-record-reported-facts.md
+- Section: PLAN-048 — Source records report typed facts, not JSON parsed on read
+- Related plans: Found by PLAN-012's follow-up review (Source Records about 8 s). PLAN-047 owns write volume and observation storage; PLAN-004 owns reported contact semantics. Work in a separate worktree while PLAN-045 is in progress in the main checkout.
+- Resume gate: Step 1 (measure the migration lock on a production-size copy and the expressions read-only on production) needs rehearsal approval; ADR-0055 must be accepted before the migration.
+- Last checked: 2026-11-03 (JSON read costs 3 to 4 s per full view scan regardless of extraction style; claims cover 9 of 15 fields and no withdrawn records).
+
+## PLAN-047 — Write only what changed
+
+- Scope: Make projectors, evaluators and refreshes write only changed rows; move per-run timestamps off content rows; replace always-changing materialized views; compact tables only after re-measurement.
+- Status: ready
+- Defined: 2026-11-03
+- Started: —
+- Completed: —
+- Blueprint: docs/plans/PLAN-047-write-only-what-changed.md
+- Source: docs/plans/PLAN-047-write-only-what-changed.md
+- Section: PLAN-047 — Write only what changed
+- Related plans: Found by PLAN-012's follow-up review. PLAN-041 owns prior matcher CPU fixes; PLAN-014 owns requirement verdict policy; PLAN-019 owns pipeline correctness and retention. Work in a separate worktree while PLAN-045 is in progress in the main checkout.
+- Resume gate: Step 1, a local code inventory of each writer, needs no external access; migrations, rehearsal, release and any compaction are separately gated.
+- Last checked: 2026-11-03 (read-only counters over about 13 days: cve_match 74 M inserts and deletes for 649 k rows; relationship evidence 27 M updates for 118 k rows; device_requirement_state fully deleted and re-inserted per evaluation).
+
 ## PLAN-046 — Authority belongs to the record type
 
 - Scope: Replace per-source-instance attribute authority with record-type authority (complete by construction) plus attribute exceptions; evidence stops carrying a copy of policy; operators manage rules in Operations; per-instance overrides only where production shows a real difference.
@@ -13,7 +83,6 @@
 - Related plans: Found by PLAN-012's post-release check (ADR-0053). PLAN-045 is changing related ingest and Operations files: work in a separate worktree and rebase migrations after PLAN-045's 0401–0403 land. PLAN-026 owns the source configuration UI.
 - Resume gate: Step 1, a read-only production inventory of rules per record type and instance, needs read-only production approval; implementation, migrations, rehearsal and release are separately gated.
 - Last checked: 2026-11-03 (two enabled instances have no rules: AMROSE ScreenConnect, 4,779 records; R-U-ON, 728; 764 of 1,208 Unknown-OS Computers have an ignored OS claim).
-
 
 ## PLAN-043 — Useful issue review
 

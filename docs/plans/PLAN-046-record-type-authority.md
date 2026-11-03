@@ -5,6 +5,11 @@ Defined, not started. Each step below needs the user's approval where marked;
 production writes, migrations, commits, pushes and deployment keep their usual
 gates.
 
+**Decision record:** [ADR-0054 — Attribute authority belongs to the record
+type](../../operations/docs/decisions/0054-authority-belongs-to-the-record-type.md)
+(Proposed). The ADR is the authority for the design; this plan owns steps,
+evidence and validation.
+
 ## Goal
 
 Every source record's claims are weighed by a rule that exists by construction.
@@ -43,6 +48,8 @@ effect without re-projecting evidence.
 
 ## Design
 
+Summary of ADR-0054; on any difference the ADR governs.
+
 1. **Record-type authority, complete by construction.** Each record type in
    `entity_types` defines its authority (eligible, tier, priority) as required
    data. A record type cannot exist without it.
@@ -57,22 +64,28 @@ effect without re-projecting evidence.
    installation evidence stop storing authority. Effective selection reads it at
    selection time; the selection signature includes the rule version, and a rule
    change queues re-selection for the affected (record type, attribute) keys.
-5. **Operators manage the rules** in Operations (record-type authority and
-   exceptions, and overrides if any), with reason and change history, replacing
-   the read-only admin page.
-6. **Guard, not defense.** Sources shows, per instance and record type, which
-   mapped attributes are deliberately ineligible or disabled. "No rule" cannot
-   occur.
-7. **Decision record.** A new ADR replaces per-instance authority; it refines
-   ADR-0010/ADR-0012 and records the evidence/policy separation.
+5. **Second-hand sources stay evidence-only.** ADR-0010's deny-by-default
+   protection becomes an explicit, audited first-hand/second-hand property of
+   each source instance, declared when the instance is configured (PLAN-026).
+   Unmapped attributes stay evidence only.
+6. **Operators manage the rules** in Operations (record-type authority and
+   exceptions, and overrides if any), with reason and change history
+   (ADR-0033), replacing the read-only admin page.
+7. **Guard, not defense.** Sources shows, per instance and record type, which
+   mapped attributes are deliberately ineligible or disabled, and which
+   instances are second-hand. "No rule" cannot occur.
+8. **Decision record.** ADR-0054 amends ADR-0010 "Independent authority
+   policies", refines ADR-0012, carries forward the ADR-0032 and ADR-0034
+   exceptions, and records the evidence/policy separation. Identity policy has
+   the same per-instance keying and is out of scope (step 1 checks it).
 
 ## Steps
 
 | Step | Item | Gate |
 | --- | --- | --- |
 | 0 | Work in a separate git worktree and branch from `origin/master`; do not touch the uncommitted PLAN-042–045 work in the main checkout. Number migrations after PLAN-045's 0401–0403 and rebase when those land. | — |
-| 1 | Read-only production inventory: for each record type and attribute, are rules identical across instances; record types and attributes with no rule; counts of claims, effective values, relationship and OS-installation evidence that each change would re-select. | Read-only production approval |
-| 2 | Draft the ADR and the exact rule table (seeded from step 1). | User decision on R-U-ON trust and any overrides |
+| 1 | Read-only production inventory: for each record type and attribute, are rules identical across instances; record types and attributes with no rule; a proposed first-hand/second-hand value per instance from current rules; whether `identity_authority_policies` has the same gap; counts of claims, effective values, relationship and OS-installation evidence that each change would re-select. | Read-only production approval |
+| 2 | Complete ADR-0054 with step 1's outcome (overrides kept or retired, first-hand/second-hand per instance, R-U-ON exceptions) and the exact rule table; the user accepts or amends it. | User decision on R-U-ON trust, instance classification and any overrides; ADR-0054 accepted before step 3 |
 | 3 | Migration: record-type authority columns, exception table, seed from current rules, retire instance rules (or convert real differences to overrides), rule-change triggers queuing re-selection. Read real constraints first; pre-check any assertion on production read-only. | Migration review |
 | 4 | Projectors: claim, relationship and OS-installation projectors stop writing authority; effective and relationship selection read it at selection time. Keep one copy of each rule. | — |
 | 5 | Operations: rule editing with reason and change history; Sources guard view. | — |
@@ -103,5 +116,8 @@ effect without re-projecting evidence.
 
 ## Related
 
-PLAN-012 (found it; ADR-0053), PLAN-025 (added the AMROSE ScreenConnect
-instance), PLAN-026 (source configuration UI), ADR-0010, ADR-0012, ADR-0050.
+ADR-0054 (this plan's decision), ADR-0010 (amended: independent authority
+policies), ADR-0012 (shared projector), ADR-0032 and ADR-0034 (exceptions carried
+forward), ADR-0033 (rule changes recorded), ADR-0050, ADR-0053; PLAN-012 (found
+it), PLAN-025 (added the AMROSE ScreenConnect instance), PLAN-026 (source
+configuration UI declares first-hand/second-hand).
