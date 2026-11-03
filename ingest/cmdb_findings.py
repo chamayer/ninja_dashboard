@@ -218,6 +218,8 @@ def _enqueue_reference_reassessments(
            AND assessment.dimension = 'hudu_device_reference'
          WHERE assessment.target_id IS NULL
             OR assessment.work_owner IS DISTINCT FROM target.expected_owner
+            OR assessment.target_version IS DISTINCT FROM
+               subject.input_version * 1000000 + subject.association_version
         """,
         (list(source_instances), list(asset_ids), list(owners), TENANT_ID),
     )

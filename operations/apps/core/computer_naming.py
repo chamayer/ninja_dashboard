@@ -18,7 +18,8 @@ from django.http import HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect
 from django.views.decorators.http import require_POST
 
-from .models import Device
+from .computer_reads import client_owned_computers, lock_client_owned_computer
+from .models import Client, Device
 
 REASON_MAX_LENGTH = 500
 NAME_MAX_LENGTH = 255
@@ -55,8 +56,8 @@ def _colliding(device: Device, name: str) -> list[str]:
     key = _key(name)
     return [
         other.canonical_hostname
-        for other in Device.objects.filter(
-            tenant_id=1, client_id=device.client_id, deleted_at__isnull=True
+        for other in client_owned_computers(
+            Device.objects.filter(deleted_at__isnull=True), 1, device.client_id
         )
         .exclude(id=device.id)
         .exclude(lifecycle_status=Device.LifecycleStatus.RETIRED)
@@ -89,8 +90,10 @@ def _named_message(request: HttpRequest, cur, device: Device) -> None:
 @require_POST
 @transaction.atomic
 def device_rename(request: HttpRequest, org_slug: str, device_id: str) -> HttpResponse:
+    client = get_object_or_404(Client, tenant_id=1, slug=org_slug, deleted_at__isnull=True)
+    lock_client_owned_computer(1, device_id, client.id)
     device = get_object_or_404(
-        Device, tenant_id=1, id=device_id, client__slug=org_slug, deleted_at__isnull=True
+        client_owned_computers(Device.objects.all(), 1, client.id), id=device_id, deleted_at__isnull=True
     )
     name = (request.POST.get("name") or "").strip().lower()
     reason = (request.POST.get("reason") or "").strip()
@@ -143,8 +146,10 @@ def device_rename(request: HttpRequest, org_slug: str, device_id: str) -> HttpRe
 @require_POST
 @transaction.atomic
 def device_name_automatic(request: HttpRequest, org_slug: str, device_id: str) -> HttpResponse:
+    client = get_object_or_404(Client, tenant_id=1, slug=org_slug, deleted_at__isnull=True)
+    lock_client_owned_computer(1, device_id, client.id)
     device = get_object_or_404(
-        Device, tenant_id=1, id=device_id, client__slug=org_slug, deleted_at__isnull=True
+        client_owned_computers(Device.objects.all(), 1, client.id), id=device_id, deleted_at__isnull=True
     )
     reason = (request.POST.get("reason") or "").strip()
     if not reason or len(reason) > REASON_MAX_LENGTH:

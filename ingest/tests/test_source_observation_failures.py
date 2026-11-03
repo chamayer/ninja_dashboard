@@ -6,6 +6,17 @@ import pytest
 from ingest import source_observations
 
 
+def test_client_attribution_records_the_independent_lookup_used():
+    attribute = source_observations._source_client_attribution
+    assert attribute("instance-client", "group", {"group": "group-client"}) == (
+        "instance-client", {"basis": "source_instance", "client_id": "instance-client"}
+    )
+    assert attribute(None, "group", {"group": "group-client"}) == (
+        "group-client", {"basis": "source_group", "client_id": "group-client"}
+    )
+    assert attribute(None, "missing", {}) == (None, {"basis": "unknown", "client_id": None})
+
+
 def test_source_collection_continues_then_reports_partial_failure(monkeypatch):
     attempted: list[str] = []
     recorded: list[tuple[str, bool]] = []

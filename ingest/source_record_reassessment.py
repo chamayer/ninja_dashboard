@@ -13,7 +13,8 @@ decisions.
 * ``apply`` applies only what the reviewed policy covers: ``newly_matched`` rows
   with exactly one candidate, through ``associate_record`` with the existing
   association kept, and only while the subject's input and association versions
-  are still those of the preview. A changed row returns to review. ``same`` needs
+  are still those of the preview. It reruns the match and locks the selected
+  Computer's effective owner before attaching. A changed row returns to review. ``same`` needs
   no change. ``changed``, ``ambiguous`` and ``unmatched`` are written to the
   review list and never applied here.
 * The report keeps the rollback mapping (each applied subject and the link it
@@ -35,6 +36,8 @@ from typing import Any
 from ingest import db, preview_identity_reconciliation
 from ingest.identity import identity_entity_types
 from ingest.identity.matching import (
+    OwnershipMatchDeferred,
+    _resolve_match,
     load_identity_match_policies,
     preview_match,
     record_name_short,
@@ -56,7 +59,8 @@ def _unattached(
     cur.execute(
         """
         SELECT o.observation_id, o.source_instance_id, o.entity_type, o.platform,
-               o.entity_key, o.client_id, o.canonical_data, s.id, s.input_version,
+               o.entity_key, operations.computer_client_independent_evidence(o.tenant_id, o.observation_id),
+               o.canonical_data, s.id, s.input_version,
                s.association_version
           FROM operations.entity_observation_current o
           JOIN operations.source_record_subjects s
@@ -108,7 +112,7 @@ def _unattached(
         )
         result = preview.result
         if result is None:
-            has_blocker = any(attempt.blockers for attempt in preview.attempts)
+            has_blocker = preview.ownership_deferred or any(attempt.blockers for attempt in preview.attempts)
             outcome, proposed = ("ambiguous" if has_blocker else "unmatched"), None
         elif len(result.candidates) == 1:
             outcome, proposed = "newly_matched", result.device_id
@@ -189,9 +193,14 @@ def apply(report: dict[str, Any]) -> dict[str, Any]:
                 """
                 SELECT s.input_version, s.association_version, s.source_instance_id,
                        s.external_namespace, s.parent_external_namespace,
-                       s.parent_external_id, s.external_id
+                       s.parent_external_id, s.external_id,
+                       o.observation_id, o.entity_type, o.platform, o.entity_key,
+                       o.canonical_data,
+                       operations.computer_client_independent_evidence(s.tenant_id, o.observation_id)
                   FROM operations.source_record_subjects s
-                 WHERE s.tenant_id = %s AND s.id = %s FOR UPDATE
+                  JOIN operations.entity_observation_current o
+                    ON o.tenant_id = s.tenant_id AND o.observation_id = s.observation_id
+                 WHERE s.tenant_id = %s AND s.id = %s FOR UPDATE OF s
                 """,
                 (tenant_id, entry["subject_id"]),
             )
@@ -204,10 +213,41 @@ def apply(report: dict[str, Any]) -> dict[str, Any]:
                     {**entry, "returned_reason": "inputs changed since preview"}
                 )
                 continue
+            observation_id, entity_type, platform, entity_key, data, client_id = row[7:]
+            data = data or {}
+            hostname = record_name_short(
+                cur, platform, entity_type, data.get("hostname") or data.get("guest_name"), data.get("domain")
+            )
+            try:
+                current = _resolve_match(
+                    cur, tenant_id=tenant_id, source_name=platform, external_id=entity_key,
+                    entity_type=entity_type, serial=data.get("serial_number"), vm_uuid=data.get("vm_uuid"),
+                    hostname=hostname or None, macs=data.get("macs") or [], client_id=client_id,
+                    policies=load_identity_match_policies(cur, tenant_id), is_online=data.get("is_online"),
+                    source_instance_id=row[2], skip_source_identity=True,
+                    identity_types=sorted(identity_entity_types(cur)),
+                    excluded_observation_ids=(observation_id,), trace=False,
+                ).result
+            except OwnershipMatchDeferred:
+                current = None
+            if (current is None or len(current.candidates) != 1
+                    or str(current.device_id) != entry["proposed_device_id"]
+                    or current.matcher != entry["matcher"]):
+                returned.append({**entry, "returned_reason": "match changed since preview"})
+                continue
+            cur.execute(
+                "SELECT operations.lock_computer_client_scope(%s, id, client_id) "
+                "FROM operations.devices WHERE tenant_id = %s AND id = %s AND deleted_at IS NULL",
+                (tenant_id, tenant_id, entry["proposed_device_id"]),
+            )
+            owner = cur.fetchone()
+            if not owner or not owner[0]:
+                returned.append({**entry, "returned_reason": "candidate ownership changed"})
+                continue
             cur.execute(
                 "SELECT operations.associate_record(%s, %s, %s, %s, %s, %s, %s,"
                 " 'reassessment', 'ingest.source_record_reassessment', true)",
-                (tenant_id, *row[2:], entry["proposed_device_id"]),
+                (tenant_id, *row[2:7], entry["proposed_device_id"]),
             )
             if not cur.fetchone()[0]:
                 returned.append({**entry, "returned_reason": "already associated"})

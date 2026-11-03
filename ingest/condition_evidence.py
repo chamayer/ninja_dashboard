@@ -61,7 +61,11 @@ def device_identity_signals(cur: Any, tenant_id: int, device_ids: list[str]) -> 
         return {}
     cur.execute(
         """
-        SELECT d.id, d.entity_id IS NOT NULL AND d.client_id IS NOT NULL,
+        SELECT d.id, d.entity_id IS NOT NULL AND EXISTS (
+                   SELECT 1 FROM operations.computer_client_ownership owner
+                    WHERE owner.tenant_id = d.tenant_id AND owner.device_id = d.id
+                      AND owner.effective_client_id = d.client_id
+                      AND owner.state IN ('resolved', 'decision_protected')),
                EXISTS (SELECT 1 FROM operations.findings f
                  JOIN operations.finding_types ft ON ft.id = f.finding_type_id
                 WHERE f.tenant_id = d.tenant_id
@@ -226,7 +230,11 @@ def device_identity_signal(
     participant = Participant("device", str(device_id), participant_role, tenant_id)
     cur.execute(
         """
-        SELECT d.entity_id IS NOT NULL AND d.client_id IS NOT NULL,
+        SELECT d.entity_id IS NOT NULL AND EXISTS (
+                   SELECT 1 FROM operations.computer_client_ownership owner
+                    WHERE owner.tenant_id = d.tenant_id AND owner.device_id = d.id
+                      AND owner.effective_client_id = d.client_id
+                      AND owner.state IN ('resolved', 'decision_protected')),
                EXISTS (
                    SELECT 1
                      FROM operations.findings conflict

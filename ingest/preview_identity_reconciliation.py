@@ -58,7 +58,7 @@ def _attempts(preview: MatchPreview) -> tuple[dict[str, Any], ...]:
 
 def _outcome(preview: MatchPreview, previous_device_id: UUID) -> tuple[str, UUID | None]:
     if preview.result is None:
-        has_blocker = any(attempt.blockers for attempt in preview.attempts)
+        has_blocker = preview.ownership_deferred or any(attempt.blockers for attempt in preview.attempts)
         return ("review_required" if has_blocker else "no_independent_match", None)
     if preview.result.device_id == previous_device_id:
         return "unchanged", previous_device_id
@@ -89,7 +89,8 @@ def run(*, tenant_id: int = 1) -> dict[str, Any]:
             """
             SELECT observation_id, source_instance_id, external_namespace,
                    parent_external_namespace, parent_external_id, external_id,
-                   device_id, active, entity_type, platform, entity_key, client_id,
+                   device_id, active, entity_type, platform, entity_key,
+                   operations.computer_client_independent_evidence(tenant_id, observation_id),
                    canonical_data
               FROM operations.entity_observation_current
              WHERE tenant_id = %s AND device_id IS NOT NULL

@@ -89,16 +89,16 @@
                 {% for d in devices %}
                 <tr>
                     <td>
-                        {% if d.client %}
-                            <a href="{% url 'device_detail' org_slug=d.client.slug device_id=d.id %}"><code>{{ d.canonical_hostname }}</code></a>
+                        {% if d.search_client %}
+                            <a href="{% url 'device_detail' org_slug=d.search_client.slug device_id=d.id %}"><code>{{ d.canonical_hostname }}</code></a>
                         {% else %}
                             <code>{{ d.canonical_hostname }}</code>
                         {% endif %}
                     </td>
                     <td class="muted"><code>{{ d.canonical_serial|default:"—" }}</code></td>
                     <td>
-                        {% if d.client %}
-                            <a href="{% url 'org_index' org_slug=d.client.slug %}">{{ d.client.display_name }}</a>
+                        {% if d.search_client %}
+                            <a href="{% url 'org_index' org_slug=d.search_client.slug %}">{{ d.search_client.display_name }}</a>
                         {% else %}
                             <span class="muted">—</span>
                         {% endif %}

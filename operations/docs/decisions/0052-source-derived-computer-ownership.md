@@ -40,6 +40,29 @@ historical or compatibility data but cannot authorize or imply current client
 ownership for an unresolved Computer. Unknown is not tenant ownership: it does
 not turn a client-owned machine into an unscoped or MSP-owned entity.
 
+## Local draft: independent evidence
+
+An observation's stored client can have been inherited from its attached
+Computer, so it cannot by itself prove that Computer's ownership. The draft
+uses a live client-scoped source instance, or a current source-group mapping
+whose provenance is independently supported. Operator mappings require a
+current matching link history no newer than the decision; automatic mappings
+require an unambiguous
+current group name and a live client name or trusted alias. A missing or
+unproved mapping is unknown evidence. Source-instance attribution takes
+precedence when present. Input changes invalidate the affected projections.
+Group-derived evidence requires one current organization record and matches
+its complete source identity to the mapping. An unqualified group ID shared
+by multiple current organization records is ambiguous even if only one of
+those records has a mapping.
+New mapping decisions use a wall-clock timestamp consistent with association
+history; older decisions with ambiguous ordering require reconfirmation.
+Ownership invalidation and settlement also queue affected source records and
+their bounded identity neighbors, so assessments made while ownership is unknown
+can be revisited. These queues execute inside the changing transaction; their
+lock and workload impact must be reviewed in an authorized rehearsal.
+This contract and its concurrency behavior remain subject to validation.
+
 ## Enforcement and transition requirements
 
 - A schema-backed, tenant-scoped result must distinguish resolved, conflict,
@@ -63,6 +86,19 @@ not turn a client-owned machine into an unscoped or MSP-owned entity.
   Keep existing decision and change history. Client reconciliation does not by
   itself merge duplicate Computers or change source associations.
 
+## Local draft: transaction fencing
+
+The draft locks ownership rows in stable device order when client-scoped writes
+or inventory projection rely on an owner. Inventory rolls back and reports a
+retry when a staged Computer's captured client no longer matches. Notification
+delivery locks the captured owners and finding rows,
+rechecks the selection, and retains those locks through each delivery attempt.
+This closes the check-to-send ownership window but can delay concurrent source
+changes while an inventory transaction or network request holds a lock. The
+delivery clients have network timeouts; these do not prove a maximum total lock
+duration. Lock waits, throughput and failure/retry behavior require a separately
+authorized rehearsal before deployment. Do not measure them on the workstation.
+
 ## Validation and acceptance
 
 Use synthetic PostgreSQL records to prove unanimous agreement and change,
@@ -82,3 +118,41 @@ source admissibility, complete invalidation, compatibility rollout and
 concurrency behavior still need review and validation. The user authorized
 preparation and local testing of schema migrations on 2026-11-03; production
 execution and deployment remain separate.
+
+The collection path previously copied an associated Computer's client into an
+observation when its source instance or group had no mapping. Existing current
+observation upserts preserve a prior client when a later input is null, and the
+fallback could also populate a group link. Those stored values are not proven
+independent source-client evidence. New collection no longer applies that
+fallback, but existing observations and links need a provenance-aware transition
+before the projector can safely treat them as current ownership evidence. Do
+not infer or rewrite historical source mappings without reviewing the available
+decision and source-binding provenance.
+
+Source-instance `client_id` is an explicit scoped input. Client source-group
+links alone are not sufficient proof: they can be derived from `org`
+observations populated by the former fallback. In addition, the resolver's
+automatic mapping backfill records undecided pre-existing links as automatic,
+including links whose attachment preceded mapping decisions. An `automatic`
+mapping decision alone therefore does not establish independent evidence.
+Explicit operator mappings and independently corroborated automatic mappings
+need distinct, enforceable treatment; a free-text reason is not a provenance
+contract. Mapping, alias and source-instance changes also need invalidation
+fences if the projector reads those inputs directly.
+
+The local draft records the client lookup basis on newly collected observations
+as `source_instance`, `source_group`, or `unknown`; it invalidates ownership
+when this metadata changes. The label records what collection used, not whether
+a group link is independent. Legacy observations lack the label, and the
+projector has not yet been changed to evaluate it. The draft remains unreleasable
+until provenance, legacy handling and their invalidation rules are enforced.
+The draft now invalidates affected Computers when source-instance clients,
+source-group links or their mapping decisions change. Alias and client-name
+changes still need fencing if automatic name corroboration is used as proof.
+The draft evidence reader recognizes source-instance clients, operator-confirmed
+group links backed by current association history, and automatic mappings whose
+current group name independently identifies one client. It returns unknown for
+uncorroborated or stale mappings. The draft projector and operator-decision
+snapshots now call this reader, and source-link history changes invalidate the
+affected ownership state. The latest automatic-name rules and wiring have not
+been validated; the draft remains unreleasable.

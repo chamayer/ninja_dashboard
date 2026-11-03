@@ -129,8 +129,12 @@ class ApplyResult:
         """One plain-English line for the Jobs pages."""
         if not self.devices:
             if self.source_changed:
-                return f"{scope}: {self.source_changed:,} source-record software rows changed."
-            return f"{scope}: no computer reported a software list."
+                text = f"{scope}: {self.source_changed:,} source-record software rows changed."
+            else:
+                text = f"{scope}: no computer reported a software list."
+            if self.unresolved:
+                text += f" {self.unresolved:,} rows need a Computer with a resolved client."
+            return text
         text = (
             f"{scope}: {self.devices:,} computers refreshed. Programs: {self.new:,} new, "
             f"{self.changed:,} changed, {self.removed:,} removed, {self.unchanged:,} unchanged."
@@ -142,7 +146,7 @@ class ApplyResult:
         if self.held_devices:
             text += f" {self.held_devices:,} computers held for review."
         if self.unresolved:
-            text += f" {self.unresolved:,} rows were on Ninja devices not linked to a computer."
+            text += f" {self.unresolved:,} rows need a Computer with a resolved client."
         if not self.complete:
             text += " Ninja stopped early, so nothing was removed."
         return text
@@ -567,6 +571,36 @@ SELECT DISTINCT ON (device_id, canonical_name) *
  ORDER BY device_id, canonical_name, seq DESC
 """
 
+# Freeze the selected ownership through the write transaction. A stale map
+# aborts the batch so its queue or caller can retry the whole transaction.
+OWNERSHIP_LOCK_SQL = """
+CREATE TEMP TABLE inventory_authorized ON COMMIT DROP AS
+WITH pairs AS MATERIALIZED (
+    SELECT DISTINCT device_id, client_id FROM inventory_raw
+     WHERE device_id IS NOT NULL AND client_id IS NOT NULL
+)
+SELECT * FROM operations.lock_computer_client_scopes(
+    %(tenant_id)s,
+    coalesce((SELECT array_agg(device_id ORDER BY device_id, client_id) FROM pairs), '{}'::uuid[]),
+    coalesce((SELECT array_agg(client_id ORDER BY device_id, client_id) FROM pairs), '{}'::uuid[])
+)
+"""
+
+DROP_UNAUTHORIZED_SQL = """
+DELETE FROM inventory_raw raw
+ WHERE NOT EXISTS (SELECT 1 FROM inventory_authorized authorized
+                    WHERE authorized.device_id = raw.device_id
+                      AND authorized.client_id = raw.client_id)
+"""
+
+
+def _lock_inventory_ownership(cur: Any, tenant_id: int) -> None:
+    cur.execute(OWNERSHIP_LOCK_SQL, {"tenant_id": tenant_id})
+    cur.execute(DROP_UNAUTHORIZED_SQL)
+    if cur.rowcount:
+        raise RuntimeError("Computer client ownership changed during software collection; retry the batch")
+
+
 DEVICE_COUNTS_SQL = """
 SELECT l.device_id, COUNT(*), s.listed_count, s.held_at, s.release_requested_at
   FROM inventory_listing l
@@ -867,6 +901,7 @@ def apply(
             result.source_retired, result.source_held = _retire_absent_source_rows(
                 cur, source_rows, stream.complete, cfg, at
             )
+        _lock_inventory_ownership(cur, TENANT_ID)
         cur.execute(LISTING_SQL)
         cur.execute(
             "CREATE INDEX ON inventory_listing (device_id, client_id, canonical_name)"
@@ -926,6 +961,10 @@ def load_device_map() -> dict[str, tuple[uuid.UUID, uuid.UUID]]:
             SELECT dl.external_id, dl.device_id, d.client_id
               FROM operations.v_device_source_link dl
               JOIN operations.devices d ON d.id = dl.device_id
+              JOIN operations.computer_client_ownership owner
+                ON owner.tenant_id = d.tenant_id AND owner.device_id = d.id
+               AND owner.effective_client_id = d.client_id
+               AND owner.state IN ('resolved', 'decision_protected')
               JOIN operations.sources s ON s.id = dl.source_id AND s.name = 'Ninja'
              WHERE dl.tenant_id = %s AND d.deleted_at IS NULL
             """,

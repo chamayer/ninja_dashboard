@@ -1,4 +1,5 @@
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 
 from ingest.evaluator import (
     _lifecycle_target,
@@ -7,6 +8,79 @@ from ingest.evaluator import (
 )
 
 NOW = datetime(2026, 7, 31, 12, 0, tzinfo=UTC)
+
+
+def test_lifecycle_write_requires_current_computer_ownership(monkeypatch):
+    from ingest import evaluator
+
+    class Cursor:
+        def __init__(self):
+            self.locked = []
+
+        def execute(self, _sql, params):
+            self.locked.append(params)
+
+        def fetchone(self):
+            return (self.locked[-1][1] == 2,)
+
+    def result(device_id):
+        return SimpleNamespace(
+            listing=SimpleNamespace(device_id=device_id, client_id=10, in_use_confirmed=False,
+                                    reporting=False, lifecycle_status="active"),
+            known=True, target="retired", reason="retire", evidence=None,
+        )
+
+    changed = []
+    monkeypatch.setattr(evaluator, "_transition_lifecycle", lambda cur, tenant, item, *args:
+                        changed.append(item.device_id) or True)
+    cur = Cursor()
+    assert evaluator._apply_lifecycle_results(cur, 1, NOW, None, {2: result(2), 1: result(1)}) == 1
+    assert [params[1] for params in cur.locked] == [1, 2]
+    assert changed == [2]
+
+
+def test_device_finding_writers_skip_an_unresolved_owner():
+    from ingest import evaluator
+
+    class Cursor:
+        def __init__(self):
+            self.statements = []
+
+        def execute(self, sql, params):
+            self.statements.append(sql)
+
+        def fetchone(self):
+            return (False,)
+
+    for writer in (evaluator._upsert_finding, evaluator._upsert_lifecycle_finding):
+        cur = Cursor()
+        assert writer(cur, 1, 2, 3, 4, "key", "low", "confirmed", NOW, {}) == 0
+        assert len(cur.statements) == 1
+        assert "lock_computer_client_scope" in cur.statements[0]
+
+
+def test_requirement_replacement_keeps_unlocked_computers_out_of_scope():
+    from ingest import evaluator
+
+    class Cursor:
+        def __init__(self):
+            self.statements = []
+
+        def execute(self, sql, params=None):
+            self.statements.append((sql, params))
+
+        def fetchall(self):
+            return [(1,)]
+
+        def fetchone(self):
+            return (True,)
+
+    cur = Cursor()
+    verdicts = [{"device_id": "1"}, {"device_id": "2"}]
+    locked = evaluator._write_requirement_state(cur, 7, [(1, 11, 5), (2, 22, 9)], verdicts)
+    assert locked == {1}
+    assert cur.statements[-1][1][1] == [1]
+    assert "owner.evidence_revision = captured.revision" in cur.statements[0][0]
 
 
 def _row(

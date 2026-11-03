@@ -254,7 +254,9 @@ def _load_records(cur: Any, tenant_id: int, subject_ids: list[uuid.UUID]) -> lis
         )
         SELECT s.id, s.input_version, s.association_version, s.record_role, s.presence,
                s.platform, s.entity_type, s.source_instance_id, s.external_id,
-               o.observation_id, o.client_id, o.canonical_data,
+               o.observation_id,
+               operations.computer_client_independent_evidence(s.tenant_id, o.observation_id) AS client_id,
+               o.canonical_data,
                (
                     SELECT CASE
                              WHEN count(DISTINCT group_link.entity_id) = 1
@@ -264,12 +266,22 @@ def _load_records(cur: Any, tenant_id: int, subject_ids: list[uuid.UUID]) -> lis
                      WHERE group_link.tenant_id = s.tenant_id
                        AND group_link.source_instance_id = s.source_instance_id
                        AND group_link.entity_class_id = 'client'
-                       AND group_link.external_id =
-                           o.canonical_data ->> 'platform_group_id'
+                       AND (group_link.external_id = o.canonical_data ->> 'platform_group_id'
+                            OR EXISTS (SELECT 1 FROM operations.entity_observation_current org
+                                 WHERE org.tenant_id = group_link.tenant_id
+                                   AND org.source_instance_id = group_link.source_instance_id
+                                   AND org.entity_type = 'org' AND org.active
+                                   AND org.entity_key = o.canonical_data ->> 'platform_group_id'
+                                   AND org.external_id = group_link.external_id
+                                   AND org.external_namespace = group_link.external_namespace
+                                   AND org.parent_external_namespace = group_link.parent_external_namespace
+                                   AND org.parent_external_id = group_link.parent_external_id))
+                       AND group_link.entity_id = operations.computer_client_independent_evidence(
+                           s.tenant_id, o.observation_id)
                        AND group_link.missing_since IS NULL
                 ) AS source_group_client_id,
                link.entity_id AS device_id,
-               d.client_id AS device_client_id,
+               owner.effective_client_id AS device_client_id,
                link.match_method,
                d.id IS NOT NULL AS device_live,
                EXISTS (SELECT 1 FROM operations.entity_candidates c
@@ -294,13 +306,17 @@ def _load_records(cur: Any, tenant_id: int, subject_ids: list[uuid.UUID]) -> lis
            AND link.entity_class_id = 'device'
           LEFT JOIN operations.devices d
             ON d.tenant_id = link.tenant_id AND d.id = link.entity_id AND d.deleted_at IS NULL
+          LEFT JOIN operations.computer_client_ownership owner
+            ON owner.tenant_id = d.tenant_id AND owner.device_id = d.id
+           AND owner.state IN ('resolved', 'decision_protected')
           LEFT JOIN legacy_stale stale_ref
             ON stale_ref.asset_id = s.external_id
            AND stale_ref.source_instance_id = s.source_instance_id::text
           LEFT JOIN legacy_divergent divergent_ref
             ON divergent_ref.asset_id = s.external_id
            AND divergent_ref.source_instance_id = s.source_instance_id::text
-           AND divergent_ref.client_id IS NOT DISTINCT FROM o.client_id
+           AND divergent_ref.client_id IS NOT DISTINCT FROM
+               operations.computer_client_independent_evidence(s.tenant_id, o.observation_id)
          WHERE s.tenant_id = %s AND s.id = ANY(%s::uuid[]) AND s.subject_kind = 'record'
         """,
         (tenant_id, tenant_id, tenant_id, subject_ids),
@@ -365,7 +381,11 @@ def _candidate_computers(
             ON d.tenant_id = link.tenant_id AND d.id = link.entity_id AND d.deleted_at IS NULL
          WHERE mine.tenant_id = %s AND mine.subject_id = ANY(%s::uuid[])
            AND (mine.key_family <> 'name'
-                OR (mo.client_id IS NOT NULL AND d.client_id = mo.client_id))
+                OR (operations.computer_client_independent_evidence(ms.tenant_id, ms.observation_id) IS NOT NULL AND EXISTS (
+                    SELECT 1 FROM operations.computer_client_ownership owner
+                     WHERE owner.tenant_id = d.tenant_id AND owner.device_id = d.id
+                       AND owner.effective_client_id = operations.computer_client_independent_evidence(ms.tenant_id, ms.observation_id)
+                       AND owner.state IN ('resolved', 'decision_protected'))))
            AND NOT EXISTS (
                SELECT 1 FROM operations.device_operator_decisions x
                 WHERE x.tenant_id = d.tenant_id AND x.device_id = d.id
@@ -422,6 +442,7 @@ def evaluate_record(
     capability_policy_known: bool = True,
     identity_conflicts: dict[uuid.UUID, set[str]] | None = None,
     attached_contradiction: dict | None = None,
+    identity_ownership_deferred: bool = False,
     stale_after_days: int | None = None,
     computer_alive: bool = False,
     now: datetime | None = None,
@@ -892,6 +913,10 @@ def evaluate_record(
         results.append(
             _result("identity.association", "not_applicable", evidence={"role": role})
         )
+    elif identity_ownership_deferred:
+        results.append(
+            _result("identity.association", "unknown", missing=["computer_client_ownership"])
+        )
     elif attached and attached_contradiction:
         # A corroborated serial/VM UUID match points to exactly one other
         # Computer: the attachment needs a decision (standing rule, 2026-11-01).
@@ -991,7 +1016,11 @@ def _rejected_software_by_record(
         f"""
         WITH installs AS (
             SELECT i.source_record_id, i.canonical_name, i.publisher, i.version,
-                   COALESCE(d.client_id, o.client_id) AS client_id, link.entity_id AS device_id
+                   CASE WHEN d.id IS NULL
+                        THEN operations.computer_client_independent_evidence(s.tenant_id, s.observation_id)
+                        ELSE owner.effective_client_id END AS client_id,
+                   CASE WHEN d.id IS NOT NULL AND owner.effective_client_id IS NOT NULL
+                        THEN d.id END AS device_id
               FROM operations.source_record_software_current i
               JOIN operations.source_record_subjects s
                 ON s.tenant_id = i.tenant_id AND s.id = i.source_record_id
@@ -1005,6 +1034,9 @@ def _rejected_software_by_record(
                AND link.external_id = s.external_id AND link.entity_class_id = 'device'
               LEFT JOIN operations.devices d
                 ON d.tenant_id = link.tenant_id AND d.id = link.entity_id AND d.deleted_at IS NULL
+              LEFT JOIN operations.computer_client_ownership owner
+                ON owner.tenant_id = d.tenant_id AND owner.device_id = d.id
+               AND owner.state IN ('resolved', 'decision_protected')
              WHERE i.tenant_id = %s AND i.source_record_id = ANY(%s::uuid[])
                AND i.stale_since IS NULL
         )
@@ -1038,7 +1070,11 @@ def _rejected_software_by_record(
         (tenant_id, subject_ids, *((tenant_id,) * 6)),
     )
     rejected: dict[uuid.UUID, list[dict]] = defaultdict(list)
-    policy_known = {record["id"]: record["client_id"] is not None for record in records}
+    policy_known = {
+        record["id"]: record.get("client_id") is not None
+        and (not record.get("device_live") or record.get("device_client_id") is not None)
+        for record in records
+    }
     for (
         subject_id,
         name,
@@ -1109,7 +1145,7 @@ _LEGACY_IDENTITY_OWNERS = (
 
 
 def _attached_contradictions(
-    cur: Any, tenant_id: int, records: list[dict]
+    cur: Any, tenant_id: int, records: list[dict], deferred_subjects: set[uuid.UUID] | None = None
 ) -> dict[uuid.UUID, dict]:
     """Attached records whose corroborated serial/VM UUID points to another Computer.
 
@@ -1181,6 +1217,10 @@ def _attached_contradictions(
             identity_types=identity_types,
             excluded_observation_ids=(record["observation_id"],),
         )
+        if getattr(preview, "ownership_deferred", False):
+            if deferred_subjects is not None:
+                deferred_subjects.add(record["id"])
+            continue
         result = preview.result
         if (
             result is not None
@@ -1262,7 +1302,7 @@ def _computers_alive(
 
 
 def _qualified_identity_conflicts(
-    cur: Any, tenant_id: int, records: list[dict]
+    cur: Any, tenant_id: int, records: list[dict], deferred_subjects: set[uuid.UUID] | None = None
 ) -> dict[uuid.UUID, dict[uuid.UUID, set[str]]]:
     """Return only competing strong matches or established identity conflicts.
 
@@ -1308,6 +1348,10 @@ def _qualified_identity_conflicts(
             identity_types=identity_types,
             excluded_observation_ids=(record["observation_id"],),
         )
+        if getattr(preview, "ownership_deferred", False):
+            if deferred_subjects is not None:
+                deferred_subjects.add(record["id"])
+            continue
         for attempt in preview.attempts:
             established_conflict = any(
                 reason != "operator_exclusion" for reason in attempt.blockers.values()
@@ -1351,7 +1395,11 @@ def _unauthorized_tools_by_record(
         f"""
         WITH installs AS (
             SELECT i.source_record_id, i.canonical_name, i.publisher, i.version,
-                   COALESCE(d.client_id, o.client_id) AS client_id, link.entity_id AS device_id
+                   CASE WHEN d.id IS NULL
+                        THEN operations.computer_client_independent_evidence(s.tenant_id, s.observation_id)
+                        ELSE owner.effective_client_id END AS client_id,
+                   CASE WHEN d.id IS NOT NULL AND owner.effective_client_id IS NOT NULL
+                        THEN d.id END AS device_id
               FROM operations.source_record_software_current i
               JOIN operations.source_record_subjects s
                 ON s.tenant_id = i.tenant_id AND s.id = i.source_record_id
@@ -1365,6 +1413,9 @@ def _unauthorized_tools_by_record(
                AND link.external_id = s.external_id AND link.entity_class_id = 'device'
               LEFT JOIN operations.devices d
                 ON d.tenant_id = link.tenant_id AND d.id = link.entity_id AND d.deleted_at IS NULL
+              LEFT JOIN operations.computer_client_ownership owner
+                ON owner.tenant_id = d.tenant_id AND owner.device_id = d.id
+               AND owner.state IN ('resolved', 'decision_protected')
              WHERE i.tenant_id = %s AND i.source_record_id = ANY(%s::uuid[])
                AND i.stale_since IS NULL
         ), resolved AS (
@@ -1453,6 +1504,11 @@ def _unauthorized_tools_by_record(
         other_concern,
     ) in cur.fetchall():
         saw_install.add(subject_id)
+        if client_id is None:
+            # Neither a missing source mapping nor an unresolved attached
+            # Computer authorizes a client-scoped capability conclusion.
+            unlinked_products.add(subject_id)
+            continue
         if product_uuid is None:
             unlinked_products.add(subject_id)
             continue
@@ -1536,8 +1592,11 @@ def _software_signal_findings_by_record(
         WITH installs AS (
             SELECT i.tenant_id, i.source_record_id, i.canonical_name, i.publisher,
                    i.version, i.install_location,
-                   COALESCE(d.client_id, o.client_id) AS client_id,
-                   link.entity_id AS device_id
+                   CASE WHEN d.id IS NULL
+                        THEN operations.computer_client_independent_evidence(s.tenant_id, s.observation_id)
+                        ELSE owner.effective_client_id END AS client_id,
+                   CASE WHEN d.id IS NOT NULL AND owner.effective_client_id IS NOT NULL
+                        THEN d.id END AS device_id
               FROM operations.source_record_software_current i
               JOIN operations.source_record_subjects s
                 ON s.tenant_id = i.tenant_id AND s.id = i.source_record_id
@@ -1552,6 +1611,9 @@ def _software_signal_findings_by_record(
               LEFT JOIN operations.devices d
                 ON d.tenant_id = link.tenant_id AND d.id = link.entity_id
                AND d.deleted_at IS NULL
+              LEFT JOIN operations.computer_client_ownership owner
+                ON owner.tenant_id = d.tenant_id AND owner.device_id = d.id
+               AND owner.state IN ('resolved', 'decision_protected')
              WHERE i.tenant_id = %s AND i.source_record_id = ANY(%s::uuid[])
                AND i.stale_since IS NULL
         ), threat_titles AS (
@@ -1776,8 +1838,9 @@ def assess_records(
     software_signals, software_signal_enabled = _software_signal_findings_by_record(
         cur, tenant_id, subject_ids, software_config, unauthorized_tools
     )
-    identity_conflicts = _qualified_identity_conflicts(cur, tenant_id, records)
-    attached_contradictions = _attached_contradictions(cur, tenant_id, records)
+    deferred_identities: set[uuid.UUID] = set()
+    identity_conflicts = _qualified_identity_conflicts(cur, tenant_id, records, deferred_identities)
+    attached_contradictions = _attached_contradictions(cur, tenant_id, records, deferred_identities)
     from ingest import device_status_settings
 
     _offline_days, stale_after_days = device_status_settings.load(cur, tenant_id)
@@ -1818,6 +1881,7 @@ def assess_records(
             capability_policy_known.get(record["id"], False),
             identity_conflicts=identity_conflicts.get(record["id"]),
             attached_contradiction=attached_contradictions.get(record["id"]),
+            identity_ownership_deferred=record["id"] in deferred_identities,
             stale_after_days=stale_after_days,
             computer_alive=computers_alive.get(record["id"], False),
             now=now,
@@ -1929,6 +1993,10 @@ def publish_finding(
             result["rule"].startswith("software.")
             or result["rule"] == "identifier.validity"
             or result["rule"] == "record.reference"
+            or (result["rule"] == "identity.association"
+                and "computer_client_ownership" in result["missing"])
+            or (result["rule"] == "case.duplicate"
+                and "computer_client_ownership" in result["missing"])
         ):
             return None
         if active_keys is not None and key not in active_keys:

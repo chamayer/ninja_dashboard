@@ -13,7 +13,7 @@ Client resolution order per observation:
      ScreenConnect instances.
   2. source-link lookup on (source, platform_group_id) — e.g. S1 site id,
      LMI group id.
-  3. Resolved device's client (fallback, requires identity match).
+An associated Computer's client is not source-client evidence.
 Groups that resolve no client are recorded in
 operations.unmatched_source_groups for operator review.
 
@@ -205,27 +205,46 @@ def _load_placeholder_names(cur) -> set[str]:
     return {row[0] for row in cur.fetchall()}
 
 
-def _load_client_links(cur, source: SourceConfig) -> dict[str, uuid.UUID]:
-    """Return {external_id: client_id} for this source's attached groups.
+def _load_client_links(cur, source: SourceConfig, source_instance_id: uuid.UUID) -> dict[str, uuid.UUID]:
+    """Return unambiguous attached groups for this source instance.
 
-    Reads `operations.v_client_source_link` over `entity_source_links`, which
-    `sync_entity_source_links_from_observations()` derives from observation
-    evidence at each collection boundary. The retired `client_links` table was
-    written at the end of this same transaction, so this lookup has always
-    served links established by earlier cycles; the derived table has the same
-    staleness.
+    Group IDs can overlap between instances of the same platform. These links
+    are collection hints; the ownership projector checks their provenance.
     """
     if not source.ops_source_id:
         return {}
     cur.execute(
         """
-        SELECT external_id, client_id
-        FROM operations.v_client_source_link
-        WHERE tenant_id = %s AND source_id = %s
+        SELECT coalesce(nullif(org.entity_key, ''), link.external_id), min(link.entity_id::text)::uuid
+        FROM operations.entity_source_links link
+        JOIN operations.clients client
+          ON client.tenant_id = link.tenant_id AND client.id = link.entity_id
+         AND client.deleted_at IS NULL
+        LEFT JOIN operations.entity_observation_current org
+          ON org.tenant_id = link.tenant_id AND org.source_instance_id = link.source_instance_id
+         AND org.entity_type = 'org' AND org.active
+         AND org.external_namespace = link.external_namespace
+         AND org.parent_external_namespace = link.parent_external_namespace
+         AND org.parent_external_id = link.parent_external_id AND org.external_id = link.external_id
+        WHERE link.tenant_id = %s AND link.source_instance_id = %s
+          AND link.entity_class_id = 'client' AND link.missing_since IS NULL
+        GROUP BY coalesce(nullif(org.entity_key, ''), link.external_id)
+        HAVING count(DISTINCT link.entity_id) = 1
         """,
-        (_TENANT_ID, source.ops_source_id),
+        (_TENANT_ID, source_instance_id),
     )
     return {row[0]: row[1] for row in cur.fetchall()}
+
+
+def _source_client_attribution(source_client_id, group_id, link_map):
+    """Capture where collection obtained the client, without using a Computer."""
+    if source_client_id is not None:
+        client_id, basis = source_client_id, "source_instance"
+    elif group_id and group_id in link_map:
+        client_id, basis = link_map[group_id], "source_group"
+    else:
+        client_id, basis = None, "unknown"
+    return client_id, {"basis": basis, "client_id": str(client_id) if client_id else None}
 
 
 # `_upsert_client_links` stood here. It minted a `client_links` row per
@@ -333,9 +352,22 @@ def write_observations(
             source.platform,
             intake_errors,
         )
-        link_map = _load_client_links(cur, source)
+        link_map = _load_client_links(cur, source, source_instance_id)
         placeholder_names = _load_placeholder_names(cur)
         identity_policies = load_identity_match_policies(cur, _TENANT_ID)
+        # Inline matching uses the actual instance's live client, requiring a
+        # match when configuration specifies one. Hold both rows through the write.
+        cur.execute(
+            """
+            SELECT operations.lock_source_instance_client(%s, %s, %s),
+                   EXISTS (SELECT 1 FROM operations.source_instances
+                            WHERE tenant_id = %s AND id = %s AND client_id IS NOT NULL)
+            """,
+            (_TENANT_ID, source_instance_id, source.client_id, _TENANT_ID, source_instance_id),
+        )
+        scoped_source = cur.fetchone()
+        inline_client_id = scoped_source[0] if scoped_source else None
+        instance_has_client = bool(scoped_source and scoped_source[1])
         for row in valid_rows:
             if row.get("_org_only"):
                 # Container-only record (e.g. a group with zero devices) —
@@ -451,13 +483,16 @@ def write_observations(
                     )
                 container_contracts.add((container_namespace, container_external_id))
 
-            # 1. Client-scoped instance wins.
-            client_id = source.client_id
-            # 2. client_links mapping on the source group.
-            if client_id is None and group_id:
-                client_id = link_map.get(group_id)
+            client_id, attribution = _source_client_attribution(
+                inline_client_id, group_id,
+                {} if (source.client_id is not None or instance_has_client) and inline_client_id is None else link_map,
+            )
+            # This records the lookup used for the current collection, even
+            # when the observation writer retains a legacy non-null client.
+            # A group link still needs independent provenance verification.
+            canonical_data["source_client_attribution"] = attribution
 
-            if entity_type in identity_entity_types(cur):
+            if entity_type in identity_entity_types(cur) and inline_client_id is not None:
                 device_id = resolve_device_fast(
                     cur,
                     _TENANT_ID,
@@ -476,27 +511,23 @@ def write_observations(
                     )
                     or None,
                     macs=canonical_data["macs"],
-                    client_id=client_id,
+                    client_id=inline_client_id,
                     policies=identity_policies,
                     is_online=canonical_data.get("is_online"),
                     source_instance_id=source_instance_id,
                 )
+            elif entity_type in identity_entity_types(cur):
+                # Source attribution is checked after the observation is
+                # stored; defer identity resolution to the full resolver.
+                device_id = None
             else:
                 # Non-identity source: the connector already knows its device
                 # (or knows it has none). Running the resolver here would let
                 # a documentation record mint or merge canonical identity.
                 device_id = row.get("resolved_device_id")
-                if client_id is None:
-                    client_id = row.get("resolved_client_id")
-            # 3. Fall back to the resolved device's client.
-            if client_id is None and device_id:
-                cur.execute(
-                    "SELECT client_id FROM operations.devices"
-                    " WHERE id = %s AND deleted_at IS NULL",
-                    (device_id,),
-                )
-                dev_row = cur.fetchone()
-                client_id = dev_row[0] if dev_row else None
+            # The association does not establish a source client's identity.
+            # Copying the Computer's owner into its own source evidence would
+            # turn the old projection into circular ownership proof.
 
             if group_id or not source.is_shared:
                 if client_id:
@@ -574,7 +605,8 @@ def write_observations(
             if not gid:
                 continue
             org_client_id = (
-                source.client_id if not source.is_shared else link_map.get(gid)
+                inline_client_id if inline_client_id is not None or source.client_id is not None or instance_has_client
+                else link_map.get(gid)
             )
             normalized = normalize_org_name(gname)
             obs_rows.append(

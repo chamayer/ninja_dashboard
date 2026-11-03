@@ -217,6 +217,14 @@ _MISSING_REASONS = {
 
 def client_conflict_summary(d):
     """``computer_client_conflict``: which clients its evidence names, and how."""
+    if d.get("ownership_contradiction"):
+        return "New source evidence contradicts the recorded client decision."
+    if d.get("ownership_state") == "unknown":
+        return "The Computer's client is unknown from current source records."
+    if d.get("ownership_state") == "conflict":
+        return "The Computer's current source records name different clients."
+    if d.get("ownership_state") == "review":
+        return "The Computer's client ownership needs review."
     evidence = d.get("evidence") or []
     clients = sorted({e.get("client") or "another client" for e in evidence})
     sources = sorted({e["platform"] for e in evidence if e.get("kind") == "record"})

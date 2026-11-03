@@ -57,6 +57,24 @@ def test_weak_name_candidates_are_unknown_without_a_qualified_conflict():
     assert result["finding"] is None
 
 
+def test_deferred_computer_ownership_preserves_identity_review():
+    record = _record(device_id=uuid.uuid4(), device_live=True)
+    result = _by_rule(source_records.evaluate_record(
+        record, {}, identity_ownership_deferred=True
+    ))[("identity.association", "")]
+    assert result["result"] == "unknown"
+    assert result["missing"] == ["computer_client_ownership"]
+
+    class Cursor:
+        def execute(self, *_args, **_kwargs):
+            raise AssertionError("deferred ownership must preserve an identity finding")
+
+    assert source_records.publish_finding(
+        Cursor(), 1, {"source_record_identity_review": 1}, "source_record", record["id"],
+        result, datetime.now(UTC), client_id=None, context={},
+    ) is None
+
+
 def test_agent_status_and_contact_are_assessed_independently():
     contact = datetime(2026, 10, 29, 12, tzinfo=UTC)
     results = _by_rule(

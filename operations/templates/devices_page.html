@@ -193,7 +193,7 @@
                     {% if d.client_slug %}
                         <a href="{% url 'org_index' org_slug=d.client_slug %}">{{ d.client_name }}</a>
                     {% else %}
-                        <span class="muted">—</span>
+                        <span class="muted">Needs review</span>
                     {% endif %}
                 </td>
                 <td class="muted">{{ d.role|humanize_label|default:"—" }}</td>
@@ -201,8 +201,10 @@
                 <td>{{ d.state_label }}</td>
                 <td class="muted num">{{ d.last_contact|date:"Y-m-d H:i"|default:"—" }}</td>
                 <td class="num">
-                    {% if d.severe %}
+                    {% if d.severe and d.client_slug %}
                         <a href="{% url 'findings_queue' %}?client={{ d.client_slug }}&severity=high" style="color:#dc2626; font-weight:600;">{{ d.severe }}</a>
+                    {% elif d.severe %}
+                        <a href="{% url 'findings_queue' %}?device_id={{ d.id }}&severity=high">{{ d.severe }}</a>
                     {% else %}
                         <span class="muted">—</span>
                     {% endif %}

@@ -11,6 +11,7 @@ import uuid
 
 from ingest.identity.matching import (
     IdentityMatchPolicy,
+    OwnershipMatchDeferred,
     load_identity_match_policies,
     resolve_device_by_policy,
 )
@@ -32,6 +33,19 @@ def resolve_device_fast(
     source_instance_id: uuid.UUID | None = None,
 ) -> uuid.UUID | None:
     """Return one Computer selected by the enabled identity policy (ADR-0032)."""
+    try:
+        return _resolve_device_fast(
+            cur, tenant_id, source_name, external_id, entity_type, serial, vm_uuid,
+            hostname, macs, client_id, policies, is_online, source_instance_id,
+        )
+    except OwnershipMatchDeferred:
+        return None
+
+
+def _resolve_device_fast(
+    cur, tenant_id, source_name, external_id, entity_type, serial, vm_uuid,
+    hostname, macs, client_id, policies, is_online, source_instance_id,
+):
     return resolve_device_by_policy(
         cur,
         tenant_id=tenant_id,

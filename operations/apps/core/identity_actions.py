@@ -112,6 +112,10 @@ def _refusal(findings: list[Finding], ids: list[str], action: FindingAction, rea
 
 def _destination_refusal(findings: list[Finding], action: FindingAction) -> str:
     """A Computer moves only to the one other client its evidence names."""
+    if action.key == KEEP_COMPUTER_CLIENT.key and any(
+        not (f.finding_details or {}).get("evidence") for f in findings
+    ):
+        return "A selected issue has no evidence to keep; review its source records first."
     if action.key == MOVE_COMPUTER_CLIENT.key and any(
         not (f.finding_details or {}).get("move_to_client_id") for f in findings
     ):

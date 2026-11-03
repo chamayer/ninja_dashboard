@@ -18,8 +18,10 @@ import json
 
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import connection, transaction
+from django.http import Http404
 from django.utils import timezone
 
+from .computer_reads import lock_client_owned_computer
 from .models import (
     AuditLog,
     Client,
@@ -264,6 +266,16 @@ def attach_candidate(
         raise ValidationError("The target entity class does not match the candidate.")
     if locked.client_id and entity.client_id != locked.client_id:
         raise ValidationError("The target entity is outside the candidate client scope.")
+    if locked.client_id and entity.entity_class_id == "device":
+        device_id = Device.objects.filter(
+            tenant_id=locked.tenant_id, entity_id=entity.id, deleted_at__isnull=True
+        ).values_list("id", flat=True).first()
+        if device_id is None:
+            raise ValidationError("The target Computer is unavailable.")
+        try:
+            lock_client_owned_computer(locked.tenant_id, device_id, locked.client_id)
+        except Http404 as exc:
+            raise ValidationError("The target Computer has no current owner in this client.") from exc
 
     now = _link_candidate_to_entity(
         candidate=locked, entity=entity, actor=actor, reason=reason

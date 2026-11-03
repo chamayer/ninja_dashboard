@@ -35,11 +35,15 @@ WITH live_groups AS (
 ), single_owner AS (
     SELECT lower(device.canonical_hostname) AS name, min(device.client_id::text) AS client_id
       FROM operations.devices device
+      LEFT JOIN operations.computer_client_ownership owner
+        ON owner.tenant_id = device.tenant_id AND owner.device_id = device.id
      WHERE device.tenant_id = 1 AND device.deleted_at IS NULL
        AND device.lifecycle_status <> 'retired' AND device.client_id IS NOT NULL
        AND COALESCE(device.canonical_hostname, '') <> ''
      GROUP BY 1
     HAVING count(DISTINCT device.client_id) = 1
+       AND bool_and(coalesce(owner.state IN ('resolved', 'decision_protected')
+                            AND owner.effective_client_id = device.client_id, false))
 ), named AS (
     SELECT row_index, count(*)::int AS named FROM unlinked GROUP BY 1
 )

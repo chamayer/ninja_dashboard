@@ -136,7 +136,19 @@ def _items_sql(scope: Scope) -> tuple[str, dict[str, Any]]:
                     WHEN f.snoozed_until > now() THEN 'paused' ELSE 'open' END AS status,
                COALESCE(f.status = ANY(%(active)s) AND s.attention = 'covered', false) AS covered,
                COALESCE(s.covered_by, '{{}}'::uuid[]) AS covered_by,
-               f.client_id, f.subject_type::text AS subject_type, f.subject_id,
+               CASE WHEN f.subject_type = 'device' AND NOT EXISTS (
+                        SELECT 1 FROM operations.computer_client_ownership owner
+                         WHERE owner.tenant_id = f.tenant_id AND owner.device_id = f.subject_id
+                           AND owner.effective_client_id = f.client_id
+                           AND owner.state IN ('resolved', 'decision_protected')
+                    ) THEN NULL
+                    WHEN f.subject_type = 'source_record' THEN (
+                        SELECT operations.computer_client_independent_evidence(
+                                   subject.tenant_id, subject.observation_id)
+                          FROM operations.source_record_subjects subject
+                         WHERE subject.tenant_id = f.tenant_id AND subject.id = f.subject_id
+                    ) ELSE f.client_id END AS client_id,
+               f.subject_type::text AS subject_type, f.subject_id,
                CASE t.name
                    WHEN 'unmatched_source_group' THEN 'source_group:'
                         || COALESCE(f.finding_details->>'source_id', '') || ':'
@@ -212,10 +224,14 @@ def _filtered_sql(scope: Scope, *, labels: bool = False) -> tuple[str, dict[str,
         # Work that belongs to a client but has none yet. Fleet-wide software
         # and platform work is not "unassigned".
         where.append(
-            "i.client_id IS NULL AND (i.subject_type IN"
+            "((i.client_id IS NULL AND (i.subject_type IN"
             " ('device', 'source_group', 'source_group_set', 'entity_candidate',"
             " 'source_record', 'source_record_case')"
-            " OR i.type_name = 'unmatched_source_group')"
+            " OR i.type_name = 'unmatched_source_group')) OR (i.subject_type = 'device'"
+            " AND NOT EXISTS (SELECT 1 FROM operations.computer_client_ownership owner"
+            " WHERE owner.tenant_id = %(tenant)s AND owner.device_id = i.subject_id"
+            " AND owner.effective_client_id = i.client_id"
+            " AND owner.state IN ('resolved', 'decision_protected'))))"
         )
     elif scope.client:
         client_id = _client_id(scope.client)
@@ -315,6 +331,11 @@ def _filtered_sql(scope: Scope, *, labels: bool = False) -> tuple[str, dict[str,
             " LEFT JOIN operations.devices d ON i.subject_type = 'device'"
             " AND d.id = i.subject_id AND d.tenant_id = %(tenant)s"
             " LEFT JOIN operations.clients c ON c.id = i.client_id"
+            " AND (i.subject_type IS DISTINCT FROM 'device' OR EXISTS ("
+            " SELECT 1 FROM operations.computer_client_ownership owner"
+            " WHERE owner.tenant_id = %(tenant)s AND owner.device_id = i.subject_id"
+            " AND owner.effective_client_id = i.client_id"
+            " AND owner.state IN ('resolved', 'decision_protected')))"
         )
     sql = f"""
         WITH items AS ({items}),

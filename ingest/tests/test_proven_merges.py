@@ -49,6 +49,14 @@ def test_same_serial_merges_into_the_oldest_live_computer():
     assert planned_proven_merges(_Cursor(rows)) == [("ninja", "s1", "serial", "abc123")]
 
 
+def test_unresolved_computer_is_not_used_as_merge_proof():
+    rows = [
+        _row("ninja", serials=["abc123"], online=["Ninja:agent.rmm"]),
+        _row("s1", serials=["abc123"], online=["SentinelOne:agent.edr"], age=5),
+    ]
+    assert planned_proven_merges(_Cursor(rows), owned={"ninja"}) == []
+
+
 def test_a_computer_holding_two_machines_is_never_merged():
     rows = [
         _row("two", serials=["abc123"], two=True),

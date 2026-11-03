@@ -5,6 +5,8 @@ from __future__ import annotations
 import uuid
 from decimal import Decimal
 
+import pytest
+
 from ingest.identity import matching
 from ingest.identity.matching import IdentityMatchPolicy
 
@@ -46,6 +48,7 @@ def _resolve(
 
     monkeypatch.setattr(matching, "_is_roaming", lambda *_args: False)
     monkeypatch.setattr(matching, "_candidates", candidates)
+    monkeypatch.setattr(matching, "_scope_candidates", lambda cur, tenant, client, rows, **kw: rows)
     monkeypatch.setattr(
         matching, "_independently_corroborated", lambda *_args: corroborated
     )
@@ -74,6 +77,20 @@ def _resolve(
         trace=False,
     )
     return preview, visited
+
+
+def test_unresolved_candidate_defers_a_scoped_match():
+    candidate = uuid.uuid4()
+
+    class Cursor:
+        def execute(self, *_args):
+            pass
+
+        def fetchall(self):
+            return [(candidate, "dirty", None, CLIENT)]
+
+    with pytest.raises(matching.OwnershipMatchDeferred):
+        matching._scope_candidates(Cursor(), 1, CLIENT, [candidate], lock=True)
 
 
 def test_ambiguous_stronger_match_does_not_fall_through_to_weaker_matcher(monkeypatch):

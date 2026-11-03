@@ -13,11 +13,12 @@ import uuid
 
 from django.contrib import messages
 from django.db import transaction
-from django.http import HttpRequest, HttpResponse
+from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import redirect
 from django.utils import timezone
 
 from .finding_actions import APPROVE_REMOTE_ACCESS_ALL, FindingAction
+from .computer_reads import lock_client_owned_computer
 from .models import AuditLog, Finding, ProductAuthorization
 
 REASON_MAX_LENGTH = 500
@@ -66,6 +67,17 @@ def approve_remote_access(request: HttpRequest, ids: list[str], action: FindingA
     all_clients = action.key == APPROVE_REMOTE_ACCESS_ALL.key
     try:
         targets = _targets(findings, all_clients)
+        if not all_clients:
+            device_scopes = sorted(
+                {(str(f.subject_id), f.client_id) for f in findings
+                 if f.subject_type == "device" and f.subject_id and f.client_id},
+                key=lambda item: item[0],
+            )
+            for device_id, client_id in device_scopes:
+                lock_client_owned_computer(1, device_id, client_id)
+    except Http404:
+        messages.warning(request, "A selected Computer no longer has that client as its current owner.")
+        return redirect(back)
     except ValueError as exc:
         messages.warning(request, str(exc))
         return redirect(back)

@@ -9,6 +9,7 @@ from django.db import connection
 from django.urls import reverse
 
 from apps.core.finding_actions import available_finding_actions
+from apps.core.computer_reads import effectively_owned_device_ids
 from apps.core.models import Device
 from apps.core.source_record_views import _rows, load_subject
 from apps.core.templatetags.human_labels import finding_detail_text
@@ -55,6 +56,22 @@ def review_context(finding, user, *, tenant_id: int) -> dict:
         "reason_required": any(action.requires_reason for action in actions),
         "steps": [],
     }
+    if name == "computer_client_conflict" and details.get("ownership_state"):
+        context["explanation"] = (
+            "The Computer's client is determined from its current source records and any "
+            "recorded client decision. Review the source records and decision before changing it."
+        )
+        if finding.subject_id:
+            context["computers"] = _comparison_computers(
+                {str(finding.subject_id): ["Computer to review"]}, {}, tenant_id
+            )
+        if not details.get("evidence"):
+            context["actions"] = []
+            context["reason_required"] = False
+            context["steps"] = [
+                "Check whether the source records are current and assigned to the correct client.",
+                "Review any earlier client decision before changing the Computer's ownership.",
+            ]
     # Show known useful facts, never an arbitrary raw payload or internal IDs.
     for key, label in (
         ("publisher", "Publisher"),
@@ -197,6 +214,12 @@ def _comparison_computers(roles: dict, candidates: dict, tenant_id: int) -> list
             tenant_id=tenant_id, id__in=list(roles), deleted_at__isnull=True
         ).select_related("client")
     }
+    owned_ids = {
+        str(device_id)
+        for device_id in Device.objects.filter(tenant_id=tenant_id, id__in=list(devices))
+        .filter(id__in=effectively_owned_device_ids(tenant_id))
+        .values_list("id", flat=True)
+    }
     # Read from the same restricted metadata surface as the source-record page.
     with connection.cursor() as cur:
         cur.execute(
@@ -246,7 +269,7 @@ def _comparison_computers(roles: dict, candidates: dict, tenant_id: int) -> list
                 "url": reverse(
                     "device_detail", kwargs={"org_slug": device.client.slug, "device_id": device.id}
                 )
-                if device and device.client
+                if device and device.client and device_id in owned_ids
                 else "",
                 "roles": labels,
                 "families": [IDENTIFIERS[family] for family in families if family in IDENTIFIERS]

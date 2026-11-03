@@ -16,7 +16,7 @@ from psycopg.rows import dict_row
 from ingest import db
 from ingest.config import settings
 from ingest.notification_scope import alertable_clause
-from ingest.notifications import _send, _still_notifyable
+from ingest.notifications import _delivery_ownership_guard, _send, _still_notifyable
 
 log = logging.getLogger(__name__)
 
@@ -34,7 +34,8 @@ def send_digest(tenant_id: int = _TENANT_ID) -> int:
         cur.execute(f"SET LOCAL operations.tenant_id = {tenant_id}")
         cur.execute(
             f"""
-            SELECT f.id AS finding_id, f.severity, f.confidence, ft.display_name AS finding_type,
+            SELECT f.id AS finding_id, f.client_id, f.subject_type, f.subject_id,
+                   f.severity, f.confidence, ft.display_name AS finding_type,
                    c.display_name AS client_name, f.finding_details,
                    f.last_seen_at
             FROM operations.findings f
@@ -44,6 +45,11 @@ def send_digest(tenant_id: int = _TENANT_ID) -> int:
               AND f.status IN ('open', 'acknowledged')
               AND (f.snoozed_until IS NULL OR f.snoozed_until <= now())
               AND (f.confidence <> 'confirmed' OR f.confidence = '')
+              AND (f.subject_type IS DISTINCT FROM 'device' OR EXISTS (
+                  SELECT 1 FROM operations.computer_client_ownership owner
+                   WHERE owner.tenant_id = f.tenant_id AND owner.device_id = f.subject_id
+                     AND owner.effective_client_id = f.client_id
+                     AND owner.state IN ('resolved', 'decision_protected')))
               {alertable_clause('f.finding_type_id')}
               AND EXISTS (
                   SELECT 1 FROM operations.condition_assessments a
@@ -106,7 +112,8 @@ def send_digest(tenant_id: int = _TENANT_ID) -> int:
     # into a digest selected from an older snapshot.
     if any(
         not _still_notifyable(
-            {"id": row["finding_id"], "finding_row_kind": "entity"}, tenant_id
+            {"id": row["finding_id"], "client_id": row["client_id"], "finding_row_kind": "entity"},
+            tenant_id,
         )
         for row in rows
     ):
@@ -151,7 +158,17 @@ def send_digest(tenant_id: int = _TENANT_ID) -> int:
     fired = 0
     failed = 0
     for route in routes:
-        status, _code, _preview = _send(route, payload)
+        captured = [
+            {"id": row["finding_id"], "client_id": row["client_id"],
+             "subject_type": row["subject_type"], "subject_id": row["subject_id"],
+             "finding_row_kind": "entity"}
+            for row in rows
+        ]
+        with _delivery_ownership_guard(captured, tenant_id) as valid:
+            if not valid:
+                log.info("digest: selection changed before delivery — skipping remaining routes")
+                break
+            status, _code, _preview = _send(route, payload)
         log.info("digest: route %s (%s) → %s", route["id"], route["channel"], status)
         if status == "sent":
             fired += 1

@@ -11,6 +11,7 @@ from django.urls import reverse
 from django.utils import timezone
 
 from . import client_domains
+from .computer_reads import client_owned_finding_ids
 from .device_status import get_device_status_policy
 from .models import Client, EntityCandidate, Finding, MergeCandidate
 from .templatetags.human_labels import humanize_label
@@ -134,6 +135,10 @@ def _software_rollup_rows(*, client_id=None) -> list[dict]:
                COUNT(DISTINCT (e.finding_id, e.device_id))
                    FILTER (WHERE e.first_seen_at >= now() - interval '24 hours') AS new
           FROM operations.v_device_software_exposure e
+          JOIN operations.computer_client_ownership owner
+            ON owner.tenant_id = e.tenant_id AND owner.device_id = e.device_id
+           AND owner.effective_client_id = e.client_id
+           AND owner.state IN ('resolved', 'decision_protected')
           JOIN operations.finding_types ft ON ft.id = e.finding_type_id
          WHERE {' AND '.join(where)}
            AND ft.issue_category = ANY(%s)
@@ -168,6 +173,10 @@ def _issue_rollup(*, client_id=None) -> tuple[dict, list[dict]]:
         filters["client_id"] = client_id
     rows = list(
         Finding.objects.filter(**filters)
+        .filter(
+            ~Q(subject_type="device")
+            | Q(id__in=client_owned_finding_ids(1))
+        )
         # Software findings are excluded here and added below. Their subject is
         # the title or release, so they carry no client_id -- left in this
         # query they would group under a None key that no client page reads,
@@ -482,9 +491,25 @@ def build_client_workspace(client, existing: dict, *, device_policy: dict | None
         cur.execute("SET LOCAL operations.tenant_id = 1")
         cur.execute(
             """
-            SELECT open_now, open_7d_ago, severe_open_now, severe_open_7d_ago
-            FROM operations.client_health_trend_current
-            WHERE tenant_id = 1 AND client_id = %s
+            SELECT COUNT(*) FILTER (WHERE f.closed_at IS NULL)::int,
+                   COUNT(*) FILTER (
+                       WHERE f.first_seen_at <= now() - interval '7 days'
+                         AND (f.closed_at IS NULL OR f.closed_at > now() - interval '7 days')
+                   )::int,
+                   COUNT(*) FILTER (WHERE f.closed_at IS NULL
+                                      AND f.severity IN ('critical', 'high'))::int,
+                   COUNT(*) FILTER (
+                       WHERE f.first_seen_at <= now() - interval '7 days'
+                         AND (f.closed_at IS NULL OR f.closed_at > now() - interval '7 days')
+                         AND f.severity IN ('critical', 'high')
+                   )::int
+              FROM operations.findings f
+             WHERE f.tenant_id = 1 AND f.client_id = %s
+               AND (f.subject_type IS DISTINCT FROM 'device' OR EXISTS (
+                   SELECT 1 FROM operations.computer_client_ownership owner
+                    WHERE owner.tenant_id = f.tenant_id AND owner.device_id = f.subject_id
+                      AND owner.effective_client_id = f.client_id
+                      AND owner.state IN ('resolved', 'decision_protected')))
             """,
             [str(client.id)],
         )

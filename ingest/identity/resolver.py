@@ -34,6 +34,7 @@ from ingest.identity.naming import write_computer_names
 from ingest.identity.matching import client_record_names, invalidate_client_names
 from ingest.identity.matching import (
     IdentityMatchPolicy,
+    OwnershipMatchDeferred,
     load_identity_match_policies,
     loose_name,
     record_name_short,
@@ -53,6 +54,14 @@ log = logging.getLogger(__name__)
 
 TENANT_ID = 1
 _MIN_IDENTITY_CANDIDATES = 2
+_OWNERSHIP_DEFERRED = object()
+
+
+def _resolve_or_defer(matcher, cur, **kwargs):
+    try:
+        return matcher(cur, **kwargs)
+    except OwnershipMatchDeferred:
+        return _OWNERSHIP_DEFERRED
 
 
 def _identity_conflict_key(client_id: uuid.UUID, device_ids) -> str:
@@ -81,7 +90,8 @@ def drain_resolution(batch_size: int = 200, *, refresh_current: bool = True) -> 
 
         cur.execute(
             """
-            SELECT observation_id, entity_type, entity_key, platform, client_id,
+            SELECT observation_id, entity_type, entity_key, platform,
+                   operations.computer_client_independent_evidence(tenant_id, observation_id),
                    observed_at, canonical_data, source_instance_id
             FROM operations.entity_observation_current
             WHERE tenant_id = %s AND device_id IS NULL
@@ -122,7 +132,8 @@ def drain_resolution(batch_size: int = 200, *, refresh_current: bool = True) -> 
                 )
                 or None
             )
-            device_id = resolve_device_by_policy(
+            device_id = _resolve_or_defer(
+                resolve_device_by_policy,
                 cur,
                 tenant_id=TENANT_ID,
                 source_name=platform,
@@ -137,6 +148,8 @@ def drain_resolution(batch_size: int = 200, *, refresh_current: bool = True) -> 
                 is_online=cd.get("is_online"),
                 source_instance_id=source_instance_id,
             )
+            if device_id is _OWNERSHIP_DEFERRED:
+                continue
             if device_id is not None:
                 _attach_observation(cur, obs_id, device_id)
                 touched.add(device_id)
@@ -324,6 +337,16 @@ def _maybe_create_candidate(
     if len(rows) < _MIN_IDENTITY_CANDIDATES:
         return
     candidate_ids = [row[0] for row in rows]
+    if client_id is None:
+        return
+    cur.execute(
+        "SELECT device_id FROM operations.lock_computer_client_scopes(%s, %s::uuid[], %s::uuid[])",
+        (TENANT_ID, candidate_ids, [client_id] * len(candidate_ids)),
+    )
+    candidate_ids = [row[0] for row in cur.fetchall()]
+    if len(candidate_ids) < _MIN_IDENTITY_CANDIDATES:
+        return
+    rows = [(device_id,) for device_id in candidate_ids]
     device_id_a = candidate_ids[0]
 
     # Standard operator-visible surface — the ADR's mandated path.
@@ -380,6 +403,7 @@ _DEVICE_NAMES = """
 device_names AS (
     SELECT DISTINCT eo.device_id, f.name_short AS name
       FROM operations.entity_observation_current eo
+      JOIN pg_temp.identity_owned_scope owner ON owner.device_id = eo.device_id
      CROSS JOIN LATERAL operations.record_name_forms(
           eo.platform, eo.entity_type,
           coalesce(nullif(eo.canonical_data ->> 'hostname', ''), eo.canonical_data ->> 'guest_name'),
@@ -465,6 +489,14 @@ SET status = 'merged'
 WHERE mc.tenant_id = %s
   AND mc.status = 'open'
   AND mc.entity_type = 'device'
+  AND jsonb_array_length(CASE WHEN jsonb_typeof(mc.member_snapshots) = 'array'
+                              THEN mc.member_snapshots ELSE '[]'::jsonb END) > 0
+  AND NOT EXISTS (
+      SELECT 1 FROM jsonb_array_elements(CASE WHEN jsonb_typeof(mc.member_snapshots) = 'array'
+                                              THEN mc.member_snapshots ELSE '[]'::jsonb END) member
+       WHERE NOT EXISTS (SELECT 1 FROM pg_temp.identity_owned_scope owner
+                          WHERE owner.device_id::text = member->>'device_id')
+  )
   AND NOT EXISTS (SELECT 1 FROM current_keys k WHERE k.canonical_key = mc.canonical_key)
 """
 )
@@ -479,6 +511,17 @@ def project_merge_candidates(cur) -> dict[str, int]:
     is built from the Computers, so it matches the identity_conflict finding.
     Proposals whose collision no longer holds are closed.
     """
+    owned = identity_findings._lock_owned_computers(cur, TENANT_ID)
+    cur.execute(
+        """
+        CREATE TEMP TABLE identity_owned_scope ON COMMIT DROP AS
+        SELECT device_id, effective_client_id AS client_id
+          FROM operations.computer_client_ownership
+         WHERE tenant_id = %s AND device_id = ANY(%s::uuid[])
+           AND state IN ('resolved', 'decision_protected')
+        """,
+        (TENANT_ID, list(owned)),
+    )
     cur.execute(
         _MERGE_CANDIDATE_UPSERT, (TENANT_ID, _MIN_IDENTITY_CANDIDATES, TENANT_ID)
     )
@@ -658,6 +701,15 @@ UPDATE operations.findings finding
    AND finding.finding_type_id = %s
    AND finding.status IN ('open', 'acknowledged')
    AND finding.condition_key LIKE 'identity_conflict:%%'
+   AND jsonb_array_length(CASE WHEN jsonb_typeof(finding.finding_details->'candidate_device_ids') = 'array'
+       THEN finding.finding_details->'candidate_device_ids' ELSE '[]'::jsonb END) > 0
+   AND NOT EXISTS (
+       SELECT 1 FROM jsonb_array_elements_text(
+           CASE WHEN jsonb_typeof(finding.finding_details->'candidate_device_ids') = 'array'
+                THEN finding.finding_details->'candidate_device_ids' ELSE '[]'::jsonb END) member
+        WHERE NOT EXISTS (SELECT 1 FROM pg_temp.identity_owned_scope owner
+                           WHERE owner.device_id::text = member)
+   )
    AND NOT EXISTS (SELECT 1 FROM collisions c WHERE finding.condition_key = c.condition_key)
    /* CONDITION_ASSESSMENT_GUARD */
 """
@@ -725,6 +777,15 @@ def _record_identity_conflict_assessments(cur, finding_type_id: int) -> None:
         FROM operations.findings
         WHERE tenant_id = %s AND finding_type_id = %s
           AND status IN ('open', 'acknowledged', 'investigating')
+          AND jsonb_array_length(CASE WHEN jsonb_typeof(finding_details->'candidate_device_ids') = 'array'
+              THEN finding_details->'candidate_device_ids' ELSE '[]'::jsonb END) > 0
+          AND NOT EXISTS (
+              SELECT 1 FROM jsonb_array_elements_text(
+                  CASE WHEN jsonb_typeof(finding_details->'candidate_device_ids') = 'array'
+                       THEN finding_details->'candidate_device_ids' ELSE '[]'::jsonb END) member
+               WHERE NOT EXISTS (SELECT 1 FROM pg_temp.identity_owned_scope owner
+                                  WHERE owner.device_id::text = member)
+          )
         """,
         (TENANT_ID, finding_type_id),
     )
@@ -801,6 +862,7 @@ WITH policy AS (
                         NULL) AS names,
            ARRAY_AGG(DISTINCT o.observation_id::text) AS observation_ids
       FROM operations.devices d
+      JOIN pg_temp.identity_owned_scope owner ON owner.device_id = d.id
       JOIN operations.entity_observation_current o
         ON o.tenant_id = d.tenant_id
        AND o.device_id = d.id
@@ -909,6 +971,14 @@ UPDATE operations.merge_candidates candidate
    AND candidate.status = 'open'
    AND candidate.entity_type = 'device'
    AND candidate.canonical_key LIKE 'identity_strong:%%'
+   AND jsonb_array_length(CASE WHEN jsonb_typeof(candidate.member_snapshots) = 'array'
+                               THEN candidate.member_snapshots ELSE '[]'::jsonb END) > 0
+   AND NOT EXISTS (
+       SELECT 1 FROM jsonb_array_elements(CASE WHEN jsonb_typeof(candidate.member_snapshots) = 'array'
+                                               THEN candidate.member_snapshots ELSE '[]'::jsonb END) member
+        WHERE NOT EXISTS (SELECT 1 FROM pg_temp.identity_owned_scope owner
+                           WHERE owner.device_id::text = member->>'device_id')
+   )
    AND NOT EXISTS (
        SELECT 1
          FROM strong_pairs pair
@@ -1089,10 +1159,13 @@ def _promote_unmatched_clusters(
 
     cur.execute(
         """
-        SELECT client_id, source_instance_id, platform, entity_type, entity_key,
+        SELECT source_client.client_id, source_instance_id, platform, entity_type, entity_key,
                observed_at, observed_at, canonical_data, observation_id
         FROM operations.entity_observation_current
-        WHERE tenant_id = %s AND device_id IS NULL AND client_id IS NOT NULL
+        CROSS JOIN LATERAL (
+            SELECT operations.computer_client_independent_evidence(tenant_id, observation_id) AS client_id
+        ) source_client
+        WHERE tenant_id = %s AND device_id IS NULL AND source_client.client_id IS NOT NULL
           AND active = TRUE
           -- Allowlist, not `<> 'org'`. This query PROMOTES unmatched rows
           -- into brand-new Devices, so anything reaching it becomes canonical
@@ -1168,7 +1241,8 @@ def _promote_unmatched_clusters(
                 )
                 or norm
             )
-            match = resolve_match(
+            match = _resolve_or_defer(
+                resolve_match,
                 cur,
                 tenant_id=TENANT_ID,
                 source_name=platform,
@@ -1183,6 +1257,8 @@ def _promote_unmatched_clusters(
                 is_online=cd.get("is_online"),
                 source_instance_id=source_instance_id,
             )
+            if match is _OWNERSHIP_DEFERRED:
+                continue
             if match is not None:
                 _attach_observation(cur, observation_id, match.device_id)
                 touched.add(match.device_id)
@@ -1263,7 +1339,7 @@ SELECT r.device_id, r.client_id, min(r.created_at) AS created_at, l.live,
 """
 
 
-def planned_proven_merges(cur) -> list[tuple]:
+def planned_proven_merges(cur, *, owned: set[uuid.UUID] | None = None) -> list[tuple]:
     """Merges the resolver would make: (survivor, absorbed, kind, value).
 
     Computers in one client that report the same usable serial or VM UUID are
@@ -1286,6 +1362,8 @@ def planned_proven_merges(cur) -> list[tuple]:
         online_streams,
         two_machines,
     ) in rows:
+        if owned is not None and device_id not in owned:
+            continue
         if two_machines or len(serials) > 1 or len(vm_uuids) > 1:
             continue
         for kind, values in (("serial", serials), ("vm_uuid", vm_uuids)):
@@ -1551,8 +1629,29 @@ def run_shadow_naming() -> None:
 
 def merge_proven_splits(cur) -> int:
     """Merge Computers proven to be one machine; each merge is recorded."""
-    planned = planned_proven_merges(cur)[:MAX_AUTOMATIC_MERGES_PER_RUN]
+    # Source updates invalidate ownership under the same row lock. Hold that
+    # lock while reading proof and merging, so an old client cannot establish
+    # that two Computers share a scope.
+    owned = identity_findings._lock_owned_computers(cur, TENANT_ID)
+    planned = planned_proven_merges(cur, owned=owned)[:MAX_AUTOMATIC_MERGES_PER_RUN]
+    merged = []
     for survivor, absorbed, kind, value in planned:
+        # An earlier merge in this transaction dirties its survivor. Defer any
+        # remaining pair involving it until the projector has re-evaluated it.
+        cur.execute(
+            """
+            SELECT d.id, d.client_id FROM operations.devices d
+            JOIN operations.computer_client_ownership owner
+              ON owner.tenant_id = d.tenant_id AND owner.device_id = d.id
+             AND owner.effective_client_id = d.client_id
+             AND owner.state IN ('resolved', 'decision_protected')
+            WHERE d.tenant_id = %s AND d.deleted_at IS NULL AND d.id = ANY(%s::uuid[])
+            """,
+            (TENANT_ID, [survivor, absorbed]),
+        )
+        current = cur.fetchall()
+        if len(current) != 2 or current[0][1] != current[1][1]:
+            continue
         label = "serial number" if kind == "serial" else "VM UUID"
         cur.execute(
             """
@@ -1567,10 +1666,11 @@ def merge_proven_splits(cur) -> int:
                 Json({kind: value}),
             ),
         )
-    write_computer_names(cur, [c for row in planned for c in row[:2]])
-    if planned:
-        log.info("resolver: merged %d Computers proven to be one machine", len(planned))
-    return len(planned)
+        merged.append((survivor, absorbed))
+    write_computer_names(cur, [c for row in merged for c in row])
+    if merged:
+        log.info("resolver: merged %d Computers proven to be one machine", len(merged))
+    return len(merged)
 
 
 def _create_device_for_group(
@@ -1664,7 +1764,7 @@ def _create_device_for_group(
     return device_id
 
 
-def _upsert_shared_serial_findings(cur, finding_type_id: int) -> int:
+def _upsert_shared_serial_findings(cur, finding_type_id: int, *, owned=None) -> int:
     """Upsert shared-serial findings with a UUID canonical subject.
 
     ADR-0032: the serials compared are those the active agent and VM records
@@ -1674,6 +1774,8 @@ def _upsert_shared_serial_findings(cur, finding_type_id: int) -> int:
     holds two machines. ``subject_id`` is the first Computer by UUID text.
     Each finding gets a measured assessment and clears once its group is gone.
     """
+    if owned is None:
+        owned = identity_findings._lock_owned_computers(cur, TENANT_ID)
     cur.execute(
         """
         WITH reported AS (
@@ -1689,6 +1791,7 @@ def _upsert_shared_serial_findings(cur, finding_type_id: int) -> int:
               JOIN operations.entity_observation_current eo
                 ON eo.tenant_id = d.tenant_id AND eo.device_id = d.id
              WHERE d.tenant_id = %s AND d.deleted_at IS NULL AND eo.active
+               AND d.id = ANY(%s::uuid[])
                AND (eo.entity_type LIKE 'agent.%%' OR eo.entity_type LIKE 'vm.%%')
                AND eo.entity_key NOT LIKE 'device-health:%%'
                AND NOT EXISTS (SELECT 1 FROM operations.identity_roaming_records rr
@@ -1753,7 +1856,7 @@ def _upsert_shared_serial_findings(cur, finding_type_id: int) -> int:
             confidence = EXCLUDED.confidence
         RETURNING id, condition_key, subject_id
         """,
-        (TENANT_ID, finding_type_id),
+        (TENANT_ID, list(owned), finding_type_id),
     )
     rows = cur.fetchall()
     now = datetime.now(UTC)
@@ -1762,7 +1865,7 @@ def _upsert_shared_serial_findings(cur, finding_type_id: int) -> int:
             cur, TENANT_ID, finding_id, finding_type_id, condition_key, subject_id, now
         )
     identity_findings.resolve_absent(
-        cur, TENANT_ID, finding_type_id, [row[1] for row in rows], now
+        cur, TENANT_ID, finding_type_id, [row[1] for row in rows], now, owned=owned
     )
     return len(rows)
 
@@ -1781,6 +1884,8 @@ def _sync_device_attributes(cur) -> None:
     the projector in the cycle, which is why `run_projection()` is invoked
     ahead of this in `resolve_all()`.
     """
+
+    owned = identity_findings._lock_owned_computers(cur, TENANT_ID)
 
     # ── Layer-entity propagation (ADR-0005 slice 2) ───────────────────
     # Keep the open-window Asset.form_factor in sync with the flat
@@ -1973,6 +2078,7 @@ def _sync_device_attributes(cur) -> None:
             FROM operations.devices d
             WHERE d.tenant_id = %s
               AND d.deleted_at IS NULL
+              AND d.id = ANY(%s::uuid[])
               AND COALESCE(d.canonical_serial, '') <> ''
               AND (
                   EXISTS (
@@ -1998,7 +2104,7 @@ def _sync_device_attributes(cur) -> None:
                 severity = EXCLUDED.severity,
                 confidence = EXCLUDED.confidence
             """,
-            (ft_placeholder, TENANT_ID),
+            (ft_placeholder, TENANT_ID, list(owned)),
         )
         if cur.rowcount:
             log.info(
@@ -2010,7 +2116,7 @@ def _sync_device_attributes(cur) -> None:
     # share the value. subject_id points to the alphabetically-first
     # device_id; finding_details lists all sharers.
     if ft_shared is not None:
-        shared_serial_count = _upsert_shared_serial_findings(cur, ft_shared)
+        shared_serial_count = _upsert_shared_serial_findings(cur, ft_shared, owned=owned)
         if shared_serial_count:
             log.info(
                 "resolver: data-quality upserted %d shared_serial findings",
@@ -2152,7 +2258,7 @@ def _sync_device_attributes(cur) -> None:
             ) sub
             JOIN operations.devices d
               ON d.id = sub.device_id AND d.tenant_id = sub.tenant_id
-            WHERE d.deleted_at IS NULL
+            WHERE d.deleted_at IS NULL AND d.id = ANY(%s::uuid[])
             ON CONFLICT (tenant_id, condition_namespace, condition_key)
             WHERE condition_key > '' AND status IN ('open', 'acknowledged', 'investigating', 'suppressed')
             DO UPDATE SET
@@ -2164,7 +2270,7 @@ def _sync_device_attributes(cur) -> None:
                 severity = EXCLUDED.severity,
                 confidence = EXCLUDED.confidence
             """,
-            (ft_placeholder_mac, TENANT_ID),
+            (ft_placeholder_mac, TENANT_ID, list(owned)),
         )
         if cur.rowcount:
             log.info(

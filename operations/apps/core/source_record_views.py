@@ -65,7 +65,12 @@ def load_subject(cur, tenant_id: int, subject_id: uuid.UUID) -> dict | None:
            AND link.external_id = s.external_id AND link.entity_class_id = 'device'
           LEFT JOIN operations.devices d
             ON d.tenant_id = link.tenant_id AND d.id = link.entity_id AND d.deleted_at IS NULL
-          LEFT JOIN operations.clients c ON c.tenant_id = d.tenant_id AND c.id = d.client_id
+          LEFT JOIN operations.computer_client_ownership owner
+            ON owner.tenant_id = d.tenant_id AND owner.device_id = d.id
+           AND owner.effective_client_id = d.client_id
+           AND owner.state IN ('resolved', 'decision_protected')
+          LEFT JOIN operations.clients c
+            ON c.tenant_id = owner.tenant_id AND c.id = owner.effective_client_id
          WHERE s.tenant_id = %s AND s.id = %s
         """,
         (tenant_id, subject_id),
@@ -161,11 +166,24 @@ def source_record_detail(request: HttpRequest, subject_id: uuid.UUID) -> HttpRes
             raise Http404("Source record not found")
         cur.execute(
             """
-            SELECT rule_key, dimension, result, evidence, missing_facts, work_owner,
-                   finding_id, rule_revision, assessed_at
-              FROM operations.source_record_assessment_current
-             WHERE tenant_id = %s AND target_kind = 'source_record' AND target_id = %s
-             ORDER BY rule_key, dimension
+            SELECT assessment.rule_key, assessment.dimension, assessment.result,
+                   assessment.evidence, assessment.missing_facts, assessment.work_owner,
+                   assessment.finding_id, assessment.rule_revision, assessment.assessed_at,
+                   assessment.target_version,
+                   EXISTS (SELECT 1 FROM operations.source_record_assessment_queue queue
+                            WHERE queue.tenant_id = assessment.tenant_id
+                              AND queue.target_kind = assessment.target_kind
+                              AND queue.target_id = assessment.target_id
+                              AND (queue.status <> 'done' OR queue.dirty_revision > queue.processed_revision)) AS pending,
+                   EXISTS (SELECT 1 FROM operations.source_record_assessment_queue queue
+                            WHERE queue.tenant_id = assessment.tenant_id
+                              AND queue.target_kind = assessment.target_kind
+                              AND queue.target_id = assessment.target_id
+                              AND queue.status = 'failed') AS reassessment_failed
+              FROM operations.source_record_assessment_current assessment
+             WHERE assessment.tenant_id = %s AND assessment.target_kind = 'source_record'
+               AND assessment.target_id = %s
+             ORDER BY assessment.rule_key, assessment.dimension
             """,
             (tenant_id, subject_id),
         )
@@ -205,7 +223,14 @@ def source_record_detail(request: HttpRequest, subject_id: uuid.UUID) -> HttpRes
     )
     for row in assessments:
         row["rule_label"] = RULE_LABELS.get(row["rule_key"], row["rule_key"])
-        row["result_label"] = RESULT_LABELS.get(row["result"], row["result"])
+        current_version = subject["input_version"] * 1_000_000 + subject["association_version"]
+        if row["pending"] or row["target_version"] != current_version:
+            row["result_label"] = "Reassessment failed" if row["reassessment_failed"] else "Pending reassessment"
+            row["missing_facts"] = []
+            row["work_owner"] = ""
+            row["evidence"] = {}
+        else:
+            row["result_label"] = RESULT_LABELS.get(row["result"], row["result"])
         if subject["restricted"]:
             row["evidence"] = {}
     return render(
@@ -385,7 +410,12 @@ SELECT s.id, s.platform, s.entity_type, s.presence, m.joined_at, m.released_at,
    AND link.external_id = s.external_id AND link.entity_class_id = 'device'
   LEFT JOIN operations.devices d
     ON d.tenant_id = link.tenant_id AND d.id = link.entity_id AND d.deleted_at IS NULL
-  LEFT JOIN operations.clients cl ON cl.tenant_id = d.tenant_id AND cl.id = d.client_id
+  LEFT JOIN operations.computer_client_ownership owner
+    ON owner.tenant_id = d.tenant_id AND owner.device_id = d.id
+   AND owner.effective_client_id = d.client_id
+   AND owner.state IN ('resolved', 'decision_protected')
+  LEFT JOIN operations.clients cl
+    ON cl.tenant_id = owner.tenant_id AND cl.id = owner.effective_client_id
  WHERE m.tenant_id = %s AND m.case_id = %s
  ORDER BY m.released_at NULLS FIRST, meta.last_seen_at DESC NULLS LAST, s.id
  LIMIT 500

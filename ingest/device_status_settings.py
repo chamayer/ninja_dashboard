@@ -74,6 +74,10 @@ def device_overrides(cur: Any, tenant_id: int) -> dict[str, int]:
         return {}
     cur.execute(
         "SELECT d.id::text, d.client_id::text FROM operations.devices d "
+        "JOIN operations.computer_client_ownership owner "
+        "ON owner.tenant_id = d.tenant_id AND owner.device_id = d.id "
+        "AND owner.effective_client_id = d.client_id "
+        "AND owner.state IN ('resolved', 'decision_protected') "
         "WHERE d.tenant_id = %s AND d.deleted_at IS NULL AND d.client_id IS NOT NULL",
         (tenant_id,),
     )
@@ -91,6 +95,10 @@ def device_offline_days(cur: Any, tenant_id: int, device_id: Any) -> int:
         return offline
     cur.execute(
         "SELECT d.client_id::text FROM operations.devices d "
+        "JOIN operations.computer_client_ownership owner "
+        "ON owner.tenant_id = d.tenant_id AND owner.device_id = d.id "
+        "AND owner.effective_client_id = d.client_id "
+        "AND owner.state IN ('resolved', 'decision_protected') "
         "WHERE d.tenant_id = %s AND d.id = %s",
         (tenant_id, str(device_id)),
     )

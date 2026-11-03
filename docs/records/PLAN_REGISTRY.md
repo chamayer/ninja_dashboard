@@ -100,8 +100,8 @@
 - Source: docs/plans/PLAN-045-source-derived-computer-client.md
 - Section: PLAN-045 — Source-derived Computer client
 - Related plans: PLAN-004 owns source associations and identity; PLAN-015 owns separately approved identity repairs; PLAN-036 supplies record-first evaluation. This plan changes client ownership projection, not duplicate merges.
-- Resume gate: User requested a pause after the checkpoint commit. Resume only on request. Production data operations, push and deployment remain separately gated.
-- Last checked: 2026-11-03 (0401–0403, projector, resolver sweep, operator choices and initial scoped readers in progress; small synthetic PostgreSQL and unit checks passed. Complete reader/input coverage and full-chain/concurrency validation remain outstanding; no production data changed).
+- Resume gate: User resumed the goal after checkpoint commit `2af7fb1b`. Production data operations, commit, push and deployment remain separately gated.
+- Last checked: 2026-11-03 (inventory and notification delivery use transaction-held ownership locks; synthetic PostgreSQL and mocked send checks pass. Lock duration needs authorized rehearsal; resolver, evaluator, remaining readers and populated-schema validation remain outstanding; no production data changed).
 
 ## PLAN-043 — Useful issue review
 

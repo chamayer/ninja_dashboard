@@ -296,13 +296,44 @@ def _load_lifecycle_results(cur, tenant_id, now, device_id, source_problems):
     return results, devices
 
 
+def _lock_evaluator_client(cur, tenant_id, device_id, client_id, revision=None):
+    """Keep the captured client valid for a client-dependent write."""
+    cur.execute(
+        "SELECT operations.lock_computer_client_scope(%s, %s, %s)",
+        (tenant_id, device_id, client_id),
+    )
+    if not cur.fetchone()[0]:
+        return False
+    if revision is None:
+        return True
+    cur.execute(
+        "SELECT evidence_revision FROM operations.computer_client_ownership "
+        "WHERE tenant_id = %s AND device_id = %s",
+        (tenant_id, device_id),
+    )
+    row = cur.fetchone()
+    return row is not None and row[0] == revision
+
+
 def _apply_lifecycle_results(cur, tenant_id, now, run_id, results):
     affected = 0
-    for result in results.values():
+    # Inventory batches also lock ownership rows in device order.
+    for result in sorted(results.values(), key=lambda value: value.listing.device_id):
         item = result.listing
-        if item.in_use_confirmed and item.reporting and result.known and result.target == "active":
+        clear_confirmation = (
+            item.in_use_confirmed and item.reporting and result.known and result.target == "active"
+        )
+        transition = result.known and item.lifecycle_status != result.target
+        if not (clear_confirmation or transition):
+            continue
+        # The listing may have been read in an earlier evaluator batch. Hold
+        # the ownership lock through the write so a source change cannot make
+        # its client-specific policy stale between this check and the update.
+        if not _lock_evaluator_client(cur, tenant_id, item.device_id, item.client_id):
+            continue
+        if clear_confirmation:
             _clear_in_use_confirmation(cur, tenant_id, item.device_id)
-        if result.known and item.lifecycle_status != result.target:
+        if transition:
             affected += _transition_lifecycle(
                 cur, tenant_id, item, item.lifecycle_status, result.target,
                 result.reason, result.evidence, now, run_id,
@@ -897,6 +928,34 @@ def _load_lifecycle_evidence(
     return per_device
 
 
+def _lock_finding_owner_scope(cur: Any, tenant_id: int, finding_type_id: int) -> list[uuid.UUID]:
+    """Fence owner-dependent clearance without treating an old client as current."""
+    cur.execute(
+        """
+        WITH candidates AS MATERIALIZED (
+            SELECT DISTINCT d.id AS device_id, d.client_id
+              FROM operations.findings f
+              JOIN operations.devices d
+                ON d.tenant_id = f.tenant_id AND d.id = f.subject_id
+               AND d.client_id = f.client_id AND d.deleted_at IS NULL
+              JOIN operations.computer_client_ownership owner
+                ON owner.tenant_id = d.tenant_id AND owner.device_id = d.id
+               AND owner.effective_client_id = d.client_id
+               AND owner.state IN ('resolved', 'decision_protected')
+             WHERE f.tenant_id = %s AND f.finding_type_id = %s
+               AND f.subject_type = 'device'
+               AND f.status IN ('open', 'acknowledged', 'investigating', 'suppressed')
+        )
+        SELECT device_id FROM operations.lock_computer_client_scopes(
+            %s,
+            coalesce((SELECT array_agg(device_id ORDER BY device_id) FROM candidates), '{}'::uuid[]),
+            coalesce((SELECT array_agg(client_id ORDER BY device_id) FROM candidates), '{}'::uuid[]))
+        """,
+        (tenant_id, finding_type_id, tenant_id),
+    )
+    return [row[0] for row in cur.fetchall()]
+
+
 def _resolve_lifecycle_findings_absent(
     cur: Any,
     tenant_id: int,
@@ -906,6 +965,7 @@ def _resolve_lifecycle_findings_absent(
     device_id: uuid.UUID | None = None,
 ) -> None:
     """Resolve only lifecycle findings no longer emitted in this evaluator run."""
+    owned = _lock_finding_owner_scope(cur, tenant_id, finding_type_id)
     cur.execute("SELECT to_regclass('operations.condition_assessments') IS NOT NULL")
     if cur.fetchone()[0]:
         cur.execute(
@@ -916,9 +976,10 @@ def _resolve_lifecycle_findings_absent(
                AND finding_type_id = %s
                AND status IN ('open', 'acknowledged', 'investigating', 'suppressed')
                AND (%s::uuid IS NULL OR subject_id = %s)
+               AND subject_id = ANY(%s::uuid[])
                AND NOT (condition_key = ANY(%s))
             """,
-            (tenant_id, finding_type_id, device_id, device_id, list(condition_keys)),
+            (tenant_id, finding_type_id, device_id, device_id, owned, list(condition_keys)),
         )
         for finding_id, subject_id, condition_key, status in cur.fetchall():
             _record_lifecycle_assessment(
@@ -940,6 +1001,7 @@ def _resolve_lifecycle_findings_absent(
                AND finding_type_id = %s
                AND status IN ('open', 'acknowledged', 'investigating', 'suppressed')
                AND (%s::uuid IS NULL OR subject_id = %s)
+               AND subject_id = ANY(%s::uuid[])
                AND NOT (condition_key = ANY(%s))
                AND EXISTS (
                    SELECT 1
@@ -954,7 +1016,7 @@ def _resolve_lifecycle_findings_absent(
                       AND a.assessed_at >= now() - (p.policy->>'freshness_hours')::integer * interval '1 hour'
                )
             """,
-            (now, tenant_id, finding_type_id, device_id, device_id, list(condition_keys)),
+            (now, tenant_id, finding_type_id, device_id, device_id, owned, list(condition_keys)),
         )
     else:
         cur.execute(
@@ -965,6 +1027,7 @@ def _resolve_lifecycle_findings_absent(
                AND finding_type_id = %s
                AND status IN ('open', 'acknowledged', 'investigating', 'suppressed')
                AND (%s::uuid IS NULL OR subject_id = %s)
+               AND subject_id = ANY(%s::uuid[])
                AND EXISTS (
                    SELECT 1
                      FROM operations.condition_assessments a
@@ -978,7 +1041,7 @@ def _resolve_lifecycle_findings_absent(
                       AND a.assessed_at >= now() - (p.policy->>'freshness_hours')::integer * interval '1 hour'
                )
             """,
-            (now, tenant_id, finding_type_id, device_id, device_id),
+            (now, tenant_id, finding_type_id, device_id, device_id, owned),
         )
 
 
@@ -1012,6 +1075,8 @@ def _upsert_lifecycle_finding(
     Resolved and won't-fix findings intentionally retain their history and a
     later recurrence opens a new row.
     """
+    if not _lock_evaluator_client(cur, tenant_id, device_id, client_id):
+        return 0
     cur.execute(
         """
         UPDATE operations.findings
@@ -1625,6 +1690,7 @@ def _evaluate_source_name_kinds(cur: Any, tenant_id: int, now: datetime) -> int:
 # --------------------------------------------------------------------------
 
 
+@_batch_unit
 def _evaluate_duplicate_records(cur: Any, tenant_id: int, now: datetime) -> int:
     """Admin finding per Computer holding two records of one source (ADR-0032).
 
@@ -1691,11 +1757,41 @@ def _evaluate_duplicate_records(cur: Any, tenant_id: int, now: datetime) -> int:
             }
         )
 
+    # Preserve existing episodes when ownership is unavailable, and hold the
+    # captured owner through both writes and recovery assessments.
+    cur.execute(
+        """
+        SELECT f.condition_key, d.id, d.client_id
+          FROM operations.findings f
+          LEFT JOIN operations.devices d
+            ON d.tenant_id = f.tenant_id AND d.deleted_at IS NULL
+           AND (d.id = f.subject_id AND f.subject_type = 'device'
+                OR d.id::text = f.subject_ref->'legacy_ref'->>'device_id'
+                OR d.id::text = f.subject_ref->>'device_id')
+         WHERE f.tenant_id = %s AND f.condition_namespace = 'admin'
+           AND f.finding_type_id = %s
+           AND f.status IN ('open', 'acknowledged', 'investigating', 'suppressed')
+        """,
+        (tenant_id, ft_id),
+    )
+    existing = cur.fetchall()
+    owners = {key[0]: key[1] for key in groups}
+    for _, device_id, client_id in existing:
+        if device_id is not None:
+            owners.setdefault(device_id, client_id)
+    ordered_owners = sorted(owners.items(), key=lambda item: str(item[0]))
+    cur.execute(
+        "SELECT device_id FROM operations.lock_computer_client_scopes(%s, %s::uuid[], %s::uuid[])",
+        (tenant_id, [item[0] for item in ordered_owners], [item[1] for item in ordered_owners]),
+    )
+    locked = {row[0] for row in cur.fetchall()}
     count = 0
-    present_keys: list[str] = []
+    present_keys: list[str] = [key for key, device_id, _ in existing if device_id not in locked]
     for (device_id, client_id, computer_name, platform, entity_type, page_group), records in (
         groups.items()
     ):
+        if device_id not in locked:
+            continue
         if len(records) < 2:
             continue
         serials = {
@@ -1933,15 +2029,19 @@ def _evaluate_coverage(
                EXISTS(SELECT 1 FROM operations.device_operator_decisions confirmed
                        WHERE confirmed.tenant_id = d.tenant_id AND confirmed.device_id = d.id
                          AND confirmed.dimension = 'in_use_confirmed'
-                         AND confirmed.value = 'true'::jsonb) AS in_use_confirmed
+                         AND confirmed.value = 'true'::jsonb) AS in_use_confirmed,
+               owner.evidence_revision
         FROM operations.devices d
+        JOIN operations.computer_client_ownership owner
+          ON owner.tenant_id = d.tenant_id AND owner.device_id = d.id
+         AND owner.effective_client_id = d.client_id
+         AND owner.state IN ('resolved', 'decision_protected')
         LEFT JOIN operations.device_operator_decisions op
           ON op.tenant_id = d.tenant_id
          AND op.device_id = d.id
          AND op.dimension = 'exemptions'
         WHERE d.tenant_id = %s
           AND d.deleted_at IS NULL
-          AND d.lifecycle_status != 'retired'
           AND (%s::uuid IS NULL OR d.id = %s)
         """,
         (tenant_id, device_id, device_id),
@@ -1996,7 +2096,10 @@ def _evaluate_coverage(
         in_universe,
         lifecycle_status,
         in_use_confirmed,
+        ownership_revision,
     ) in devices:
+        if lifecycle_status == "retired":
+            continue
         exemptions = exemptions or {}
         not_applied: list[dict[str, str]] = []
         tier_rows = resolve_tier(dev_client_id, dev_role or "all")
@@ -2143,6 +2246,7 @@ def _evaluate_coverage(
                         not collection_blockers,
                     ),
                 ),
+                ownership_revision=ownership_revision,
             )
 
         if os_group == "Unknown" and os_unknown_ft is not None:
@@ -2164,12 +2268,14 @@ def _evaluate_coverage(
                     ),
                     EvaluationCoverage(True, True, True, True),
                 ),
+                ownership_revision=ownership_revision,
             )
 
-    _write_requirement_state(cur, tenant_id, device_id, verdicts)
+    scope = [(row[0], row[1], row[9]) for row in devices]
+    locked_devices = _write_requirement_state(cur, tenant_id, scope, verdicts)
     count += _reconcile_requirement_findings(
         cur, tenant_id, device_id, now, verdicts, os_unknown_subjects,
-        source_problems, identity_blocked, fully_offline_devices, lifecycle_results,
+        source_problems, identity_blocked, fully_offline_devices, lifecycle_results, locked_devices,
     )
     return count
 
@@ -2198,6 +2304,7 @@ def _reconcile_requirement_findings(
     identity_blocked: set[uuid.UUID],
     fully_offline_devices: set[uuid.UUID],
     lifecycle_results: dict[uuid.UUID, LifecycleResult],
+    locked_devices: set[uuid.UUID],
 ) -> int:
     """Reconcile old episodes from this successful coverage pass, never a second rule.
 
@@ -2225,10 +2332,11 @@ def _reconcile_requirement_findings(
                            'os_unknown_coverage')
            AND f.status IN ('open', 'acknowledged', 'investigating', 'suppressed')
            AND (%s::uuid IS NULL OR f.subject_id = %s)
+           AND f.subject_id = ANY(%s::uuid[])
          ORDER BY f.id
          FOR UPDATE OF f
         """,
-        (tenant_id, device_id, device_id),
+        (tenant_id, device_id, device_id, list(locked_devices)),
     )
     count = 0
     for fid, subject, key, type_name, details, status, existing, client, lifecycle in cur.fetchall():
@@ -2291,24 +2399,44 @@ def _reconcile_requirement_findings(
 
 
 def _write_requirement_state(
-    cur: Any, tenant_id: int, device_id: uuid.UUID | None, verdicts: list[dict[str, Any]]
-) -> None:
+    cur: Any, tenant_id: int, scope: list[tuple], verdicts: list[dict[str, Any]]
+) -> set[uuid.UUID]:
     """Replace the stored requirement verdicts for this pass (ADR-0035, migration 0332).
 
-    A full pass replaces every Computer's verdicts; a single-Computer pass only
-    that Computer's. Runs in the coverage pass's transaction, so the verdicts
-    and the findings they produced commit together.
+    Only Computers whose captured client and evidence revision remain current
+    may be replaced or reconciled. Other verdicts and findings remain intact.
+    Locks are held through the subsequent finding reconciliation transaction.
     """
+    devices = [row[0] for row in scope]
+    clients = [row[1] for row in scope]
+    revisions = [row[2] for row in scope]
+    cur.execute(
+        """
+        WITH locked AS MATERIALIZED (
+            SELECT * FROM operations.lock_computer_client_scopes(%s, %s::uuid[], %s::uuid[])
+        )
+        SELECT locked.device_id
+          FROM locked
+          JOIN unnest(%s::uuid[], %s::bigint[]) captured(device_id, revision)
+            ON captured.device_id = locked.device_id
+          JOIN operations.computer_client_ownership owner
+            ON owner.tenant_id = %s AND owner.device_id = locked.device_id
+           AND owner.evidence_revision = captured.revision
+        """,
+        (tenant_id, devices, clients, devices, revisions, tenant_id),
+    )
+    locked_devices = {row[0] for row in cur.fetchall()}
     cur.execute(
         "SELECT to_regprocedure("
         "'operations.write_device_requirement_state(bigint, uuid[], jsonb)') IS NOT NULL"
     )
     if not cur.fetchone()[0]:
-        return
+        return locked_devices
     cur.execute(
         "SELECT operations.write_device_requirement_state(%s, %s::uuid[], %s::jsonb)",
-        (tenant_id, [str(device_id)] if device_id else None, json.dumps(verdicts)),
+        (tenant_id, list(locked_devices), json.dumps(verdicts)),
     )
+    return locked_devices
 
 
 # --------------------------------------------------------------------------
@@ -2724,6 +2852,7 @@ def _auto_resolve(
     # (any agent.* observation appears).
     unenrolled_ft_id = _get_finding_type_id(cur, "device_unenrolled")
     if unenrolled_ft_id:
+        owned = _lock_finding_owner_scope(cur, tenant_id, unenrolled_ft_id)
         cur.execute(
             f"""
             UPDATE operations.findings f
@@ -2732,6 +2861,7 @@ def _auto_resolve(
               AND f.finding_type_id = %s
               AND f.status IN ('open', 'acknowledged')
               AND (%s::uuid IS NULL OR f.subject_id = %s)
+              AND f.subject_id = ANY(%s::uuid[])
               AND EXISTS (
                   SELECT 1 FROM operations.device_agent_presence_current apc
                   WHERE apc.tenant_id = f.tenant_id
@@ -2740,7 +2870,7 @@ def _auto_resolve(
               )
             {clear_assessment}
             """,
-            (now, tenant_id, unenrolled_ft_id, device_id, device_id),
+            (now, tenant_id, unenrolled_ft_id, device_id, device_id, owned),
         )
         count += cur.rowcount or 0
 
@@ -2763,6 +2893,7 @@ def _resolve_findings_absent(
     """Resolve absent findings only after a complete result is established."""
     if not current_subject_ids and not empty_result_verified:
         return
+    owned = _lock_finding_owner_scope(cur, tenant_id, finding_type_id)
     # Absence from the current result is not recovery evidence. A source can
     # disappear, a collection can be incomplete, or a device can be omitted
     # by an unhealthy evaluator run. Only a producer-specific positive
@@ -2793,10 +2924,11 @@ def _resolve_findings_absent(
         WHERE tenant_id = %s AND condition_namespace = 'entity'
           AND finding_type_id = %s
           AND status IN ('open', 'acknowledged')
+          AND subject_id = ANY(%s::uuid[])
           AND NOT (subject_id = ANY(%s::uuid[]))
         {assessment_clause}
         """,
-        (now, tenant_id, finding_type_id, current_subject_ids),
+        (now, tenant_id, finding_type_id, owned, current_subject_ids),
     )
 
 
@@ -2856,8 +2988,11 @@ def _upsert_finding(
     now: datetime,
     details: dict[str, Any],
     assessment: tuple[tuple[Signal, ...], EvaluationCoverage] | None = None,
+    ownership_revision: int | None = None,
 ) -> int:
     """Refresh one finding while preserving its episode and operator state."""
+    if not _lock_evaluator_client(cur, tenant_id, device_id, client_id, ownership_revision):
+        return 0
     cur.execute(
         """
         INSERT INTO operations.findings (

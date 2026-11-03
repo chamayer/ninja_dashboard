@@ -53,7 +53,8 @@ BEGIN
     END IF;
     SELECT coalesce(jsonb_agg(jsonb_build_object(
                'observation_id', observation.observation_id,
-               'client_id', observation.client_id)
+               'client_id', operations.computer_client_independent_evidence(
+                   observation.tenant_id, observation.observation_id))
                ORDER BY observation.observation_id), '[]'::jsonb)
       INTO v_evidence FROM operations.entity_observation_current observation
      WHERE observation.tenant_id = p_tenant AND observation.device_id = p_device
@@ -76,8 +77,13 @@ BEGIN
                WHEN operations.device_operator_decisions.value ->> 'client_id' = p_client::text
                     AND p_record_keys IS NOT NULL
                THEN jsonb_build_object('client_id', p_client, 'evidence',
-                    coalesce(operations.device_operator_decisions.value -> 'evidence', '[]'::jsonb)
-                    || v_evidence)
+                    coalesce((SELECT jsonb_agg(saved)
+                                FROM jsonb_array_elements(coalesce(
+                                    operations.device_operator_decisions.value -> 'evidence', '[]'::jsonb)) saved
+                               WHERE NOT EXISTS (
+                                   SELECT 1 FROM jsonb_array_elements(v_evidence) current_evidence
+                                    WHERE current_evidence ->> 'observation_id' = saved ->> 'observation_id'
+                               )), '[]'::jsonb) || v_evidence)
                ELSE EXCLUDED.value END,
            reason = EXCLUDED.reason, set_by = EXCLUDED.set_by, set_at = EXCLUDED.set_at,
            version = operations.device_operator_decisions.version + 1;

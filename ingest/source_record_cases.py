@@ -39,7 +39,8 @@ def _members(cur: Any, tenant_id: int, key: dict) -> list[dict]:
     cur.execute(
         """
         SELECT s.id, s.platform, s.input_version, s.association_version,
-               link.entity_id AS device_id, d.id IS NOT NULL AS device_live
+               link.entity_id AS device_id, d.id IS NOT NULL AS device_live,
+               owner.device_id IS NOT NULL AS device_owned
           FROM operations.source_record_lookup_keys k
           JOIN operations.source_record_subjects s
             ON s.tenant_id = k.tenant_id AND s.id = k.subject_id
@@ -51,6 +52,10 @@ def _members(cur: Any, tenant_id: int, key: dict) -> list[dict]:
            AND link.external_id = s.external_id AND link.entity_class_id = 'device'
           LEFT JOIN operations.devices d
             ON d.tenant_id = link.tenant_id AND d.id = link.entity_id AND d.deleted_at IS NULL
+          LEFT JOIN operations.computer_client_ownership owner
+            ON owner.tenant_id = d.tenant_id AND owner.device_id = d.id
+           AND owner.effective_client_id = d.client_id
+           AND owner.state IN ('resolved', 'decision_protected')
          WHERE k.tenant_id = %s AND k.source_instance_id = %s
            AND k.key_family = %s AND k.normalized_value = %s
            AND s.presence = 'present'
@@ -228,7 +233,7 @@ def assess_case_keys(
             current["version"] += 1
 
         attached = {m["device_id"] for m in members if m["device_live"]}
-        same_computer = len(attached) == 1 and all(m["device_live"] for m in members)
+        same_computer = len(attached) == 1 and all(m.get("device_owned") for m in members)
         evidence = {
             "member_count": len(members),
             "attached_computers": len(attached),
@@ -242,6 +247,15 @@ def assess_case_keys(
                 owner="duplicate_disposition",
             )
             finding_id = None  # resolved by the disposition; nothing to reopen
+        elif len(attached) == 1 and all(m["device_live"] for m in members) and not same_computer:
+            result = source_records._result(
+                "case.duplicate", "unknown", evidence=evidence,
+                missing=["computer_client_ownership"],
+            )
+            finding_id = source_records.publish_finding(
+                cur, tenant_id, type_ids, "source_record_case", current["id"],
+                result, now, client_id=None, context={},
+            )
         elif key["key_family"] not in _DEFECT_FAMILIES:
             # A shared MAC (docks, adapters, VPNs) starts an investigation; it
             # does not establish a duplicate entry (§5). The case stays visible.

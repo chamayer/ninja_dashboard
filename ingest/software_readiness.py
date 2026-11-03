@@ -63,7 +63,11 @@ WITH conflicts AS (
      ) AS candidate(value)
 )
 SELECT device.id::text,
-       device.entity_id IS NOT NULL AND device.client_id IS NOT NULL AS attached,
+       device.entity_id IS NOT NULL AND EXISTS (
+           SELECT 1 FROM operations.computer_client_ownership owner
+            WHERE owner.tenant_id = device.tenant_id AND owner.device_id = device.id
+              AND owner.effective_client_id = device.client_id
+              AND owner.state IN ('resolved', 'decision_protected')) AS attached,
        conflicted.device_key IS NOT NULL AS conflicted
   FROM operations.devices device
   LEFT JOIN conflicted ON conflicted.device_key = device.id::text

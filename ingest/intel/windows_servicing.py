@@ -243,8 +243,12 @@ def _load_devices(cur: Any, tenant_id: int, device_id: uuid.UUID | None) -> list
                  WHEN attr.os_build_number IS NOT NULL THEN 'effective attributes'
                  WHEN ninja.os_build_number IS NOT NULL THEN 'Ninja normalized evidence'
                  ELSE 'effective attributes'
-               END
+               END, owner.evidence_revision
         FROM operations.devices d
+        JOIN operations.computer_client_ownership owner
+          ON owner.tenant_id = d.tenant_id AND owner.device_id = d.id
+         AND owner.effective_client_id = d.client_id
+         AND owner.state IN ('resolved', 'decision_protected')
         LEFT JOIN LATERAL (
             SELECT MAX(e.value_text) FILTER (WHERE definition.key = 'os_name')
                        AS os_name,
@@ -287,7 +291,7 @@ def _load_devices(cur: Any, tenant_id: int, device_id: uuid.UUID | None) -> list
 def _write_current(
     cur: Any,
     tenant_id: int,
-    device_id: uuid.UUID | None,
+    scope: list[uuid.UUID],
     rows: list[dict[str, Any]],
 ) -> None:
     if rows:
@@ -330,26 +334,14 @@ def _write_current(
             rows,
         )
     current_ids = [row["device_id"] for row in rows]
-    if device_id is not None:
-        if not current_ids:
-            cur.execute(
-                "DELETE FROM operations.device_windows_servicing_current "
-                "WHERE tenant_id = %s AND device_id = %s",
-                (tenant_id, device_id),
-            )
-    elif current_ids:
-        cur.execute(
-            """
-            DELETE FROM operations.device_windows_servicing_current
-            WHERE tenant_id = %s AND NOT (device_id = ANY(%s::uuid[]))
-            """,
-            (tenant_id, current_ids),
-        )
-    else:
-        cur.execute(
-            "DELETE FROM operations.device_windows_servicing_current WHERE tenant_id = %s",
-            (tenant_id,),
-        )
+    cur.execute(
+        """
+        DELETE FROM operations.device_windows_servicing_current
+         WHERE tenant_id = %s AND device_id = ANY(%s::uuid[])
+           AND NOT (device_id = ANY(%s::uuid[]))
+        """,
+        (tenant_id, scope, current_ids),
+    )
 
 
 def _finding_condition(tenant_id: int, device_id: uuid.UUID, name: str) -> str:
@@ -359,7 +351,7 @@ def _finding_condition(tenant_id: int, device_id: uuid.UUID, name: str) -> str:
 def _sync_findings(
     cur: Any,
     tenant_id: int,
-    device_id: uuid.UUID | None,
+    scope: list[uuid.UUID],
     rows: list[dict[str, Any]],
     now: datetime,
 ) -> int:
@@ -463,7 +455,7 @@ def _sync_findings(
             WHERE tenant_id = %s
               AND finding_type_id = %s
               AND status IN ('open', 'acknowledged')
-              AND (%s::uuid IS NULL OR subject_id = %s)
+              AND subject_id = ANY(%s::uuid[])
               AND NOT (subject_id = ANY(%s::uuid[]))
               AND to_regclass('operations.condition_assessments') IS NOT NULL
               AND EXISTS (
@@ -483,7 +475,7 @@ def _sync_findings(
                     )
               )
             """,
-            (now, now, tenant_id, finding_type_id, device_id, device_id, offenders[name]),
+            (now, now, tenant_id, finding_type_id, scope, offenders[name]),
         )
         affected += cur.rowcount or 0
     return affected
@@ -539,6 +531,26 @@ def sync(
     evaluated_at = now or datetime.now(timezone.utc)
     rules = _load_rules(cur)
     releases = _load_releases(cur)
+    devices = _load_devices(cur, tenant_id, device_id)
+    device_ids = [row[0] for row in devices]
+    clients = [row[1] for row in devices]
+    revisions = [row[6] for row in devices]
+    cur.execute(
+        """
+        WITH locked AS MATERIALIZED (
+            SELECT * FROM operations.lock_computer_client_scopes(%s, %s::uuid[], %s::uuid[])
+        )
+        SELECT locked.device_id
+          FROM locked
+          JOIN unnest(%s::uuid[], %s::bigint[]) captured(device_id, revision)
+            ON captured.device_id = locked.device_id
+          JOIN operations.computer_client_ownership owner
+            ON owner.tenant_id = %s AND owner.device_id = locked.device_id
+           AND owner.evidence_revision = captured.revision
+        """,
+        (tenant_id, device_ids, clients, device_ids, revisions, tenant_id),
+    )
+    locked = {row[0] for row in cur.fetchall()}
     projected: list[dict[str, Any]] = []
     for (
         current_device_id,
@@ -547,7 +559,10 @@ def sync(
         os_build_number,
         os_release_id,
         evidence_source,
-    ) in _load_devices(cur, tenant_id, device_id):
+        _revision,
+    ) in devices:
+        if current_device_id not in locked:
+            continue
         result = classify_windows(
             os_name,
             os_build_number,
@@ -583,8 +598,9 @@ def sync(
             }
         )
 
-    _write_current(cur, tenant_id, device_id, projected)
-    return _sync_findings(cur, tenant_id, device_id, projected, evaluated_at)
+    scope = list(locked)
+    _write_current(cur, tenant_id, scope, projected)
+    return _sync_findings(cur, tenant_id, scope, projected, evaluated_at)
 
 
 def project_and_evaluate(

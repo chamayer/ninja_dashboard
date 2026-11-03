@@ -85,6 +85,44 @@ class MatchPreview:
 
     result: MatchResult | None
     attempts: tuple[MatchAttempt, ...]
+    ownership_deferred: bool = False
+
+
+class OwnershipMatchDeferred(Exception):
+    """An identity candidate has no stable client for a scoped match."""
+
+
+def _scope_candidates(cur, tenant_id, client_id, candidates, *, lock):
+    """Keep only current-client candidates; defer unresolved ownership."""
+    cur.execute(
+        """
+        SELECT d.id, owner.state, owner.effective_client_id, d.client_id
+          FROM operations.devices d
+          LEFT JOIN operations.computer_client_ownership owner
+            ON owner.tenant_id = d.tenant_id AND owner.device_id = d.id
+         WHERE d.tenant_id = %s AND d.deleted_at IS NULL AND d.id = ANY(%s::uuid[])
+        """,
+        (tenant_id, candidates),
+    )
+    rows = cur.fetchall()
+    if len(rows) != len(set(candidates)) or any(
+        state not in {"resolved", "decision_protected"} or effective is None or effective != stored
+        for _, state, effective, stored in rows
+    ):
+        raise OwnershipMatchDeferred()
+    scoped = [device_id for device_id, _state, effective, _stored in rows if effective == client_id]
+    if lock and rows:
+        # Candidates currently owned by another client also affect whether a
+        # scoped match is safe: their owner could otherwise change while the
+        # caller acts on this result.
+        captured = sorted(((device_id, effective) for device_id, _state, effective, _stored in rows), key=lambda item: str(item[0]))
+        cur.execute(
+            "SELECT device_id FROM operations.lock_computer_client_scopes(%s, %s::uuid[], %s::uuid[])",
+            (tenant_id, [item[0] for item in captured], [item[1] for item in captured]),
+        )
+        if {row[0] for row in cur.fetchall()} != {item[0] for item in captured}:
+            raise OwnershipMatchDeferred()
+    return scoped
 
 
 def load_identity_match_policies(
@@ -279,26 +317,43 @@ def _resolve_match(
             continue
         if policy.requires_client_scope and client_id is None:
             continue
-        candidates = _candidates(
-            cur,
-            tenant_id=tenant_id,
-            source_name=source_name,
-            source_instance_id=source_instance_id,
-            external_id=external_id,
-            entity_type=entity_type,
-            serial=record_serial,
-            vm_uuid=record_vm_uuid,
-            hostname=hostname,
-            macs=macs or [],
-            client_id=client_id if policy.requires_client_scope else None,
-            matcher=policy.matcher,
-            identity_types=identity_types,
-            excluded_observation_ids=excluded_observation_ids,
-        )
+        try:
+            candidates = _candidates(
+                cur,
+                tenant_id=tenant_id,
+                source_name=source_name,
+                source_instance_id=source_instance_id,
+                external_id=external_id,
+                entity_type=entity_type,
+                serial=record_serial,
+                vm_uuid=record_vm_uuid,
+                hostname=hostname,
+                macs=macs or [],
+                client_id=client_id if policy.requires_client_scope else None,
+                matcher=policy.matcher,
+                identity_types=identity_types,
+                excluded_observation_ids=excluded_observation_ids,
+                lock_candidates=not trace,
+            )
+        except OwnershipMatchDeferred:
+            if trace:
+                return MatchPreview(None, tuple(attempts), ownership_deferred=True)
+            raise
         if not candidates:
             if trace:
                 attempts.append(MatchAttempt(policy.matcher, (), (), {}))
             continue
+        if policy.requires_client_scope:
+            try:
+                candidates = _scope_candidates(
+                    cur, tenant_id, client_id, candidates, lock=not trace
+                )
+            except OwnershipMatchDeferred:
+                if trace:
+                    return MatchPreview(None, tuple(attempts), ownership_deferred=True)
+                raise
+            if not candidates:
+                continue
         blockers = {
             device_id: blocker
             for device_id in candidates
@@ -494,6 +549,7 @@ def _candidates(
     matcher: str,
     identity_types: list[str],
     excluded_observation_ids: tuple[uuid.UUID, ...],
+    lock_candidates: bool,
 ) -> list[uuid.UUID]:
     if matcher == "source_identity":
         if source_instance_id is None:
@@ -508,7 +564,6 @@ def _candidates(
                AND eo.entity_key = %s
                AND eo.entity_type = %s AND d.deleted_at IS NULL
                AND NOT (eo.observation_id = ANY(%s::uuid[]))
-               AND (%s::uuid IS NULL OR d.client_id = %s::uuid)
             """,
             (
                 tenant_id,
@@ -517,8 +572,6 @@ def _candidates(
                 external_id,
                 entity_type,
                 list(excluded_observation_ids),
-                client_id,
-                client_id,
             ),
         )
         return [row[0] for row in cur.fetchall()]
@@ -539,7 +592,6 @@ def _candidates(
                                   AND rr.source_instance_id = eo.source_instance_id
                                   AND rr.external_id = eo.external_id)
                AND d.deleted_at IS NULL
-               AND (%s::uuid IS NULL OR d.client_id = %s::uuid)
             """,
             (
                 tenant_id,
@@ -549,8 +601,6 @@ def _candidates(
                 source_instance_id,
                 source_instance_id,
                 list(excluded_observation_ids),
-                client_id,
-                client_id,
             ),
         )
         return [row[0] for row in cur.fetchall()]
@@ -571,7 +621,6 @@ def _candidates(
                                   AND rr.source_instance_id = eo.source_instance_id
                                   AND rr.external_id = eo.external_id)
                AND d.deleted_at IS NULL
-               AND (%s::uuid IS NULL OR d.client_id = %s::uuid)
             """,
             (
                 tenant_id,
@@ -581,8 +630,6 @@ def _candidates(
                 source_instance_id,
                 source_instance_id,
                 list(excluded_observation_ids),
-                client_id,
-                client_id,
             ),
         )
         return [row[0] for row in cur.fetchall()]
@@ -600,6 +647,7 @@ def _candidates(
             external_id=external_id,
             identity_types=identity_types,
             excluded_observation_ids=excluded_observation_ids,
+            lock_candidates=lock_candidates,
         )
     return []
 
@@ -622,7 +670,11 @@ SELECT eo.device_id, d.lifecycle_status, f.name_short, f.name_key,
       coalesce(nullif(eo.canonical_data ->> 'hostname', ''), eo.canonical_data ->> 'guest_name'),
       eo.canonical_data ->> 'domain') f
  WHERE eo.tenant_id = %(tenant)s
-   AND (%(client)s::uuid IS NULL OR d.client_id = %(client)s::uuid)
+   AND (%(all_clients)s OR %(client)s::uuid IS NULL OR d.client_id = %(client)s::uuid OR NOT EXISTS (
+       SELECT 1 FROM operations.computer_client_ownership owner
+        WHERE owner.tenant_id = d.tenant_id AND owner.device_id = d.id
+          AND owner.effective_client_id = d.client_id
+          AND owner.state IN ('resolved', 'decision_protected')))
    AND NOT (eo.observation_id = ANY(%(excluded_observation_ids)s::uuid[]))
    AND eo.entity_key NOT LIKE 'device-health:%%'
    AND f.name_short IS NOT NULL
@@ -647,10 +699,30 @@ def invalidate_client_names(client_id=None) -> None:
 
 
 def client_record_names(
-    cur, tenant_id: int, client_id, excluded_observation_ids: tuple[uuid.UUID, ...] = ()
+    cur, tenant_id: int, client_id, excluded_observation_ids: tuple[uuid.UUID, ...] = (),
+    *, match_name: str | None = None,
 ) -> list[tuple]:
     """(device_id, lifecycle, name_short, name_key, is_current, platform, entity_key,
     entity_type, source_instance_id) for every named record of the client's Computers."""
+    if match_name is not None:
+        # Ownership can change in another process while a client cache is
+        # warm. Query only names that can match this record so a newly owned
+        # or unresolved Computer cannot be omitted from the decision.
+        cur.execute(
+            _CLIENT_NAMES + """
+   AND (f.name_key = %(match_key)s
+        OR (length(%(match_name)s) = 15 AND length(f.name_short) > 15
+            AND left(f.name_short, 15) = %(match_name)s)
+        OR (length(f.name_short) = 15 AND length(%(match_name)s) > 15
+            AND left(%(match_name)s, 15) = f.name_short))
+            """,
+            {
+                "tenant": tenant_id, "client": client_id, "all_clients": True,
+                "excluded_observation_ids": list(excluded_observation_ids),
+                "match_name": match_name, "match_key": _LOOSE_RE.sub("", match_name),
+            },
+        )
+        return cur.fetchall()
     cache_key = (
         tenant_id,
         client_id,
@@ -665,6 +737,7 @@ def client_record_names(
         {
             "tenant": tenant_id,
             "client": client_id,
+            "all_clients": False,
             "excluded_observation_ids": list(excluded_observation_ids),
         },
     )
@@ -708,7 +781,11 @@ SELECT DISTINCT eo.device_id, eo.platform, eo.entity_key, eo.source_instance_id,
         ON h.tenant_id = eo.tenant_id AND h.source_instance_id = eo.source_instance_id
        AND h.external_id = eo.external_id AND h.entity_type = eo.entity_type
      WHERE eo.tenant_id = %(tenant)s
-       AND (%(client)s::uuid IS NULL OR d.client_id = %(client)s::uuid)
+       AND (%(all_clients)s OR %(client)s::uuid IS NULL OR d.client_id = %(client)s::uuid OR NOT EXISTS (
+           SELECT 1 FROM operations.computer_client_ownership owner
+            WHERE owner.tenant_id = d.tenant_id AND owner.device_id = d.id
+              AND owner.effective_client_id = d.client_id
+              AND owner.state IN ('resolved', 'decision_protected')))
        AND eo.entity_type = ANY(%(types)s::text[])
        AND NOT (eo.observation_id = ANY(%(excluded_observation_ids)s::uuid[]))
        AND NOT EXISTS (SELECT 1 FROM operations.identity_roaming_records rr
@@ -729,7 +806,15 @@ def _history_names(
     client_id,
     identity_types: list[str],
     excluded_observation_ids: tuple[uuid.UUID, ...] = (),
+    *, match_key: str | None = None,
 ) -> list[tuple]:
+    if match_key is not None:
+        cur.execute(
+            _HISTORY_NAMES + " AND f.name_key = %(match_key)s",
+            {"tenant": tenant_id, "client": client_id, "all_clients": True, "types": identity_types,
+             "excluded_observation_ids": list(excluded_observation_ids), "match_key": match_key},
+        )
+        return cur.fetchall()
     cache_key = (
         tenant_id,
         client_id,
@@ -746,6 +831,7 @@ def _history_names(
         {
             "tenant": tenant_id,
             "client": client_id,
+            "all_clients": False,
             "types": identity_types,
             "excluded_observation_ids": list(excluded_observation_ids),
         },
@@ -771,6 +857,7 @@ def _name_candidates(
     external_id: str,
     identity_types: list[str],
     excluded_observation_ids: tuple[uuid.UUID, ...],
+    lock_candidates: bool,
 ) -> list[uuid.UUID]:
     """Computers whose records report the name (ADR-0034 section 4).
 
@@ -788,7 +875,8 @@ def _name_candidates(
     rows = [
         (device_id, _tier(lifecycle, is_current), name_short, name_key)
         for device_id, lifecycle, name_short, name_key, is_current, platform, entity_key, entity_type, row_source_instance in client_record_names(
-            cur, tenant_id, client_id
+            cur, tenant_id, client_id, excluded_observation_ids,
+            match_name=hostname if client_id is not None else None
         )
         # The record's own row is skipped by its complete source identity.
         if entity_type in types
@@ -801,12 +889,18 @@ def _name_candidates(
         )
         and _names_match(hostname, key, name_short, name_key or "")
     ]
+    if rows and client_id is not None:
+        scoped = set(_scope_candidates(
+            cur, tenant_id, client_id, list({row[0] for row in rows}), lock=lock_candidates
+        ))
+        rows = [row for row in rows if row[0] in scoped]
     if not rows:
         # Tier 4 only decides when no current or withdrawn record holds the name.
         rows = [
             (device_id, 4, short, name_key)
             for device_id, platform, entity_key, row_source_instance, short, name_key in _history_names(
-                cur, tenant_id, client_id, identity_types
+                cur, tenant_id, client_id, identity_types, excluded_observation_ids,
+                match_key=key if client_id is not None else None,
             )
             if name_key == key
             and not (
@@ -818,6 +912,11 @@ def _name_candidates(
                 )
             )
         ]
+        if rows and client_id is not None:
+            scoped = set(_scope_candidates(
+                cur, tenant_id, client_id, list({row[0] for row in rows}), lock=lock_candidates
+            ))
+            rows = [row for row in rows if row[0] in scoped]
     chosen: list[uuid.UUID] = []
     for tier in (1, 2, 3, 4):
         in_tier = [row for row in rows if row[1] == tier]

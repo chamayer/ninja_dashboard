@@ -30,6 +30,7 @@ from django.db.models import (
     F,
     Max,
     Q,
+    UUIDField,
     Value,
     When,
 )
@@ -87,8 +88,13 @@ from .client_workspace import (
 from .computer_reads import (
     client_owned_computers,
     client_owned_device_ids,
+    client_owned_finding_ids,
     current_computer_sql,
     current_computers,
+    effective_computer_client_sql,
+    effectively_owned_device_ids,
+    lock_client_owned_computer,
+    source_owned_finding_ids,
 )
 from .conditions.live import load_active_profile
 from .conditions.operator import (
@@ -678,6 +684,10 @@ def _affected_device_rows(findings) -> list[dict]:
                 FROM operations.findings f
                 JOIN matching m ON m.id = f.id
                 JOIN operations.finding_types ft ON ft.id = f.finding_type_id
+                JOIN operations.computer_client_ownership owner
+                  ON owner.tenant_id = f.tenant_id AND owner.device_id = f.subject_id
+                 AND owner.effective_client_id = f.client_id
+                 AND owner.state IN ('resolved', 'decision_protected')
                 WHERE f.tenant_id = 1 AND f.subject_type = 'device'
 
                 UNION
@@ -685,6 +695,10 @@ def _affected_device_rows(findings) -> list[dict]:
                 SELECT e.device_id, e.finding_type
                 FROM operations.v_device_software_exposure e
                 JOIN matching m ON m.id = e.finding_id
+                JOIN operations.computer_client_ownership owner
+                  ON owner.tenant_id = e.tenant_id AND owner.device_id = e.device_id
+                 AND owner.effective_client_id = e.client_id
+                 AND owner.state IN ('resolved', 'decision_protected')
                 WHERE e.tenant_id = 1
             )
             SELECT d.id::text,
@@ -699,6 +713,10 @@ def _affected_device_rows(findings) -> list[dict]:
             JOIN operations.devices d
               ON d.tenant_id = 1 AND d.id = impacted.device_id
              AND d.deleted_at IS NULL
+            JOIN operations.computer_client_ownership owner
+              ON owner.tenant_id = d.tenant_id AND owner.device_id = d.id
+             AND owner.effective_client_id = d.client_id
+             AND owner.state IN ('resolved', 'decision_protected')
             JOIN operations.clients c
               ON c.tenant_id = 1 AND c.id = d.client_id
              AND c.deleted_at IS NULL
@@ -898,14 +916,20 @@ def home(request: HttpRequest) -> HttpResponse:  # noqa: PLR0912, PLR0915
     ).count()
     device_rollup = (
         current_computers(Device.objects.filter(tenant_id=1, deleted_at__isnull=True))
-        .values("client_id", "lifecycle_status", "device_role", "device_type")
+        .annotate(
+            effective_client_id=Case(
+                When(id__in=effectively_owned_device_ids(1), then=F("client_id")),
+                default=Value(None), output_field=UUIDField(),
+            )
+        )
+        .values("effective_client_id", "lifecycle_status", "device_role", "device_type")
         .annotate(n=Count("id"))
     )
     for row in device_rollup:
         count = row["n"]
         if row["lifecycle_status"] == Device.LifecycleStatus.PENDING_CLEANUP:
             review_devices += count
-        client_id = row["client_id"]
+        client_id = row["effective_client_id"]
         device_counts[client_id] = device_counts.get(client_id, 0) + count
         if row["device_type"] == Device.DeviceType.VM:
             device_mix["virtual"] += count
@@ -922,11 +946,11 @@ def home(request: HttpRequest) -> HttpResponse:  # noqa: PLR0912, PLR0915
             f"""
             SELECT COUNT(*)::int,
                    COUNT(*) FILTER (
-                       WHERE {recent_contact_sql("last_contact_at", "client_id", active_device_days)}
+                       WHERE {recent_contact_sql("v.last_contact_at", effective_computer_client_sql("v"), active_device_days)}
                    )::int
-            FROM operations.v_device
-            WHERE tenant_id = 1
-              AND {current_computer_sql()}
+            FROM operations.v_device v
+            WHERE v.tenant_id = 1
+              AND {current_computer_sql("v")}
             """
         )
         total_devices, active_devices = cur.fetchone()
@@ -940,7 +964,21 @@ def home(request: HttpRequest) -> HttpResponse:  # noqa: PLR0912, PLR0915
         cur.execute(
             """
             WITH active AS MATERIALIZED (
-                SELECT finding.client_id, finding_type.issue_category,
+                SELECT CASE WHEN finding.subject_type = 'device' AND NOT EXISTS (
+                           SELECT 1 FROM operations.computer_client_ownership owner
+                            WHERE owner.tenant_id = finding.tenant_id
+                              AND owner.device_id = finding.subject_id
+                              AND owner.effective_client_id = finding.client_id
+                              AND owner.state IN ('resolved', 'decision_protected')
+                       ) THEN NULL
+                       WHEN finding.subject_type = 'source_record' THEN (
+                           SELECT operations.computer_client_independent_evidence(
+                                      subject.tenant_id, subject.observation_id)
+                             FROM operations.source_record_subjects subject
+                            WHERE subject.tenant_id = finding.tenant_id
+                              AND subject.id = finding.subject_id
+                       ) ELSE finding.client_id END AS client_id,
+                       finding_type.issue_category,
                        finding_type.name AS type_name, finding.severity,
                        finding.subject_id, finding.first_seen_at,
                        COALESCE(finding.last_detected_at, finding.last_seen_at) AS updated_at
@@ -1061,14 +1099,18 @@ def home(request: HttpRequest) -> HttpResponse:  # noqa: PLR0912, PLR0915
         cur.execute("SET LOCAL operations.tenant_id = 1")
         cur.execute(
             f"""
-            SELECT client_id,
+            SELECT v.client_id,
                    COUNT(*)::int,
                    COUNT(*) FILTER (
-                       WHERE effective_patching_scope = 'Included'
+                       WHERE v.effective_patching_scope = 'Included'
                    )::int
-            FROM operations.v_device
-            WHERE tenant_id = 1 AND {current_computer_sql()}
-            GROUP BY client_id
+            FROM operations.v_device v
+            JOIN operations.computer_client_ownership owner
+              ON owner.tenant_id = v.tenant_id AND owner.device_id = v.device_id
+             AND owner.effective_client_id = v.client_id
+             AND owner.state IN ('resolved', 'decision_protected')
+            WHERE v.tenant_id = 1 AND {current_computer_sql('v')}
+            GROUP BY v.client_id
             """
         )
         patching_by_client = {
@@ -1853,6 +1895,8 @@ def org_index(request: HttpRequest, org_slug: str) -> HttpResponse:
             tenant_id=1, client=client, status__in=_FINDING_ACTIVE_STATUSES
         ).filter(
             ~Q(subject_type="device") | Q(subject_id__in=client_owned_device_ids(1, client.id))
+        ).filter(
+            ~Q(subject_type="source_record") | Q(id__in=source_owned_finding_ids(1))
         ).count()
 
         # ── Client scoreboard extensions ──
@@ -1907,6 +1951,12 @@ def org_index(request: HttpRequest, org_slug: str) -> HttpResponse:
                          AND owner.device_id = operations.findings.subject_id
                          AND owner.effective_client_id = operations.findings.client_id
                          AND owner.state IN ('resolved', 'decision_protected')))
+                  AND (subject_type IS DISTINCT FROM 'source_record' OR EXISTS (
+                      SELECT 1 FROM operations.source_record_subjects subject
+                       WHERE subject.tenant_id = operations.findings.tenant_id
+                         AND subject.id = operations.findings.subject_id
+                         AND operations.findings.client_id = operations.computer_client_independent_evidence(
+                                 subject.tenant_id, subject.observation_id)))
                 GROUP BY severity
                 """,
                 [str(client.id)],
@@ -1947,6 +1997,11 @@ def org_index(request: HttpRequest, org_slug: str) -> HttpResponse:
                        WHERE owner.tenant_id = f.tenant_id AND owner.device_id = f.subject_id
                          AND owner.effective_client_id = f.client_id
                          AND owner.state IN ('resolved', 'decision_protected')))
+                  AND (f.subject_type IS DISTINCT FROM 'source_record' OR EXISTS (
+                      SELECT 1 FROM operations.source_record_subjects subject
+                       WHERE subject.tenant_id = f.tenant_id AND subject.id = f.subject_id
+                         AND f.client_id = operations.computer_client_independent_evidence(
+                                 subject.tenant_id, subject.observation_id)))
                   AND f.status IN ('open', 'acknowledged', 'investigating')
                   AND f.severity IN ('critical', 'high')
                 ORDER BY CASE f.severity WHEN 'critical' THEN 0 ELSE 1 END,
@@ -2091,6 +2146,7 @@ def org_index(request: HttpRequest, org_slug: str) -> HttpResponse:
                     filter=(
                         Q(devices__deleted_at__isnull=True)
                         & ~Q(devices__lifecycle_status=Device.LifecycleStatus.RETIRED)
+                        & Q(devices__id__in=effectively_owned_device_ids(1))
                     ),
                 )
             )
@@ -2117,12 +2173,16 @@ def org_index(request: HttpRequest, org_slug: str) -> HttpResponse:
             cur.execute("SET LOCAL operations.tenant_id = 1")
             cur.execute(
                 """
-                SELECT platform, COUNT(DISTINCT client_id)
-                FROM operations.device_agent_presence_current
-                WHERE client_id IS NOT NULL
-                  AND entity_type LIKE 'agent.%'
-                GROUP BY platform
-                ORDER BY platform
+                SELECT presence.platform, COUNT(DISTINCT presence.client_id)
+                FROM operations.device_agent_presence_current presence
+                JOIN operations.computer_client_ownership owner
+                  ON owner.tenant_id = presence.tenant_id AND owner.device_id = presence.device_id
+                 AND owner.effective_client_id = presence.client_id
+                 AND owner.state IN ('resolved', 'decision_protected')
+                WHERE presence.client_id IS NOT NULL
+                  AND presence.entity_type LIKE 'agent.%'
+                GROUP BY presence.platform
+                ORDER BY presence.platform
                 """
             )
             source_coverage = [{"name": r[0], "client_count": int(r[1])} for r in cur.fetchall()]
@@ -2687,10 +2747,10 @@ def _build_raw_snapshot_view(device, links):
 @login_required
 def device_detail(request: HttpRequest, org_slug: str, device_id: str) -> HttpResponse:
     device = get_object_or_404(
-        Device.objects.select_related("client"),
-        tenant_id=1,
+        client_owned_computers(
+            Device.objects.select_related("client"), 1, _get_client_by_slug(org_slug).id
+        ),
         id=device_id,
-        client__slug=org_slug,
         deleted_at__isnull=True,
     )
     links = list(device.source_links.select_related("source").order_by("source__name"))
@@ -3641,11 +3701,13 @@ def device_lifecycle_set(
         )
         return redirect("device_detail", org_slug=org_slug, device_id=device_id)
 
+    client_id = _get_client_by_slug(org_slug).id
+    lock_client_owned_computer(1, device_id, client_id)
     device = get_object_or_404(
-        Device.objects.select_for_update(),
-        tenant_id=1,
+        client_owned_computers(
+            Device.objects.select_for_update(), 1, client_id
+        ),
         id=device_id,
-        client__slug=org_slug,
         deleted_at__isnull=True,
     )
     entity = get_object_or_404(
@@ -3707,13 +3769,14 @@ def device_lifecycle_set(
 
 @login_required
 @require_POST
+@transaction.atomic
 def device_patch_scope_set(request: HttpRequest, org_slug: str, device_id: str) -> HttpResponse:
     """Operator override of a device's patching scope."""
+    client_id = _get_client_by_slug(org_slug).id
+    lock_client_owned_computer(1, device_id, client_id)
     device = get_object_or_404(
-        Device,
-        tenant_id=1,
+        client_owned_computers(Device.objects.all(), 1, client_id),
         id=device_id,
-        client__slug=org_slug,
         deleted_at__isnull=True,
     )
     scope = (request.POST.get("scope") or "").strip()
@@ -3732,13 +3795,14 @@ def device_patch_scope_set(request: HttpRequest, org_slug: str, device_id: str) 
 
 @login_required
 @require_POST
+@transaction.atomic
 def device_exemption_add(request: HttpRequest, org_slug: str, device_id: str) -> HttpResponse:
     """Add or update an exemption key on the device's exemptions dict."""
+    client_id = _get_client_by_slug(org_slug).id
+    lock_client_owned_computer(1, device_id, client_id)
     device = get_object_or_404(
-        Device,
-        tenant_id=1,
+        client_owned_computers(Device.objects.all(), 1, client_id),
         id=device_id,
-        client__slug=org_slug,
         deleted_at__isnull=True,
     )
     entity_type = (request.POST.get("entity_type") or "").strip()
@@ -3763,12 +3827,13 @@ def device_exemption_add(request: HttpRequest, org_slug: str, device_id: str) ->
 
 @login_required
 @require_POST
+@transaction.atomic
 def device_exemption_clear(request: HttpRequest, org_slug: str, device_id: str) -> HttpResponse:
+    client_id = _get_client_by_slug(org_slug).id
+    lock_client_owned_computer(1, device_id, client_id)
     device = get_object_or_404(
-        Device,
-        tenant_id=1,
+        client_owned_computers(Device.objects.all(), 1, client_id),
         id=device_id,
-        client__slug=org_slug,
         deleted_at__isnull=True,
     )
     entity_type = (request.POST.get("entity_type") or "").strip()
@@ -3793,12 +3858,13 @@ def device_exemption_clear(request: HttpRequest, org_slug: str, device_id: str) 
 
 @login_required
 @require_POST
+@transaction.atomic
 def device_patch_scope_clear(request: HttpRequest, org_slug: str, device_id: str) -> HttpResponse:
+    client_id = _get_client_by_slug(org_slug).id
+    lock_client_owned_computer(1, device_id, client_id)
     device = get_object_or_404(
-        Device,
-        tenant_id=1,
+        client_owned_computers(Device.objects.all(), 1, client_id),
         id=device_id,
-        client__slug=org_slug,
         deleted_at__isnull=True,
     )
     DevicePatchingOverride.objects.filter(tenant_id=1, device=device).delete()
@@ -3841,10 +3907,17 @@ def search(request: HttpRequest) -> HttpResponse:
     matched = _search_computer_identity(q)
     devices = list(
         Device.objects.filter(tenant_id=1, deleted_at__isnull=True, id__in=matched)
+        .annotate(
+            effective_client_id=Case(
+                When(id__in=effectively_owned_device_ids(1), then=F("client_id")),
+                default=Value(None), output_field=UUIDField(),
+            )
+        )
         .select_related("client")
     )
     for device in devices:
         device.search_matched = matched[device.id]
+        device.search_client = device.client if device.effective_client_id else None
     devices.sort(
         key=lambda d: (
             d.lifecycle_status == Device.LifecycleStatus.RETIRED,
@@ -3865,8 +3938,8 @@ def search(request: HttpRequest) -> HttpResponse:
     # Unambiguous matches → redirect straight there.
     if len(devices) == 1 and not clients and not source_records:
         d = devices[0]
-        if d.client:
-            return redirect("device_detail", org_slug=d.client.slug, device_id=d.id)
+        if d.search_client:
+            return redirect("device_detail", org_slug=d.search_client.slug, device_id=d.id)
     if len(clients) == 1 and not devices and not source_records:
         return redirect("org_index", org_slug=clients[0].slug)
 
@@ -3960,7 +4033,7 @@ def _search_source_records(q: str) -> list[dict[str, object]]:
                    observation.external_id, observation.parent_external_id,
                    observation.reported_name, observation.canonical_hostname,
                    observation.canonical_serial, observation.vm_uuid,
-                   observation.active, observation.device_id, device.canonical_hostname,
+                   observation.active, device.id, device.canonical_hostname,
                    client.slug, client.display_name,
                    CASE
                      WHEN observation.external_id ILIKE %(p)s THEN 'source record ID'
@@ -3979,9 +4052,15 @@ def _search_source_records(q: str) -> list[dict[str, object]]:
                 ON device.tenant_id = observation.tenant_id
                AND device.id = observation.device_id
                AND device.deleted_at IS NULL
+              LEFT JOIN operations.computer_client_ownership owner
+                ON owner.tenant_id = device.tenant_id AND owner.device_id = device.id
+               AND owner.effective_client_id = device.client_id
+               AND owner.state IN ('resolved', 'decision_protected')
               LEFT JOIN operations.clients client
                 ON client.tenant_id = observation.tenant_id
-               AND client.id = observation.client_id
+               AND client.id = CASE WHEN device.id IS NOT NULL THEN owner.effective_client_id
+                   ELSE operations.computer_client_independent_evidence(
+                       observation.tenant_id, observation.observation_id) END
                AND client.deleted_at IS NULL
              WHERE observation.tenant_id = 1
                AND (observation.external_id ILIKE %(p)s
@@ -4172,25 +4251,52 @@ def _entity_issue_rows(request, findings, issue_categories, issue_type_groups) -
         for f in all_display_findings
         if f.subject_type == Finding.SubjectType.DEVICE and f.subject_id
     }
+    source_record_ids = {
+        f.subject_id for f in all_display_findings
+        if f.subject_type == Finding.SubjectType.SOURCE_RECORD and f.subject_id
+    }
+    source_record_clients: dict = {}
+    if source_record_ids:
+        with transaction.atomic(), connection.cursor() as cur:
+            cur.execute("SET LOCAL operations.tenant_id = 1")
+            cur.execute(
+                """
+                SELECT subject.id, client.display_name
+                  FROM operations.source_record_subjects subject
+                  JOIN operations.clients client
+                    ON client.tenant_id = subject.tenant_id AND client.deleted_at IS NULL
+                   AND client.id = operations.computer_client_independent_evidence(
+                       subject.tenant_id, subject.observation_id)
+                 WHERE subject.tenant_id = 1 AND subject.id = ANY(%s::uuid[])
+                """,
+                [list(source_record_ids)],
+            )
+            source_record_clients = dict(cur.fetchall())
     device_context_by_id: dict = {}
     if device_subject_ids:
         device_context_by_id = {
             device_id: {
                 "hostname": hostname,
                 "os_name": os_name,
-                "client_slug": client_slug,
-                "client_name": client_name,
+                "client_slug": client_slug if effective_client_id else None,
+                "client_name": client_name if effective_client_id else None,
             }
-            for device_id, hostname, os_name, client_slug, client_name in Device.objects.filter(
+            for device_id, hostname, os_name, client_slug, client_name, effective_client_id in Device.objects.filter(
                 tenant_id=1,
                 id__in=device_subject_ids,
                 deleted_at__isnull=True,
+            ).annotate(
+                effective_client_id=Case(
+                    When(id__in=effectively_owned_device_ids(1), then=F("client_id")),
+                    default=Value(None), output_field=UUIDField(),
+                )
             ).values_list(
                 "id",
                 "canonical_hostname",
                 "os_name",
                 "client__slug",
                 "client__display_name",
+                "effective_client_id",
             )
         }
 
@@ -4252,6 +4358,7 @@ def _entity_issue_rows(request, findings, issue_categories, issue_type_groups) -
             source__name="Hudu",
             external_id__in=stale_asset_ids,
             device__deleted_at__isnull=True,
+            device_id__in=effectively_owned_device_ids(1),
         ).select_related("device", "device__client"):
             hudu_devices_by_asset.setdefault(link.external_id, []).append(link.device)
     may_archive_hudu = ARCHIVE_HUDU_ASSETS in available_finding_actions(request.user)
@@ -4289,8 +4396,6 @@ def _entity_issue_rows(request, findings, issue_categories, issue_type_groups) -
                 )
             if device_context.get("client_name"):
                 context_parts.append(device_context["client_name"])
-            elif f.client:
-                context_parts.append(f.client.display_name)
             os_parts = [
                 device_context.get("os_name", ""),
                 device_context.get("os_release_id", ""),
@@ -4368,8 +4473,8 @@ def _entity_issue_rows(request, findings, issue_categories, issue_type_groups) -
                 part for part in (details.get("platform"), details.get("entity_type")) if part
             ):
                 context_parts.append(source_text)
-            if f.client:
-                context_parts.append(f.client.display_name)
+            if source_client := source_record_clients.get(f.subject_id):
+                context_parts.append(source_client)
         elif f.subject_type == Finding.SubjectType.SOURCE_RECORD_CASE:
             subject_label = details.get("case_label") or "Source record case"
             subject_url = reverse("source_record_case_detail", kwargs={"case_id": f.subject_id})
@@ -4398,7 +4503,7 @@ def _entity_issue_rows(request, findings, issue_categories, issue_type_groups) -
                     client_id=f.client_id,
                     id__in=candidate_ids,
                     deleted_at__isnull=True,
-                ).order_by("created_at", "id")
+                ).filter(id__in=effectively_owned_device_ids(1)).order_by("created_at", "id")
             )
             hostname = details.get("hostname") or details.get("canonical_hostname")
             device = next(
@@ -4422,7 +4527,7 @@ def _entity_issue_rows(request, findings, issue_categories, issue_type_groups) -
             hudu_url = details.get("url") or ""
             context_parts = [f.client.display_name] if f.client else []
             candidates = hudu_devices_by_asset.get(str(details.get("asset_id")), [])
-            if len(candidates) == 1:
+            if len(candidates) == 1 and candidates[0].client_id == f.client_id:
                 device = candidates[0]
                 subject_label = device.canonical_hostname or "Unnamed Computer"
                 subject_url = reverse(
@@ -5983,6 +6088,11 @@ def finding_review(request: HttpRequest, finding_id: str) -> HttpResponse:
     subject_label = finding.get_subject_type_display()
     subject_url = ""
     review_links: list[dict[str, str]] = []
+    safe_finding_client = (
+        finding.client
+        if finding.subject_type not in {Finding.SubjectType.DEVICE, Finding.SubjectType.SOURCE_RECORD}
+        else None
+    )
 
     if finding.subject_type == Finding.SubjectType.DEVICE:
         device = (
@@ -5991,10 +6101,13 @@ def finding_review(request: HttpRequest, finding_id: str) -> HttpResponse:
                 id=finding.subject_id,
                 deleted_at__isnull=True,
             )
+            .filter(id__in=effectively_owned_device_ids(1))
             .select_related("client")
             .first()
         )
         if device and device.client:
+            if device.client_id == finding.client_id:
+                safe_finding_client = finding.client
             subject_label = device.canonical_hostname or "Unnamed Computer"
             subject_url = reverse(
                 "device_detail",
@@ -6022,11 +6135,11 @@ def finding_review(request: HttpRequest, finding_id: str) -> HttpResponse:
             subject_url = reverse("software_detail", kwargs={"name": canonical_name})
             review_links.append({"label": "Open software details", "url": subject_url})
 
-    if finding.finding_type.name.startswith("patch_") and finding.client:
+    if finding.finding_type.name.startswith("patch_") and safe_finding_client:
         review_links.append(
             {
                 "label": "Review patch evidence",
-                "url": f"{reverse('patch_evidence_page')}?{urlencode({'client': finding.client.slug})}",
+                "url": f"{reverse('patch_evidence_page')}?{urlencode({'client': safe_finding_client.slug})}",
             }
         )
     if finding.finding_type.name == "cmdb_asset_stale" and details.get("url"):
@@ -6037,9 +6150,9 @@ def finding_review(request: HttpRequest, finding_id: str) -> HttpResponse:
     }:
         review_links.append({"label": "Check source health", "url": reverse("sources_status")})
 
-    if finding.client and not subject_url:
-        subject_label = finding.client.display_name
-        subject_url = reverse("org_index", kwargs={"org_slug": finding.client.slug})
+    if safe_finding_client and not subject_url:
+        subject_label = safe_finding_client.display_name
+        subject_url = reverse("org_index", kwargs={"org_slug": safe_finding_client.slug})
         review_links.append({"label": "Open client", "url": subject_url})
 
     if finding.finding_type.name == "identity_conflict" and finding.client:
@@ -6051,6 +6164,7 @@ def finding_review(request: HttpRequest, finding_id: str) -> HttpResponse:
                 id__in=candidate_ids,
                 deleted_at__isnull=True,
             )
+            .filter(id__in=effectively_owned_device_ids(1))
             .select_related("client")
             .order_by("canonical_hostname", "id")
         )
@@ -8083,6 +8197,12 @@ def software_detail(request: HttpRequest, name: str) -> HttpResponse:
             status__in=_FINDING_ACTIVE_STATUSES,
             finding_details__canonical_name__iexact=canonical_name,
         )
+        .filter(~Q(subject_type=Finding.SubjectType.DEVICE) | Q(id__in=client_owned_finding_ids(1)))
+        .filter(
+            ~Q(subject_type=Finding.SubjectType.SOURCE_RECORD)
+            | Q(client_id__isnull=True)
+            | Q(id__in=source_owned_finding_ids(1))
+        )
         .select_related("finding_type", "client")
         .order_by("-last_detected_at", "-last_seen_at")[:50]
     )
@@ -8706,13 +8826,18 @@ def software_user_risk(request: HttpRequest) -> HttpResponse:
             ).values_list("id", flat=True)
         ]
 
-    client_where = ""
+    client_where = (
+        " AND EXISTS (SELECT 1 FROM operations.computer_client_ownership owner"
+        " WHERE owner.tenant_id = d.tenant_id AND owner.device_id = d.id"
+        " AND owner.effective_client_id = d.client_id"
+        " AND owner.state IN ('resolved', 'decision_protected'))"
+    )
     client_params: list = []
     if filtered_client_ids:
-        client_where = "AND d.client_id = ANY(%s::uuid[])"
+        client_where += " AND d.client_id = ANY(%s::uuid[])"
         client_params.append(filtered_client_ids)
     elif client_slugs:
-        client_where = "AND FALSE"
+        client_where += " AND FALSE"
 
     sql = f"""
         WITH
@@ -8730,6 +8855,7 @@ def software_user_risk(request: HttpRequest) -> HttpResponse:
             JOIN operations.devices d ON d.id = e.device_id AND d.deleted_at IS NULL
                                       AND {current_computer_sql("d")}
             WHERE e.tenant_id = 1
+              AND e.client_id = d.client_id
               AND e.status IN ('open', 'acknowledged')
               AND e.finding_type <> 'whitelist_suggestion'
               {client_where}
@@ -8756,6 +8882,7 @@ def software_user_risk(request: HttpRequest) -> HttpResponse:
             JOIN operations.devices d ON d.id = sic.device_id AND d.deleted_at IS NULL
                                       AND {current_computer_sql("d")}
             WHERE sd.tenant_id = 1
+              AND sic.client_id = d.client_id
               AND sd.decision IN ('reject', 'investigate')
               AND sd.canonical_name <> ''
               AND (sd.device_id IS NULL OR sd.device_id = sic.device_id)
@@ -8775,6 +8902,7 @@ def software_user_risk(request: HttpRequest) -> HttpResponse:
             JOIN operations.devices d ON d.id = sic.device_id AND d.deleted_at IS NULL
                                       AND {current_computer_sql("d")}
             WHERE sd.tenant_id = 1
+              AND sic.client_id = d.client_id
               AND sd.decision IN ('reject', 'investigate')
               AND sd.publisher <> ''
               AND (sd.device_id IS NULL OR sd.device_id = sic.device_id)
@@ -10937,13 +11065,18 @@ def software_tech_checklist(request: HttpRequest) -> HttpResponse:
             ).values_list("id", flat=True)
         ]
 
-    client_where = ""
+    client_where = (
+        " AND EXISTS (SELECT 1 FROM operations.computer_client_ownership owner"
+        " WHERE owner.tenant_id = d.tenant_id AND owner.device_id = d.id"
+        " AND owner.effective_client_id = d.client_id"
+        " AND owner.state IN ('resolved', 'decision_protected'))"
+    )
     client_params: list = []
     if filtered_client_ids:
-        client_where = "AND d.client_id = ANY(%s::uuid[])"
+        client_where += " AND d.client_id = ANY(%s::uuid[])"
         client_params.append(filtered_client_ids)
     elif client_slugs:
-        client_where = "AND FALSE"
+        client_where += " AND FALSE"
     if role_filter in ("server", "workstation", "unknown"):
         client_where += " AND d.device_role = %s"
         client_params.append(role_filter)
@@ -10965,6 +11098,7 @@ def software_tech_checklist(request: HttpRequest) -> HttpResponse:
                                   AND {current_computer_sql("d")}
         JOIN operations.clients c ON c.id = d.client_id AND c.deleted_at IS NULL
         WHERE e.tenant_id = 1
+          AND e.client_id = d.client_id
           AND e.status IN ('open', 'acknowledged')
           AND e.finding_type <> 'whitelist_suggestion'
           {client_where}
@@ -11006,6 +11140,7 @@ def software_tech_checklist(request: HttpRequest) -> HttpResponse:
                                   AND {current_computer_sql("d")}
         JOIN operations.clients c ON c.id = d.client_id AND c.deleted_at IS NULL
         WHERE sd.tenant_id = 1
+          AND sic.client_id = d.client_id
           AND sd.decision IN ('reject', 'investigate')
           AND sd.canonical_name <> ''
           AND (sd.device_id IS NULL OR sd.device_id = sic.device_id)
@@ -11036,6 +11171,7 @@ def software_tech_checklist(request: HttpRequest) -> HttpResponse:
                                   AND {current_computer_sql("d")}
         JOIN operations.clients c ON c.id = d.client_id AND c.deleted_at IS NULL
         WHERE sd.tenant_id = 1
+          AND sic.client_id = d.client_id
           AND sd.decision IN ('reject', 'investigate')
           AND sd.publisher <> ''
           AND (sd.device_id IS NULL OR sd.device_id = sic.device_id)
@@ -11249,13 +11385,13 @@ def devices_page(request: HttpRequest) -> HttpResponse:
                    COUNT(*) FILTER (WHERE device_role = 'workstation') AS workstations,
                    COUNT(*) FILTER (WHERE effective_patching_scope = 'Included') AS in_patch_scope,
                    COUNT(*) FILTER (
-                       WHERE {recent_contact_sql("last_contact_at", "client_id", active_device_days)}
+                       WHERE {recent_contact_sql("v.last_contact_at", effective_computer_client_sql("v"), active_device_days)}
                    ) AS active,
                    COUNT(*) FILTER (
-                       WHERE {stale_contact_sql("last_contact_at", "client_id", active_device_days)}
+                       WHERE {stale_contact_sql("v.last_contact_at", effective_computer_client_sql("v"), active_device_days)}
                    ) AS stale
-            FROM operations.v_device
-            WHERE tenant_id = 1 AND {current_computer_sql()}
+            FROM operations.v_device v
+            WHERE v.tenant_id = 1 AND {current_computer_sql("v")}
             """
         )
         row = cur.fetchone()
@@ -11330,15 +11466,16 @@ def devices_page(request: HttpRequest) -> HttpResponse:
             where.append("NOT v.is_online_any")
         if state_filter == "active":
             where.append(
-                recent_contact_sql("v.last_contact_at", "v.client_id", active_device_days)
+                recent_contact_sql("v.last_contact_at", effective_computer_client_sql("v"), active_device_days)
             )
         elif state_filter == "not-reporting":
             where.append(
-                stale_contact_sql("v.last_contact_at", "v.client_id", active_device_days)
+                stale_contact_sql("v.last_contact_at", effective_computer_client_sql("v"), active_device_days)
             )
         if client_filter:
             where.append(
-                "v.client_id = (SELECT id FROM operations.clients WHERE slug = %s AND tenant_id = 1)"
+                f"{effective_computer_client_sql('v')} = "
+                "(SELECT id FROM operations.clients WHERE slug = %s AND tenant_id = 1)"
             )
             params.append(client_filter)
         if software_filter or software_publisher_filter:
@@ -11384,7 +11521,7 @@ def devices_page(request: HttpRequest) -> HttpResponse:
                 SELECT v.device_id, v.canonical_hostname, v.canonical_serial,
                        v.device_role, v.os_group, v.os_name,
                        v.is_online_any, v.online_sources, v.last_contact_at,
-                       v.effective_patching_scope, v.client_id
+                       v.effective_patching_scope, {effective_computer_client_sql("v")} AS client_id
                 FROM operations.v_device v
                 WHERE {where_sql}
                 ORDER BY v.canonical_hostname
@@ -11743,7 +11880,7 @@ def patching_queue(request: HttpRequest) -> HttpResponse:
     base_qs = Finding.objects.filter(
         tenant_id=1,
         finding_type__issue_category=finding_registry.PATCHING,
-    )
+    ).filter(~Q(subject_type=Finding.SubjectType.DEVICE) | Q(id__in=client_owned_finding_ids(1)))
     if status_filter == "active":
         base_qs = base_qs.filter(status__in=_FINDING_ACTIVE_STATUSES)
     elif status_filter and status_filter != "all":
@@ -11776,7 +11913,7 @@ def patching_queue(request: HttpRequest) -> HttpResponse:
         if os_family_filter:
             device_scope_filters["os_family"] = os_family_filter
         scoped_device_ids = current_computers(
-            Device.objects.filter(**device_scope_filters)
+            Device.objects.filter(**device_scope_filters, id__in=effectively_owned_device_ids(1))
         ).values("id")
         base_qs = base_qs.filter(
             subject_type=Finding.SubjectType.DEVICE,
@@ -11816,7 +11953,14 @@ def patching_queue(request: HttpRequest) -> HttpResponse:
     # Device-population summary — how many devices exist in the
     # filtered slice, how many are in scope (Included). Reads
     # v_device (Track O). Scoped to client + role if filtered.
-    pop_where = ["tenant_id = %s", current_computer_sql()]
+    pop_where = [
+        "tenant_id = %s", current_computer_sql(),
+        "EXISTS (SELECT 1 FROM operations.computer_client_ownership owner "
+        "WHERE owner.tenant_id = operations.v_device.tenant_id "
+        "AND owner.device_id = operations.v_device.device_id "
+        "AND owner.effective_client_id = operations.v_device.client_id "
+        "AND owner.state IN ('resolved', 'decision_protected'))",
+    ]
     pop_params: list = [1]
     if filtered_client_ids:
         pop_where.append("client_id = ANY(%s::uuid[])")
@@ -11855,7 +11999,13 @@ def patching_queue(request: HttpRequest) -> HttpResponse:
     # Status overview.  Keep the three ideas deliberately separate:
     # device freshness (active), patching policy (Included), and evidence of
     # patch work (a recent Ninja state observation or install outcome).
-    posture_where = ["v.tenant_id = %s", current_computer_sql("v")]
+    posture_where = [
+        "v.tenant_id = %s", current_computer_sql("v"),
+        "EXISTS (SELECT 1 FROM operations.computer_client_ownership owner "
+        "WHERE owner.tenant_id = v.tenant_id AND owner.device_id = v.device_id "
+        "AND owner.effective_client_id = v.client_id "
+        "AND owner.state IN ('resolved', 'decision_protected'))",
+    ]
     posture_params: list = [1]
     if filtered_client_ids:
         posture_where.append("v.client_id = ANY(%s::uuid[])")
@@ -13126,7 +13276,9 @@ def inventory_clients(request: HttpRequest) -> HttpResponse:
             row["references"].append(reference)
 
     active_computers = current_computers(
-        Device.objects.filter(tenant_id=1, deleted_at__isnull=True)
+        Device.objects.filter(
+            tenant_id=1, deleted_at__isnull=True, id__in=effectively_owned_device_ids(1)
+        )
     )
     for item in active_computers.values("client_id").annotate(n=Count("id")):
         row = rows_by_client.get(str(item["client_id"]))
@@ -13139,7 +13291,12 @@ def inventory_clients(request: HttpRequest) -> HttpResponse:
             """
             SELECT device.client_id::text, evidence.source_name, count(DISTINCT device.id)
               FROM operations.v_device_observation_current evidence
-              JOIN operations.devices device ON device.id = evidence.device_id
+              JOIN operations.devices device
+                ON device.tenant_id = evidence.tenant_id AND device.id = evidence.device_id
+              JOIN operations.computer_client_ownership owner
+                ON owner.tenant_id = device.tenant_id AND owner.device_id = device.id
+               AND owner.effective_client_id = device.client_id
+               AND owner.state IN ('resolved', 'decision_protected')
              WHERE evidence.tenant_id = 1 AND evidence.observation_active
                AND device.deleted_at IS NULL AND device.lifecycle_status <> %s
              GROUP BY 1, 2
@@ -14002,6 +14159,10 @@ def patch_evidence_page(request: HttpRequest) -> HttpResponse:
          AND dl.tenant_id = 1
         JOIN operations.devices d
           ON d.id = dl.device_id AND d.deleted_at IS NULL
+        JOIN operations.computer_client_ownership owner
+          ON owner.tenant_id = d.tenant_id AND owner.device_id = d.id
+         AND owner.effective_client_id = d.client_id
+         AND owner.state IN ('resolved', 'decision_protected')
         JOIN operations.clients c
           ON c.id = d.client_id AND c.deleted_at IS NULL
         LEFT JOIN operations.device_session_current dsc
@@ -15137,6 +15298,10 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
                  AND d.id = state.device_id
                  AND d.deleted_at IS NULL
                  AND d.lifecycle_status <> 'retired'
+                JOIN operations.computer_client_ownership owner
+                  ON owner.tenant_id = d.tenant_id AND owner.device_id = d.id
+                 AND owner.effective_client_id = d.client_id
+                 AND owner.state IN ('resolved', 'decision_protected')
                 JOIN operations.clients c ON c.id = d.client_id
                 LEFT JOIN operations.device_operator_decisions decision
                   ON decision.tenant_id = d.tenant_id
@@ -15165,6 +15330,11 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
                  AND device.id = hudu.device_id
                  AND device.deleted_at IS NULL
                  AND {current_computer_sql("device")}
+                JOIN operations.computer_client_ownership owner
+                  ON owner.tenant_id = device.tenant_id AND owner.device_id = device.id
+                 AND owner.effective_client_id = device.client_id
+                 AND owner.effective_client_id = hudu.client_id
+                 AND owner.state IN ('resolved', 'decision_protected')
                 LEFT JOIN operations.v_device_source_record_lifecycle_current lifecycle
                   ON lifecycle.tenant_id = hudu.tenant_id
                  AND lifecycle.observation_id = hudu.observation_id
@@ -15185,6 +15355,10 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
                        session.last_contact_at,
                        c.offline_after_days
                 FROM operations.devices d
+                JOIN operations.computer_client_ownership owner
+                  ON owner.tenant_id = d.tenant_id AND owner.device_id = d.id
+                 AND owner.effective_client_id = d.client_id
+                 AND owner.state IN ('resolved', 'decision_protected')
                 JOIN operations.clients c ON c.id = d.client_id
                 LEFT JOIN operations.device_operator_decisions decision
                   ON decision.tenant_id = d.tenant_id
@@ -16701,7 +16875,7 @@ def source_records(
         clauses.append("observation.source_instance_id = %s")
         params.append(source_filter)
     if client_filter_id is not None:
-        clauses.append("observation.client_id = %s")
+        clauses.append(f"{_SOURCE_RECORD_CLIENT_SQL} = %s")
         params.append(client_filter_id)
     if state == "active":
         clauses.append("observation.active")
@@ -16720,17 +16894,17 @@ def source_records(
     elif relationship == "unlinked_computer":
         clauses.append("observation.device_id IS NULL")
     elif relationship == "client_attributed":
-        clauses.append("observation.client_id IS NOT NULL")
+        clauses.append(f"{_SOURCE_RECORD_CLIENT_SQL} IS NOT NULL")
     elif relationship == "parent_record":
         clauses.append("NULLIF(observation.parent_external_id, '') IS NOT NULL")
     elif relationship == "has_relationship":
         clauses.append(
-            "(observation.device_id IS NOT NULL OR observation.client_id IS NOT NULL "
+            f"(observation.device_id IS NOT NULL OR {_SOURCE_RECORD_CLIENT_SQL} IS NOT NULL "
             "OR NULLIF(observation.parent_external_id, '') IS NOT NULL)"
         )
     elif relationship == "no_relationship":
         clauses.append(
-            "observation.device_id IS NULL AND observation.client_id IS NULL "
+            f"observation.device_id IS NULL AND {_SOURCE_RECORD_CLIENT_SQL} IS NULL "
             "AND NULLIF(observation.parent_external_id, '') IS NULL"
         )
     if query:
@@ -16836,7 +17010,7 @@ def source_records(
                    observation.device_id, device.canonical_hostname,
                    client.slug, client.display_name,
                    CASE WHEN observation.device_id IS NOT NULL THEN TRUE ELSE FALSE END,
-                   CASE WHEN observation.client_id IS NOT NULL THEN TRUE ELSE FALSE END,
+                   CASE WHEN {_SOURCE_RECORD_CLIENT_SQL} IS NOT NULL THEN TRUE ELSE FALSE END,
                    CASE WHEN NULLIF(observation.parent_external_id, '') IS NOT NULL THEN TRUE ELSE FALSE END,
                    observation.reported_name, observation.platform_group_id,
                    observation.link_verdict, observation.archived,
@@ -16844,15 +17018,26 @@ def source_records(
                    device.entity_id, group_mapping.observed_name,
                    -- Operations proposed this record as something other than a Computer.
                    {_PROPOSED_OTHER_SQL},
-                   observation.restricted, observation.reported_online
+                   observation.restricted, observation.reported_online,
+                   computer_client.slug
               FROM page observation
               JOIN operations.source_instances instance
                 ON instance.tenant_id = observation.tenant_id AND instance.id = observation.source_instance_id
               JOIN operations.sources source ON source.id = instance.source_id
               LEFT JOIN operations.devices device
                 ON device.tenant_id = observation.tenant_id AND device.id = observation.device_id
+               AND device.deleted_at IS NULL
+              LEFT JOIN operations.computer_client_ownership owner
+                ON owner.tenant_id = device.tenant_id AND owner.device_id = device.id
+               AND owner.effective_client_id = device.client_id
+               AND owner.state IN ('resolved', 'decision_protected')
+              LEFT JOIN operations.clients computer_client
+                ON computer_client.tenant_id = owner.tenant_id
+               AND computer_client.id = owner.effective_client_id
+               AND computer_client.deleted_at IS NULL
               LEFT JOIN operations.clients client
-                ON client.tenant_id = observation.tenant_id AND client.id = observation.client_id
+                ON client.tenant_id = observation.tenant_id AND client.id = {_SOURCE_RECORD_CLIENT_SQL}
+               AND client.deleted_at IS NULL
               LEFT JOIN group_mapping
                 ON group_mapping.tenant_id = observation.tenant_id
                AND group_mapping.source_id = instance.source_id
@@ -16882,6 +17067,7 @@ def source_records(
                 "hostname": row[10],
                 "client_slug": row[11],
                 "client_name": row[12],
+                "computer_client_slug": row[27],
                 "has_computer": row[13],
                 "has_client": row[14],
                 "has_parent": row[15],
@@ -17015,20 +17201,24 @@ _PROPOSED_OTHER_SQL = (
     " AND candidate.proposed_entity_class_id <> 'device')"
 )
 _NOT_STALE_SQL = "COALESCE(observation.link_verdict, '') <> 'stale'"
+_SOURCE_RECORD_CLIENT_SQL = (
+    "operations.computer_client_independent_evidence("
+    "observation.tenant_id, observation.observation_id)"
+)
 _UNLINKED_REASON_SQL = {
     "archived": f"({_UNLINKED_BASE_SQL} AND observation.archived)",
     "stale": f"({_UNLINKED_BASE_SQL} AND NOT observation.archived AND NOT {_NOT_STALE_SQL})",
     "group": (
         f"({_UNLINKED_BASE_SQL} AND NOT observation.archived AND {_NOT_STALE_SQL}"
-        " AND observation.client_id IS NULL)"
+        f" AND {_SOURCE_RECORD_CLIENT_SQL} IS NULL)"
     ),
     "asset": (
         f"({_UNLINKED_BASE_SQL} AND NOT observation.archived AND {_NOT_STALE_SQL}"
-        f" AND observation.client_id IS NOT NULL AND {_PROPOSED_OTHER_SQL})"
+        f" AND {_SOURCE_RECORD_CLIENT_SQL} IS NOT NULL AND {_PROPOSED_OTHER_SQL})"
     ),
     "no_match": (
         f"({_UNLINKED_BASE_SQL} AND NOT observation.archived AND {_NOT_STALE_SQL}"
-        f" AND observation.client_id IS NOT NULL AND NOT {_PROPOSED_OTHER_SQL})"
+        f" AND {_SOURCE_RECORD_CLIENT_SQL} IS NOT NULL AND NOT {_PROPOSED_OTHER_SQL})"
     ),
 }
 
@@ -18488,7 +18678,8 @@ def software_decision_create(request: HttpRequest) -> HttpResponse:
         if not device_id_str:
             messages.error(request, "Choose a device for a device-scoped decision.")
             return redirect(_safe_next(request, "software_decisions_queue"))
-        device = get_object_or_404(Device, id=device_id_str, tenant_id=1)
+        device = get_object_or_404(Device, id=device_id_str, tenant_id=1, deleted_at__isnull=True)
+        lock_client_owned_computer(1, device.id, device.client_id)
         client = device.client
     # scope == "global": both remain None.
 
@@ -18508,8 +18699,14 @@ def software_decision_create(request: HttpRequest) -> HttpResponse:
                       FROM operations.software_installations_current sic
                       JOIN operations.devices d
                         ON d.id = sic.device_id AND d.tenant_id = sic.tenant_id
+                      JOIN operations.computer_client_ownership owner
+                        ON owner.tenant_id = d.tenant_id AND owner.device_id = d.id
+                       AND owner.effective_client_id = d.client_id
+                       AND owner.effective_client_id = sic.client_id
+                       AND owner.state IN ('resolved', 'decision_protected')
                      WHERE sic.tenant_id = 1 AND sic.deleted_at IS NULL AND sic.stale_since IS NULL
                        AND d.deleted_at IS NULL AND {current_computer_sql("d")}
+                       AND operations.lock_computer_client_scope(d.tenant_id, d.id, d.client_id)
                        AND sic.{target_column} = %s
                        AND LOWER(sic.{match_column}) = LOWER(%s)
                 )
@@ -19015,6 +19212,7 @@ def merge_candidate_group_review(request: HttpRequest, candidate_id) -> HttpResp
 
 
 @login_required
+@transaction.atomic
 def device_merge(
     request: HttpRequest, org_slug: str, device_id: str, target_id: str
 ) -> HttpResponse:
@@ -19027,16 +19225,26 @@ def device_merge(
     the older anchor as a stable technical identifier (UUID breaks a timestamp
     tie), moves both evidence sets to it, and redirects to the computer.
     """
+    client_id = _get_client_by_slug(org_slug).id
+    if request.method == "POST":
+        guard_findings()
+        for owned_id in sorted({device_id, target_id}):
+            lock_client_owned_computer(1, owned_id, client_id)
     device_a = get_object_or_404(
-        Device.objects.select_related("client").prefetch_related("source_links__source"),
-        tenant_id=1,
+        client_owned_computers(
+            Device.objects.select_related("client").prefetch_related("source_links__source"),
+            1,
+            client_id,
+        ),
         id=device_id,
-        client__slug=org_slug,
         deleted_at__isnull=True,
     )
     device_b = get_object_or_404(
-        Device.objects.select_related("client").prefetch_related("source_links__source"),
-        tenant_id=1,
+        client_owned_computers(
+            Device.objects.select_related("client").prefetch_related("source_links__source"),
+            1,
+            device_a.client_id,
+        ),
         id=target_id,
         deleted_at__isnull=True,
     )
@@ -19052,7 +19260,6 @@ def device_merge(
         return redirect("device_detail", org_slug=org_slug, device_id=device_id)
 
     if request.method == "POST":
-        guard_findings()
         if request.POST.get("confirmation") != "same_computer":
             messages.error(request, "Confirm that these are the same computer.")
             return redirect(

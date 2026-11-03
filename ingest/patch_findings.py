@@ -132,14 +132,41 @@ def classify(tenant_id: int = _TENANT_ID, *, incremental: bool = True) -> int:
 
 def _prepare_evaluation_scope(cur, tenant_id: int, *, incremental: bool) -> bool:
     """Materialize changed patch/device state for every evaluator query."""
+    # Client backlog totals read more than the changed devices. Fence every
+    # resolved patch-eligible Computer for this transaction, then derive both
+    # the changed scope and aggregate inputs from that same locked set.
+    cur.execute(
+        """
+        CREATE TEMP TABLE patch_owner_scope ON COMMIT DROP AS
+        WITH candidates AS MATERIALIZED (
+            SELECT v.device_id, v.client_id, owner.evidence_revision
+              FROM operations.v_device v
+              JOIN operations.computer_client_ownership owner
+                ON owner.tenant_id = v.tenant_id AND owner.device_id = v.device_id
+               AND owner.effective_client_id = v.client_id
+               AND owner.state IN ('resolved', 'decision_protected')
+             WHERE v.tenant_id = %s AND v.effective_patching_scope = 'Included'
+               AND v.lifecycle_status <> 'retired'
+        ), locked AS MATERIALIZED (
+            SELECT * FROM operations.lock_computer_client_scopes(
+                %s,
+                coalesce((SELECT array_agg(device_id ORDER BY device_id) FROM candidates), '{}'::uuid[]),
+                coalesce((SELECT array_agg(client_id ORDER BY device_id) FROM candidates), '{}'::uuid[]))
+        )
+        SELECT candidates.device_id, candidates.client_id, candidates.evidence_revision
+          FROM candidates JOIN locked USING (device_id, client_id)
+          JOIN operations.computer_client_ownership owner
+            ON owner.tenant_id = %s AND owner.device_id = candidates.device_id
+           AND owner.evidence_revision = candidates.evidence_revision
+        """,
+        (tenant_id, tenant_id, tenant_id),
+    )
     if not _table_exists(cur, "operations.patch_evaluation_state"):
         cur.execute("CREATE TEMP TABLE patch_eval_scope (device_id uuid PRIMARY KEY, client_id uuid, state_digest text) ON COMMIT DROP")
         cur.execute(
             """INSERT INTO patch_eval_scope (device_id, client_id, state_digest)
                  SELECT device_id, client_id, md5(device_id::text)
-                   FROM operations.v_device
-                  WHERE tenant_id=%s AND effective_patching_scope='Included' AND lifecycle_status <> 'retired'""",
-            (tenant_id,),
+                   FROM pg_temp.patch_owner_scope""",
         )
         return True
     cur.execute("CREATE TEMP TABLE patch_eval_scope (device_id uuid PRIMARY KEY, client_id uuid, state_digest text) ON COMMIT DROP")
@@ -147,9 +174,11 @@ def _prepare_evaluation_scope(cur, tenant_id: int, *, incremental: bool) -> bool
         """
         INSERT INTO patch_eval_scope (device_id, client_id, state_digest)
         SELECT v.device_id, v.client_id,
-               md5(concat_ws('|', v.needs_reboot::text, v.last_boot_at::text,
+               md5(concat_ws('|', v.client_id::text, owner.evidence_revision::text,
+                   v.needs_reboot::text, v.last_boot_at::text,
                    MAX(signal.last_seen_at)::text, BOOL_OR(COALESCE(signal.ever_installed, false))::text))
           FROM operations.v_device v
+          JOIN pg_temp.patch_owner_scope owner ON owner.device_id = v.device_id
           JOIN operations.v_device_source_link link ON link.tenant_id=v.tenant_id AND link.device_id=v.device_id
           JOIN operations.sources source ON source.id=link.source_id AND source.name='Ninja'
           LEFT JOIN ninja_patches.device_patch_signal signal
@@ -157,8 +186,8 @@ def _prepare_evaluation_scope(cur, tenant_id: int, *, incremental: bool) -> bool
           LEFT JOIN operations.patch_evaluation_state prior
             ON prior.tenant_id=v.tenant_id AND prior.device_id=v.device_id
          WHERE v.tenant_id=%s AND v.effective_patching_scope='Included' AND v.lifecycle_status <> 'retired'
-         GROUP BY v.device_id, v.client_id, v.needs_reboot, v.last_boot_at, prior.state_digest
-        HAVING %s OR prior.state_digest IS DISTINCT FROM md5(concat_ws('|', v.needs_reboot::text, v.last_boot_at::text,
+         GROUP BY v.device_id, v.client_id, owner.evidence_revision, v.needs_reboot, v.last_boot_at, prior.state_digest
+        HAVING %s OR prior.state_digest IS DISTINCT FROM md5(concat_ws('|', v.client_id::text, owner.evidence_revision::text, v.needs_reboot::text, v.last_boot_at::text,
                    MAX(signal.last_seen_at)::text, BOOL_OR(COALESCE(signal.ever_installed, false))::text))
         """,
         (tenant_id, not incremental),
@@ -472,6 +501,7 @@ def _emit_approval_backlog(cur, tenant_id, ft_ids, now, keys, policy) -> int:
                         THEN dl.external_id::int END AS ninja_id,
                    v.client_id
             FROM operations.v_device v
+            JOIN pg_temp.patch_owner_scope owner ON owner.device_id = v.device_id
             JOIN operations.v_device_source_link dl
               ON dl.device_id = v.device_id AND dl.tenant_id = v.tenant_id
             JOIN operations.sources s
@@ -709,6 +739,7 @@ def _patch_evaluation_coverage(cur, tenant_id, subject_type, subject_id, now, po
             ), included AS (
                 SELECT v.device_id
                   FROM operations.v_device v
+                  JOIN pg_temp.patch_owner_scope owner ON owner.device_id = v.device_id
                   JOIN operations.device_agent_presence_current presence
                     ON presence.tenant_id = v.tenant_id
                    AND presence.device_id = v.device_id
@@ -726,6 +757,25 @@ def _patch_evaluation_coverage(cur, tenant_id, subject_type, subject_id, now, po
                AND (SELECT finished_at FROM latest_patch_run)
                    BETWEEN %s - interval '{policy['patch_activity_days']} days' AND %s
                AND EXISTS (SELECT 1 FROM included)
+               AND NOT EXISTS (
+                   SELECT 1 FROM operations.v_device unresolved
+                   JOIN operations.device_agent_presence_current presence
+                     ON presence.tenant_id = unresolved.tenant_id
+                    AND presence.device_id = unresolved.device_id
+                    AND presence.platform = 'Ninja' AND presence.reported_online IS TRUE
+                   WHERE unresolved.tenant_id = nullif(current_setting('operations.tenant_id', true), '')::bigint
+                     AND unresolved.lifecycle_status <> 'retired'
+                     AND NOT EXISTS (
+                         SELECT 1 FROM operations.computer_client_ownership owner
+                          WHERE owner.tenant_id = unresolved.tenant_id
+                            AND owner.device_id = unresolved.device_id
+                            AND owner.effective_client_id = unresolved.client_id
+                            AND owner.state IN ('resolved', 'decision_protected')
+                            AND (unresolved.effective_patching_scope <> 'Included' OR EXISTS (
+                                SELECT 1 FROM pg_temp.patch_owner_scope locked
+                                 WHERE locked.device_id = unresolved.device_id))
+                     )
+               )
                AND NOT EXISTS (
                    SELECT 1 FROM included i
                     WHERE NOT EXISTS (
@@ -871,12 +921,33 @@ def _auto_resolve(cur, tenant_id, emitted_keys, now, policy) -> None:
             OR (
               f.subject_type = 'client'
               AND ft.name = 'patch_approval_backlog'
+              AND NOT EXISTS (
+                  SELECT 1 FROM operations.v_device unresolved
+                  JOIN operations.device_agent_presence_current unresolved_presence
+                    ON unresolved_presence.tenant_id = unresolved.tenant_id
+                   AND unresolved_presence.device_id = unresolved.device_id
+                   AND unresolved_presence.platform = 'Ninja'
+                   AND unresolved_presence.reported_online IS TRUE
+                  WHERE unresolved.tenant_id = f.tenant_id
+                    AND unresolved.lifecycle_status <> 'retired'
+                    AND NOT EXISTS (
+                        SELECT 1 FROM operations.computer_client_ownership owner
+                         WHERE owner.tenant_id = unresolved.tenant_id
+                           AND owner.device_id = unresolved.device_id
+                           AND owner.effective_client_id = unresolved.client_id
+                           AND owner.state IN ('resolved', 'decision_protected')
+                           AND (unresolved.effective_patching_scope <> 'Included' OR EXISTS (
+                               SELECT 1 FROM pg_temp.patch_owner_scope locked
+                                WHERE locked.device_id = unresolved.device_id))
+                    )
+              )
               AND (SELECT status FROM latest_patch_run) = 'ok'
               AND (SELECT finished_at FROM latest_patch_run)
                   BETWEEN now() - interval '{policy['patch_activity_days']} days' AND now()
               AND EXISTS (
                   SELECT 1
                     FROM operations.v_device client_device
+                    JOIN pg_temp.patch_owner_scope owner ON owner.device_id = client_device.device_id
                     JOIN operations.v_device_source_link device_link
                       ON device_link.tenant_id = client_device.tenant_id
                      AND device_link.device_id = client_device.device_id
@@ -896,6 +967,7 @@ def _auto_resolve(cur, tenant_id, emitted_keys, now, policy) -> None:
               AND NOT EXISTS (
                   SELECT 1
                     FROM operations.v_device client_device
+                    JOIN pg_temp.patch_owner_scope owner ON owner.device_id = client_device.device_id
                     JOIN operations.v_device_source_link device_link
                       ON device_link.tenant_id = client_device.tenant_id
                      AND device_link.device_id = client_device.device_id
@@ -935,6 +1007,7 @@ def _auto_resolve(cur, tenant_id, emitted_keys, now, policy) -> None:
                           JOIN operations.v_device client_device
                             ON client_device.tenant_id = link.tenant_id
                            AND client_device.device_id = link.device_id
+                          JOIN pg_temp.patch_owner_scope owner ON owner.device_id = client_device.device_id
                           JOIN operations.device_agent_presence_current presence
                             ON presence.tenant_id = client_device.tenant_id
                            AND presence.device_id = client_device.device_id

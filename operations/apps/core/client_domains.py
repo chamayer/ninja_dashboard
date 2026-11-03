@@ -37,8 +37,13 @@ _LEARNED_SQL = """
 SELECT d.client_id::text, lower(trim(trailing '.' FROM eo.canonical_domain)),
        count(DISTINCT d.id)::int
   FROM operations.v_entity_observation_admin_metadata eo
-  JOIN operations.devices d ON d.id = eo.device_id AND d.deleted_at IS NULL
+  JOIN operations.devices d ON d.tenant_id = eo.tenant_id AND d.id = eo.device_id
+   AND d.deleted_at IS NULL
    AND d.lifecycle_status <> 'retired'
+  JOIN operations.computer_client_ownership owner
+    ON owner.tenant_id = d.tenant_id AND owner.device_id = d.id
+   AND owner.effective_client_id = d.client_id
+   AND owner.state IN ('resolved', 'decision_protected')
  WHERE eo.active
    AND eo.canonical_domain IS NOT NULL
    AND d.client_id::text = ANY(%s)

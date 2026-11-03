@@ -493,6 +493,16 @@ def entity_candidate_detail(request: HttpRequest, candidate_id: uuid.UUID) -> Ht
     if candidate.client_id:
         clauses.append("client_id = %s")
         params.append(candidate.client_id)
+        clauses.append(
+            "(entity_class <> 'device' OR EXISTS ("
+            "SELECT 1 FROM operations.devices d "
+            "JOIN operations.computer_client_ownership owner "
+            "ON owner.tenant_id = d.tenant_id AND owner.device_id = d.id "
+            "AND owner.effective_client_id = d.client_id "
+            "AND owner.state IN ('resolved', 'decision_protected') "
+            "WHERE d.tenant_id = operations.v_entity_admin_summary.tenant_id "
+            "AND d.entity_id = operations.v_entity_admin_summary.id))"
+        )
     if target_search:
         clauses.append("display_label ILIKE %s")
         params.append(f"%{target_search}%")

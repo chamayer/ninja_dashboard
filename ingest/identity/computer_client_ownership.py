@@ -119,9 +119,13 @@ def reconcile_cycle(tenant_id: int, *, batch_size: int = 100) -> dict[str, int]:
         with db.findings_transaction(tenant_id) as cur:
             cur.execute(
                 """
-                SELECT device_id FROM operations.computer_client_ownership
-                 WHERE tenant_id = %s AND state = 'dirty'
-                 ORDER BY device_id LIMIT %s
+                SELECT owner.device_id
+                  FROM operations.computer_client_ownership owner
+                  JOIN operations.devices device
+                    ON device.tenant_id = owner.tenant_id AND device.id = owner.device_id
+                   AND device.deleted_at IS NULL
+                 WHERE owner.tenant_id = %s AND owner.state = 'dirty'
+                 ORDER BY owner.device_id LIMIT %s
                 """,
                 (tenant_id, batch_size),
             )

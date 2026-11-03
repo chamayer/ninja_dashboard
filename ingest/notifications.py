@@ -14,6 +14,7 @@ import json
 import logging
 import os
 import smtplib
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from email.message import EmailMessage
 from typing import Any
@@ -77,7 +78,11 @@ def dispatch(tenant_id: int = _TENANT_ID) -> int:
             _record_event(f, rule["id"], "", "skipped_no_route", "", "", {}, now)
             continue
         payload = _build_payload(f)
-        status, code, preview = _send(route, payload)
+        with _delivery_ownership_guard([f], tenant_id) as valid:
+            if valid:
+                status, code, preview = _send(route, payload)
+            else:
+                status, code, preview = "skipped_stale_assessment", None, None
         _record_event(
             f, rule["id"],
             route.get("channel") or "",
@@ -98,7 +103,7 @@ def dispatch(tenant_id: int = _TENANT_ID) -> int:
     return sent
 
 
-def _still_notifyable(finding: dict[str, Any], tenant_id: int) -> bool:
+def _still_notifyable(finding: dict[str, Any], tenant_id: int, *, cur=None) -> bool:
     """Recheck mutable handling and current response immediately before send."""
     row_kind = finding.get("finding_row_kind")
     if row_kind == "entity":
@@ -107,6 +112,12 @@ def _still_notifyable(finding: dict[str, Any], tenant_id: int) -> bool:
                 SELECT 1
                   FROM operations.findings f
                  WHERE f.tenant_id = %s AND f.id = %s
+                   AND f.client_id IS NOT DISTINCT FROM %s::uuid
+                   AND (f.subject_type IS DISTINCT FROM 'device' OR EXISTS (
+                       SELECT 1 FROM operations.computer_client_ownership owner
+                        WHERE owner.tenant_id = f.tenant_id AND owner.device_id = f.subject_id
+                          AND owner.effective_client_id = f.client_id
+                          AND owner.state IN ('resolved', 'decision_protected')))
                    AND f.status IN ('open', 'acknowledged')
                    AND (f.snoozed_until IS NULL OR f.snoozed_until <= now())
                    {alertable_clause('f.finding_type_id')}
@@ -195,10 +206,63 @@ def _still_notifyable(finding: dict[str, Any], tenant_id: int) -> bool:
         """
     else:
         return False
-    with db.pool.connection() as conn, conn.cursor() as cur:
-        cur.execute(f"SET LOCAL operations.tenant_id = {tenant_id}")
-        cur.execute(query, (tenant_id, finding["id"]))
+    params = (tenant_id, finding["id"], finding.get("client_id")) if row_kind == "entity" else (
+        tenant_id, finding["id"]
+    )
+    if cur is not None:
+        cur.execute(query, params)
         return bool(cur.fetchone()[0])
+    with db.pool.connection() as conn, conn.cursor() as cursor:
+        cursor.execute(f"SET LOCAL operations.tenant_id = {tenant_id}")
+        cursor.execute(query, params)
+        return bool(cursor.fetchone()[0])
+
+
+@contextmanager
+def _delivery_ownership_guard(findings: list[dict[str, Any]], tenant_id: int):
+    """Keep captured device ownership stable until the delivery attempt ends.
+
+    Locks are taken in the same order as the projector: ownership first, then
+    finding rows. A failed or changed selection is never sent. Network calls
+    have timeouts; callers must not do unrelated work while holding these locks.
+    """
+    entities = [f for f in findings if f.get("finding_row_kind") == "entity"]
+    pairs = sorted(
+        {(str(f["subject_id"]), str(f["client_id"])) for f in entities
+         if f.get("subject_type") == "device" and f.get("subject_id") and f.get("client_id")}
+    )
+    if any(f.get("subject_type") == "device" and
+           (not f.get("subject_id") or not f.get("client_id")) for f in entities):
+        yield False
+        return
+    with db.pool.connection() as conn, conn.cursor() as cur:
+        cur.execute("SELECT set_config('operations.tenant_id', %s, true)", (str(tenant_id),))
+        if pairs:
+            cur.execute(
+                "SELECT device_id, client_id FROM operations.lock_computer_client_scopes("
+                "%s::bigint, %s::uuid[], %s::uuid[])",
+                (tenant_id, [p[0] for p in pairs], [p[1] for p in pairs]),
+            )
+            if {(str(device), str(client)) for device, client in cur.fetchall()} != set(pairs):
+                yield False
+                return
+        if entities:
+            cur.execute(
+                "SELECT id, subject_type, subject_id, client_id FROM operations.findings "
+                "WHERE tenant_id = %s AND id = ANY(%s::uuid[]) ORDER BY id FOR SHARE",
+                (tenant_id, [str(f["id"]) for f in entities]),
+            )
+            current = {str(row[0]): row[1:] for row in cur.fetchall()}
+            for finding in entities:
+                row = current.get(str(finding["id"]))
+                if row is None or tuple(str(value or "") for value in row) != (
+                    str(finding.get("subject_type") or ""),
+                    str(finding.get("subject_id") or ""),
+                    str(finding.get("client_id") or ""),
+                ):
+                    yield False
+                    return
+        yield all(_still_notifyable(f, tenant_id, cur=cur) for f in findings)
 
 
 # ── loaders ─────────────────────────────────────────────────────────────
@@ -255,6 +319,11 @@ def _load_pending_findings(cur, tenant_id: int) -> list[dict[str, Any]]:
         JOIN operations.finding_types ft ON ft.id = f.finding_type_id
         WHERE f.tenant_id = %s AND f.status IN ('open', 'acknowledged')
           AND (f.snoozed_until IS NULL OR f.snoozed_until <= now())
+          AND (f.subject_type IS DISTINCT FROM 'device' OR EXISTS (
+              SELECT 1 FROM operations.computer_client_ownership owner
+               WHERE owner.tenant_id = f.tenant_id AND owner.device_id = f.subject_id
+                 AND owner.effective_client_id = f.client_id
+                 AND owner.state IN ('resolved', 'decision_protected')))
           {alertable_clause('f.finding_type_id')}
           AND EXISTS (
               SELECT 1

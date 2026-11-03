@@ -180,6 +180,20 @@ def test_kept_evidence_stays_out_and_new_evidence_raises_it_again():
     assert [row["client"] for row in details["evidence"]] == ["City Painting"]
 
 
+def test_accepted_record_changed_to_another_client_is_not_hidden_by_its_old_key():
+    computer = _computer("ved-01", {"platform": "Hudu", "entity_type": "cmdb.asset", "client": OTHER})
+    key = findings.client_conflicts({computer.id: computer}, {}, NAMES)[0][1]["evidence"][0]["key"]
+    record = computer.records[0]
+    choices = {str(computer.id): {"evidence": [{
+        "observation_id": str(record["observation_id"]), "client_id": str(OTHER),
+    }]}}
+    accepted = {str(computer.id): {key}}
+    assert findings.client_conflicts({computer.id: computer}, accepted, NAMES, choices) == []
+    record["client_id"] = THIRD
+    [(_, details)] = findings.client_conflicts({computer.id: computer}, accepted, NAMES, choices)
+    assert details["evidence"][0]["client_id"] == str(THIRD)
+
+
 def test_two_other_clients_have_no_single_destination_and_unmapped_or_roaming_records_are_ignored():
     computer = _computer(
         "pc-2",

@@ -69,7 +69,8 @@ SELECT d.id, d.client_id, d.canonical_hostname, d.created_at,
        coalesce((eo.canonical_data ->> 'is_online')::boolean, false),
        eo.last_seen_at,
        -- The client of the record's source group (ADR-0040).
-       eo.client_id, eo.canonical_data ->> 'platform_group_id', rr.external_id IS NOT NULL
+       operations.computer_client_independent_evidence(d.tenant_id, eo.observation_id),
+       eo.canonical_data ->> 'platform_group_id', rr.external_id IS NOT NULL
   FROM operations.devices d
   JOIN operations.entity_observation_current eo
     ON eo.tenant_id = d.tenant_id AND eo.device_id = d.id
@@ -91,9 +92,12 @@ SELECT device_id, k.value
 """
 
 _ACCEPTED = """
-SELECT device_id, k.value
-  FROM operations.device_operator_decisions, jsonb_array_elements_text(value) k
- WHERE tenant_id = %s AND dimension = 'client_conflict_accepted'
+SELECT decision.device_id, k.value
+  FROM operations.computer_client_conflict_decisions(%s::bigint) decision
+ CROSS JOIN LATERAL jsonb_array_elements_text(
+     CASE WHEN jsonb_typeof(decision.value) = 'array' THEN decision.value ELSE '[]'::jsonb END
+ ) k
+ WHERE decision.dimension = 'client_conflict_accepted'
 """
 
 
@@ -135,6 +139,29 @@ class _Computer:
 _IDENTITY_RECORD_TYPES_CACHE: frozenset[str] = frozenset()
 
 
+def _lock_owned_computers(cur: Any, tenant_id: int) -> set[uuid.UUID]:
+    """Fence client-scoped identity groups for the findings transaction."""
+    cur.execute(
+        """
+        WITH candidates AS MATERIALIZED (
+            SELECT d.id AS device_id, d.client_id
+              FROM operations.devices d
+              JOIN operations.computer_client_ownership owner
+                ON owner.tenant_id = d.tenant_id AND owner.device_id = d.id
+               AND owner.effective_client_id = d.client_id
+               AND owner.state IN ('resolved', 'decision_protected')
+             WHERE d.tenant_id = %s AND d.deleted_at IS NULL
+        )
+        SELECT device_id FROM operations.lock_computer_client_scopes(
+            %s,
+            coalesce((SELECT array_agg(device_id ORDER BY device_id) FROM candidates), '{}'::uuid[]),
+            coalesce((SELECT array_agg(client_id ORDER BY device_id) FROM candidates), '{}'::uuid[]))
+        """,
+        (tenant_id, tenant_id),
+    )
+    return {row[0] for row in cur.fetchall()}
+
+
 def evaluate(cur: Any, tenant_id: int, now: datetime) -> int:
     """Raise and clear both identity conditions; return findings written."""
     global _IDENTITY_RECORD_TYPES_CACHE
@@ -147,12 +174,14 @@ def evaluate(cur: Any, tenant_id: int, now: datetime) -> int:
     if normalize._serial_rejection_cache is None:
         log.warning("identity findings: serial rejections unavailable, skipped")
         return 0
+    owned = _lock_owned_computers(cur, tenant_id)
     computers = _load(cur, tenant_id)
+    owned_computers = {key: computer for key, computer in computers.items() if key in owned}
     written = 0
     ft_two = _finding_type_id(cur, TWO_MACHINES)
     if ft_two is not None:
         keys = []
-        for computer in computers.values():
+        for computer in owned_computers.values():
             proposal = two_machines(computer, now)
             if proposal is None:
                 continue
@@ -161,11 +190,11 @@ def evaluate(cur: Any, tenant_id: int, now: datetime) -> int:
             written += _upsert(
                 cur, tenant_id, ft_two, computer.client_id, computer.id, key, "high", now, proposal
             )
-        resolve_absent(cur, tenant_id, ft_two, keys, now)
+        resolve_absent(cur, tenant_id, ft_two, keys, now, owned=owned)
     ft_dup = _finding_type_id(cur, DUPLICATE_COMPUTERS)
     if ft_dup is not None:
         keys = []
-        for subject, details in duplicate_groups(computers, _separated(cur, tenant_id)):
+        for subject, details in duplicate_groups(owned_computers, _separated(cur, tenant_id)):
             # Keyed by the Computers, never by a name (ADR-0034 section 8).
             key = _key(
                 tenant_id, DUPLICATE_COMPUTERS, subject.client_id,
@@ -175,45 +204,62 @@ def evaluate(cur: Any, tenant_id: int, now: datetime) -> int:
             written += _upsert(
                 cur, tenant_id, ft_dup, subject.client_id, subject.id, key, "medium", now, details
             )
-        resolve_absent(cur, tenant_id, ft_dup, keys, now)
+        resolve_absent(cur, tenant_id, ft_dup, keys, now, owned=owned)
     # Review only: a name collision is not evidence that the Computers are one
     # machine, so it has its own type without Merge or Confirm-separate.
     ft_collision = _finding_type_id(cur, NAME_COLLISION)
     if ft_collision is not None:
         keys = []
         for subject_id, client_id, member_ids, details in name_collision_groups(
-            cur, tenant_id, computers
+            cur, tenant_id, owned_computers
         ):
+            if any(
+                uuid.UUID(member_id) not in owned_computers
+                or owned_computers[uuid.UUID(member_id)].client_id != client_id
+                for member_id in member_ids
+            ):
+                continue
             # Keyed by the Computers, never by a name (ADR-0034 section 8).
             key = _key(tenant_id, NAME_COLLISION, *member_ids)
             keys.append(key)
             written += _upsert(
                 cur, tenant_id, ft_collision, client_id, subject_id, key, "medium", now, details
             )
-        resolve_absent(cur, tenant_id, ft_collision, keys, now)
+        resolve_absent(cur, tenant_id, ft_collision, keys, now, owned=owned)
     # Label drift (ADR-0034 section 9): non-alerting, fixed at the source.
     ft_drift = _finding_type_id(cur, LABEL_DRIFT)
     if ft_drift is not None:
         keys = []
         for (device_id, client_id, platform), details in label_drift(cur, tenant_id).items():
+            if device_id not in owned:
+                continue
             key = _key(tenant_id, LABEL_DRIFT, device_id, platform)
             keys.append(key)
             written += _upsert(cur, tenant_id, ft_drift, client_id, device_id, key, "low", now, details)
-        resolve_absent(cur, tenant_id, ft_drift, keys, now)
+        resolve_absent(cur, tenant_id, ft_drift, keys, now, owned=owned)
     # A Computer linked to more than one client (ADR-0040): one per Computer.
     ft_clients = _finding_type_id(cur, CLIENT_CONFLICT)
     if ft_clients is not None:
         keys = []
-        for computer, details in client_conflicts(
-            computers, _accepted(cur, tenant_id), _client_names(cur, tenant_id)
+        projections = _ownership_projections(cur, tenant_id)
+        # A Computer that resolved after the lock snapshot has not been fenced
+        # for this run. Keep its finding unscoped until the next evaluation.
+        for subject, (computer, state, effective, reason, contradiction) in projections.items():
+            if subject not in owned and state in {"resolved", "decision_protected"}:
+                projections[subject] = (computer, "dirty", None, "ownership_changed_during_evaluation", False)
+        for computer, details, effective_client in ownership_conflicts(
+            computers, _accepted(cur, tenant_id), _client_names(cur, tenant_id),
+            _client_ownership_choices(cur, tenant_id), projections,
         ):
             key = _key(tenant_id, CLIENT_CONFLICT, computer.id)
             keys.append(key)
             written += _upsert(
-                cur, tenant_id, ft_clients, computer.client_id, computer.id, key, "high", now,
+                cur, tenant_id, ft_clients, effective_client, computer.id, key, "high", now,
                 details,
             )
-        resolve_absent(cur, tenant_id, ft_clients, keys, now)
+        # Dirty or unresolved ownership is not evidence that an earlier
+        # conflict cleared; only a locked, resolved Computer can clear it.
+        resolve_absent(cur, tenant_id, ft_clients, keys, now, owned=owned)
     return written
 
 
@@ -221,6 +267,7 @@ def client_conflicts(
     computers: dict[uuid.UUID, _Computer],
     accepted: dict[str, set[str]],
     client_names: dict[str, str],
+    choices: dict[str, dict[str, Any]] | None = None,
 ) -> list[tuple[_Computer, dict[str, Any]]]:
     """Computers whose evidence names another client, with that evidence.
 
@@ -276,7 +323,24 @@ def client_conflicts(
                     "hostname": twin.name,
                 }
         kept = accepted.get(str(computer.id), set())
-        rows = [row for key, row in sorted(evidence.items()) if key not in kept]
+        choice = (choices or {}).get(str(computer.id))
+
+        def is_kept(key: str, row: dict[str, Any]) -> bool:
+            if key not in kept:
+                return False
+            if row["kind"] != "record" or choice is None:
+                return True
+            # A legacy key identifies a record, not the client it named. Once
+            # a scoped choice has a snapshot, suppress only that exact
+            # record/client pair; a later mapping change must be reviewed.
+            return any(
+                str(saved.get("observation_id")) == row["observation_id"]
+                and str(saved.get("client_id")) == row["client_id"]
+                for saved in (choice.get("evidence") or [])
+                if isinstance(saved, dict)
+            )
+
+        rows = [row for key, row in sorted(evidence.items()) if not is_kept(key, row)]
         if not rows:
             continue
         others = sorted({row["client_id"] for row in rows})
@@ -301,12 +365,87 @@ def client_conflicts(
     return found
 
 
+def ownership_conflicts(
+    computers: dict[uuid.UUID, _Computer],
+    accepted: dict[str, set[str]],
+    client_names: dict[str, str],
+    choices: dict[str, dict[str, Any]],
+    projections: dict[uuid.UUID, tuple[_Computer, str | None, Any, str, bool]],
+) -> list[tuple[_Computer, dict[str, Any], Any]]:
+    """Include unresolved ownership in the existing Computer review queue."""
+    existing = {
+        computer.id: (computer, details)
+        for computer, details in client_conflicts(computers, accepted, client_names, choices)
+    }
+    # A legacy record decision has no client snapshot. Show its current
+    # evidence again so an operator can make a scoped, auditable decision.
+    legacy_review = {
+        device_id for device_id, (_computer, state, _client, reason, _contradiction)
+        in projections.items() if state == "review" and reason == "legacy_decision_needs_review"
+    }
+    if legacy_review:
+        for computer, details in client_conflicts(computers, {}, client_names, choices):
+            if computer.id in legacy_review:
+                existing[computer.id] = (computer, details)
+    for device_id, (computer, state, _client, reason, contradiction) in projections.items():
+        if state not in {"unknown", "conflict", "review"} and not contradiction:
+            continue
+        if device_id not in existing:
+            existing[device_id] = (
+                computer,
+                {"hostname": computer.name, "evidence": [], "other_client_ids": [],
+                 "move_to_client_id": None, "same_name_elsewhere": []},
+            )
+        existing[device_id][1].update(
+            ownership_state=state, ownership_reason=reason, ownership_contradiction=contradiction
+        )
+    result = []
+    for device_id, (computer, details) in existing.items():
+        projection = projections.get(device_id)
+        effective = projection[2] if projection and projection[1] in {"resolved", "decision_protected"} else None
+        # A stored client on an unresolved Computer is not its current owner.
+        details["client_id"] = str(effective) if effective is not None else None
+        details["client"] = client_names.get(str(effective), "") if effective is not None else ""
+        result.append((computer, details, effective))
+    return result
+
+
+def _ownership_projections(
+    cur: Any, tenant_id: int
+) -> dict[uuid.UUID, tuple[_Computer, str | None, Any, str, bool]]:
+    cur.execute(
+        """
+        SELECT d.id, d.client_id, d.canonical_hostname, d.created_at,
+               owner.state, owner.effective_client_id, coalesce(owner.reason, ''),
+               coalesce(owner.contradiction, false)
+          FROM operations.devices d
+          LEFT JOIN operations.computer_client_ownership owner
+            ON owner.tenant_id = d.tenant_id AND owner.device_id = d.id
+         WHERE d.tenant_id = %s AND d.deleted_at IS NULL
+        """,
+        (tenant_id,),
+    )
+    return {
+        device_id: (_Computer(device_id, stored_client, hostname, created), state, effective, reason, contradiction)
+        for device_id, stored_client, hostname, created, state, effective, reason, contradiction in cur.fetchall()
+    }
+
+
 def _accepted(cur: Any, tenant_id: int) -> dict[str, set[str]]:
     cur.execute(_ACCEPTED, (tenant_id,))
     accepted: dict[str, set[str]] = {}
     for device_id, key in cur.fetchall():
         accepted.setdefault(str(device_id), set()).add(key)
     return accepted
+
+
+def _client_ownership_choices(cur: Any, tenant_id: int) -> dict[str, dict[str, Any]]:
+    cur.execute(
+        "SELECT device_id, value FROM operations.computer_client_conflict_decisions(%s::bigint) "
+        "WHERE dimension = 'client_ownership_choice'",
+        (tenant_id,),
+    )
+    return {str(device_id): value for device_id, value in cur.fetchall() if isinstance(value, dict)}
 
 
 def _client_names(cur: Any, tenant_id: int) -> dict[str, str]:
@@ -704,6 +843,13 @@ def _upsert(
     preserved = preserve_operator_episode(cur, "findings", tenant_id, condition_key, now, details)
     if preserved is not None:
         finding_id = uuid.UUID(preserved)
+        # An investigating or suppressed episode can outlive its previous
+        # owner. Keep the operator state, but do not retain a stale client.
+        cur.execute(
+            "UPDATE operations.findings SET client_id = %s "
+            "WHERE tenant_id = %s AND id = %s AND client_id IS DISTINCT FROM %s",
+            (client_id, tenant_id, finding_id, client_id),
+        )
     else:
         cur.execute(
             """
@@ -755,7 +901,10 @@ def record_measured(cur, tenant_id, finding_id, finding_type_id, condition_key, 
     )
 
 
-def resolve_absent(cur: Any, tenant_id: int, finding_type_id: int, keys: list[str], now) -> None:
+def resolve_absent(
+    cur: Any, tenant_id: int, finding_type_id: int, keys: list[str], now,
+    *, owned: set[uuid.UUID] | None = None,
+) -> None:
     """Close findings whose condition this complete run no longer found."""
     cur.execute(
         """
@@ -764,6 +913,24 @@ def resolve_absent(cur: Any, tenant_id: int, finding_type_id: int, keys: list[st
          WHERE f.tenant_id = %s AND f.finding_type_id = %s
            AND f.status IN ('open', 'acknowledged')
            AND NOT (f.condition_key = ANY(%s::text[]))
+           AND (%s::uuid[] IS NULL OR (
+               f.subject_type = 'device' AND f.subject_id = ANY(%s::uuid[])
+               AND NOT EXISTS (
+                   SELECT 1 FROM jsonb_array_elements(
+                       CASE WHEN jsonb_typeof(f.finding_details->'computers') = 'array'
+                            THEN f.finding_details->'computers' ELSE '[]'::jsonb END
+                   ) member
+                   WHERE member ? 'device_id'
+                     AND NOT (member->>'device_id' = ANY(%s::text[]))
+               )
+               AND NOT EXISTS (
+                   SELECT 1 FROM jsonb_array_elements_text(
+                       CASE WHEN jsonb_typeof(f.finding_details->'device_ids') = 'array'
+                            THEN f.finding_details->'device_ids' ELSE '[]'::jsonb END
+                   ) member
+                   WHERE NOT (member = ANY(%s::text[]))
+               )
+           ))
            AND EXISTS (
                SELECT 1
                  FROM operations.condition_assessments assessment
@@ -777,7 +944,11 @@ def resolve_absent(cur: Any, tenant_id: int, finding_type_id: int, keys: list[st
                       (policy.policy ->> 'freshness_hours')::integer * interval '1 hour'
            )
         """,
-        (now, tenant_id, finding_type_id, keys),
+        (now, tenant_id, finding_type_id, keys,
+         list(owned) if owned is not None else None,
+         list(owned) if owned is not None else None,
+         [str(device_id) for device_id in owned] if owned is not None else None,
+         [str(device_id) for device_id in owned] if owned is not None else None),
     )
     if cur.rowcount:
         log.info("identity findings: cleared %d (type %s)", cur.rowcount, finding_type_id)

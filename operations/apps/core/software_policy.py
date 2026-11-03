@@ -149,7 +149,12 @@ SELECT s.device_id, d.canonical_hostname, c.slug, c.display_name, s.held_at, s.h
        s.release_requested_by
   FROM operations.software_inventory_devices s
   JOIN operations.devices d ON d.tenant_id = s.tenant_id AND d.id = s.device_id
-  LEFT JOIN operations.clients c ON c.id = d.client_id
+  LEFT JOIN operations.computer_client_ownership owner
+    ON owner.tenant_id = d.tenant_id AND owner.device_id = d.id
+   AND owner.effective_client_id = d.client_id
+   AND owner.state IN ('resolved', 'decision_protected')
+  LEFT JOIN operations.clients c
+    ON c.tenant_id = owner.tenant_id AND c.id = owner.effective_client_id
  WHERE s.tenant_id = 1 AND s.held_at IS NOT NULL
  ORDER BY s.held_at, d.canonical_hostname
 """

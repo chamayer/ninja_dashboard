@@ -121,3 +121,22 @@ def test_cluster_peer_cannot_lend_a_match_or_association(monkeypatch):
 class SimpleMatch:
     def __init__(self, device_id):
         self.device_id = device_id
+
+
+def test_unresolved_ownership_defers_promotion(monkeypatch):
+    monkeypatch.setattr(resolver, "_load_agent_ids", lambda _cur: {})
+    monkeypatch.setattr(resolver, "identity_entity_types", lambda _cur: {"agent.rmm", "agent.edr"})
+    monkeypatch.setattr(resolver, "record_name_short", lambda *_args: "shared-host")
+    monkeypatch.setattr(resolver, "_collapse_mac_variants", lambda clusters: clusters)
+    monkeypatch.setattr(resolver, "_collapse_prefix_variants", lambda clusters: clusters)
+    monkeypatch.setattr(resolver, "invalidate_client_names", lambda *_args: None)
+    monkeypatch.setattr(resolver, "write_computer_names", lambda *_args: None)
+    created = []
+    monkeypatch.setattr(resolver, "_create_device_for_group", lambda *args: created.append(args))
+
+    def deferred(*_args, **_kwargs):
+        raise resolver.OwnershipMatchDeferred()
+
+    monkeypatch.setattr(resolver, "resolve_match", deferred)
+    assert resolver._promote_unmatched_clusters(_Cursor(), ()) == 0
+    assert created == []
