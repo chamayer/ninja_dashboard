@@ -268,7 +268,20 @@ def drain(
             outcome.failed += _finish(batch, str(exc) or exc.__class__.__name__)
         else:
             _add(outcome.result, part)
-            _finish(batch)
+            # A source record can still be refreshed when its Computer has no
+            # effective client, but the Computer inventory was not applied.
+            # Keep that request in the normal retry/failure path instead of
+            # recording a successful Computer refresh.
+            unresolved = [
+                entry for entry in batch if str(entry.ninja_device_id) not in device_map
+            ]
+            resolved = [
+                entry for entry in batch if str(entry.ninja_device_id) in device_map
+            ]
+            outcome.failed += _finish(
+                unresolved, "Computer inventory could not be mapped to a resolved client."
+            )
+            _finish(resolved)
         finally:
             handled += len(batch)
             if count is not None:

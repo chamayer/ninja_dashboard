@@ -194,7 +194,7 @@ def test_the_worker_fetches_batches_and_retries_failed_ones(monkeypatch):
     monkeypatch.setattr(queue, "claim", lambda run: entries)
     monkeypatch.setattr(queue, "_finish", lambda batch, error="": finished.append(
         ([e.id for e in batch], error)) or (len(batch) if error else 0))
-    monkeypatch.setattr(software, "load_device_map", lambda: {})
+    monkeypatch.setattr(software, "load_device_map", lambda: {str(i): (i, i) for i in range(1, 151)})
 
     def _refresh(client, ids, device_map):
         requested.append(len(ids))
@@ -211,6 +211,27 @@ def test_the_worker_fetches_batches_and_retries_failed_ones(monkeypatch):
     assert outcome.material_changed
     assert finished[0] == ([999], "Not a single-computer request (expected id=<number>).")
     assert finished[-1] == (list(range(101, 151)), "ninja down")
+
+
+def test_the_worker_retries_unmapped_computers_after_a_successful_source_refresh(monkeypatch):
+    entries = [queue.Entry(1, "id=1", 0, 3), queue.Entry(2, "id=2", 0, 3)]
+    finished = []
+    monkeypatch.setattr(queue, "recover_stale_entries", lambda: 0)
+    monkeypatch.setattr(queue, "claim", lambda run: entries)
+    monkeypatch.setattr(queue, "_finish", lambda batch, error="": (
+        finished.append(([entry.id for entry in batch], error)) or (len(batch) if error else 0)
+    ) if batch else 0)
+    monkeypatch.setattr(software, "load_device_map", lambda: {"1": (1, 1)})
+    monkeypatch.setattr(software, "device_refresh",
+                        lambda client, ids, device_map: software.ApplyResult(devices=1))
+
+    outcome = queue.drain(object(), "run-1")
+
+    assert outcome.failed == 1
+    assert finished == [
+        ([2], "Computer inventory could not be mapped to a resolved client."),
+        ([1], ""),
+    ]
 
 
 def test_an_unchanged_inventory_is_not_a_material_change():
