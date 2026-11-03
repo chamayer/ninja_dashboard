@@ -28,6 +28,7 @@ from psycopg.types.json import Json
 from ingest import db, device_cache_projector
 from ingest.conditions import record_assessment
 from ingest.identity import findings as identity_findings
+from ingest.identity import computer_client_ownership
 from ingest.identity import identity_entity_types
 from ingest.identity.naming import write_computer_names
 from ingest.identity.matching import client_record_names, invalidate_client_names
@@ -179,6 +180,12 @@ def drain_resolution(batch_size: int = 200, *, refresh_current: bool = True) -> 
     _add_count("computers_promoted", promoted_count)
     _add_count("computers_merged", merged_count)
     promoted_count += merged_count
+
+    # Reconcile even when no observations were newly attached. Failures must
+    # reach the resolver job so a partial ownership sweep is visible and retried.
+    ownership_counts = computer_client_ownership.reconcile_cycle(TENANT_ID)
+    _telemetry["client_ownership"] = ownership_counts
+    log.info("resolver: Computer client ownership projection %s", ownership_counts)
 
     # ADR-0012: the projector is the sole writer of the five device cache
     # columns. It must run before _sync_device_attributes, which copies that

@@ -19,6 +19,10 @@ validation results, or completed-plan summaries here.
 
 ## Next action — active plan routing
 
+- **PLAN-045 — active, user-paused after checkpoint commit.** On resume, finish
+  client-scope enforcement and concurrency coverage for the projector; see the
+  [plan](docs/plans/PLAN-045-source-derived-computer-client.md).
+
 - **PLAN-041 — active.** Release bounded matcher lookups and measure a complete
   optimized run. DMARC fixes are verified. See the
   [handoff](docs/plans/PLAN-041-host-cpu-and-runtime-profiling.md).

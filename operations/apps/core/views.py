@@ -84,7 +84,12 @@ from .client_workspace import (
     build_client_workspace,
     client_source_references,
 )
-from .computer_reads import current_computer_sql, current_computers
+from .computer_reads import (
+    client_owned_computers,
+    client_owned_device_ids,
+    current_computer_sql,
+    current_computers,
+)
 from .conditions.live import load_active_profile
 from .conditions.operator import (
     ATTENTION_BLOCKED,
@@ -1799,7 +1804,9 @@ def org_index(request: HttpRequest, org_slug: str) -> HttpResponse:
         client = request.current_client
         devices = list(
             current_computers(
-                Device.objects.filter(tenant_id=1, client=client, deleted_at__isnull=True)
+                client_owned_computers(
+                    Device.objects.filter(deleted_at__isnull=True), 1, client.id
+                )
             ).only("device_type")
         )
         ctx["device_count"] = len(devices)
@@ -1831,6 +1838,12 @@ def org_index(request: HttpRequest, org_slug: str) -> HttpResponse:
                     SELECT COUNT(DISTINCT canonical_name)::int
                     FROM operations.software_installations_current
                     WHERE tenant_id = 1 AND client_id = %s AND deleted_at IS NULL
+                      AND EXISTS (
+                          SELECT 1 FROM operations.computer_client_ownership owner
+                           WHERE owner.tenant_id = operations.software_installations_current.tenant_id
+                             AND owner.device_id = operations.software_installations_current.device_id
+                             AND owner.effective_client_id = operations.software_installations_current.client_id
+                             AND owner.state IN ('resolved', 'decision_protected'))
                     """,
                     [str(client.id)],
                 )
@@ -1838,6 +1851,8 @@ def org_index(request: HttpRequest, org_slug: str) -> HttpResponse:
 
         ctx["active_finding_count"] = Finding.objects.filter(
             tenant_id=1, client=client, status__in=_FINDING_ACTIVE_STATUSES
+        ).filter(
+            ~Q(subject_type="device") | Q(subject_id__in=client_owned_device_ids(1, client.id))
         ).count()
 
         # ── Client scoreboard extensions ──
@@ -1857,9 +1872,13 @@ def org_index(request: HttpRequest, org_slug: str) -> HttpResponse:
                                      AND last_contact_at >= NOW() - INTERVAL '{active_device_days} days') AS active,
                    COUNT(*) FILTER (WHERE last_contact_at IS NULL
                                         OR last_contact_at < NOW() - INTERVAL '{active_device_days} days') AS stale
-                FROM operations.v_device
-                WHERE tenant_id = 1 AND client_id = %s
-                  AND {current_computer_sql()}
+                FROM operations.v_device v
+                JOIN operations.computer_client_ownership owner
+                  ON owner.tenant_id = v.tenant_id AND owner.device_id = v.device_id
+                 AND owner.effective_client_id = v.client_id
+                 AND owner.state IN ('resolved', 'decision_protected')
+                WHERE v.tenant_id = 1 AND v.client_id = %s
+                  AND {current_computer_sql("v")}
             """,
                 [str(client.id)],
             )
@@ -1882,6 +1901,12 @@ def org_index(request: HttpRequest, org_slug: str) -> HttpResponse:
                 FROM operations.findings
                 WHERE tenant_id = 1 AND client_id = %s AND condition_namespace = 'entity'
                   AND status IN ('open', 'acknowledged', 'investigating')
+                  AND (subject_type IS DISTINCT FROM 'device' OR EXISTS (
+                      SELECT 1 FROM operations.computer_client_ownership owner
+                       WHERE owner.tenant_id = operations.findings.tenant_id
+                         AND owner.device_id = operations.findings.subject_id
+                         AND owner.effective_client_id = operations.findings.client_id
+                         AND owner.state IN ('resolved', 'decision_protected')))
                 GROUP BY severity
                 """,
                 [str(client.id)],
@@ -1912,7 +1937,16 @@ def org_index(request: HttpRequest, org_slug: str) -> HttpResponse:
                   AND (f.client_id = %s
                        OR f.id IN (SELECT e.finding_id
                                      FROM operations.v_device_software_exposure e
+                                     JOIN operations.computer_client_ownership owner
+                                       ON owner.tenant_id = e.tenant_id AND owner.device_id = e.device_id
+                                      AND owner.effective_client_id = e.client_id
+                                      AND owner.state IN ('resolved', 'decision_protected')
                                     WHERE e.tenant_id = 1 AND e.client_id = %s))
+                  AND (f.subject_type IS DISTINCT FROM 'device' OR EXISTS (
+                      SELECT 1 FROM operations.computer_client_ownership owner
+                       WHERE owner.tenant_id = f.tenant_id AND owner.device_id = f.subject_id
+                         AND owner.effective_client_id = f.client_id
+                         AND owner.state IN ('resolved', 'decision_protected')))
                   AND f.status IN ('open', 'acknowledged', 'investigating')
                   AND f.severity IN ('critical', 'high')
                 ORDER BY CASE f.severity WHEN 'critical' THEN 0 ELSE 1 END,
@@ -1946,6 +1980,10 @@ def org_index(request: HttpRequest, org_slug: str) -> HttpResponse:
                     SELECT v.device_id, v.canonical_hostname, v.device_role,
                            v.os_group, v.last_contact_at
                       FROM operations.v_device v
+                      JOIN operations.computer_client_ownership owner
+                        ON owner.tenant_id = v.tenant_id AND owner.device_id = v.device_id
+                       AND owner.effective_client_id = v.client_id
+                       AND owner.state IN ('resolved', 'decision_protected')
                      WHERE v.tenant_id = 1 AND v.client_id = %s
                        AND {current_computer_sql("v")}
                        AND NOT v.is_online_any
@@ -1999,8 +2037,14 @@ def org_index(request: HttpRequest, org_slug: str) -> HttpResponse:
                 SELECT COUNT(*)::int
                 FROM operations.software_decisions
                 WHERE tenant_id = 1 AND (client_id IS NULL OR client_id = %s)
+                  AND (device_id IS NULL OR EXISTS (
+                      SELECT 1 FROM operations.computer_client_ownership owner
+                       WHERE owner.tenant_id = operations.software_decisions.tenant_id
+                         AND owner.device_id = operations.software_decisions.device_id
+                         AND owner.effective_client_id = %s
+                         AND owner.state IN ('resolved', 'decision_protected')))
                 """,
-                [str(client.id)],
+                [str(client.id), str(client.id)],
             )
             ctx["software_decisions"] = cur.fetchone()[0]
 
@@ -2011,6 +2055,12 @@ def org_index(request: HttpRequest, org_slug: str) -> HttpResponse:
                 FROM operations.findings
                 WHERE tenant_id = 1 AND client_id = %s AND condition_namespace = 'entity'
                   AND first_seen_at > NOW() - INTERVAL '24 hours'
+                  AND (subject_type IS DISTINCT FROM 'device' OR EXISTS (
+                      SELECT 1 FROM operations.computer_client_ownership owner
+                       WHERE owner.tenant_id = operations.findings.tenant_id
+                         AND owner.device_id = operations.findings.subject_id
+                         AND owner.effective_client_id = operations.findings.client_id
+                         AND owner.state IN ('resolved', 'decision_protected')))
                 """,
                 [str(client.id)],
             )
@@ -2093,7 +2143,7 @@ def org_devices(request: HttpRequest, org_slug: str) -> HttpResponse:
     """Device list for a specific client with server-side search/filter."""
     client = _get_client_by_slug(org_slug)
     base_qs = current_computers(
-        Device.objects.filter(tenant_id=1, client=client, deleted_at__isnull=True)
+        client_owned_computers(Device.objects.filter(deleted_at__isnull=True), 1, client.id)
     )
     type_counts = {
         row["device_type"]: row["count"]
@@ -12466,8 +12516,8 @@ def client_mapping_bulk(request: HttpRequest) -> HttpResponse:
     note = f"{count} moved to {destination}; {moved['computers_moved']} Computers moved with them."
     if moved["computers_mixed"]:
         note += (
-            f" {moved['computers_mixed']} Computers also have records from another client and "
-            "stay where they are; they are listed as “Computer under the wrong client?”."
+            f" {moved['computers_mixed']} Computers will be reconciled from their current "
+            "source records; cases needing a decision will remain for review."
         )
     messages.success(request, note)
     return redirect(back)
@@ -14563,9 +14613,14 @@ def org_software(request: HttpRequest, org_slug: str) -> HttpResponse:
     base_where = f"""tenant_id = %s AND client_id = %s AND deleted_at IS NULL
         AND stale_since IS NULL
         AND device_id IN (
-            SELECT id FROM operations.devices
-            WHERE tenant_id = 1 AND deleted_at IS NULL
-              AND {current_computer_sql()}
+            SELECT d.id FROM operations.devices d
+            JOIN operations.computer_client_ownership ownership
+              ON ownership.tenant_id = d.tenant_id AND ownership.device_id = d.id
+             AND ownership.effective_client_id = d.client_id
+             AND ownership.state IN ('resolved', 'decision_protected')
+            WHERE d.tenant_id = 1 AND d.deleted_at IS NULL
+              AND d.client_id = operations.software_installations_current.client_id
+              AND {current_computer_sql("d")}
         )"""
     extra_where = ""
     extra_params: list = []
@@ -14651,6 +14706,10 @@ def org_software(request: HttpRequest, org_slug: str) -> HttpResponse:
                 -- f.client_id here returned 0 for every title.
                 SELECT e.canonical_name, COUNT(DISTINCT e.device_id)
                 FROM operations.v_device_software_exposure e
+                JOIN operations.computer_client_ownership ownership
+                  ON ownership.tenant_id = e.tenant_id AND ownership.device_id = e.device_id
+                 AND ownership.effective_client_id = e.client_id
+                 AND ownership.state IN ('resolved', 'decision_protected')
                 WHERE e.tenant_id = 1
                   AND e.client_id = %s
                   AND e.status IN ('open', 'acknowledged')
@@ -14745,6 +14804,10 @@ def org_software_devices(request: HttpRequest, org_slug: str) -> HttpResponse:
                 FROM operations.software_installations_current s
                 JOIN operations.devices d
                      ON d.id = s.device_id AND d.tenant_id = s.tenant_id
+                JOIN operations.computer_client_ownership ownership
+                     ON ownership.tenant_id = s.tenant_id AND ownership.device_id = s.device_id
+                    AND ownership.effective_client_id = s.client_id
+                    AND ownership.state IN ('resolved', 'decision_protected')
                 WHERE s.tenant_id = %s
                   AND s.client_id = %s
                   AND s.canonical_name = %s

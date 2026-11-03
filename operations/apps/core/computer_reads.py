@@ -9,6 +9,7 @@ online state are separate dimensions.
 from __future__ import annotations
 
 from django.db.models import QuerySet
+from django.db.models.expressions import RawSQL
 
 from .models import Device
 
@@ -16,6 +17,22 @@ from .models import Device
 def current_computers(queryset: QuerySet[Device]) -> QuerySet[Device]:
     """Select the ordinary operational Computer population from an ORM query."""
     return queryset.exclude(lifecycle_status=Device.LifecycleStatus.RETIRED)
+
+
+def client_owned_device_ids(tenant_id: int, client_id) -> RawSQL:
+    return RawSQL(
+        "SELECT device_id FROM operations.computer_client_ownership "
+        "WHERE tenant_id = %s AND effective_client_id = %s "
+        "AND state IN ('resolved', 'decision_protected')",
+        [tenant_id, client_id],
+    )
+
+
+def client_owned_computers(queryset: QuerySet[Device], tenant_id: int, client_id) -> QuerySet[Device]:
+    """Only Computers whose current projection authorizes this client."""
+    return queryset.filter(
+        tenant_id=tenant_id, client_id=client_id, id__in=client_owned_device_ids(tenant_id, client_id)
+    )
 
 
 def current_computer_sql(alias: str = "") -> str:

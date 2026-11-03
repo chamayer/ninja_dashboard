@@ -226,9 +226,17 @@ def _filtered_sql(scope: Scope, *, labels: bool = False) -> tuple[str, dict[str,
             # A software approval case affects a client through its uncovered
             # installations; its decision scope does not change.
             where.append(
-                "(i.client_id = %(client_id)s::uuid OR (i.subject_type IN"
+                "((i.client_id = %(client_id)s::uuid AND (i.subject_type IS DISTINCT FROM 'device'"
+                " OR EXISTS (SELECT 1 FROM operations.computer_client_ownership owner"
+                " WHERE owner.tenant_id = %(tenant)s AND owner.device_id = i.subject_id"
+                " AND owner.effective_client_id = %(client_id)s::uuid"
+                " AND owner.state IN ('resolved', 'decision_protected')))) OR (i.subject_type IN"
                 " ('software_product', 'software_version') AND EXISTS ("
                 " SELECT 1 FROM operations.v_device_software_exposure e"
+                " JOIN operations.computer_client_ownership owner"
+                " ON owner.tenant_id = e.tenant_id AND owner.device_id = e.device_id"
+                " AND owner.effective_client_id = e.client_id"
+                " AND owner.state IN ('resolved', 'decision_protected')"
                 " WHERE e.tenant_id = %(tenant)s AND e.finding_id = i.id"
                 " AND e.client_id = %(client_id)s::uuid)))"
             )

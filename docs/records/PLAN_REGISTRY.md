@@ -1,5 +1,19 @@
 # Plan registry
 
+## PLAN-045 — Source-derived Computer client
+
+- Scope: Reconcile Computer client ownership from current source evidence after changes and each full resolver cycle, retaining human decisions and explicit unresolved states.
+- Status: active
+- Defined: 2026-11-02
+- Started: 2026-11-02
+- Completed: —
+- Blueprint: docs/plans/PLAN-045-source-derived-computer-client.md
+- Source: docs/plans/PLAN-045-source-derived-computer-client.md
+- Section: PLAN-045 — Source-derived Computer client
+- Related plans: PLAN-004 owns source associations and identity; PLAN-015 owns separately approved identity repairs; PLAN-036 supplies record-first evaluation. This plan changes client ownership projection, not duplicate merges.
+- Resume gate: User requested a pause after the checkpoint commit. Resume only on request. Production data operations, push and deployment remain separately gated.
+- Last checked: 2026-11-03 (0401–0403, projector, resolver sweep, operator choices and initial scoped readers in progress; small synthetic PostgreSQL and unit checks passed. Complete reader/input coverage and full-chain/concurrency validation remain outstanding; no production data changed).
+
 ## PLAN-043 — Useful issue review
 
 - Scope: Explain issues, display safe source-record identity evidence and comparisons, and expose existing permission-checked resolution paths on the review page.
