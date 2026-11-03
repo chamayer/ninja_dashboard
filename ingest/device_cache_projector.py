@@ -56,121 +56,10 @@ log = logging.getLogger(__name__)
 
 TENANT_ID = 1
 
-# Shared by the dry-run preview and the write. Produces one target row per
-# device that has an entity anchor, with every cache column resolved.
-_TARGET_SQL = r"""
-WITH eff AS (
-    SELECT e.entity_id, ad.key, e.value_text, e.value_boolean
-      FROM operations.entity_attribute_effective_current e
-      JOIN operations.attribute_definitions ad
-        ON ad.id = e.attribute_definition_id
-     WHERE e.tenant_id = %(tenant)s
-       AND e.status = 'selected'
-       AND ad.key IN ('os_name', 'os_family', 'device_role',
-                      'node_class', 'is_virtual_machine')
-),
-pivot AS (
-    SELECT entity_id,
-           max(value_text) FILTER (WHERE key = 'os_name')     AS os_name,
-           max(value_text) FILTER (WHERE key = 'os_family')   AS os_family,
-           max(value_text) FILTER (WHERE key = 'device_role') AS device_role,
-           upper(max(value_text) FILTER (WHERE key = 'node_class')) AS node_class,
-           bool_or(value_boolean) FILTER (WHERE key = 'is_virtual_machine') AS is_vm,
-           -- ADR-0012 section 6: the node_class taxonomy is data, not inline
-           -- left()/right() tests. NULL where the class implies no form
-           -- factor, which is every agent.* class (ADR-0005).
-           (SELECT NULLIF(m.form_factor, '')
-              FROM operations.node_class_mappings m
-             WHERE upper(max(value_text) FILTER (WHERE key = 'node_class'))
-                   LIKE m.pattern
-             ORDER BY m.priority, m.id
-             LIMIT 1) AS node_class_form_factor
-      FROM eff
-     GROUP BY entity_id
-),
--- Asset-nature signals only. Agent presence is deliberately absent.
-types AS (
-    SELECT l.entity_id,
-           bool_or(o.entity_type = 'network.device') AS has_network,
-           bool_or(o.entity_type = 'vm.host')        AS has_vm_host,
-           bool_or(o.entity_type = 'vm.guest')       AS has_vm_guest
-      FROM operations.entity_source_links l
-      JOIN operations.entity_observation_current o
-        ON o.tenant_id          = l.tenant_id
-       AND o.source_instance_id = l.source_instance_id
-       AND o.external_namespace = l.external_namespace
-       AND o.external_id        = l.external_id
-     WHERE l.tenant_id = %(tenant)s
-       AND l.missing_since IS NULL
-     GROUP BY l.entity_id
-)
-SELECT d.id AS device_id,
-       COALESCE(p.os_name,     d.os_name)     AS os_name,
-       COALESCE(p.os_family,   d.os_family)   AS os_family,
-       COALESCE(
-           (SELECT g.os_group
-              FROM operations.os_group_mappings g
-             WHERE COALESCE(p.os_family, d.os_family) LIKE g.pattern
-             ORDER BY g.priority, g.pattern
-             LIMIT 1),
-           d.os_group, 'Unknown'
-       ) AS os_group,
-       COALESCE(p.device_role, d.device_role, 'unknown') AS device_role,
-       CASE
-           WHEN COALESCE(t.has_network, false)
-             OR p.node_class_form_factor = 'network-device'
-               THEN 'network-device'
-           WHEN COALESCE(t.has_vm_host, false)
-             OR p.node_class_form_factor = 'hypervisor-host'
-               THEN 'hypervisor-host'
-           WHEN COALESCE(t.has_vm_guest, false)
-             OR p.node_class_form_factor = 'vm'
-             OR COALESCE(p.is_vm, false)
-               THEN 'vm'
-           -- Retain a known form factor when no asset-nature evidence is
-           -- currently selected. Measured 2026-08-05 against production: 33
-           -- devices have a known device_type with neither an asset-nature
-           -- observation nor a selected is_virtual_machine claim, so projecting
-           -- 'unknown' would downgrade them on a mapping gap rather than on
-           -- evidence. The gap is reported as device_type_evidence_missing.
-           WHEN COALESCE(d.device_type, 'unknown') <> 'unknown'
-               THEN d.device_type
-           ELSE 'unknown'
-       END AS device_type,
-       -- Exposed so the evidence-gap counter can tell "form factor is backed
-       -- by an entity type" from "form factor is backed by nothing".
-       COALESCE(t.has_network, false)
-         OR COALESCE(t.has_vm_host, false)
-         OR COALESCE(t.has_vm_guest, false) AS has_asset_nature
-  FROM operations.devices d
-  LEFT JOIN pivot p ON p.entity_id = d.entity_id
-  LEFT JOIN types t ON t.entity_id = d.entity_id
- WHERE d.tenant_id = %(tenant)s
-   AND d.deleted_at IS NULL
-   AND d.entity_id IS NOT NULL
-"""
-
-_CHANGED_PREDICATE = """
-       t.os_name     IS DISTINCT FROM d.os_name
-    OR t.os_family   IS DISTINCT FROM d.os_family
-    OR t.os_group    IS DISTINCT FROM d.os_group
-    OR t.device_role IS DISTINCT FROM d.device_role
-    OR t.device_type IS DISTINCT FROM d.device_type
-"""
-
-
-# Migration 0400 moved the target rule into the database so the association
-# procedure can refresh the Computers it changes (PLAN-012 item 4). The inline
-# copy above is the fallback until that migration is present; remove it once
-# every deployment has 0400.
-_DB_TARGET_SQL = "SELECT * FROM operations.device_cache_targets(%(tenant)s, NULL)"
-
-
-def _has_db_projector(cur) -> bool:
-    cur.execute(
-        "SELECT to_regprocedure('operations.project_device_cache(bigint, uuid[])') IS NOT NULL"
-    )
-    return bool(cur.fetchone()[0])
+# The target rule described above lives in the database (migration 0400:
+# ``device_cache_targets`` and ``project_device_cache``), so this cycle-wide
+# projection and the association refresh share one copy (PLAN-012 item 4).
+_TARGET_SQL = "SELECT * FROM operations.device_cache_targets(%(tenant)s, NULL)"
 
 
 def project(*, dry_run: bool = True, tenant_id: int = TENANT_ID) -> dict[str, int]:
@@ -182,12 +71,10 @@ def project(*, dry_run: bool = True, tenant_id: int = TENANT_ID) -> dict[str, in
     params = {"tenant": tenant_id}
     with db.transaction() as cur:
         cur.execute(f"SET LOCAL operations.tenant_id = {int(tenant_id)}")
-        in_database = _has_db_projector(cur)
-        target_sql = _DB_TARGET_SQL if in_database else _TARGET_SQL
 
         cur.execute(
             f"""
-            WITH target AS ({target_sql})
+            WITH target AS ({_TARGET_SQL})
             SELECT
                 count(*) FILTER (WHERE t.os_name     IS DISTINCT FROM d.os_name),
                 count(*) FILTER (WHERE t.os_family   IS DISTINCT FROM d.os_family),
@@ -234,30 +121,11 @@ def project(*, dry_run: bool = True, tenant_id: int = TENANT_ID) -> dict[str, in
             "rows_written": 0,
         }
 
-        if not dry_run and in_database:
+        if not dry_run:
             cur.execute(
                 "SELECT operations.project_device_cache(%(tenant)s, NULL)", params
             )
             counts["rows_written"] = cur.fetchone()[0] or 0
-        elif not dry_run:
-            cur.execute(
-                f"""
-                WITH target AS ({target_sql})
-                UPDATE operations.devices d
-                   SET os_name        = t.os_name,
-                       os_family      = t.os_family,
-                       os_group       = t.os_group,
-                       device_role    = t.device_role,
-                       device_type    = t.device_type,
-                       updated_at     = now(),
-                       updated_reason = 'device cache projection'
-                  FROM target t
-                 WHERE d.id = t.device_id
-                   AND ({_CHANGED_PREDICATE})
-                """,
-                params,
-            )
-            counts["rows_written"] = cur.rowcount or 0
 
     log.info("device cache projection: %s (dry_run=%s)", counts, dry_run)
     return counts

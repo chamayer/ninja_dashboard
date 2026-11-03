@@ -201,10 +201,20 @@ def test_projector_writes_every_cache_column(column: str) -> None:
 
     Without this, deleting a producer and forgetting to add the column to the
     projector would leave it silently frozen and this suite still green.
+
+    Since migration 0400 the projector's write is the database function
+    ``operations.project_device_cache``, which the Python projector calls.
     """
-    text = (_REPO_ROOT / _PROJECTOR).read_text(encoding="utf-8")
-    update_block = text[text.find("UPDATE operations.devices") :]
+    projector = (_REPO_ROOT / _PROJECTOR).read_text(encoding="utf-8")
+    assert "operations.project_device_cache(" in projector
+    migration = (
+        _REPO_ROOT
+        / "operations/apps/core/migrations/0400_association_refreshes_computer_values.py"
+    ).read_text(encoding="utf-8")
+    function = migration[migration.index("CREATE FUNCTION operations.project_device_cache") :]
+    start = function.index("UPDATE operations.devices")
+    update_block = function[start : function.index("$function$", start)]
     assert re.search(rf"\b{column}\s*=", update_block), (
-        f"{_PROJECTOR} does not write {column}; a producer was removed without "
-        "the projector taking ownership."
+        f"project_device_cache does not write {column}; a producer was removed "
+        "without the projector taking ownership."
     )

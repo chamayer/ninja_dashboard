@@ -66,8 +66,8 @@ def test_device_cache_columns_have_one_database_writer():
     )
 
 
-def test_database_target_matches_the_python_fallback_rule():
-    # Same signals and fallbacks as ingest.device_cache_projector._TARGET_SQL.
+def test_database_rule_keeps_the_projector_signals():
+    # The projector's documented signals and fallbacks (ADR-0005, 2026-08-05).
     for fragment in (
         "WHEN COALESCE(d.device_type, 'unknown') <> 'unknown'",
         "COALESCE(p.device_role, d.device_role, 'unknown')",
@@ -75,8 +75,15 @@ def test_database_target_matches_the_python_fallback_rule():
         "l.missing_since IS NULL",
     ):
         assert fragment in migration.CACHE_SQL
-        assert fragment in _PROJECTOR
+
+
+def test_python_projector_has_no_copy_of_the_rule():
+    # One copy (PLAN-012 item 4): the projector reads and writes through the database.
+    assert "operations.device_cache_targets(%(tenant)s, NULL)" in _PROJECTOR
     assert "operations.project_device_cache(%(tenant)s, NULL)" in _PROJECTOR
+    assert "UPDATE operations.devices" not in _PROJECTOR
+    assert "entity_attribute_effective_current e\n" not in _PROJECTOR
+    assert "_has_db_projector" not in _PROJECTOR
 
 
 def test_reverse_restores_the_procedure_before_dropping_the_refresh():
