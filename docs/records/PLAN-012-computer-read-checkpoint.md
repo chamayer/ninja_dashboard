@@ -4,10 +4,14 @@ This record holds the PLAN-012 checkpoint. The original consumer ledger and
 slices were lost on 2026-10-26; the ledger below was reconstructed from
 current source on 2026-11-02 and replaces it.
 
-## Active checkpoint — 2026-11-02
+## Final checkpoint — completed 2026-11-03
 
-**Status:** Released in 0.143.0 (commits `1d5939bc`, `ab06c6f2`,
-`be604373`); post-deploy verification pending.
+**Status:** Released in 0.143.0 (`6f587fae`, pushed to both remotes) and
+verified 2026-11-02 read-only: stack recreated 21:54 UTC and healthy; 0400
+applied 21:56 UTC; new functions owned by `operations_migrate`;
+`set_source_association` calls the refresh; `device_cache_targets` matches the
+stored cache on all 6,369 Computers; no Operations errors or ingest
+tracebacks since deploy.
 **Decision (2026-11-02, owner delegated):** A read model/projection is not a
 goal in itself. Stage 2 production measurements decide among an ordering
 index, a read model, or neither; any migration needs its own approval. This
@@ -25,9 +29,10 @@ the same 8 fail at HEAD `4c9fcc15`. Ingest non-Postgres suite 644 passed,
 load; Ruff error count for `views.py` unchanged (97, pre-existing). Tests ran
 in a scratch virtualenv with `shared` on `PYTHONPATH` (no pytest in the dev
 containers). Postgres-backed tests, browser checks and live data were not run.
-**Next action:** verify the 0.143.0 deployment read-only (containers, 0400
-applied, functions present, new Computers get OS values), then complete
-PLAN-012 in the registry.
+**Next action (verify gate):** after the next resolver run that creates
+Computers, confirm read-only that they have OS values and no first-day
+`os_unknown_coverage` (baseline 460 of 905 in 30 days), then mark PLAN-012
+completed.
 
 ### Completion gate status
 

@@ -36,10 +36,6 @@ validation results, or completed-plan summaries here.
   (deploy-interrupted runs) is implemented locally; ship it with the next
   approved release and verify after a deploy. See the
   [plan](docs/plans/PLAN-037-source-failures.md).
-- **PLAN-012 — active.** Stage 1 committed locally; Stage 2 measured; 0400
-  rehearsed. Next: approval to commit the Stage 2 fixes and 0400, then an
-  approved release. See the
-  [checkpoint](docs/records/PLAN-012-computer-read-checkpoint.md).
 - **PLAN-015 — active.** Next: implement and validate the read-only preview;
   production reads require separate authorization. See the [plan](operations/docs/plans/PLAN-015-identity-reconciliation.md)
   and [Operations checkpoint](operations/BLUEPRINT.md).

@@ -1,5 +1,20 @@
 # Plan registry
 
+## PLAN-046 — Authority belongs to the record type
+
+- Scope: Replace per-source-instance attribute authority with record-type authority (complete by construction) plus attribute exceptions; evidence stops carrying a copy of policy; operators manage rules in Operations; per-instance overrides only where production shows a real difference.
+- Status: ready
+- Defined: 2026-11-03
+- Started: —
+- Completed: —
+- Blueprint: docs/plans/PLAN-046-record-type-authority.md
+- Source: docs/plans/PLAN-046-record-type-authority.md
+- Section: PLAN-046 — Authority belongs to the record type
+- Related plans: Found by PLAN-012's post-release check (ADR-0053). PLAN-045 is changing related ingest and Operations files: work in a separate worktree and rebase migrations after PLAN-045's 0401–0403 land. PLAN-026 owns the source configuration UI.
+- Resume gate: Step 1, a read-only production inventory of rules per record type and instance, needs read-only production approval; implementation, migrations, rehearsal and release are separately gated.
+- Last checked: 2026-11-03 (two enabled instances have no rules: AMROSE ScreenConnect, 4,779 records; R-U-ON, 728; 764 of 1,208 Unknown-OS Computers have an ignored OS claim).
+
+
 ## PLAN-043 — Useful issue review
 
 - Scope: Explain issues, display safe source-record identity evidence and comparisons, and expose existing permission-checked resolution paths on the review page.
@@ -421,15 +436,15 @@ do not open competing blueprints for the same work.
 ## PLAN-012 — Computers inventory read model
 
 - Scope: Operations Computers inventory performance
-- Status: active
+- Status: completed
 - Defined: 2026-10-21
 - Started: 2026-10-21
-- Completed: —
+- Completed: 2026-11-03
 - Blueprint: BLUEPRINT.md
 - Source: docs/records/PLAN-012-computer-read-checkpoint.md
 - Section: PLAN-012 — Computer reads and inventory checkpoint
-- Resume gate: Stage 1 (items 1, 2, 3, 5, 7) committed locally as 1d5939bc, not released. Item 6 closed from read-only production measurements (2026-11-02): no read model, no ordering index; the Source Records view redesign and write-churn findings are in TODO.md. Item 4: migration 0400 passed its rehearsal on a production schema clone. Next: approval to commit the Stage 2 fixes and 0400, then an approved release; complete after 0400 is verified in production. Requirement-rule changes belong to PLAN-014.
-- Last checked: 2026-11-02 (Stage 2 read-only production measurements and a 0400 rehearsal on a dropped schema-only clone; no production data change, migration, or push).
+- Resume gate: No action. Released in 0.143.0 (6f587fae); verified in production. Durable decision: ADR-0053. Follow-ups are in TODO.md; the authority gap found after release is PLAN-046.
+- Last checked: 2026-11-03 (both Computers created after the deploy had their claims on the new Computer and values selected in the creating transaction; one stayed Unknown only because its source instance has no authority rules, PLAN-046).
 
 ## PLAN-013 — Operations sign-in page
 
