@@ -2,6 +2,15 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.143.3] — 2026-11-03 — One copy of the Computer cache rule
+
+### Changed
+
+- The identity resolver's Computer cache projection (OS, OS group, role,
+  type) always uses the database rule added by migration 0400. The Python
+  fallback copy for deployments without 0400 is removed; behavior is
+  unchanged. No migration.
+
 ## [0.143.2] — 2026-11-02 — Useful issue review
 
 ### Fixed
