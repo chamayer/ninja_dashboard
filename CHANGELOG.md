@@ -2,6 +2,25 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.144.0] — 2026-11-04 — First seen and presence history for source records
+
+### Added
+
+- Source records keep when they were first seen and every time the source
+  stopped or started reporting them, beyond the 90-day history window
+  (ADR-0045 as narrowed, PLAN-019 Step 4). The source record page shows
+  "First seen" with its basis and a presence history. Migration 0404 adds
+  two columns to `source_record_subjects`, fills them once for existing
+  records as "at least since" values, and records `presence` in the existing
+  change history.
+
+### Fixed
+
+- A failed SentinelOne sites fetch no longer withdraws sites that have no
+  agents; that run withdraws nothing (PLAN-017 F08).
+- Ninja activities beyond the per-run page limit are no longer skipped: the
+  next runs fetch the rest of the backlog (PLAN-017 F02).
+
 ## [0.143.3] — 2026-11-03 — One copy of the Computer cache rule
 
 ### Changed
