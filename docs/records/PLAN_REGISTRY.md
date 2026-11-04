@@ -1,5 +1,20 @@
 # Plan registry
 
+## PLAN-052 — Ninja VM guest records: withdrawn volume and unmatched health rows
+
+- Scope: Explain and, if wrong, fix why most Ninja VM guest device records are withdrawn and why VM guest device-health rows outnumber VM guest device records; decide whether long-withdrawn VM records need a retention rule.
+- Status: ready
+- Defined: 2026-11-04
+- Started: —
+- Completed: —
+- Blueprint: docs/plans/PLAN-052-ninja-vm-guest-records.md
+- Source: docs/plans/PLAN-052-ninja-vm-guest-records.md
+- Section: PLAN-052 — Ninja VM guest records: withdrawn volume and unmatched health rows
+- Related plans: Found by a PLAN-019 read-only count. PLAN-038 owns the device-health companion model; PLAN-019 Step 4 records presence changes.
+- Resume gate: Step 1 (read-only production diagnosis) needs read-only production approval; any fix, retention rule, migration or release is separately approved.
+- Last checked: 2026-11-04 (vm.guest devices 2,704 with 2,006 withdrawn; vm.guest health 3,453, 749 more than devices; agent.rmm health matches devices).
+
+
 ## PLAN-051 — Retire the device layer tables
 
 - Scope: Stop writing and then retire assets, os_instances, agent_instances and their field-history tables (ADR-0013), keeping the data-quality Issues that share the resolver step and archiving the data before the drop.
