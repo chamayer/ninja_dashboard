@@ -120,14 +120,16 @@ reviewed migration.
 
 ## Checkpoint (2026-11-04)
 
-- Branch `plan019-finish`, worktree `.work/plan019`, from `dbfafd4f`.
-- Validated locally: ingest unit tests (13 passed), ruff, `manage.py check`,
-  template load. Migration 0404 was not run anywhere (the dev database is
-  behind and not to be used); the user validates in production.
-- Next: merge and release with explicit approval that names migration 0404
-  (it rewrites no table; it updates every `source_record_subjects` row
-  once). After deploy: check a source record page and one S1 and one
-  activities run.
+- Released: 0.144.0 (`4663fbb8`) and 0.144.1 (`cedc9dbc`, fixes 0404's
+  pending-trigger-events failure). 0404 applied 2026-11-04 17:04 UTC; all
+  34,141 source records have `first_seen_at`; presence change history is
+  enabled.
+- Open validation: one activities run and one successful SentinelOne run on
+  the new code. SentinelOne runs have failed with `deadlock detected` since
+  2026-11-04 01:53 UTC (before this release; first failure after PLAN-045's
+  0401-0403), so F08 waits on that.
+- Activity retention moved to PLAN-053. Then close: registry complete, root
+  BLUEPRINT entry removed, TODO line updated.
 
 F05 purge measurement stays in the root backlog under R08 and PLAN-006's
 gate. F04 stays with PLAN-012 item 4.

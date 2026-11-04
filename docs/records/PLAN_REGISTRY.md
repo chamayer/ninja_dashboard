@@ -1,5 +1,20 @@
 # Plan registry
 
+## PLAN-053 — Ninja activity retention
+
+- Scope: Bound how long ninja_activities.activities keeps Ninja activity events (774k rows, 7.0 GB, no deletion today), keeping the device timeline, patch activity search and the activity rollup views working; measure first, then decide a period, implement a batched delete and clean up once.
+- Status: ready
+- Defined: 2026-11-04
+- Started: —
+- Completed: —
+- Blueprint: docs/plans/PLAN-053-ninja-activity-retention.md
+- Source: docs/plans/PLAN-053-ninja-activity-retention.md
+- Section: PLAN-053 — Ninja activity retention
+- Related plans: Moved from PLAN-019 (received from PLAN-022's backlog). PLAN-050 (database memory) and PLAN-041 (host CPU) benefit; PLAN-047 owns write churn.
+- Resume gate: Step 1 (read-only production measurement) needs read-only production approval; the retention decision, implementation, the one-time delete and any table rewrite are each separately approved.
+- Last checked: 2026-11-04 (readers: device timeline, patch activity search, three materialized views refreshed after each activities run).
+
+
 ## PLAN-052 — Ninja VM guest records: withdrawn volume and unmatched health rows
 
 - Scope: Explain and, if wrong, fix why most Ninja VM guest device records are withdrawn and why VM guest device-health rows outnumber VM guest device records; decide whether long-withdrawn VM records need a retention rule.
@@ -643,10 +658,7 @@ do not open competing blueprints for the same work.
 - Section: PLAN-019 — Data pipeline correctness and source-record retention (PLAN-017 follow-up)
 - Resume gate: Executing this plan or any step requires separate explicit user approval. Coordinates with PLAN-002/005/007, which keep their own statuses and gates; F04 stays with PLAN-012.
 - Last checked: 2026-10-26 (Step 1 and Step 2 (U04, migration 0349) deployed in 0.129.0; F09 decided: no daily presence; next is Step 3 with its own approval).
-- Received from the backlog (2026-10-28, from PLAN-022): retention for
-  `ninja_activities.activities` (774k rows, 7.0 GB, live). Choose a period;
-  it affects the device timeline and any activity trends. Outside the
-  approved steps; needs its own approval.
+- Activity retention (received 2026-10-28 from PLAN-022) moved to PLAN-053 on 2026-11-04.
 
 ## PLAN-020 — Operations entity links in tables
 
