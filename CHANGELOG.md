@@ -2,6 +2,17 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.144.2] — 2026-11-04 — Coordinate source writes and ownership work
+
+### Fixed
+
+- Source snapshots and software apply coordinate with ownership and findings
+  work through the existing tenant transaction guard, preventing the two
+  reproduced PLAN-045 ownership/assessment-queue deadlock patterns. API fetching
+  remains outside the guard. Health observations, backfill and notification
+  ownership fencing follow the same coordination protocol. Conflicting work
+  within a tenant waits; workload impact remains unmeasured. No new migration.
+
 ## [0.144.1] — 2026-11-04 — Migration 0404 applies
 
 ### Fixed

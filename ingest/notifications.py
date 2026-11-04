@@ -237,6 +237,9 @@ def _delivery_ownership_guard(findings: list[dict[str, Any]], tenant_id: int):
         return
     with db.pool.connection() as conn, conn.cursor() as cur:
         cur.execute("SELECT set_config('operations.tenant_id', %s, true)", (str(tenant_id),))
+        # Join source/ownership coordination before taking ownership or finding
+        # row locks. Shared mode permits concurrent delivery attempts.
+        cur.execute("SELECT operations.acquire_tenant_guard(%s, 'shared')", (tenant_id,))
         if pairs:
             cur.execute(
                 "SELECT device_id, client_id FROM operations.lock_computer_client_scopes("

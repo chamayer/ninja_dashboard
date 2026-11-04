@@ -116,6 +116,7 @@ def test_health_attaches_to_its_present_ninja_device_record(monkeypatch) -> None
         return len(rows)
 
     monkeypatch.setattr(device_health.db, "transaction", transaction)
+    monkeypatch.setattr(device_health.db, "findings_transaction", lambda _tenant: transaction())
     monkeypatch.setattr(
         device_health,
         "begin_run",

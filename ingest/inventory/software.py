@@ -46,6 +46,7 @@ from ingest import db
 from ingest.observations import MATERIAL_HASH_VERSION, material_hash
 from ingest.runlog import run_log
 from shared import software_settings
+from shared.findings_contract import guard_findings_writes
 
 log = logging.getLogger(__name__)
 
@@ -896,6 +897,9 @@ def apply(
             if prior is None or (row[-1] or at) >= (prior[-1] or at):
                 unique_source_rows[key] = row
         source_rows = list(unique_source_rows.values())
+        # Fetching and temporary-table loading above take no shared row locks.
+        # Coordinate before source-record enqueueing and ownership fencing.
+        guard_findings_writes(cur, TENANT_ID)
         if source_rows:
             result.source_changed = _apply_source_record_rows(cur, source_rows, at)
             result.source_retired, result.source_held = _retire_absent_source_rows(

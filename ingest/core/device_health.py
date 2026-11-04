@@ -161,7 +161,7 @@ def _write_health_observations(
     """Write authoritative health current/history evidence."""
     batch_id = uuid.uuid4()
     try:
-        with db.transaction() as cur:
+        with db.findings_transaction(_TENANT_ID) as cur:
             cur.execute(f"SET LOCAL operations.tenant_id = {_TENANT_ID}")
             cur.execute(
                 """

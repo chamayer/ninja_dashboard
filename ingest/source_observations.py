@@ -49,6 +49,7 @@ from ingest.normalize import (
 from ingest.observation_runs import begin_run, complete_run, reconcile_complete_run
 from ingest.observations import write_current_rows
 from ingest.sources import INCOMPLETE_SNAPSHOT_KEY, SourceConfig
+from shared.findings_contract import guard_findings_writes
 
 log = logging.getLogger(__name__)
 
@@ -336,6 +337,8 @@ def write_observations(
     with db.transaction() as cur:
         cur.execute(f"SET LOCAL operations.tenant_id = {_TENANT_ID}")
         snapshot_scope = source.source_key or source.source_name
+        # Coordinate ownership invalidation and reassessment before row locks.
+        guard_findings_writes(cur, _TENANT_ID)
         run_id, source_instance_id = begin_run(
             cur,
             _TENANT_ID,

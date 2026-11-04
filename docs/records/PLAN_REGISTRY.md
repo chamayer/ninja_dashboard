@@ -1,5 +1,19 @@
 # Plan registry
 
+## PLAN-054 — Source collection deadlock repair
+
+- Scope: Coordinate source/software writes with ownership and findings work to prevent the PLAN-045 deadlocks.
+- Status: active
+- Defined: 2026-11-04
+- Started: 2026-11-04
+- Completed: —
+- Blueprint: docs/plans/PLAN-054-source-collection-deadlock.md
+- Source: docs/plans/PLAN-054-source-collection-deadlock.md
+- Section: PLAN-054 — Source collection deadlock repair
+- Related plans: PLAN-045 introduced invalidation; PLAN-019 awaits collection recovery. Earlier local notes called this PLAN-052, which the remote registry assigned to unrelated Ninja VM analysis.
+- Resume gate: Release preparation authorized; separate commit and push approvals required. No new migrations. Production reads authorized; manual collections need separate authorization.
+- Last checked: 2026-11-04 (isolated 0.144.2 release on current origin/master; 49 focused tests pass including five PostgreSQL concurrency cases. Production ledgers match all release migrations. No commit or push yet).
+
 ## PLAN-053 — Ninja activity retention
 
 - Scope: Bound how long ninja_activities.activities keeps Ninja activity events (774k rows, 7.0 GB, no deletion today), keeping the device timeline, patch activity search and the activity rollup views working; measure first, then decide a period, implement a batched delete and clean up once.

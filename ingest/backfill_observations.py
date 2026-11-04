@@ -38,7 +38,7 @@ def run(*, batch_size: int = 1000, after: str = "", dry_run: bool = False) -> in
     copied = 0
     cursor = after
     while True:
-        with db.transaction() as cur:
+        with db.findings_transaction(1) as cur:
             cur.execute("SET LOCAL operations.tenant_id = 1")
             cur.execute(
                 """
