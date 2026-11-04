@@ -18,6 +18,7 @@
     <tr><th>Reported state</th><td>{{ subject.reported_state_label }}</td></tr>
     <tr><th>Reported last contact</th><td>{{ subject.reported_last_contact_at|date:"Y-m-d H:i"|default:"Unknown" }}</td></tr>
     {% endif %}
+    <tr><th>First seen</th><td>{% if presence.first_seen %}{{ presence.first_seen.at|date:"Y-m-d H:i" }} <span class="muted">({{ presence.first_seen.basis_label }})</span>{% else %}—{% endif %}</td></tr>
     <tr><th>Managed since</th><td>{{ subject.admitted_at|date:"Y-m-d H:i" }}</td></tr>
     <tr><th>Versions</th><td>input {{ subject.input_version }} · association {{ subject.association_version }}</td></tr>
   </table>
@@ -34,6 +35,19 @@
   </table>
 </div>
 {% endfor %}
+
+{% if presence.events %}
+<div class="card" style="margin-bottom:1rem;">
+  <h2>Presence history</h2>
+  <p class="muted">When the source stopped and started reporting this record. Kept indefinitely.</p>
+  <table>
+    <tr><th>When</th><th>What</th></tr>
+    {% for event in presence.events %}
+    <tr><td>{{ event.recorded_at|date:"Y-m-d H:i" }}</td><td>{% if event.presence == "withdrawn" %}No longer reported{% else %}Reported again{% endif %}</td></tr>
+    {% endfor %}
+  </table>
+</div>
+{% endif %}
 
 <div class="card" style="margin-bottom:1rem;">
   <h2>Assessments</h2>

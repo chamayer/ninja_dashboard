@@ -107,12 +107,27 @@ reviewed migration.
     admin-managed significant-field set and the churn measurement are
     dropped until an operator question needs them.
 
+- Step 3 (2026-11-04, commit 46d7f45d): F08 option A through a fetcher
+  incomplete-snapshot marker; F02 per-filter continuations in
+  `ninja_core.ingest_state`, walked before the cursor moves.
+- Step 4 (2026-11-04, migration 0404): reuses existing data, no new table.
+  `source_record_subjects` gains `first_seen_at` and `first_seen_basis`
+  (existing records backfilled as `retained_history_lower_bound`); its
+  `presence` column is registered in the 0306 change history, which keeps
+  every withdrawal and return. The source record page shows both.
+  PLAN-049's unmerged branch also uses 0404; whichever merges second
+  renumbers.
+
 ## Checkpoint (2026-11-04)
 
 - Branch `plan019-finish`, worktree `.work/plan019`, from `dbfafd4f`.
-- Next: Step 3 commit (F08 option A, F02 bounded continuation), then Step 4
-  commit (migration, writer trigger, source record page). Push and deploy
-  need separate approval that names the migration.
+- Validated locally: ingest unit tests (13 passed), ruff, `manage.py check`,
+  template load. Migration 0404 was not run anywhere (the dev database is
+  behind and not to be used); the user validates in production.
+- Next: merge and release with explicit approval that names migration 0404
+  (it rewrites no table; it updates every `source_record_subjects` row
+  once). After deploy: check a source record page and one S1 and one
+  activities run.
 
 F05 purge measurement stays in the root backlog under R08 and PLAN-006's
 gate. F04 stays with PLAN-012 item 4.

@@ -212,6 +212,7 @@ def source_record_detail(request: HttpRequest, subject_id: uuid.UUID) -> HttpRes
         )
         dispositions = _rows(cur)
         companions = companion_details(cur, subject_id)
+        presence = presence_history(cur, tenant_id, subject_id)
     from apps.core.finding_actions import can_manage_lifecycle
 
     undoable = bool(
@@ -244,8 +245,50 @@ def source_record_detail(request: HttpRequest, subject_id: uuid.UUID) -> HttpRes
             "dispositions": dispositions,
             "undoable": undoable,
             "companions": companions,
+            "presence": presence,
         },
     )
+
+
+_FIRST_SEEN_BASIS_LABELS = {
+    "first_observation": "first collection",
+    "retained_history_lower_bound": "at least since; earlier history was purged",
+}
+
+
+def presence_history(cur, tenant_id: int, subject_id: uuid.UUID) -> dict:
+    """First seen, then each withdrawal and return, kept beyond 90 days (ADR-0045)."""
+    cur.execute(
+        "SELECT to_regclass('operations.source_record_subjects_change_history') IS NOT NULL"
+    )
+    if not cur.fetchone()[0]:
+        return {"first_seen": None, "events": []}
+    cur.execute(
+        """
+        SELECT first_seen_at, first_seen_basis
+          FROM operations.source_record_subjects
+         WHERE tenant_id = %s AND id = %s
+        """,
+        (tenant_id, subject_id),
+    )
+    row = cur.fetchone()
+    first_seen = (
+        {"at": row[0], "basis_label": _FIRST_SEEN_BASIS_LABELS.get(row[1], "")}
+        if row and row[0]
+        else None
+    )
+    cur.execute(
+        """
+        SELECT recorded_at, after_values ->> 'presence' AS presence
+          FROM operations.source_record_subjects_change_history
+         WHERE tenant_id = %s AND entity_key = %s AND operation = 'U'
+           AND 'presence' = ANY (changed_columns)
+         ORDER BY recorded_at, id
+         LIMIT 500
+        """,
+        (tenant_id, str(subject_id)),
+    )
+    return {"first_seen": first_seen, "events": _rows(cur)}
 
 
 # Fields of a companion data set that only describe where it came from.
