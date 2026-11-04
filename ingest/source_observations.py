@@ -48,7 +48,7 @@ from ingest.normalize import (
 )
 from ingest.observation_runs import begin_run, complete_run, reconcile_complete_run
 from ingest.observations import write_current_rows
-from ingest.sources import SourceConfig
+from ingest.sources import INCOMPLETE_SNAPSHOT_KEY, SourceConfig
 
 log = logging.getLogger(__name__)
 
@@ -139,7 +139,9 @@ def run_source_observations(
             )
             continue
         try:
-            rows = _FETCHERS[source.platform](source, observed_at)
+            rows, incomplete_reason = _split_incomplete_markers(
+                _FETCHERS[source.platform](source, observed_at)
+            )
             if not rows:
                 # An empty fetch is not evidence that every record vanished:
                 # write_observations opens no snapshot run for it, so nothing
@@ -150,9 +152,13 @@ def run_source_observations(
                     "Collection returned no records; not treated as a complete "
                     "collection, so no records were withdrawn."
                 )
-            written = write_observations(source, rows, batch_id, observed_at)
+            written = write_observations(
+                source, rows, batch_id, observed_at, incomplete_reason=incomplete_reason
+            )
             counts[source.platform] = counts.get(source.platform, 0) + written
-            _record_source_run(source, observed_at, ok=True, rows=written)
+            _record_source_run(
+                source, observed_at, ok=True, rows=written, error=incomplete_reason
+            )
             log.info(
                 "source_observations: source=%s written=%d", source.source_name, written
             )
@@ -171,6 +177,18 @@ def run_source_observations(
     if failures:
         raise SourceObservationFailure(failures, counts)
     return counts
+
+
+def _split_incomplete_markers(rows: list[Any]) -> tuple[list[Any], str]:
+    """Separate fetcher incomplete-snapshot markers from the data rows."""
+    reasons: list[str] = []
+    data: list[Any] = []
+    for row in rows or []:
+        if isinstance(row, dict) and row.get(INCOMPLETE_SNAPSHOT_KEY):
+            reasons.append(str(row[INCOMPLETE_SNAPSHOT_KEY]))
+        else:
+            data.append(row)
+    return data, " ".join(reasons)
 
 
 def _record_source_run(
@@ -295,12 +313,16 @@ def write_observations(
     rows: list[dict[str, Any]],
     batch_id: uuid.UUID,
     observed_at: datetime,
+    *,
+    incomplete_reason: str = "",
 ) -> int:
     """Write normalized source rows through the shared Operations contract.
 
     Connectors supply source-specific facts, stable record identity, and a
     container identity. This writer owns client attachment, Computer identity,
     current/history state, and snapshot reconciliation for every source.
+    ``incomplete_reason`` (from a fetcher marker) records the run as an
+    incomplete snapshot, so it withdraws nothing.
     """
     if not rows:
         return 0
@@ -674,19 +696,22 @@ def write_observations(
                 cur, attached_before, attachments(cur, current_rows)
             )
         is_complete_snapshot = (
-            not getattr(source, "is_partial_snapshot", False) and not intake_errors
+            not getattr(source, "is_partial_snapshot", False)
+            and not intake_errors
+            and not incomplete_reason
         )
+        run_errors = [incomplete_reason] if incomplete_reason else []
+        if intake_errors:
+            run_errors.append(
+                f"{len(intake_errors)} row(s) lacked stable source identity; "
+                "durable intake-error subjects were recorded."
+            )
         complete_run(
             cur,
             run_id,
             written,
             failed_rows=len(intake_errors),
-            error=(
-                f"{len(intake_errors)} row(s) lacked stable source identity; "
-                "durable intake-error subjects were recorded."
-                if intake_errors
-                else ""
-            ),
+            error=" ".join(run_errors),
             is_complete_snapshot=is_complete_snapshot,
             identity_rows=current_rows,
         )

@@ -36,10 +36,19 @@ without ingesting anything (no backfill).
 Walking model: for each source, paginate back from latest using
 `olderThan`, processing records until we cross last_id. Then move to
 the next source. Cursor updated to MAX(id seen) at the end.
+
+Catch-up (PLAN-017 F02): a walk that stops at the page cap leaves older
+events behind the advancing cursor. It saves a continuation per filter
+(key 'activities.continuation.<filter>': the filter, the oldest id reached
+and the cursor it must walk back to). Each later run first walks open
+continuations, at most the page cap each, through the same store and
+enqueue path, and deletes each one when it reaches its stop id. Storage is
+insert-once, so re-walking an overlap is harmless.
 """
 
 from __future__ import annotations
 
+import json
 import logging
 from typing import Any
 
@@ -57,6 +66,7 @@ from ingest.inventory.queue import SOFTWARE_ACTIVITY_TYPES, enqueue_activity
 log = logging.getLogger(__name__)
 
 _STATE_KEY = "activities.last_id"
+_CONTINUATION_PREFIX = "activities.continuation."
 _PAGE_SIZE = 500
 _MAX_PAGES_PER_SOURCE = 200  # safety cap: 200 * 500 = 100k records / source / run
 
@@ -90,6 +100,36 @@ def run(client: NinjaClient) -> int:
         max_id = last_id
         total_fetched = 0
         capped_filters: list[str] = []
+        # label -> continuation to keep, or None to delete it.
+        continuations: dict[str, dict[str, Any] | None] = {}
+
+        for label, cont in sorted(_get_continuations().items()):
+            fetched, max_id, capped, oldest = _pull_one(
+                client, cont["params"], f"{label} (catch-up)",
+                int(cont["stop_at"]), max_id, known_device_ids, all_rows,
+                older_than=int(cont["older_than"]),
+            )
+            total_fetched += fetched
+            continuations[label] = (
+                {**cont, "older_than": oldest} if capped and oldest else None
+            )
+
+        def walk(filter_params: dict[str, Any], label: str) -> None:
+            nonlocal max_id, total_fetched
+            fetched, max_id, capped, oldest = _pull_one(
+                client, filter_params, label,
+                last_id, max_id, known_device_ids, all_rows,
+            )
+            total_fetched += fetched
+            if capped and oldest:
+                capped_filters.append(label)
+                # An open continuation for the same filter is folded in:
+                # walk back to its earlier stop id (overlap is idempotent).
+                prior = continuations.get(label)
+                stop_at = min(last_id, int(prior["stop_at"])) if prior else last_id
+                continuations[label] = {
+                    "params": filter_params, "older_than": oldest, "stop_at": stop_at,
+                }
 
         if statuscode_allowlist:
             log.info(
@@ -97,13 +137,7 @@ def run(client: NinjaClient) -> int:
                 len(statuscode_allowlist),
             )
             for code in sorted(statuscode_allowlist):
-                fetched, max_id, capped = _pull_one(
-                    client, {"status": code}, code,
-                    last_id, max_id, known_device_ids, all_rows,
-                )
-                total_fetched += fetched
-                if capped:
-                    capped_filters.append(code)
+                walk({"status": code}, code)
         elif sources:
             log.warning(
                 "INGEST_ACTIVITY_TYPES_INCLUDE not set — falling back to "
@@ -111,43 +145,15 @@ def run(client: NinjaClient) -> int:
                 len(sources),
             )
             for source in sources:
-                fetched, max_id, capped = _pull_one(
-                    client, {"type": source}, source,
-                    last_id, max_id, known_device_ids, all_rows,
-                )
-                total_fetched += fetched
-                if capped:
-                    capped_filters.append(source)
-            fetched, max_id, capped = _pull_one(
-                client,
-                {"status": "NODE_DELETED"},
-                "NODE_DELETED",
-                last_id,
-                max_id,
-                known_device_ids,
-                all_rows,
-            )
-            total_fetched += fetched
-            if capped:
-                capped_filters.append("NODE_DELETED")
+                walk({"type": source}, source)
+            walk({"status": "NODE_DELETED"}, "NODE_DELETED")
         else:
             log.warning(
                 "Neither INGEST_ACTIVITY_TYPES_INCLUDE nor "
                 "INGEST_ACTIVITY_SOURCES is set — collecting only required "
                 "NODE_DELETED source events"
             )
-            fetched, max_id, capped = _pull_one(
-                client,
-                {"status": "NODE_DELETED"},
-                "NODE_DELETED",
-                last_id,
-                max_id,
-                known_device_ids,
-                all_rows,
-            )
-            total_fetched += fetched
-            if capped:
-                capped_filters.append("NODE_DELETED")
+            walk({"status": "NODE_DELETED"}, "NODE_DELETED")
 
         # SOFTWARE_* activities are triggers, not records. Their only job is
         # to enqueue an inventory rescan (_enqueue_software_activities below
@@ -179,20 +185,19 @@ def run(client: NinjaClient) -> int:
         if settings.SOFTWARE_QUEUE_ENABLED and all_rows:
             _enqueue_software_activities(all_rows)
 
+        # Continuations are saved before the cursor moves past the capped
+        # walk, so an interruption between the two only repeats work.
+        _save_continuations(continuations)
         if max_id > last_id:
             _set_last_id(max_id)
 
         _refresh_activity_summary_views()
         stats["rows_inserted"] = inserted
         if capped_filters:
-            # The cursor still advances past the capped walk, so older events
-            # in that backlog are not fetched later. Recording the run as
-            # partial makes the gap visible; it does not recover it
-            # (PLAN-017 F02; bounded continuation is PLAN-019 Step 3).
             stats["partial_reason"] = (
                 f"Stopped at the {_MAX_PAGES_PER_SOURCE}-page limit for "
                 f"{', '.join(capped_filters)}; older activities in that backlog "
-                "were not fetched and will not be fetched by later runs."
+                "will be fetched by the next runs."
             )
         log.info(
             "activities: fetched %d total, kept %d, stored %d, inserted %d, "
@@ -211,13 +216,16 @@ def _pull_one(
     max_id: int,
     known_device_ids: set[int],
     out_rows: list[dict],
-) -> tuple[int, int, bool]:
-    """Walk back from latest with the given server-side filter, until
-    we cross last_id. Server-side filter means everything returned is
-    kept (no client-side rejection). Returns (fetched, new_max_id, capped),
-    where capped means the page limit stopped the walk before last_id."""
+    *,
+    older_than: int | None = None,
+) -> tuple[int, int, bool, int | None]:
+    """Walk back from latest (or from `older_than`) with the given
+    server-side filter, until we cross last_id. Server-side filter means
+    everything returned is kept (no client-side rejection). Returns
+    (fetched, new_max_id, capped, oldest_id_reached), where capped means the
+    page limit stopped the walk before last_id."""
     log.info("Pulling activities for %s (last_id=%d)", label, last_id)
-    cursor: int | None = None
+    cursor: int | None = older_than
     fetched = 0
     kept = 0
     capped = False
@@ -270,7 +278,7 @@ def _pull_one(
 
     if fetched > 0:
         log.info("  %s done: fetched %d, kept %d", label, fetched, kept)
-    return fetched, max_id, capped
+    return fetched, max_id, capped, cursor
 
 
 def _first_run(client: NinjaClient) -> int:
@@ -342,6 +350,36 @@ def _get_last_id() -> str | None:
         )
         row = cur.fetchone()
         return row[0] if row else None
+
+
+def _get_continuations() -> dict[str, dict[str, Any]]:
+    with db.transaction() as cur:
+        cur.execute(
+            "SELECT key, value FROM ninja_core.ingest_state WHERE key LIKE %s",
+            (_CONTINUATION_PREFIX + "%",),
+        )
+        return {
+            key[len(_CONTINUATION_PREFIX):]: json.loads(value)
+            for key, value in cur.fetchall()
+        }
+
+
+def _save_continuations(continuations: dict[str, dict[str, Any] | None]) -> None:
+    if not continuations:
+        return
+    with db.transaction() as cur:
+        for label, cont in continuations.items():
+            key = _CONTINUATION_PREFIX + label
+            if cont is None:
+                cur.execute("DELETE FROM ninja_core.ingest_state WHERE key = %s", (key,))
+            else:
+                cur.execute(
+                    "INSERT INTO ninja_core.ingest_state (key, value, updated_at) "
+                    "VALUES (%s, %s, NOW()) "
+                    "ON CONFLICT (key) DO UPDATE "
+                    "SET value = EXCLUDED.value, updated_at = NOW()",
+                    (key, json.dumps(cont)),
+                )
 
 
 def _set_last_id(value: int) -> None:

@@ -28,7 +28,9 @@ def test_source_collection_continues_then_reports_partial_failure(monkeypatch):
         return [{"external_id": "1"}]
 
     monkeypatch.setitem(source_observations._FETCHERS, "Test", fetch)
-    monkeypatch.setattr(source_observations, "write_observations", lambda *_args: 0)
+    monkeypatch.setattr(
+        source_observations, "write_observations", lambda *_args, **_kwargs: 0
+    )
     monkeypatch.setattr(
         source_observations,
         "_record_source_run",
@@ -67,7 +69,7 @@ def test_empty_collection_is_recorded_as_not_complete(monkeypatch):
     monkeypatch.setattr(
         source_observations,
         "write_observations",
-        lambda *args: written.append(args) or 0,
+        lambda *args, **_kwargs: written.append(args) or 0,
     )
     monkeypatch.setattr(
         source_observations,
@@ -107,7 +109,7 @@ def test_partial_intake_is_reported_failed_with_committed_row_count(monkeypatch)
     monkeypatch.setattr(
         source_observations,
         "write_observations",
-        lambda *_args: (_ for _ in ()).throw(
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
             source_observations.PartialIntakeError(1, 1)
         ),
     )
@@ -174,3 +176,78 @@ def test_intake_identity_error_requires_stable_record_and_container_keys():
         )
         == ""
     )
+
+
+def _marker(reason: str) -> dict:
+    return {source_observations.INCOMPLETE_SNAPSHOT_KEY: reason}
+
+
+def _test_source(key: str) -> SimpleNamespace:
+    return SimpleNamespace(
+        platform="Test",
+        source_key=key,
+        source_name=key,
+        source_binding_id="binding",
+        entity_type="agent.test",
+    )
+
+
+def test_incomplete_marker_writes_rows_as_an_incomplete_snapshot(monkeypatch):
+    # PLAN-017 F08 option A: a fetcher that lost part of its source (the
+    # SentinelOne sites list) still writes what it read, but the run must not
+    # withdraw anything. The marker never reaches the writer as a data row.
+    calls: list[tuple[list, str]] = []
+    recorded: list[tuple[bool, int, str]] = []
+    monkeypatch.setitem(
+        source_observations._FETCHERS,
+        "Test",
+        lambda _s, _t: [{"entity_key": "one"}, _marker("sites list failed")],
+    )
+    monkeypatch.setattr(
+        source_observations,
+        "write_observations",
+        lambda _source, rows, _batch, _at, *, incomplete_reason="": calls.append(
+            (rows, incomplete_reason)
+        ) or len(rows),
+    )
+    monkeypatch.setattr(
+        source_observations,
+        "_record_source_run",
+        lambda _source, _started, ok, rows, error="": recorded.append(
+            (ok, rows, error)
+        ),
+    )
+
+    counts = source_observations.run_source_observations(
+        [_test_source("sites-down")], datetime.now(timezone.utc)
+    )
+
+    assert counts == {"Test": 1}
+    assert calls == [([{"entity_key": "one"}], "sites list failed")]
+    assert recorded == [(True, 1, "sites list failed")]
+
+
+def test_marker_without_rows_is_an_empty_collection(monkeypatch):
+    recorded: list[tuple[bool, int, str]] = []
+    monkeypatch.setitem(
+        source_observations._FETCHERS, "Test", lambda _s, _t: [_marker("down")]
+    )
+    monkeypatch.setattr(
+        source_observations,
+        "write_observations",
+        lambda *_a, **_k: pytest.fail("an empty collection must not be written"),
+    )
+    monkeypatch.setattr(
+        source_observations,
+        "_record_source_run",
+        lambda _source, _started, ok, rows, error="": recorded.append(
+            (ok, rows, error)
+        ),
+    )
+
+    with pytest.raises(source_observations.SourceObservationFailure):
+        source_observations.run_source_observations(
+            [_test_source("all-down")], datetime.now(timezone.utc)
+        )
+
+    assert recorded[0][0:2] == (False, 0)

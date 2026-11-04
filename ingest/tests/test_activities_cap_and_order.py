@@ -61,6 +61,7 @@ class Store:
         self.events: list[str] = []
         self.enqueued_devices: list[int] = []
         self.run_stats: list[dict] = []
+        self.continuations: dict[str, dict] = {}
 
 
 class Crash(RuntimeError):
@@ -101,6 +102,18 @@ def _install(monkeypatch, store: Store, *, statuses, enqueue=None):
     )
     monkeypatch.setattr(activities, "_get_last_id", lambda: str(store.last_id))
     monkeypatch.setattr(activities, "_set_last_id", set_last_id)
+
+    def save_continuations(changes):
+        for label, cont in changes.items():
+            if cont is None:
+                store.continuations.pop(label, None)
+            else:
+                store.continuations[label] = cont
+
+    monkeypatch.setattr(
+        activities, "_get_continuations", lambda: dict(store.continuations)
+    )
+    monkeypatch.setattr(activities, "_save_continuations", save_continuations)
     monkeypatch.setattr(activities, "_fetch_known_device_ids", lambda: {5})
     monkeypatch.setattr(activities, "_refresh_activity_summary_views", lambda: None)
     monkeypatch.setattr(activities, "enqueue_activity", enqueue or default_enqueue)
@@ -132,6 +145,28 @@ def test_cap_hit_records_the_run_as_partial(monkeypatch):
 
     reason = store.run_stats[-1].get("partial_reason")
     assert reason and "NODE_DELETED" in reason and "2-page limit" in reason
+
+
+def test_backlog_over_cap_is_caught_up_by_later_runs(monkeypatch):
+    # F02 fix: 25 events behind a cap of 10 per walk. Nothing is lost.
+    records = [_activity(START + i, "NODE_DELETED") for i in range(0, 26)]
+    stored: list[int] = []
+    store = Store(START)
+    _install(monkeypatch, store, statuses=["NODE_DELETED"])
+    monkeypatch.setattr(
+        activities.db,
+        "insert_ignore",
+        lambda _cur, _table, rows, conflict_keys: stored.extend(r["id"] for r in rows)
+        or len(rows),
+    )
+    client = FakeNinja(records)
+
+    for _ in range(3):
+        activities.run(client)
+
+    assert sorted(set(stored)) == list(range(START + 1, START + 26))
+    assert store.continuations == {}
+    assert store.last_id == START + 25
 
 
 def test_backlog_within_cap_is_not_partial(monkeypatch):

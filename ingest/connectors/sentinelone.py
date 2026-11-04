@@ -10,7 +10,7 @@ import httpx
 from psycopg.types.json import Json
 
 from ingest.normalize import infer_device_role, normalize_hostname, parse_dt
-from ingest.sources import SourceConfig
+from ingest.sources import INCOMPLETE_SNAPSHOT_KEY, SourceConfig
 
 log = logging.getLogger(__name__)
 
@@ -72,7 +72,9 @@ def fetch(source: SourceConfig, observed_at: datetime) -> list[dict]:
 def _fetch_sites(client: httpx.Client, base_url: str, headers: dict) -> list[dict]:
     """Container-only rows so sites with zero agents still produce an `org`
     observation. A sites-endpoint failure never blocks the agent run —
-    device-derived groups still emit."""
+    device-derived groups still emit — but it marks the snapshot incomplete:
+    an empty site missing from this run is not evidence that it left
+    (PLAN-017 F08, option A)."""
     rows: list[dict] = []
     cursor: str | None = None
     try:
@@ -101,4 +103,10 @@ def _fetch_sites(client: httpx.Client, base_url: str, headers: dict) -> list[dic
                 break
     except Exception:
         log.exception("SentinelOne sites fetch failed — continuing with agent-derived groups")
+        rows.append({
+            INCOMPLETE_SNAPSHOT_KEY: (
+                "The SentinelOne sites list could not be fetched; nothing was "
+                "withdrawn this run."
+            ),
+        })
     return rows

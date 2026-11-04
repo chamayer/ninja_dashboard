@@ -28,6 +28,11 @@ from ingest.normalize import (
 
 log = logging.getLogger(__name__)
 
+# A fetcher that could not read part of its source appends one row carrying
+# this key with a plain reason. The writer then records the run as an
+# incomplete snapshot, so nothing is withdrawn on missing evidence.
+INCOMPLETE_SNAPSHOT_KEY = "_snapshot_incomplete"
+
 @dataclass(frozen=True)
 class SourceConfig:
     platform: str
