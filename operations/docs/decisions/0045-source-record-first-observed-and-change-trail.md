@@ -1,6 +1,6 @@
 # 0045 — Source records keep a first-observed anchor and a significant-change trail
 
-Status: Accepted (requirement); design and implementation under PLAN-019
+Status: Accepted (requirement); narrowed 2026-11-04; implementation under PLAN-019
 Date: 2026-10-26
 
 ## Context
@@ -77,3 +77,21 @@ presence stretches when gaps of up to seven days count as one. The anchor's
 `daily_presence_lower_bound` basis applies only to a backfill run before
 PLAN-022 drops `source_record_seen_daily`; after that, backfill uses the
 other bases.
+
+## Amendment — narrowed scope (2026-11-04)
+
+The user narrowed decision 2 when finishing PLAN-019:
+
+- Kept: the first-observed anchor (decision 1) and the presence trail from the
+  2026-10-26 amendment. Each time a source record is withdrawn or returns, one
+  row is kept indefinitely, so first seen, last seen and every gap survive the
+  90-day interval purge. This is what replaced daily presence.
+- Dropped for now: the admin-managed set of other significant fields and the
+  churn measurement that was to choose it. No operator question or reader
+  needed them, and other places already keep long-lived first-seen
+  facts (Computers, OS and agent instances, source links, Ninja activities).
+  If such a question appears, the trail table can take more change kinds
+  without being redesigned.
+- The anchor's `daily_presence_lower_bound` basis is not used:
+  `source_record_seen_daily` was already dropped (migration 0350) before the
+  backfill.

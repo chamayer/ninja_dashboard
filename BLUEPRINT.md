@@ -46,8 +46,9 @@ validation results, or completed-plan summaries here.
 - **PLAN-016 — active.** Next: implement the bounded, tenant-scoped,
   read-only explorer and focused tests. See the [plan](operations/docs/plans/PLAN-016-admin-sql-explorer.md)
   and [Operations checkpoint](operations/BLUEPRINT.md).
-- **PLAN-019 — active, approval-gated.** Step 3 is next; each step requires
-  separate explicit approval. See the [plan](docs/plans/PLAN-019-data-pipeline-correctness-and-retention.md).
+- **PLAN-019 — active.** Steps 3 and 4 (narrowed) approved for a local build
+  on branch `plan019-finish` (worktree `.work/plan019`); push and deploy are
+  separately gated. See the [plan](docs/plans/PLAN-019-data-pipeline-correctness-and-retention.md).
 
 Completed and ready plans remain in the registry; their details stay in their
 registered source documents. Update this index only when active status,

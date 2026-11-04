@@ -66,7 +66,7 @@ reviewed migration.
   over time becomes part of the ADR 0045 trail (Step 4); Ninja's daily
   presence is removed by PLAN-022 A1. The "half coverage" was by design:
   presence covered only Ninja's device record, not its device-health record.
-- Step 2 U04 (2026-10-26, approved for local build; uncommitted):
+- Step 2 U04 (2026-10-26; released in 0.129.0 with Step 1):
   - Migration `0349_software_target_generation` adds
     `software_reclassification_targets.generation bigint NOT NULL DEFAULT 1`
     (metadata-only add).
@@ -96,6 +96,23 @@ reviewed migration.
   | Catalog projection, then EOL | Same as `software_title_current` | No | Stale until the next changing run; EOL failure is logged |
   No other stage needs a generation fence. The non-durable trigger for title
   current and the catalog is a separate gap (backlog), not U04.
+
+- 2026-11-04 decisions (user): finish the plan lean.
+  - F08: option A. A failed SentinelOne sites fetch marks that run
+    incomplete, so nothing is withdrawn; an agent that really left is
+    withdrawn one cycle later. Option B (separate container scope in the
+    shared writer) is not built.
+  - Step 4 narrowed (ADR 0045 amendment 2026-11-04): first-observed anchor
+    plus a presence trail (withdrawn/returned) kept beyond 90 days. The
+    admin-managed significant-field set and the churn measurement are
+    dropped until an operator question needs them.
+
+## Checkpoint (2026-11-04)
+
+- Branch `plan019-finish`, worktree `.work/plan019`, from `dbfafd4f`.
+- Next: Step 3 commit (F08 option A, F02 bounded continuation), then Step 4
+  commit (migration, writer trigger, source record page). Push and deploy
+  need separate approval that names the migration.
 
 F05 purge measurement stays in the root backlog under R08 and PLAN-006's
 gate. F04 stays with PLAN-012 item 4.
