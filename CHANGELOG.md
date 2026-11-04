@@ -2,6 +2,17 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.144.1] — 2026-11-04 — Migration 0404 applies
+
+### Fixed
+
+- Migration 0404 failed on startup with "cannot ALTER TABLE
+  source_record_subjects because it has pending trigger events", so 0.144.0
+  never applied it and Operations restarted repeatedly. The column defaults
+  are now set before the backfill, and the backfill's deferred trigger events
+  fire before the change-history trigger is added. Each failed attempt rolled
+  back fully; no data changed.
+
 ## [0.144.0] — 2026-11-04 — First seen and presence history for source records
 
 ### Added

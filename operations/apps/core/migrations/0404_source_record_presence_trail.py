@@ -29,6 +29,10 @@ ALTER TABLE operations.source_record_subjects
     ADD COLUMN first_seen_at timestamptz,
     ADD COLUMN first_seen_basis text CHECK (first_seen_basis IN (
         'first_observation', 'retained_history_lower_bound'));
+-- Defaults apply to new rows only; existing rows are filled below.
+ALTER TABLE operations.source_record_subjects
+    ALTER COLUMN first_seen_at SET DEFAULT now(),
+    ALTER COLUMN first_seen_basis SET DEFAULT 'first_observation';
 
 UPDATE operations.source_record_subjects s
    SET first_seen_at = LEAST(s.admitted_at, h.first_from),
@@ -44,10 +48,10 @@ UPDATE operations.source_record_subjects s
          WHERE s2.subject_kind = 'record'
          GROUP BY s2.id) h
  WHERE s.id = h.id;
-
-ALTER TABLE operations.source_record_subjects
-    ALTER COLUMN first_seen_at SET DEFAULT now(),
-    ALTER COLUMN first_seen_basis SET DEFAULT 'first_observation';
+-- The UPDATE queues the deferred source_record_advance_generation trigger per
+-- row; fire it now, or the next DDL on this table fails with "pending trigger
+-- events" (0.144.0 deploy, 2026-11-04).
+SET CONSTRAINTS ALL IMMEDIATE;
 
 UPDATE operations.change_history_registry
    SET classification = 'covered',
