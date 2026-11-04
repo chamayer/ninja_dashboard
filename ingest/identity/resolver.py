@@ -74,115 +74,155 @@ def _identity_conflict_key(client_id: uuid.UUID, device_ids) -> str:
     return f"identity_conflict:{digest}"
 
 
-def drain_resolution(batch_size: int = 200, *, refresh_current: bool = True) -> int:
-    """Resolve up to batch_size unresolved entity_observations.
+RESOLUTION_TRANSACTION_ROWS = 10
 
-    Returns the count of observations that were resolved (device_id set).
-    Refreshes device_agent_presence_current if any observations were resolved,
-    unless the caller will immediately run the full derived-state coordinator.
-    """
+
+def _unassociated_identity_ids(limit=None):
+    """Select a bounded work set without holding the tenant mutation guard."""
+    with db.transaction() as cur:
+        cur.execute("SET LOCAL operations.tenant_id = 1")
+        cur.execute(
+            "SELECT observation_id FROM operations.entity_observation_current "
+            "WHERE tenant_id = %s AND device_id IS NULL AND active "
+            "AND entity_type = ANY(%s) ORDER BY observed_at DESC, observation_id LIMIT %s",
+            (TENANT_ID, sorted(identity_entity_types(cur)), limit),
+        )
+        return [row[0] for row in cur.fetchall()]
+
+
+def _resolve_observation_batch(cur, observation_ids):
+    """Re-read current inputs and name changed Computers before this batch commits."""
     resolved_count = 0
-    touched: set = set()
+    touched = set()
+    identity_policies = load_identity_match_policies(cur, TENANT_ID)
+    cur.execute(
+        """
+        SELECT observation_id, entity_type, entity_key, platform,
+               operations.computer_client_independent_evidence(tenant_id, observation_id),
+               observed_at, canonical_data, source_instance_id
+        FROM operations.entity_observation_current
+        WHERE tenant_id = %s AND device_id IS NULL
+          AND active = TRUE
+          -- Allowlist, not `<> 'org'`: only identity-signal streams may
+          -- be matched or promoted into a Device. Documentation rows
+          -- (doc.*) would otherwise be hostname-matched on an asset name
+          -- and promoted into Devices invented from a wiki page.
+          AND entity_type = ANY(%s)
+          AND observation_id = ANY(%s::uuid[])
+        ORDER BY observed_at DESC, observation_id
+        """,
+        (TENANT_ID, sorted(identity_entity_types(cur)), observation_ids),
+    )
+    rows = cur.fetchall()
+
+    identity_conflict_ft_id = _load_finding_type_id(cur, "identity_conflict")
+
+    for (
+        obs_id,
+        entity_type,
+        entity_key,
+        platform,
+        client_id,
+        observed_at,
+        canonical_data,
+        source_instance_id,
+    ) in rows:
+        cd = canonical_data or {}
+
+        serial = cd.get("serial_number")
+        vm_uuid = cd.get("vm_uuid")
+        hostname_raw = cd.get("hostname") or cd.get("guest_name")
+        # The one SQL normalization (ADR-0034 section 1).
+        norm = (
+            record_name_short(
+                cur, platform, entity_type, hostname_raw, cd.get("domain")
+            )
+            or None
+        )
+        device_id = _resolve_or_defer(
+            resolve_device_by_policy,
+            cur,
+            tenant_id=TENANT_ID,
+            source_name=platform,
+            external_id=entity_key,
+            entity_type=entity_type,
+            serial=serial,
+            vm_uuid=vm_uuid,
+            hostname=norm,
+            macs=cd.get("macs") or [],
+            client_id=client_id,
+            policies=identity_policies,
+            is_online=cd.get("is_online"),
+            source_instance_id=source_instance_id,
+        )
+        if device_id is _OWNERSHIP_DEFERRED:
+            continue
+        if device_id is not None:
+            _attach_observation(cur, obs_id, device_id)
+            touched.add(device_id)
+            resolved_count += 1
+            log.debug(
+                "resolver: policy match %s → device %s", entity_key, device_id
+            )
+            continue
+        if norm:
+            _maybe_create_candidate(
+                cur,
+                obs_id,
+                entity_key,
+                norm,
+                client_id,
+                identity_conflict_ft_id=identity_conflict_ft_id,
+            )
+    write_computer_names(cur, touched)
+
+    return resolved_count, len(rows)
+
+
+def drain_resolution(batch_size: int = 200, *, refresh_current: bool = True) -> int:
+    """Resolve a selected work set in short, independently atomic transactions.
+
+    Ownership is reconciled before matching so an expensive identity pass cannot
+    prevent already dirty Computers from being settled. Each batch rechecks
+    presence and association under the guard; source changes between batches
+    cannot attach stale inputs. The existing final sweep settles new attachments.
+    """
+    if batch_size < 1:
+        raise ValueError("batch_size must be positive")
+    computer_client_ownership.reconcile_cycle(TENANT_ID)
     with db.findings_transaction(TENANT_ID) as cur:
         load_identity_value_rejections(cur)
-        identity_policies = load_identity_match_policies(cur, TENANT_ID)
         refresh_roaming_records(cur)
-
-        cur.execute(
-            """
-            SELECT observation_id, entity_type, entity_key, platform,
-                   operations.computer_client_independent_evidence(tenant_id, observation_id),
-                   observed_at, canonical_data, source_instance_id
-            FROM operations.entity_observation_current
-            WHERE tenant_id = %s AND device_id IS NULL
-              AND active = TRUE
-              -- Allowlist, not `<> 'org'`: only identity-signal streams may
-              -- be matched or promoted into a Device. Documentation rows
-              -- (doc.*) would otherwise be hostname-matched on an asset name
-              -- and promoted into Devices invented from a wiki page.
-              AND entity_type = ANY(%s)
-            ORDER BY observed_at DESC
-            LIMIT %s
-            """,
-            (TENANT_ID, sorted(identity_entity_types(cur)), batch_size),
-        )
-        rows = cur.fetchall()
-
-        identity_conflict_ft_id = _load_finding_type_id(cur, "identity_conflict")
-
-        for (
-            obs_id,
-            entity_type,
-            entity_key,
-            platform,
-            client_id,
-            observed_at,
-            canonical_data,
-            source_instance_id,
-        ) in rows:
-            cd = canonical_data or {}
-
-            serial = cd.get("serial_number")
-            vm_uuid = cd.get("vm_uuid")
-            hostname_raw = cd.get("hostname") or cd.get("guest_name")
-            # The one SQL normalization (ADR-0034 section 1).
-            norm = (
-                record_name_short(
-                    cur, platform, entity_type, hostname_raw, cd.get("domain")
-                )
-                or None
+    observation_ids = _unassociated_identity_ids(batch_size)
+    resolved_count = examined = 0
+    for offset in range(0, len(observation_ids), RESOLUTION_TRANSACTION_ROWS):
+        with db.findings_transaction(TENANT_ID) as cur:
+            count, seen = _resolve_observation_batch(
+                cur, observation_ids[offset:offset + RESOLUTION_TRANSACTION_ROWS]
             )
-            device_id = _resolve_or_defer(
-                resolve_device_by_policy,
-                cur,
-                tenant_id=TENANT_ID,
-                source_name=platform,
-                external_id=entity_key,
-                entity_type=entity_type,
-                serial=serial,
-                vm_uuid=vm_uuid,
-                hostname=norm,
-                macs=cd.get("macs") or [],
-                client_id=client_id,
-                policies=identity_policies,
-                is_online=cd.get("is_online"),
-                source_instance_id=source_instance_id,
-            )
-            if device_id is _OWNERSHIP_DEFERRED:
-                continue
-            if device_id is not None:
-                _attach_observation(cur, obs_id, device_id)
-                touched.add(device_id)
-                resolved_count += 1
-                log.debug(
-                    "resolver: policy match %s → device %s", entity_key, device_id
-                )
-                continue
-            if norm:
-                _maybe_create_candidate(
-                    cur,
-                    obs_id,
-                    entity_key,
-                    norm,
-                    client_id,
-                    identity_conflict_ft_id=identity_conflict_ft_id,
-                )
-        write_computer_names(cur, touched)
-
+        resolved_count += count
+        examined += seen
     log.info(
         "resolver: resolved %d / %d observations",
         resolved_count,
-        len(rows) if rows else 0,
+        examined,
     )
     _add_count("observations_resolved", resolved_count)
-    _add_count("observations_examined", len(rows) if rows else 0)
+    _add_count("observations_examined", examined)
 
     promoted_count = 0
     try:
-        with db.findings_transaction(TENANT_ID) as cur:
-            promoted_count = _promote_unmatched_clusters(cur, identity_policies)
+        promotion_ids = _unassociated_identity_ids()
+        for offset in range(0, len(promotion_ids), RESOLUTION_TRANSACTION_ROWS):
+            with db.findings_transaction(TENANT_ID) as cur:
+                identity_policies = load_identity_match_policies(cur, TENANT_ID)
+                promoted_count += _promote_unmatched_clusters(
+                    cur, identity_policies,
+                    observation_ids=promotion_ids[offset:offset + RESOLUTION_TRANSACTION_ROWS],
+                )
     except Exception:
-        log.exception("resolver: device promotion failed — continuing")
+        log.exception("resolver: device promotion failed")
+        raise
 
     merged_count = 0
     try:
@@ -196,7 +236,7 @@ def drain_resolution(batch_size: int = 200, *, refresh_current: bool = True) -> 
 
     # Reconcile even when no observations were newly attached. Failures must
     # reach the resolver job so a partial ownership sweep is visible and retried.
-    ownership_counts = computer_client_ownership.reconcile_cycle(TENANT_ID)
+    ownership_counts = computer_client_ownership.reconcile_dirty(TENANT_ID)
     _telemetry["client_ownership"] = ownership_counts
     log.info("resolver: Computer client ownership projection %s", ownership_counts)
 
@@ -1136,7 +1176,7 @@ def _create_device_anchor(cur, device_id, client_id, created_reason: str) -> Non
 
 
 def _promote_unmatched_clusters(
-    cur, identity_policies: tuple[IdentityMatchPolicy, ...]
+    cur, identity_policies: tuple[IdentityMatchPolicy, ...], *, observation_ids=None
 ) -> int:
     """Create devices for unresolved (client, hostname) clusters.
 
@@ -1173,8 +1213,9 @@ def _promote_unmatched_clusters(
           -- 4,991 Devices were minted from Hudu doc.asset records before this
           -- was caught. Promotion must be opt-in per entity type.
           AND entity_type = ANY(%s)
+          AND (%s::uuid[] IS NULL OR observation_id = ANY(%s::uuid[]))
         """,
-        (TENANT_ID, sorted(identity_entity_types(cur))),
+        (TENANT_ID, sorted(identity_entity_types(cur)), observation_ids, observation_ids),
     )
     unresolved = cur.fetchall()
     if not unresolved:

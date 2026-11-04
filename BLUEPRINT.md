@@ -22,9 +22,8 @@ validation results, or completed-plan summaries here.
 - **PLAN-054 — active.** Review the isolated 0.144.2 deadlock repair for commit
   and deployment; see the [handoff](docs/plans/PLAN-054-source-collection-deadlock.md).
 
-- **PLAN-045 — active.** Finish client-scope enforcement and concurrency
-  coverage for the projector; see the
-  [plan](docs/plans/PLAN-045-source-derived-computer-client.md).
+- **PLAN-045 — active.** Emergency services are stopped; validate and release
+  bounded resolver transactions. See the [checkpoint](docs/records/PLAN-045-active-checkpoint.md).
 
 - **PLAN-041 — active.** Release bounded matcher lookups and measure a complete
   optimized run. DMARC fixes are verified. See the

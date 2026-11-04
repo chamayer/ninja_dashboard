@@ -140,7 +140,7 @@
 - Defined: 2026-11-02
 - Started: 2026-11-02
 - Completed: —
-- Blueprint: docs/plans/PLAN-045-source-derived-computer-client.md
+- Blueprint: docs/records/PLAN-045-active-checkpoint.md
 - Source: docs/plans/PLAN-045-source-derived-computer-client.md
 - Section: PLAN-045 — Source-derived Computer client
 - Related plans: PLAN-004 owns source associations and identity; PLAN-015 owns separately approved identity repairs; PLAN-036 supplies record-first evaluation. This plan changes client ownership projection, not duplicate merges.

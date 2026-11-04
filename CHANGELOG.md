@@ -2,6 +2,18 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.144.3] — 2026-11-04 — Bound identity resolver transactions
+
+### Fixed
+
+- Identity matching and promotion release the tenant guard between batches of
+  at most ten records. Each batch reads current inputs, skips records already
+  attached or withdrawn, and names changed Computers before commit. Ownership
+  reconciliation runs before identity work, then drains new invalidations after
+  it without repeating the full fleet sweep. This addresses the observed
+  half-hour resolver transaction blocking source and evaluator work. The
+  per-record matching and association cost remains unmeasured. No migration.
+
 ## [0.144.2] — 2026-11-04 — Coordinate source writes and ownership work
 
 ### Fixed

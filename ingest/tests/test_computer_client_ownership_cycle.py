@@ -7,7 +7,7 @@ from unittest.mock import patch
 from uuid import UUID
 
 import ingest
-from ingest.identity.computer_client_ownership import reconcile_cycle
+from ingest.identity.computer_client_ownership import reconcile_cycle, reconcile_dirty
 
 
 class Cursor:
@@ -22,7 +22,7 @@ class Cursor:
         if "SELECT id FROM operations.devices" in sql:
             _, last, _, limit = params
             self.rows = [(value,) for value in self.devices if last is None or value > last][:limit]
-        elif "SELECT device_id FROM operations.computer_client_ownership" in sql:
+        elif "SELECT owner.device_id" in sql:
             self.rows = [(value,) for value in sorted(self.dirty)][: params[1]]
         elif "operations.project_computer_client" in sql:
             device_id = params[1]
@@ -43,6 +43,18 @@ class Cursor:
 
 
 class ReconcileCycleTests(unittest.TestCase):
+    def test_dirty_drain_does_not_repeat_full_sweep(self):
+        cursor = Cursor()
+        cursor.dirty.add(UUID(int=1))
+
+        @contextmanager
+        def transaction(_tenant_id):
+            yield cursor
+
+        with patch.object(ingest, "db", SimpleNamespace(findings_transaction=transaction), create=True):
+            self.assertEqual(reconcile_dirty(1), {"resolved": 1})
+        self.assertEqual(cursor.projected, [UUID(int=1)])
+
     def test_sweeps_and_drains_new_lower_key(self):
         cursor = Cursor()
 

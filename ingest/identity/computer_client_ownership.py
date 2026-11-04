@@ -79,6 +79,15 @@ def reconcile_cycle(tenant_id: int, *, batch_size: int = 100) -> dict[str, int]:
     certifying incomplete work. The findings guard is acquired before row
     locks because a resolved move can update device findings.
     """
+    return _reconcile(tenant_id, batch_size=batch_size, full_sweep=True)
+
+
+def reconcile_dirty(tenant_id: int, *, batch_size: int = 100) -> dict[str, int]:
+    """Settle new invalidations without repeating the full fleet sweep."""
+    return _reconcile(tenant_id, batch_size=batch_size, full_sweep=False)
+
+
+def _reconcile(tenant_id: int, *, batch_size: int, full_sweep: bool) -> dict[str, int]:
     from ingest import db
 
     if batch_size < 1 or batch_size > 1000:
@@ -95,7 +104,7 @@ def reconcile_cycle(tenant_id: int, *, batch_size: int = 100) -> dict[str, int]:
             status = cur.fetchone()[0]
             counts[status] = counts.get(status, 0) + 1
 
-    while True:
+    while full_sweep:
         with db.findings_transaction(tenant_id) as cur:
             cur.execute(
                 """

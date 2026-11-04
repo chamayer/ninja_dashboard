@@ -31,6 +31,16 @@ decisions already call `guard_findings` before ownership fencing.
 
 ## Consequences and validation limits
 
+PLAN-045 emergency follow-up: a resolver transaction held this guard for over
+30 minutes while matching and associating up to 500 records before ownership
+reconciliation. Resolver matching and promotion now use transactions of at most
+ten records, re-reading their inputs after acquiring the guard and naming each
+batch's changed Computers before commit. A full ownership sweep runs before
+matching; a dirty-only drain follows association changes. Partial completion is
+intentional: earlier batches remain committed if a later batch fails. Association
+authority and idempotent re-reading make the next run safe. This bounds records
+per transaction, not execution time; per-record cost still needs investigation.
+
 Snapshot atomicity, trigger admission, rollback, and queue semantics remain
 unchanged. No migration or additional queue is introduced. Competing guarded
 database transactions in one tenant serialize; ordinary MVCC reads and other
