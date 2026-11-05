@@ -317,13 +317,15 @@ Read Inbox at the start of every session.
 
 ### Ops / hardening (backlog)
 
-- [ ] **Jobs execution-scope claim race (observed 2026-11-05):** during
+- [x] **Jobs execution-scope claim race (observed 2026-11-05):** during
       PLAN-045 production verification, the Jobs worker exited once when
       `jobs_claim_next_v6` hit `jobs_one_executing_run` while claiming a
       `computer-client-ownership` run. The restart recovered and the run
-      completed; no ownership rows remained dirty. Diagnose concurrent claim
-      and successor admission for the same tenant/job/scope before changing
-      the unique-index or claim contract.
+      completed; no ownership rows remained dirty. Fixed in 0.144.9 by keeping
+      queued successors ineligible while the same tenant/job/scope is active;
+      0.144.10 removed an obsolete role from migration 0405. Production
+      migration and installed guards are verified; a post-deployment successor
+      completion cycle remains unobserved. See PLAN-055.
 - [ ] Stale-data banner — if `v_active_devices` returns 0 (because
       ingest broke), dashboards look empty. A markdown card at the
       top of Overview showing `MAX(last_observed_at)` from run_log

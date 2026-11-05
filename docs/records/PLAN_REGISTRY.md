@@ -3,16 +3,16 @@
 ## PLAN-055 — Jobs execution-scope claim race
 
 - Scope: Prevent a queued Jobs successor from being claimed while the same tenant/job/scope has an active run; preserve workflow dependencies, request coalescing, and resource capacity.
-- Status: active
+- Status: completed
 - Defined: 2026-11-05
 - Started: 2026-11-05
-- Completed: —
+- Completed: 2026-11-05
 - Blueprint: docs/plans/PLAN-055-jobs-execution-scope-claim-race.md
 - Source: docs/plans/PLAN-055-jobs-execution-scope-claim-race.md
 - Section: PLAN-055 — Jobs execution-scope claim race
 - Related plans: PLAN-045 introduced ownership successors and is complete; PLAN-054 owns source-write lock ordering. PLAN-049 has a conflicting planned migration 0404 and must follow PLAN-055's migration 0405 as 0406 or later.
-- Resume gate: Release 0.144.9 exposed a stale `metabase_ro` role reference in migration 0405; 0.144.10 removes it. Push the correction, then verify migration application, Operations health, and successor claim behavior. PLAN-049 must rebase and renumber its migration first.
-- Last checked: 2026-11-05 (production restart logs confirm migration 0405 stopped on missing role `metabase_ro`; operations service is restarting while retrying.)
+- Resume gate: —
+- Last checked: 2026-11-05 (0.144.10 / `d139bacb` deployed to origin and mirror; migration 0405 applied; Operations, ingest, and Jobs worker are healthy. Installed v6/v7 definitions contain the active-scope guard. Two successors remain queued behind fresh active runs; a post-deployment successor completion cycle has not yet been observed.)
 
 ## PLAN-054 — Source collection deadlock repair
 

@@ -19,8 +19,6 @@ validation results, or completed-plan summaries here.
 
 ## Next action — active plan routing
 
-- **PLAN-055 — active.** Validate migration 0405's active-scope claim guard;
-  see the [plan](docs/plans/PLAN-055-jobs-execution-scope-claim-race.md).
 - PLAN-049's planned migration 0404 conflicts with the tracked 0404; rebase it
   after PLAN-055's 0405 and renumber to 0406 or later.
 

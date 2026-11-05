@@ -48,11 +48,20 @@ currently also plans migration 0404 from another branch; it must rebase and
 renumber to 0406 or later after this plan, before either migration branch is
 merged. No production data changes are expected.
 
-## Validation and checkpoint
+## Completion and validation
 
-Release 0.144.9 reached production, but 0405 could not apply because the
-production database no longer has role `metabase_ro`; Operations is restarting
-while startup retries. A correction is prepared in 0.144.10 by removing the
-obsolete role from the migration's REVOKE list. The focused pytest passes after
-the contract assertion correction. Next push 0.144.10, then verify migration
-application, Operations health, and the claim behavior.
+Completed 2026-11-05. Release 0.144.9 introduced the guard; 0.144.10 removed
+the obsolete `metabase_ro` role reference that initially blocked migration
+0405. Commits: `cf0733c4` (fix), `54fdd2b6` (contract assertion), and
+`d139bacb` (production role compatibility). Release 0.144.10 is deployed to
+origin and mirror.
+
+The focused pytest passes. Production confirms migration 0405 is applied,
+Operations, ingest, and Jobs worker are healthy, and the installed v6/v7
+definitions both include the active-scope guard. Two same-scope successors
+currently remain queued behind fresh active `platform-evaluate` and `resolver`
+runs, demonstrating that claim eligibility respects the active run. No
+post-deployment successor start after predecessor completion has yet been
+observed; the successors remain queued as intended until their predecessors
+finish. No unique-index or deadlock errors appeared in recent worker logs. The
+remaining follow-up is observation only, not a known defect.
