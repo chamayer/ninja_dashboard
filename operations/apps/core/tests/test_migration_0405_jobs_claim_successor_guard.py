@@ -15,4 +15,5 @@ def test_both_claim_paths_leave_active_scope_successors_queued():
     assert sql.count("active.wait_category IS DISTINCT FROM 'workflow'") == 2
     assert "operations.jobs_claim_next_v6(p_tenant_id, p_worker_incarnation)" in sql
     assert "GRANT EXECUTE ON FUNCTION operations.jobs_claim_next_v6" in sql
-    assert "GRANT EXECUTE ON FUNCTION operations.jobs_claim_next_v7" in sql
+    assert "operations.jobs_claim_next_v7(BIGINT, UUID)" in sql
+    assert "operations.jobs_claim_next_v6(BIGINT, UUID),\n    operations.jobs_claim_next_v7(BIGINT, UUID) TO ninja_ingest" in sql
