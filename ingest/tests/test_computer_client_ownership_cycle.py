@@ -19,6 +19,8 @@ class Cursor:
         self.result = None
 
     def execute(self, sql, params):
+        if "set_config('operations.tenant_id'" in sql:
+            return
         if "SELECT id FROM operations.devices" in sql:
             _, last, _, limit = params
             self.rows = [(value,) for value in self.devices if last is None or value > last][:limit]
@@ -46,27 +48,53 @@ class ReconcileCycleTests(unittest.TestCase):
     def test_dirty_drain_does_not_repeat_full_sweep(self):
         cursor = Cursor()
         cursor.dirty.add(UUID(int=1))
+        projected_per_guard = []
 
         @contextmanager
-        def transaction(_tenant_id):
+        def transaction():
             yield cursor
 
-        with patch.object(ingest, "db", SimpleNamespace(findings_transaction=transaction), create=True):
+        @contextmanager
+        def guarded_transaction(_tenant_id):
+            before = len(cursor.projected)
+            yield cursor
+            projected_per_guard.append(len(cursor.projected) - before)
+
+        with patch.object(
+            ingest,
+            "db",
+            SimpleNamespace(transaction=transaction, findings_transaction=guarded_transaction),
+            create=True,
+        ):
             self.assertEqual(reconcile_dirty(1), {"resolved": 1})
         self.assertEqual(cursor.projected, [UUID(int=1)])
+        self.assertEqual(projected_per_guard, [1])
 
     def test_sweeps_and_drains_new_lower_key(self):
         cursor = Cursor()
+        projected_per_guard = []
 
         @contextmanager
-        def transaction(tenant_id):
-            self.assertEqual(tenant_id, 1)
+        def transaction():
             yield cursor
 
-        with patch.object(ingest, "db", SimpleNamespace(findings_transaction=transaction), create=True):
+        @contextmanager
+        def guarded_transaction(tenant_id):
+            self.assertEqual(tenant_id, 1)
+            before = len(cursor.projected)
+            yield cursor
+            projected_per_guard.append(len(cursor.projected) - before)
+
+        with patch.object(
+            ingest,
+            "db",
+            SimpleNamespace(transaction=transaction, findings_transaction=guarded_transaction),
+            create=True,
+        ):
             result = reconcile_cycle(1, batch_size=1)
         self.assertEqual(cursor.projected, [UUID(int=2), UUID(int=3), UUID(int=1)])
         self.assertEqual(result, {"resolved": 3})
+        self.assertEqual(projected_per_guard, [1, 1, 1])
 
     def test_projector_failure_is_not_hidden(self):
         cursor = Cursor()
@@ -80,10 +108,19 @@ class ReconcileCycleTests(unittest.TestCase):
         cursor.execute = execute
 
         @contextmanager
-        def transaction(_tenant_id):
+        def transaction():
             yield cursor
 
-        with patch.object(ingest, "db", SimpleNamespace(findings_transaction=transaction), create=True):
+        @contextmanager
+        def guarded_transaction(_tenant_id):
+            yield cursor
+
+        with patch.object(
+            ingest,
+            "db",
+            SimpleNamespace(transaction=transaction, findings_transaction=guarded_transaction),
+            create=True,
+        ):
             with self.assertRaisesRegex(RuntimeError, "projection failed"):
                 reconcile_cycle(1)
 

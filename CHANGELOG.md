@@ -2,6 +2,15 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.144.7] — 2026-11-05 — Bound ownership projection transactions
+
+### Fixed
+
+- Dirty ownership reconciliation and the daily full sweep now project one
+  Computer per guarded transaction, allowing other tenant writes to acquire
+  the findings guard between Computers. Each Computer and its dependent scope
+  updates remain atomic. No database migration.
+
 ## [0.144.6] — 2026-11-05 — Keep source ownership work independent
 
 ### Fixed

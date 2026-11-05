@@ -21,10 +21,29 @@ Keep identity association and promotion in the resolver. Move source-derived
 Computer ownership reconciliation into coalesced dirty-only Jobs triggered
 after source writes and resolver completion. Move full-fleet ownership repair
 to its own daily, low-priority maintenance Job. Keep database serialization at
-the existing bounded tenant transaction guard; avoid a whole-job identity lock,
-new queue framework, or database migration.
+the existing tenant guard, but hold it for only one Computer projection per
+transaction. This bounds how long an ownership projection can block other
+tenant writes while preserving the findings lock order and atomic update of a
+Computer and its dependent scope rows. Avoid a whole-job identity lock, new
+queue framework, or database migration.
 
-## Validation and next action
+## Current work — bound guard duration
+
+Production after 0.144.6 showed the split workflow succeeds, but projecting a
+set of dirty Computers in one transaction can hold the exclusive findings
+guard for minutes. Select bounded candidate IDs outside the guard and project
+each Computer in its own guarded transaction. Apply this to dirty drains and
+the low-priority full sweep. A failure leaves remaining rows dirty for the next
+run; already committed Computers remain complete. Keep per-Computer lock order
+and transactional reassessment unchanged.
+
+Affected files: `ingest/identity/computer_client_ownership.py`, its focused
+tests, `VERSION`, `CHANGELOG.md`, this checkpoint, and the PLAN-045 registry
+entry. No SQL migration is expected. Validate focused reconciliation tests,
+registry validation, syntax, Ruff, and `git diff --check`; then verify live
+guard waits and dirty age after the authorized release.
+
+## Prior validation and current next action
 
 The split is implemented: identity resolution no longer runs ownership sweeps;
 source refresh and agent observations request coalesced dirty-only work, and
@@ -43,5 +62,9 @@ were installed. No migration or full-fleet local run was added. The first
 replay-safe Jobs policies require per-definition database authority rows; the
 worker stayed down until this was corrected by keeping these jobs in manual-
 review recovery mode, without adding a migration. Version 0.144.5 contains the
-correction. Next release 0.144.6 and verify source-triggered ownership runs do
-not wait for identity resolution, while normal source collection remains clear.
+correction. Version 0.144.6 is deployed. Production confirmed a ScreenConnect
+source run's ownership child depended only on source refresh, completed with 21
+resolved while the resolver was still running, left 0 dirty rows (0 older than
+30 minutes), and logged no deadlocks in the worker's preceding 30 minutes.
+Current next action: bound tenant-guard duration per Computer, then commit,
+push to both remotes, and verify production latency and recovery.

@@ -74,10 +74,11 @@ def compare_explicit_client_decision(
 def reconcile_cycle(tenant_id: int, *, batch_size: int = 100) -> dict[str, int]:
     """Project every live Computer, then drain inputs dirtied during the sweep.
 
-    Each bounded batch is atomic. Failures escape to the resolver job; the
-    dirty state and a subsequent full sweep provide retry rather than silently
-    certifying incomplete work. The findings guard is acquired before row
-    locks because a resolved move can update device findings.
+    Candidate pages are bounded, and each Computer is projected atomically in
+    its own transaction. Failures escape to the resolver job; the dirty state
+    and a subsequent full sweep provide retry rather than silently certifying
+    incomplete work. The findings guard is acquired before row locks because a
+    resolved move can update device findings.
     """
     return _reconcile(tenant_id, batch_size=batch_size, full_sweep=True)
 
@@ -95,51 +96,59 @@ def _reconcile(tenant_id: int, *, batch_size: int, full_sweep: bool) -> dict[str
     counts: dict[str, int] = {}
     last_id: UUID | None = None
 
-    def project(cur, device_ids) -> None:
+    def project(cur, device_id) -> None:
+        cur.execute(
+            "SELECT operations.project_computer_client(%s::bigint, %s::uuid)",
+            (tenant_id, device_id),
+        )
+        status = cur.fetchone()[0]
+        counts[status] = counts.get(status, 0) + 1
+
+    def select_device_ids(query: str, params: tuple) -> list[UUID]:
+        # Candidate discovery must not hold the exclusive findings guard. Each
+        # selected Computer is re-read and projected atomically under that guard.
+        with db.transaction() as cur:
+            cur.execute("SELECT set_config('operations.tenant_id', %s, true)", (str(tenant_id),))
+            cur.execute(query, params)
+            return [row[0] for row in cur.fetchall()]
+
+    def project_each(device_ids: list[UUID]) -> None:
         for device_id in device_ids:
-            cur.execute(
-                "SELECT operations.project_computer_client(%s::bigint, %s::uuid)",
-                (tenant_id, device_id),
-            )
-            status = cur.fetchone()[0]
-            counts[status] = counts.get(status, 0) + 1
+            with db.findings_transaction(tenant_id) as cur:
+                project(cur, device_id)
 
     while full_sweep:
-        with db.findings_transaction(tenant_id) as cur:
-            cur.execute(
-                """
-                SELECT id FROM operations.devices
-                 WHERE tenant_id = %s AND deleted_at IS NULL
-                   AND (%s::uuid IS NULL OR id > %s::uuid)
-                 ORDER BY id LIMIT %s
-                """,
-                (tenant_id, last_id, last_id, batch_size),
-            )
-            device_ids = [row[0] for row in cur.fetchall()]
-            if not device_ids:
-                break
-            project(cur, device_ids)
-            last_id = device_ids[-1]
+        device_ids = select_device_ids(
+            """
+            SELECT id FROM operations.devices
+             WHERE tenant_id = %s AND deleted_at IS NULL
+               AND (%s::uuid IS NULL OR id > %s::uuid)
+             ORDER BY id LIMIT %s
+            """,
+            (tenant_id, last_id, last_id, batch_size),
+        )
+        if not device_ids:
+            break
+        project_each(device_ids)
+        last_id = device_ids[-1]
 
-    # A new Computer starts dirty even if it sorts before the sweep cursor.
-    # Bound repeated batches so a constantly changing fleet reports a retry
-    # instead of leaving a resolver job running forever.
+    # A new Computer starts dirty even if it sorts before a full-sweep cursor.
+    # Bound repeated selection pages so a constantly changing fleet reports a
+    # retry instead of leaving a resolver job running forever.
     for _ in range(100):
-        with db.findings_transaction(tenant_id) as cur:
-            cur.execute(
-                """
-                SELECT owner.device_id
-                  FROM operations.computer_client_ownership owner
-                  JOIN operations.devices device
-                    ON device.tenant_id = owner.tenant_id AND device.id = owner.device_id
-                   AND device.deleted_at IS NULL
-                 WHERE owner.tenant_id = %s AND owner.state = 'dirty'
-                 ORDER BY owner.device_id LIMIT %s
-                """,
-                (tenant_id, batch_size),
-            )
-            device_ids = [row[0] for row in cur.fetchall()]
-            if not device_ids:
-                return counts
-            project(cur, device_ids)
+        device_ids = select_device_ids(
+            """
+            SELECT owner.device_id
+              FROM operations.computer_client_ownership owner
+              JOIN operations.devices device
+                ON device.tenant_id = owner.tenant_id AND device.id = owner.device_id
+               AND device.deleted_at IS NULL
+             WHERE owner.tenant_id = %s AND owner.state = 'dirty'
+             ORDER BY owner.device_id LIMIT %s
+            """,
+            (tenant_id, batch_size),
+        )
+        if not device_ids:
+            return counts
+        project_each(device_ids)
     raise RuntimeError("Computer client ownership remains dirty after 100 reconciliation batches")
