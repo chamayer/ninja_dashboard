@@ -28,13 +28,20 @@ new queue framework, or database migration.
 
 The split is implemented: identity resolution no longer runs ownership sweeps;
 source refresh and agent observations request coalesced dirty-only work, and
-resolver completion requests it for newly associated Computers. A separate
-daily low-priority sweep is registered. All nine focused resolver/ownership
-tests pass; registry smoke, plan registry, compileall, Ruff, and diff checks
-pass. Workflow-admission tests could not collect because the local Python
-environment lacks `pydantic`; no dependencies were installed. No migration or
-full-fleet local run was added. The first 0.144.4 rollout exposed that
+resolver-created dirties are caught by a 10-minute dirty-only schedule. A
+separate daily low-priority full sweep is registered. Production 0.144.5 is
+healthy; one ownership run completed with 12 resolved, 1 conflict, and 3
+unknown rows, leaving 0 live dirty rows. AMROSE ScreenConnect completed after
+writing 5,617 records without a deadlock. Its successor exposed that coalesced
+Jobs dependencies made source-triggered ownership wait for the resolver too;
+0.144.6 removes that prerequisite and adds the catch-up schedule. All ten
+focused resolver/ownership tests pass; registry smoke, plan registry,
+compileall, Ruff, and diff checks pass. Workflow-admission tests could not
+collect because the local Python environment lacks `pydantic`; no dependencies
+were installed. No migration or full-fleet local run was added. The first
+0.144.4 rollout exposed that
 replay-safe Jobs policies require per-definition database authority rows; the
 worker stayed down until this was corrected by keeping these jobs in manual-
 review recovery mode, without adding a migration. Version 0.144.5 contains the
-correction. Next verify worker recovery, dirty ownership age, and source runs.
+correction. Next release 0.144.6 and verify source-triggered ownership runs do
+not wait for identity resolution, while normal source collection remains clear.

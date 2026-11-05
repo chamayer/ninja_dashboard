@@ -320,6 +320,7 @@ _RAW_DEFINITIONS = (
         "run_log",
         "ingest.main.run_computer_client_ownership_once",
         run_all=False,
+        schedule_ids=("computer_client_ownership_cycle",),
         priority=90,
         handler_version="computer-client-ownership-v1",
     ),
@@ -811,6 +812,12 @@ _SCHEDULE_DEFINITIONS = (
     ),
     ScheduleDefinition("identity_resolver_cycle", "resolver", "constant:30", "minutes"),
     ScheduleDefinition(
+        "computer_client_ownership_cycle",
+        "computer-client-ownership",
+        "constant:10",
+        "minutes",
+    ),
+    ScheduleDefinition(
         "computer_client_ownership_sweep_cycle",
         "computer-client-ownership-sweep",
         "constant:24",
@@ -1092,9 +1099,6 @@ _WORKFLOW_SUCCESSORS = MappingProxyType(
             DependencyDefinition("platform-evaluate", "patch.findings"),
         ),
         "resolver": (
-            DependencyDefinition(
-                "computer-client-ownership", "identity.current", "always", "tenant"
-            ),
             DependencyDefinition("platform-evaluate", "identity.current"),
         ),
         "agent-observations": (
@@ -1242,13 +1246,19 @@ def registry_digest() -> str:
 
 def schedule_definitions() -> tuple[ScheduleDefinition, ...]:
     """Return cadences for operation entry points, never dependent steps."""
+    # Ownership is also a source successor; this cadence catches rows dirtied
+    # later by resolver associations without gating source-triggered work.
+    periodic_dependency_drains = frozenset({"computer-client-ownership"})
     dependent_keys = {
         successor.successor for item in _DEFINITIONS for successor in item.successors
     }
     return tuple(
         schedule
         for schedule in _SCHEDULE_DEFINITIONS
-        if schedule.job_key not in dependent_keys
+        if (
+            schedule.job_key not in dependent_keys
+            or schedule.job_key in periodic_dependency_drains
+        )
         and schedule.job_key not in _SOURCE_OWNED_DEFINITION_KEYS
     )
 

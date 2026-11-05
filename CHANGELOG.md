@@ -2,6 +2,14 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.144.6] — 2026-11-05 — Keep source ownership work independent
+
+### Fixed
+
+- Source-triggered ownership work no longer inherits the resolver as another
+  prerequisite through Jobs coalescing. A 10-minute dirty-only catch-up picks
+  up ownership changes created later by identity associations.
+
 ## [0.144.5] — 2026-11-05 — Start the ownership workflow worker
 
 ### Fixed
