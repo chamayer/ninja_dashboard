@@ -1,5 +1,19 @@
 # Plan registry
 
+## PLAN-055 — Jobs execution-scope claim race
+
+- Scope: Prevent a queued Jobs successor from being claimed while the same tenant/job/scope has an active run; preserve workflow dependencies, request coalescing, and resource capacity.
+- Status: active
+- Defined: 2026-11-05
+- Started: 2026-11-05
+- Completed: —
+- Blueprint: docs/plans/PLAN-055-jobs-execution-scope-claim-race.md
+- Source: docs/plans/PLAN-055-jobs-execution-scope-claim-race.md
+- Section: PLAN-055 — Jobs execution-scope claim race
+- Related plans: PLAN-045 introduced ownership successors and is complete; PLAN-054 owns source-write lock ordering. PLAN-049 has a conflicting planned migration 0404 and must follow PLAN-055's migration 0405 as 0406 or later.
+- Resume gate: User approved commit and deployment for release 0.144.9, including migration 0405. After the origin deployment, verify migration application and a successful claim of a queued successor after its active run completes. PLAN-049 must rebase and renumber its migration first.
+- Last checked: 2026-11-05 (confirmed both claim functions selected queued successors without excluding a same-scope active run; migration 0405 adds that eligibility guard while preserving both unique indexes.)
+
 ## PLAN-054 — Source collection deadlock repair
 
 - Scope: Coordinate source/software writes with ownership and findings work to prevent the PLAN-045 deadlocks.
@@ -84,8 +98,8 @@
 - Blueprint: docs/plans/PLAN-049-active-findings-index.md
 - Source: docs/plans/PLAN-049-active-findings-index.md
 - Section: PLAN-049 — Index active findings by subject
-- Related plans: Found by PLAN-012's follow-up review. PLAN-042/PLAN-044 own the Coverage-view (/inventory/computers/) performance, not /devices/. Migration 0404 depends on PLAN-045's 0403. PLAN-019 F05 owns closed-finding retention.
-- Resume gate: Implemented, validated locally and committed on branch plan049-active-findings-index (4cb502e0, worktree .work/plan049); not merged. Next: merge after PLAN-045's migrations land, then release with explicit approval of migration 0404 and a read-only post-deploy plan check.
+- Related plans: Found by PLAN-012's follow-up review. PLAN-042/PLAN-044 own the Coverage-view (/inventory/computers/) performance, not /devices/. PLAN-055 claims migration 0405; this plan must rebase and renumber its migration to 0406 or later. PLAN-019 F05 owns closed-finding retention.
+- Resume gate: Implemented, validated locally and committed on branch plan049-active-findings-index (4cb502e0, worktree .work/plan049); not merged. Next: rebase after PLAN-055's migration 0405, renumber this migration to 0406 or later, then release with approval of the pending migrations and a read-only post-deploy plan check.
 - Last checked: 2026-11-03 (devices_page severe-findings subquery 2.3 s reading all 29,557 active severe findings; Operations suite failures identical to the branch base).
 
 

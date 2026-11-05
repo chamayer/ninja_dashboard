@@ -2,6 +2,14 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.144.9] — 2026-11-05 — Prevent duplicate Jobs execution claims
+
+### Fixed
+
+- Jobs claim paths leave a queued successor pending while the same tenant,
+  definition, and scope has an active run, preventing a unique-index violation
+  from terminating the worker. Migration 0405 updates the claim functions.
+
 ## [0.144.8] — 2026-11-05 — Reduce platform health guard time
 
 ### Fixed
