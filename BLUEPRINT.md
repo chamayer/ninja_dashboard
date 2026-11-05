@@ -19,11 +19,11 @@ validation results, or completed-plan summaries here.
 
 ## Next action — active plan routing
 
-- **PLAN-054 — active.** Review the isolated 0.144.2 deadlock repair for commit
-  and deployment; see the [handoff](docs/plans/PLAN-054-source-collection-deadlock.md).
+- **PLAN-054 — active.** Verify production stability after the 0.144.3 deadlock
+  repair; see the [handoff](docs/plans/PLAN-054-source-collection-deadlock.md).
 
-- **PLAN-045 — active.** Emergency services are stopped; validate and release
-  bounded resolver transactions. See the [checkpoint](docs/records/PLAN-045-active-checkpoint.md).
+- **PLAN-045 — active.** Split dirty ownership reconciliation from identity
+  resolution; see the [checkpoint](docs/records/PLAN-045-active-checkpoint.md).
 
 - **PLAN-041 — active.** Release bounded matcher lookups and measure a complete
   optimized run. DMARC fixes are verified. See the

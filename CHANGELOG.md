@@ -2,6 +2,17 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.144.4] — 2026-11-05 — Separate Computer ownership reconciliation
+
+### Fixed
+
+- Dirty Computer ownership now reconciles in a high-priority, coalesced Jobs
+  workflow after identity-source writes and resolver completion. It no longer
+  waits for the resolver's full-fleet sweep or identity matching to finish.
+- Full-fleet ownership reconciliation runs separately as low-priority daily
+  maintenance. Both paths use bounded transactions and the existing tenant
+  transaction guard. No database migration.
+
 ## [0.144.3] — 2026-11-04 — Bound identity resolver transactions
 
 ### Fixed

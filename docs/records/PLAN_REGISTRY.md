@@ -135,7 +135,7 @@
 
 ## PLAN-045 — Source-derived Computer client
 
-- Scope: Reconcile Computer client ownership from current source evidence after changes and each full resolver cycle, retaining human decisions and explicit unresolved states.
+- Scope: Reconcile Computer client ownership in a coalesced dirty-only Jobs workflow after source and identity updates, with a separate daily full sweep for anti-entropy; retain human decisions and explicit unresolved states.
 - Status: active
 - Defined: 2026-11-02
 - Started: 2026-11-02
@@ -144,8 +144,8 @@
 - Source: docs/plans/PLAN-045-source-derived-computer-client.md
 - Section: PLAN-045 — Source-derived Computer client
 - Related plans: PLAN-004 owns source associations and identity; PLAN-015 owns separately approved identity repairs; PLAN-036 supplies record-first evaluation. This plan changes client ownership projection, not duplicate merges.
-- Resume gate: User resumed the goal after checkpoint commit `2af7fb1b`. Production data operations, commit, push and deployment remain separately gated.
-- Last checked: 2026-11-03 (inventory and notification delivery use transaction-held ownership locks; synthetic PostgreSQL and mocked send checks pass. Lock duration needs authorized rehearsal; resolver, evaluator, remaining readers and populated-schema validation remain outstanding; no production data changed).
+- Resume gate: User authorized committing and pushing changes until this goal is achieved. Automatic deployment through origin is included; verify the reviewed release has no pending migrations.
+- Last checked: 2026-11-05 (production source runs recovered after 0.144.3 without deadlocks, but dirty ownership rows remained older than 30 minutes. Resolver inspection found full-fleet ownership projection coupled to identity matching and promotion. Split in progress; no current production counts inferred).
 
 ## PLAN-043 — Useful issue review
 

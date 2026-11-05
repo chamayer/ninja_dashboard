@@ -28,7 +28,6 @@ from psycopg.types.json import Json
 from ingest import db, device_cache_projector
 from ingest.conditions import record_assessment
 from ingest.identity import findings as identity_findings
-from ingest.identity import computer_client_ownership
 from ingest.identity import identity_entity_types
 from ingest.identity.naming import write_computer_names
 from ingest.identity.matching import client_record_names, invalidate_client_names
@@ -182,14 +181,12 @@ def _resolve_observation_batch(cur, observation_ids):
 def drain_resolution(batch_size: int = 200, *, refresh_current: bool = True) -> int:
     """Resolve a selected work set in short, independently atomic transactions.
 
-    Ownership is reconciled before matching so an expensive identity pass cannot
-    prevent already dirty Computers from being settled. Each batch rechecks
-    presence and association under the guard; source changes between batches
-    cannot attach stale inputs. The existing final sweep settles new attachments.
+    Each batch rechecks presence and association under the guard; source changes
+    between batches cannot attach stale inputs. Computer ownership projection
+    is a separate Jobs workflow so identity matching cannot delay dirty rows.
     """
     if batch_size < 1:
         raise ValueError("batch_size must be positive")
-    computer_client_ownership.reconcile_cycle(TENANT_ID)
     with db.findings_transaction(TENANT_ID) as cur:
         load_identity_value_rejections(cur)
         refresh_roaming_records(cur)
@@ -233,12 +230,6 @@ def drain_resolution(batch_size: int = 200, *, refresh_current: bool = True) -> 
     _add_count("computers_promoted", promoted_count)
     _add_count("computers_merged", merged_count)
     promoted_count += merged_count
-
-    # Reconcile even when no observations were newly attached. Failures must
-    # reach the resolver job so a partial ownership sweep is visible and retried.
-    ownership_counts = computer_client_ownership.reconcile_dirty(TENANT_ID)
-    _telemetry["client_ownership"] = ownership_counts
-    log.info("resolver: Computer client ownership projection %s", ownership_counts)
 
     # ADR-0012: the projector is the sole writer of the five device cache
     # columns. It must run before _sync_device_attributes, which copies that

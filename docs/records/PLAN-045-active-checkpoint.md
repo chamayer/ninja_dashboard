@@ -2,46 +2,36 @@
 
 ## Goal and authorization
 
-User authorized stopping all Ninja jobs and fixing the production emergency.
-Ingest and Jobs were stopped at approximately 23:01 UTC on 2026-11-04.
-Operations and Postgres remain healthy. Do not restart job services until a
-reviewed repair is ready. Commit/push remain subject to separate approval.
+User authorized committing and pushing the emergency repair through completion.
+Normal operations were restarted after the 0.144.3 deadlock repair. Production
+source runs recovered, but ownership dirty rows remained older than 30 minutes.
 
 ## Confirmed state
 
-4,254 live ownership rows remain dirty. The resolver held the exclusive tenant
-guard from 22:29:55 for more than 30 minutes, alternating name-candidate queries
-and resolver association calls. Four other sessions waited 25–30 minutes.
-Ownership reconciliation runs after identity resolution and promotion, so it
-had not been reached. After stopping both services, no holder or waiter remained.
-Job ledger running states remain interrupted; do not forge terminal results.
+The remaining backlog was traced to the resolver doing a full-fleet ownership
+sweep before identity matching, then draining dirty ownership after matching.
+The resolver also runs client resolution, promotion, merging, cache and layer
+projection, and naming. A prior production check showed 10 dirty ownership
+rows, 9 older than 30 minutes, while the resolver had run for about 40 minutes.
+Refresh live state before reporting current counts.
 
 ## Scope and design
 
-Bound resolver mutation transactions and re-read each selected record batch
-under the guard. Name each batch's changed Computers before commit. Reconcile
-ownership before expensive matching and again after association changes.
-Bound promotion transactions as well; preserve per-record identity decisions,
-source/tenant filtering, and the sole association writer. Keep 0.144.2's
-coordination instead of removing deadlock protection.
+Keep identity association and promotion in the resolver. Move source-derived
+Computer ownership reconciliation into coalesced dirty-only Jobs triggered
+after source writes and resolver completion. Move full-fleet ownership repair
+to its own daily, low-priority maintenance Job. Keep database serialization at
+the existing bounded tenant transaction guard; avoid a whole-job identity lock,
+new queue framework, or database migration.
 
 ## Validation and next action
 
-Use small local synthetic tests for batching, re-reading changed/attached
-records, per-batch naming, deferred ownership, failure propagation, and policy
-behavior. Do not run full local evaluators or performance workloads.
-Implemented on origin/master in `.work/plan045-emergency`, release 0.144.3.
-Matching and promotion use at most ten records per transaction and re-read
-current presence/association/evidence before mutations. Naming remains atomic
-with each batch. Earlier committed batches survive a later failure; that failure
-escapes matching to the Job. The dirty-only final drain avoids a second full
-fleet sweep. Current guard protection is retained; no migration or retry added.
-74 focused checks pass, including PostgreSQL re-read and deadlock regressions.
-Promotion failures escape to the Job instead of being logged as successful work.
-Ruff, syntax, registry and diff checks pass. No performance guarantee is inferred
-from synthetic tests. User requested finishing this as an explicit goal with no
-additional heavy testing or broad design work; completed checks are sufficient
-for the scoped implementation review.
-Production remains stopped; no commit, push, deployment or restart yet.
-Next complete checks, obtain release commit/push approval, then verify controlled
-recovery and backlog drain. Investigate individual query costs afterward.
+The split is implemented: identity resolution no longer runs ownership sweeps;
+source refresh and agent observations request coalesced dirty-only work, and
+resolver completion requests it for newly associated Computers. A separate
+daily low-priority sweep is registered. All nine focused resolver/ownership
+tests pass; registry smoke, plan registry, compileall, Ruff, and diff checks
+pass. Workflow-admission tests could not collect because the local Python
+environment lacks `pydantic`; no dependencies were installed. No migration or
+full-fleet local run was added. Next commit and push the reviewed 0.144.4
+release, then verify deployment, dirty ownership age, and source runs.

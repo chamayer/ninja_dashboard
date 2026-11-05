@@ -31,16 +31,6 @@ def harness(monkeypatch):
     monkeypatch.setattr(resolver, "refresh_roaming_records", lambda _: None)
     monkeypatch.setattr(resolver, "load_identity_match_policies", lambda *_: ())
     monkeypatch.setattr(
-        resolver.computer_client_ownership,
-        "reconcile_cycle",
-        lambda _: events.append("ownership") or {},
-    )
-    monkeypatch.setattr(
-        resolver.computer_client_ownership,
-        "reconcile_dirty",
-        lambda _: events.append("ownership") or {},
-    )
-    monkeypatch.setattr(
         resolver, "_unassociated_identity_ids", lambda limit=None: list(range(23))
     )
     monkeypatch.setattr(resolver, "merge_proven_splits", lambda _: 0)
@@ -76,12 +66,11 @@ def test_resolution_and_promotion_release_guard_between_batches(harness, monkeyp
         == promoted
         == [list(range(10)), list(range(10, 20)), list(range(20, 23))]
     )
-    assert events[0] == "ownership"
     for index, event in enumerate(events):
         if event in ("resolve", "promote"):
             assert events[index - 1] == "begin"
             assert events[index + 1] == "commit"
-    assert events.count("ownership") == 2
+    assert "ownership" not in events
     assert not active
 
 

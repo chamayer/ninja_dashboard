@@ -926,6 +926,14 @@ def _execute(job_key: str, progress: V1JobProgress) -> int | JobExecutionResult 
             "Resolving computer identity",
             lambda: main.run_identity_resolver_once(),
         ),
+        "computer-client-ownership": (
+            "Reconciling changed Computer ownership",
+            main.run_computer_client_ownership_once,
+        ),
+        "computer-client-ownership-sweep": (
+            "Checking all Computer ownership",
+            main.run_computer_client_ownership_sweep_once,
+        ),
         "patches": (
             "Collecting Ninja patches and activity",
             lambda: main.run_patching_once(),

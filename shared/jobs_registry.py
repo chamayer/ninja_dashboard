@@ -300,7 +300,7 @@ _RAW_DEFINITIONS = (
     JobDefinition(
         "resolver",
         "Identity resolver",
-        "Match source records to the right computer.",
+        "Match source records to the right computer and settle identity links.",
         "evaluators",
         "evaluation",
         "run/resolver",
@@ -308,6 +308,35 @@ _RAW_DEFINITIONS = (
         "run_log",
         "ingest.identity.resolver.drain_resolution",
         schedule_ids=("identity_resolver_cycle",),
+    ),
+    JobDefinition(
+        "computer-client-ownership",
+        "Computer client ownership",
+        "Reconcile changed Computer client ownership after source and identity updates.",
+        "maintenance",
+        "evaluation",
+        "",
+        "computer_client_ownership",
+        "run_log",
+        "ingest.main.run_computer_client_ownership_once",
+        run_all=False,
+        priority=90,
+        handler_version="computer-client-ownership-v1",
+    ),
+    JobDefinition(
+        "computer-client-ownership-sweep",
+        "Computer client ownership sweep",
+        "Check all Computers for ownership changes as daily maintenance.",
+        "maintenance",
+        "evaluation",
+        "",
+        "computer_client_ownership_sweep",
+        "run_log",
+        "ingest.main.run_computer_client_ownership_sweep_once",
+        run_all=False,
+        schedule_ids=("computer_client_ownership_sweep_cycle",),
+        priority=10,
+        handler_version="computer-client-ownership-sweep-v1",
     ),
     JobDefinition(
         "intel-kev",
@@ -667,6 +696,16 @@ REPLAY_SAFE_RECOVERY_EVIDENCE = MappingProxyType(
             "links. A later replay converges to the current evidence and does not mutate "
             "an external system."
         ),
+        "computer-client-ownership": (
+            "Ownership reconciliation only updates current Computer client projections "
+            "from committed local source evidence. It is tenant-scoped and idempotent; "
+            "a later run converges after interruption and has no external mutation."
+        ),
+        "computer-client-ownership-sweep": (
+            "The full ownership sweep only reprojects current local Computer evidence "
+            "in bounded transactions. It is tenant-scoped and idempotent; a later run "
+            "converges after interruption and has no external mutation."
+        ),
         "patch-classify": (
             "Patch-status evaluation reads local Ninja evidence and convergently updates "
             "local findings. A later replay has no external mutation."
@@ -781,6 +820,11 @@ _SCHEDULE_DEFINITIONS = (
         "ninja_enrichment_cycle", "ninja-enrichment", "PATCH_INGEST_SCHEDULE_HOURS"
     ),
     ScheduleDefinition("identity_resolver_cycle", "resolver", "constant:30", "minutes"),
+    ScheduleDefinition(
+        "computer_client_ownership_sweep_cycle",
+        "computer-client-ownership-sweep",
+        "constant:24",
+    ),
     ScheduleDefinition("platform_evaluate_cycle", "platform-evaluate", "constant:4"),
     ScheduleDefinition(
         "software_classify_cycle",
@@ -922,6 +966,12 @@ _RESOURCE_KEYS_BY_DEFINITION: dict[str, tuple[str, ...]] = {
     "platform-evaluate": ("tenant:{tenant_id}:platform-findings",),
     "cmdb-evaluate": ("tenant:{tenant_id}:cmdb-findings",),
     "resolver": ("tenant:{tenant_id}:identity-state",),
+    # Ownership batches use the tenant transaction guard. A whole-job identity
+    # lock would put dirty reconciliation back behind a long resolver run.
+    "computer-client-ownership": (),
+    # The anti-entropy sweep yields between bounded database transactions; it
+    # must not hold the identity Jobs lock for its entire fleet pass.
+    "computer-client-ownership-sweep": (),
     "intel-kev": (),
     "intel-nvd": (),
     "intel-cpe-dict": (),
@@ -977,6 +1027,8 @@ _CAPACITY_KEYS_BY_DEFINITION: dict[str, tuple[str, ...]] = {
     "platform-evaluate": ("capacity:processing",),
     "cmdb-evaluate": ("capacity:processing",),
     "resolver": ("capacity:processing",),
+    "computer-client-ownership": (),
+    "computer-client-ownership-sweep": (),
     "intel-kev": (),
     "intel-nvd": (),
     "intel-cpe-dict": (),
@@ -1015,6 +1067,12 @@ _WORKFLOW_SUCCESSORS = MappingProxyType(
     {
         "source-refresh": (
             DependencyDefinition(
+                "computer-client-ownership",
+                "source.identity-observations",
+                "identity_source",
+                "tenant",
+            ),
+            DependencyDefinition(
                 "resolver", "source.identity-observations", "identity_source", "tenant"
             ),
             DependencyDefinition(
@@ -1043,8 +1101,19 @@ _WORKFLOW_SUCCESSORS = MappingProxyType(
         "patch-classify": (
             DependencyDefinition("platform-evaluate", "patch.findings"),
         ),
-        "resolver": (DependencyDefinition("platform-evaluate", "identity.current"),),
+        "resolver": (
+            DependencyDefinition(
+                "computer-client-ownership", "identity.current", "always", "tenant"
+            ),
+            DependencyDefinition("platform-evaluate", "identity.current"),
+        ),
         "agent-observations": (
+            DependencyDefinition(
+                "computer-client-ownership",
+                "source.identity-observations",
+                "identity_source",
+                "tenant",
+            ),
             DependencyDefinition("resolver", "source.identity-observations"),
         ),
         "documentation-observations": (
@@ -1214,6 +1283,8 @@ _SYSTEM_SERVICE_KEYS = frozenset(
         "run-log-recovery",
         "platform-health-evaluate",
         "source-record-assess",
+        "computer-client-ownership",
+        "computer-client-ownership-sweep",
         "software-enqueue-orgs",
     }
 )

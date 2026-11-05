@@ -46,6 +46,7 @@ from ingest.evaluator import evaluate as platform_evaluate
 from ingest.identity.client_resolver import (
     drain_client_resolution as _drain_client_resolution,
 )
+from ingest.identity import computer_client_ownership
 from ingest.identity import resolver as identity_resolver
 from ingest.identity.resolver import drain_resolution as _drain_resolution
 from ingest.inventory import queue as software_queue
@@ -260,6 +261,20 @@ def run_identity_resolver_once(*, refresh_current: bool = True):
     telemetry = identity_resolver.take_telemetry()
     telemetry["seconds"] = round(time.monotonic() - started, 1)
     return operator_job_queue.JobExecutionResult(result=telemetry)
+
+
+def run_computer_client_ownership_once():
+    """Reconcile source-dirtied Computer ownership without a fleet sweep."""
+    counts = computer_client_ownership.reconcile_dirty(tenant_id=1)
+    log.info("Computer client ownership dirty reconciliation complete: %s", counts)
+    return operator_job_queue.JobExecutionResult(result=counts)
+
+
+def run_computer_client_ownership_sweep_once():
+    """Run the lower-frequency full Computer ownership consistency sweep."""
+    counts = computer_client_ownership.reconcile_cycle(tenant_id=1)
+    log.info("Computer client ownership full sweep complete: %s", counts)
+    return operator_job_queue.JobExecutionResult(result=counts)
 
 
 def run_ninja_observations_once() -> None:
