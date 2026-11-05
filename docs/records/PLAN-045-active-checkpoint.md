@@ -33,5 +33,8 @@ daily low-priority sweep is registered. All nine focused resolver/ownership
 tests pass; registry smoke, plan registry, compileall, Ruff, and diff checks
 pass. Workflow-admission tests could not collect because the local Python
 environment lacks `pydantic`; no dependencies were installed. No migration or
-full-fleet local run was added. Next commit and push the reviewed 0.144.4
-release, then verify deployment, dirty ownership age, and source runs.
+full-fleet local run was added. The first 0.144.4 rollout exposed that
+replay-safe Jobs policies require per-definition database authority rows; the
+worker stayed down until this was corrected by keeping these jobs in manual-
+review recovery mode, without adding a migration. Version 0.144.5 contains the
+correction. Next verify worker recovery, dirty ownership age, and source runs.

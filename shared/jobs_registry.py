@@ -696,16 +696,6 @@ REPLAY_SAFE_RECOVERY_EVIDENCE = MappingProxyType(
             "links. A later replay converges to the current evidence and does not mutate "
             "an external system."
         ),
-        "computer-client-ownership": (
-            "Ownership reconciliation only updates current Computer client projections "
-            "from committed local source evidence. It is tenant-scoped and idempotent; "
-            "a later run converges after interruption and has no external mutation."
-        ),
-        "computer-client-ownership-sweep": (
-            "The full ownership sweep only reprojects current local Computer evidence "
-            "in bounded transactions. It is tenant-scoped and idempotent; a later run "
-            "converges after interruption and has no external mutation."
-        ),
         "patch-classify": (
             "Patch-status evaluation reads local Ninja evidence and convergently updates "
             "local findings. A later replay has no external mutation."

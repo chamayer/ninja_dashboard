@@ -5,6 +5,7 @@ def test_dirty_ownership_has_priority_and_source_successors():
     ownership = definition("computer-client-ownership")
     assert ownership.priority > definition("resolver").priority
     assert ownership.resource_keys == ()
+    assert ownership.snapshot_metadata()["recovery_mode"] == "manual_review"
 
     source_successors = {
         edge.successor: edge for edge in definition("source-refresh").successors
@@ -26,3 +27,4 @@ def test_full_sweep_is_daily_maintenance_without_holding_identity_job_lock():
     assert schedule.cadence_setting == "constant:24"
     assert sweep.priority < definition("resolver").priority
     assert sweep.resource_keys == ()
+    assert sweep.snapshot_metadata()["recovery_mode"] == "manual_review"

@@ -2,6 +2,14 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.144.5] — 2026-11-05 — Start the ownership workflow worker
+
+### Fixed
+
+- New ownership Jobs use the conservative manual-review recovery mode until a
+  reviewed database recovery authority is added. This keeps worker startup
+  migration-free and prevents unregistered replay policy from stopping Jobs.
+
 ## [0.144.4] — 2026-11-05 — Separate Computer ownership reconciliation
 
 ### Fixed
