@@ -17,3 +17,4 @@ def test_both_claim_paths_leave_active_scope_successors_queued():
     assert "GRANT EXECUTE ON FUNCTION operations.jobs_claim_next_v6" in sql
     assert "operations.jobs_claim_next_v7(BIGINT, UUID)" in sql
     assert "operations.jobs_claim_next_v6(BIGINT, UUID),\n    operations.jobs_claim_next_v7(BIGINT, UUID) TO ninja_ingest" in sql
+    assert "metabase_ro" not in sql

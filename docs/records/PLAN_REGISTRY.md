@@ -11,8 +11,8 @@
 - Source: docs/plans/PLAN-055-jobs-execution-scope-claim-race.md
 - Section: PLAN-055 — Jobs execution-scope claim race
 - Related plans: PLAN-045 introduced ownership successors and is complete; PLAN-054 owns source-write lock ordering. PLAN-049 has a conflicting planned migration 0404 and must follow PLAN-055's migration 0405 as 0406 or later.
-- Resume gate: User approved commit and deployment for release 0.144.9, including migration 0405. After the origin deployment, verify migration application and a successful claim of a queued successor after its active run completes. PLAN-049 must rebase and renumber its migration first.
-- Last checked: 2026-11-05 (confirmed both claim functions selected queued successors without excluding a same-scope active run; migration 0405 adds that eligibility guard while preserving both unique indexes.)
+- Resume gate: Release 0.144.9 exposed a stale `metabase_ro` role reference in migration 0405; 0.144.10 removes it. Push the correction, then verify migration application, Operations health, and successor claim behavior. PLAN-049 must rebase and renumber its migration first.
+- Last checked: 2026-11-05 (production restart logs confirm migration 0405 stopped on missing role `metabase_ro`; operations service is restarting while retrying.)
 
 ## PLAN-054 — Source collection deadlock repair
 

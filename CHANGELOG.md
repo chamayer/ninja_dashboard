@@ -2,6 +2,14 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.144.10] — 2026-11-05 — Apply Jobs claim migration on production roles
+
+### Fixed
+
+- Removed the obsolete `metabase_ro` role from migration 0405's privilege
+  revocation list so Operations startup can apply the claim guard on the
+  current production role set.
+
 ## [0.144.9] — 2026-11-05 — Prevent duplicate Jobs execution claims
 
 ### Fixed

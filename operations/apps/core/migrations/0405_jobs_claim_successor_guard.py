@@ -219,7 +219,7 @@ ALTER FUNCTION operations.jobs_claim_next_v6(BIGINT, UUID) OWNER TO operations_m
 ALTER FUNCTION operations.jobs_claim_next_v7(BIGINT, UUID) OWNER TO operations_migrate;
 REVOKE ALL ON FUNCTION operations.jobs_claim_next_v6(BIGINT, UUID),
     operations.jobs_claim_next_v7(BIGINT, UUID)
-FROM PUBLIC, operations_app, ninja_ingest, operations_readonly, metabase_ro;
+FROM PUBLIC, operations_app, ninja_ingest, operations_readonly;
 GRANT EXECUTE ON FUNCTION operations.jobs_claim_next_v6(BIGINT, UUID),
     operations.jobs_claim_next_v7(BIGINT, UUID) TO ninja_ingest;
 """

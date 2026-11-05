@@ -50,9 +50,9 @@ merged. No production data changes are expected.
 
 ## Validation and checkpoint
 
-The migration and contract test are implemented locally for release 0.144.9. Python compilation,
-plan registry validation, and targeted whitespace/predicate checks pass. The
-focused pytest could not run because pytest is not installed; no local
-PostgreSQL service or `psql` is available to apply and exercise the SQL. No
-production database test or mutation was performed. User authorized commit and
-push; next validate the deployed migration and claim behavior.
+Release 0.144.9 reached production, but 0405 could not apply because the
+production database no longer has role `metabase_ro`; Operations is restarting
+while startup retries. A correction is prepared in 0.144.10 by removing the
+obsolete role from the migration's REVOKE list. The focused pytest passes after
+the contract assertion correction. Next push 0.144.10, then verify migration
+application, Operations health, and the claim behavior.
