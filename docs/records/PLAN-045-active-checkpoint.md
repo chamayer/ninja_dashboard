@@ -31,17 +31,26 @@ queue framework, or database migration.
 
 Production after 0.144.6 showed the split workflow succeeds, but projecting a
 set of dirty Computers in one transaction can hold the exclusive findings
-guard for minutes. Select bounded candidate IDs outside the guard and project
-each Computer in its own guarded transaction. Apply this to dirty drains and
-the low-priority full sweep. A failure leaves remaining rows dirty for the next
-run; already committed Computers remain complete. Keep per-Computer lock order
-and transactional reassessment unchanged.
+guard for minutes. Project each Computer in its own guarded transaction so
+other writers can proceed between Computers. A failure leaves remaining rows
+dirty for the next run; each Computer's ownership and dependent rows remain
+atomic.
 
-Affected files: `ingest/identity/computer_client_ownership.py`, its focused
-tests, `VERSION`, `CHANGELOG.md`, this checkpoint, and the PLAN-045 registry
-entry. No SQL migration is expected. Validate focused reconciliation tests,
-registry validation, syntax, Ruff, and `git diff --check`; then verify live
-guard waits and dirty age after the authorized release.
+After 0.144.7 deployed, production exposed another long guard holder:
+`platform-health-evaluate` performs one `admin_findings` scan per unmet Jobs
+dependency. Read-only inspection found 330 unmet dependencies, 5,718 stored
+dependency rows, and three waiting exclusive-guard writers while that evaluator
+held the guard for about 2.5 minutes. Load active Jobs failure findings once
+and resolve dependency parents from that in-memory set. Preserve the current
+priority (timeout, repeated failure, then schedule failure) and latest-finding
+selection. Do not alter the shared guard contract.
+
+Affected files: `ingest/identity/computer_client_ownership.py`,
+`ingest/platform_findings.py`, focused tests, `VERSION`, `CHANGELOG.md`, this
+checkpoint, and the PLAN-045 registry entry. No SQL migration is expected.
+Validate focused ownership and platform-finding tests, registry validation,
+syntax, Ruff, and `git diff --check`; then verify live guard waits and dirty age
+after the authorized release.
 
 ## Prior validation and current next action
 
@@ -66,5 +75,6 @@ correction. Version 0.144.6 is deployed. Production confirmed a ScreenConnect
 source run's ownership child depended only on source refresh, completed with 21
 resolved while the resolver was still running, left 0 dirty rows (0 older than
 30 minutes), and logged no deadlocks in the worker's preceding 30 minutes.
-Current next action: bound tenant-guard duration per Computer, then commit,
-push to both remotes, and verify production latency and recovery.
+Version 0.144.7 is deployed; the Jobs worker and ingest recovered healthy after
+the automatic rollout. Current next action: validate the bulk lookup, release
+0.144.8, then verify production guard waits and source recovery.

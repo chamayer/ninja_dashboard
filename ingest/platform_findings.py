@@ -1144,10 +1144,13 @@ def _eval_jobs_unmet_dependencies(
     dry_run: bool,
     keys: list[str],
 ) -> None:
+    parents_by_run, parents_by_job = _active_jobs_dependency_parents(cur)
     for row in rows:
         dependency_id = str(row["dependency_id"])
         key = f"jobs_unmet_dependency:{dependency_id}"
-        parent = _active_jobs_dependency_parent(cur, row)
+        parent = _active_jobs_dependency_parent(
+            row, parents_by_run=parents_by_run, parents_by_job=parents_by_job
+        )
         if parent is not None:
             if not dry_run:
                 cur.execute(
@@ -1182,17 +1185,14 @@ def _eval_jobs_unmet_dependencies(
         )
 
 
-def _active_jobs_dependency_parent(
-    cur: Any, dependency: dict[str, Any]
-) -> tuple[str, str] | None:
-    """Return an active finding for the exact prerequisite run or its job."""
-    prerequisite_run_id = str(dependency.get("prerequisite_job_run_id") or "")
-    prerequisite_job_key = str(dependency.get("prerequisite_job_key") or "")
-    if not prerequisite_run_id and not prerequisite_job_key:
-        return None
+def _active_jobs_dependency_parents(
+    cur: Any,
+) -> tuple[dict[str, tuple[str, str]], dict[str, tuple[str, str]]]:
+    """Load active Jobs failure findings once for dependency-parent matching."""
     cur.execute(
         """
-        SELECT finding.condition_key, finding_type.name
+        SELECT finding.condition_key, finding_type.name,
+               finding.details->>'job_run_id', finding.details->>'job_key'
           FROM operations.admin_findings finding
           JOIN operations.finding_types finding_type
             ON finding_type.id = finding.finding_type_id
@@ -1201,22 +1201,35 @@ def _active_jobs_dependency_parent(
            AND finding_type.name IN (
                'jobs_timeout', 'jobs_repeated_failure', 'jobs_schedule_failure'
            )
-           AND (
-               (finding_type.name = 'jobs_timeout'
-                AND finding.details->>'job_run_id' = %s)
-               OR (finding_type.name IN ('jobs_repeated_failure', 'jobs_schedule_failure')
-                   AND finding.details->>'job_key' = %s)
-           )
          ORDER BY CASE finding_type.name
                     WHEN 'jobs_timeout' THEN 0
                     WHEN 'jobs_repeated_failure' THEN 1
                     ELSE 2
                   END, finding.last_detected_at DESC
-         LIMIT 1
         """,
-        (TENANT_ID, prerequisite_run_id, prerequisite_job_key),
+        (TENANT_ID,),
     )
-    return cur.fetchone()
+    by_run: dict[str, tuple[str, str]] = {}
+    by_job: dict[str, tuple[str, str]] = {}
+    for condition_key, finding_type, job_run_id, job_key in cur.fetchall():
+        parent = (condition_key, finding_type)
+        if finding_type == "jobs_timeout" and job_run_id:
+            by_run.setdefault(job_run_id, parent)
+        elif finding_type in ("jobs_repeated_failure", "jobs_schedule_failure") and job_key:
+            by_job.setdefault(job_key, parent)
+    return by_run, by_job
+
+
+def _active_jobs_dependency_parent(
+    dependency: dict[str, Any],
+    *,
+    parents_by_run: dict[str, tuple[str, str]],
+    parents_by_job: dict[str, tuple[str, str]],
+) -> tuple[str, str] | None:
+    """Return the highest-priority active finding for this prerequisite."""
+    prerequisite_run_id = str(dependency.get("prerequisite_job_run_id") or "")
+    prerequisite_job_key = str(dependency.get("prerequisite_job_key") or "")
+    return parents_by_run.get(prerequisite_run_id) or parents_by_job.get(prerequisite_job_key)
 
 
 def _eval_jobs_registry_mismatch(

@@ -2,6 +2,15 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.144.8] — 2026-11-05 — Reduce platform health guard time
+
+### Fixed
+
+- Platform health now loads active Jobs failure findings once and matches
+  unmet dependencies in memory, instead of scanning findings once per
+  dependency. This reduces time holding the tenant findings guard. No database
+  migration.
+
 ## [0.144.7] — 2026-11-05 — Bound ownership projection transactions
 
 ### Fixed

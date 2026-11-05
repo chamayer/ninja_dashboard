@@ -135,7 +135,7 @@
 
 ## PLAN-045 — Source-derived Computer client
 
-- Scope: Reconcile Computer client ownership in a coalesced dirty-only Jobs workflow after source and identity updates, with a separate daily full sweep for anti-entropy; retain human decisions and explicit unresolved states. Bound tenant-guard hold time to one Computer projection transaction.
+- Scope: Reconcile Computer client ownership in a coalesced dirty-only Jobs workflow after source and identity updates, with a separate daily full sweep for anti-entropy; retain human decisions and explicit unresolved states. Bound ownership projection to one Computer per guard transaction and remove the observed Jobs-dependency N+1 scan that holds the same guard.
 - Status: active
 - Defined: 2026-11-02
 - Started: 2026-11-02
@@ -145,7 +145,7 @@
 - Section: PLAN-045 — Source-derived Computer client
 - Related plans: PLAN-004 owns source associations and identity; PLAN-015 owns separately approved identity repairs; PLAN-036 supplies record-first evaluation. PLAN-054 repairs source-write lock ordering; PLAN-045 now bounds projector transactions without changing that guard contract. This plan changes client ownership projection, not duplicate merges.
 - Resume gate: User authorized committing and pushing changes until this goal is achieved. Automatic deployment through origin is included; verify the reviewed release has no pending migrations.
-- Last checked: 2026-11-05 (0.144.6 deployed; ScreenConnect ownership successor depended only on source refresh, completed with 21 resolved while resolver remained active; 0 dirty rows, none older than 30 minutes, and no worker deadlocks in the preceding 30 minutes. Current implementation bounds tenant-guard hold time to one Computer per transaction; production verification remains pending).
+- Last checked: 2026-11-05 (0.144.7 deployed; ownership projection now commits one Computer per transaction. Production then showed platform-health-evaluate holding the same guard for about 2.5 minutes while checking 330 unmet dependencies via repeated admin_findings queries, with three guard waiters. Remove the repeated lookup before declaring write latency recovered).
 
 ## PLAN-043 — Useful issue review
 

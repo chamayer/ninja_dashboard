@@ -22,8 +22,8 @@ validation results, or completed-plan summaries here.
 - **PLAN-054 — active.** Verify production stability after the 0.144.3 deadlock
   repair; see the [handoff](docs/plans/PLAN-054-source-collection-deadlock.md).
 
-- **PLAN-045 — active.** Bound tenant-guard hold time to one Computer
-  ownership projection per transaction; see the [checkpoint](docs/records/PLAN-045-active-checkpoint.md).
+- **PLAN-045 — active.** Bound ownership projection and Jobs health-evaluation
+  guard time; see the [checkpoint](docs/records/PLAN-045-active-checkpoint.md).
 
 - **PLAN-041 — active.** Release bounded matcher lookups and measure a complete
   optimized run. DMARC fixes are verified. See the
