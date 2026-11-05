@@ -136,16 +136,16 @@
 ## PLAN-045 — Source-derived Computer client
 
 - Scope: Reconcile Computer client ownership in a coalesced dirty-only Jobs workflow after source and identity updates, with a separate daily full sweep for anti-entropy; retain human decisions and explicit unresolved states. Bound ownership projection to one Computer per guard transaction and remove the observed Jobs-dependency N+1 scan that holds the same guard.
-- Status: active
+- Status: completed
 - Defined: 2026-11-02
 - Started: 2026-11-02
-- Completed: —
+- Completed: 2026-11-05
 - Blueprint: docs/records/PLAN-045-active-checkpoint.md
 - Source: docs/plans/PLAN-045-source-derived-computer-client.md
 - Section: PLAN-045 — Source-derived Computer client
 - Related plans: PLAN-004 owns source associations and identity; PLAN-015 owns separately approved identity repairs; PLAN-036 supplies record-first evaluation. PLAN-054 repairs source-write lock ordering; PLAN-045 now bounds projector transactions without changing that guard contract. This plan changes client ownership projection, not duplicate merges.
-- Resume gate: User authorized committing and pushing changes until this goal is achieved. Automatic deployment through origin is included; verify the reviewed release has no pending migrations.
-- Last checked: 2026-11-05 (0.144.7 deployed; ownership projection now commits one Computer per transaction. Production then showed platform-health-evaluate holding the same guard for about 2.5 minutes while checking 330 unmet dependencies via repeated admin_findings queries, with three guard waiters. Remove the repeated lookup before declaring write latency recovered).
+- Resume gate: —
+- Last checked: 2026-11-05 (0.144.8 `60ddb296` deployed to origin and mirror; SentinelOne collected 4,487 source observations, its ownership successor completed without waiting for the resolver, dirty rows returned to 0, platform health completed in 17 seconds versus 6 minutes 23 seconds on 0.144.7, and no deadlocks were logged in the preceding 15 minutes. A one-time Jobs claim unique-key violation restarted the worker; it recovered healthy and the queue follow-up is recorded in TODO.md).
 
 ## PLAN-043 — Useful issue review
 
