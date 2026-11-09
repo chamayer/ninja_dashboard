@@ -32,6 +32,16 @@ def home_summary(*, now: datetime | None = None, policy: dict[str, int] | None =
     policy = policy if policy is not None else get_device_status_policy(1)
     with transaction.atomic(), connection.cursor() as cursor:
         cursor.execute("SET LOCAL operations.tenant_id = 1")
+        # Operations and ingest start independently. During deployment the old
+        # fact query remains available until ingest applies its migration.
+        cursor.execute("SELECT to_regclass('ninja_patches.patch_outcome_counts') IS NOT NULL")
+        has_outcome_counts = cursor.fetchone()[0]
+        outcome_source = (
+            "ninja_patches.patch_outcome_counts" if has_outcome_counts
+            else "ninja_patches.patch_facts"
+        )
+        outcome_count = "fact.outcome_count" if has_outcome_counts else "1"
+        outcome_filter = "" if has_outcome_counts else "AND fact.fact_type = 'install_outcome'"
         cursor.execute(
             f"""
             WITH current_computers AS (
@@ -73,13 +83,12 @@ def home_summary(*, now: datetime | None = None, policy: dict[str, int] | None =
                  WHERE computer.has_owner AND computer.effective_patching_scope = 'Included'
                    AND link.ninja_device_id IS NOT NULL
             ), outcomes AS (
-                SELECT COUNT(*) FILTER (WHERE lower(fact.status) = 'installed')::int AS installed,
-                       COUNT(*) FILTER (WHERE lower(fact.status) = 'failed')::int AS failed,
+                SELECT COALESCE(SUM({outcome_count}) FILTER (WHERE lower(fact.status) = 'installed'), 0)::bigint AS installed,
+                       COALESCE(SUM({outcome_count}) FILTER (WHERE lower(fact.status) = 'failed'), 0)::bigint AS failed,
                        MAX(fact.installed_at) AS latest
                   FROM included_ninja_devices device
-                  JOIN ninja_patches.patch_facts fact ON fact.device_id = device.ninja_device_id
-                 WHERE fact.fact_type = 'install_outcome'
-                   AND fact.installed_at >= %s
+                  JOIN {outcome_source} fact ON fact.device_id = device.ninja_device_id
+                 WHERE fact.installed_at >= %s {outcome_filter}
             )
             SELECT COUNT(*)::int AS current_total,
                    COUNT(*) FILTER (WHERE has_owner AND effective_patching_scope = 'Included')::int AS included,

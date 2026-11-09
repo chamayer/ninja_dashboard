@@ -163,7 +163,7 @@
 
 ## PLAN-044 — Navigation and Computers performance
 
-- Scope: Achieve ordinary Home response time ≤1.5 seconds (2.0-second hard maximum), preserving the agreed domain-owned Operations overview, supported trends of 30 days or less, current Coverage totals without a separate Home trend, and detailed client portfolio on Clients. User authorized additive migration 0406 for a tenant-checked bulk source-attribution function and focused tests on 2026-11-09; no table/data-model changes.
+- Scope: Achieve ordinary Home response time ≤1.5 seconds (2.0-second hard maximum), preserving the agreed domain-owned Operations overview, supported trends of 30 days or less, current Coverage totals without a separate Home trend, and detailed client portfolio on Clients. User authorized the Patching outcome summary and migration 0406 for tenant-checked bulk source attribution.
 - Status: active
 - Defined: 2026-11-02
 - Started: 2026-11-02
@@ -172,8 +172,8 @@
 - Source: operations/docs/plans/PLAN-044-page-performance.md
 - Section: PLAN-044 — Navigation and Computers performance
 - Related plans: PLAN-042 supplies prior performance evidence; PLAN-012 retains Computer semantics and verification; PLAN-043 independently owns issue review in views.py. PLAN-019 source-record history is complete. PLAN-003/004 contracts remain unchanged. PLAN-049 follows this plan's migration 0406 and must use 0407 or later.
-- Resume gate: Home implementation is in progress under the reviewed plan. Keep recorded client-impact counts and existing domain KPIs; no additional schema is proposed. Commit and push require separate approvals; an origin push approval must include automatic deployment and any reviewed pending migrations.
-- Last checked: 2026-11-09 (`e9439cc5` was the reviewed baseline and both local remote-tracking tips; production migration 0406 was confirmed applied. Whole-Home feeder review found independent Issues, Patching, and Software statement timeouts at 3 seconds, Inventory at 1.33 seconds, and a confirmed cold navigation SQL alias error. The implementation and focused synthetic PostgreSQL checks are recorded in the Operations blueprint; the user requested no further testing, the old test fixture remains outdated, and full-request latency remains unmeasured. PLAN-049 remains separate at 0407+).
+- Resume gate: User authorized the Patching summary implementation; preserve exact KPI and rolling-window semantics. Commit and push require separate approvals; an origin push approval must include automatic deployment and reviewed pending migrations.
+- Last checked: 2026-11-09 (`60ba6e45` is on both remotes; production Home returned 200 in 14.440 seconds. Patching outcome summary is implemented locally with SQL migration 119; synthetic parity passed. Production migration cost and speedup remain unmeasured. PLAN-049 remains separate at 0407+).
 
 ## PLAN-043 — Useful issue review
 

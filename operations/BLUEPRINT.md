@@ -14,31 +14,19 @@ Clients portfolio boundary.
 finding publication, Patching, Software, and Inventory owner readers. Exact
 files, ordered steps, decisions, and acceptance checks are in the
 [current implementation plan](docs/plans/PLAN-044-page-performance.md#home-implementation-plan--2026-11-09-review).
-**Checkpoint:** `e9439cc5` is the confirmed baseline; migration 0406 is
-applied. Source assessment refreshes recorded client IDs, including retained
-unknown findings; mapping changes enqueue reassessment, so IDs can lag. Home
-Issues uses recorded IDs and reuses its open count for navigation. Shared
-source-group attention rows and critical totals match their filtered Issues scopes
-while the overall action total remains deduplicated. Patching
-counts all current Computers and narrows owned activity/outcomes. Inventory uses
-an existence check for history. Software groups publisher counts before selecting
-a title's modal publisher; its label no longer claims unproven approvals. No new
-schema is proposed. PLAN-049 must use migration 0407 or later.
-**Validation:** 55 existing source-record/Home/navigation tests and Django check
-pass. Synthetic PostgreSQL checks cover Issues selection parity, attribution,
-Patching activity/outcomes, Inventory history, Software title/publisher/risk
-parity, publication status/snooze, covered representatives, Home/drilldown and
-differing-severity counts,
-RLS, and client-scoped source evidence. A real Home template/context smoke check confirms navigation
-reuse and card labels; cold fallback and both batch-helper
-PostgreSQL checks pass. No latency improvement has been measured. The old Issues fixture lacks issue_category; an
-existing Home attribution assertion expects the superseded batch query and fails.
-The user requested no further testing. Runtime files are included by Docker.
-Whole-file formatting/lint checks report existing violations outside this change.
-**Next:** Review the implementation and remaining gates in the
-[acceptance evidence](docs/plans/PLAN-044-page-performance.md#acceptance-evidence-and-remaining-gates).
-Respect the request to stop further testing. Full-request timing, commit, and
-deployment require the applicable authorization.
+**Checkpoint:** `60ba6e45` is on both remotes. An authenticated Home request
+took 14.440 seconds; Patching's query took 6.814 seconds. The detailed
+[plan](docs/plans/PLAN-044-page-performance.md#acceptance-evidence-and-remaining-gates)
+records earlier evidence and limitations. The user authorized implementing the
+Patching summary only. Preserve current ownership, scope and exact rolling
+30-day semantics; make summary updates reflect committed patch facts.
+SQL migration 119 and the Home reader now maintain and use exact-timestamp
+outcome counts. Synthetic PostgreSQL mutation parity, Python compilation,
+registry validation and whitespace checks passed. Production speedup, storage,
+write overhead, and migration-lock duration are unmeasured; startup fallback
+handles independent service ordering. Details and deployment risks are in the plan.
+**Next:** Commit the reviewed change as authorized, then obtain push approval
+explicitly covering migration 119 and automatic deployment.
 
 ## PLAN-015 — Identity reconciliation
 

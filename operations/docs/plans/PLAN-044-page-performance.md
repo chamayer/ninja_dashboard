@@ -1,6 +1,34 @@
 # PLAN-044 — Navigation and Computers performance
 
-Status: active. The current Home implementation plan below supersedes older next-action and authorization notes. The user authorized implementation of this reviewed plan; work is in progress. Home target: ≤1.5 seconds, with an ordinary response under 2 seconds required. Migration 0406 is already applied; no additional schema is proposed. Commit and push approvals remain separate; an origin push approval must include automatic deployment and any reviewed pending migrations.
+Status: active. The Patching outcome summary below supersedes the earlier no-schema restriction for that change. Home target: ≤1.5 seconds, with an ordinary response under 2 seconds required. Migration 0406 is already applied. Commit and push approvals remain separate; an origin push approval must include automatic deployment and reviewed pending migrations.
+
+## Patching outcome summary — 2026-11-09
+
+The user authorized implementing the Patching summary after the live query took
+6.814 seconds. This supersedes the no-additional-schema restriction for this
+Patching change only. SQL migration `119_patch_outcome_counts` builds counts by
+device, exact outcome timestamp, and status, then maintains them transactionally
+from patch-fact changes. Home retains its existing ownership and scope logic and
+uses the same exact rolling cutoff. The reader falls back to patch facts while
+the independently started ingest service has not yet applied the migration.
+
+The initial migration locks patch-fact writes while it scans and populates the
+summary; its production duration, storage, write overhead, concurrency behavior,
+and actual speedup are unmeasured. Review those deployment risks and the pending
+migration before seeking push approval. The timestamp-level grouping may not
+reduce every workload sufficiently. This change addresses only Patching; the
+other measured slow Home readers remain. Existing refresh and ingestion state is
+not a guarantee of external source freshness.
+
+Read-only production preflight: 11,047 recent outcome rows form 6,560 summary
+groups. This establishes some reduction for the 30-day population, not query
+speed or total table size. The ingest ledger is current through 118 and Django
+reports no pending migrations; SQL 119 is the pending change in this release.
+
+Validation: a small throwaway PostgreSQL database applied the migration and
+confirmed summary parity after inserts, status/type/timestamp updates, and
+deletion. Python compilation, plan-registry validation, and diff whitespace
+checks passed. No production change or performance measurement was performed.
 
 ## Home implementation plan — 2026-11-09 review
 
@@ -180,6 +208,26 @@ PostgreSQL check also confirms that a covered selected representative stays
 excluded instead of exposing its uncovered sibling.
 
 ### Acceptance evidence and remaining gates
+
+2026-11-09 production measurement: the deployed Issues, Patching, Software,
+and Home view files match `60ba6e45`. A staff/superuser authenticated Home GET
+returned HTTP 200 in 14.440 seconds (navigation cache state unknown), missing
+the target. Separate read-only reader samples measured Inventory at 2.635 s,
+Issues at 3.845 s, and Software at 3.345 s; Patching hit a five-second SQL
+statement timeout after 5.015 s. These independent samples are not a breakdown
+of the measured request. The full request was measured on the internal service
+endpoint and does not include browser or external network time.
+
+Follow-up bounded read-only production measurements: Inventory's two queries
+were 0.806 and 0.833 s; Issues' main query was 2.675 s; Patching was 6.814 s;
+Software was 2.634 s. Separate `EXPLAIN ANALYZE` executions measured Patching
+at 6.395 s with a patch-facts bitmap scan repeated 2,783 times; Issues at
+2.870 s with temporary reads/writes during aggregation; Software at 2.714 s
+with temporary reads/writes and large grouped/sorted installation inputs;
+Inventory's current and history queries at 0.508 and 0.626 s with substantial
+shared block reads, including a history sequential scan. These are individual
+samples under live load; execution-plan node times are inclusive and cannot be
+added. No application code was changed.
 
 | Requirement | Current evidence | Remaining |
 | --- | --- | --- |
