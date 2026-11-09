@@ -54,8 +54,12 @@ seconds on its severe-Issue column.
 ## Dependencies
 
 Migration 0404 depends on PLAN-045's 0403 (in the local WIP commit
-`2af7fb1b`); rebase if PLAN-045 renumbers. PLAN-050 (database memory) affects
-all cold-read timings.
+`2af7fb1b`); rebase if PLAN-045 renumbers. PLAN-055 occupies 0405 and PLAN-044
+now owns 0406 for the Home source-attribution helper. Rebase this branch after
+PLAN-044 and renumber the index migration to 0407 or later. The old worktree
+`.work/plan049` is absent; resume from commit `4cb502e0` on branch
+`plan049-active-findings-index`. PLAN-050 (database memory) affects all
+cold-read timings.
 
 ## Related
 

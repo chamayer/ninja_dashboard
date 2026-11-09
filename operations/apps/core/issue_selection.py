@@ -164,17 +164,25 @@ def _items_sql(
         else ""
     )
     source_record_cte = (
-        "WITH source_record_clients AS MATERIALIZED ("
-        "SELECT subject.tenant_id, subject.id, "
-        "operations.computer_client_independent_evidence("
-        "subject.tenant_id, subject.observation_id) AS client_id "
+        "WITH eligible_subjects AS MATERIALIZED ("
+        "SELECT DISTINCT subject.tenant_id, subject.id, subject.observation_id "
         "FROM (SELECT DISTINCT f.tenant_id, f.subject_id "
         "FROM operations.findings f "
         "JOIN operations.finding_types t ON t.id = f.finding_type_id "
         "WHERE f.tenant_id = %(tenant)s AND f.subject_type = 'source_record' AND "
         + " AND ".join(finding_where)
         + ") eligible JOIN operations.source_record_subjects subject "
-        "ON subject.tenant_id = eligible.tenant_id AND subject.id = eligible.subject_id)"
+        "ON subject.tenant_id = eligible.tenant_id AND subject.id = eligible.subject_id), "
+        "source_record_observations AS MATERIALIZED ("
+        "SELECT DISTINCT observation_id FROM eligible_subjects WHERE observation_id IS NOT NULL), "
+        "source_record_attribution AS MATERIALIZED ("
+        "SELECT * FROM operations.computer_client_independent_evidence_batch("
+        "%(tenant)s, ARRAY(SELECT observations.observation_id "
+        "FROM source_record_observations observations))), "
+        "source_record_clients AS MATERIALIZED ("
+        "SELECT subject.tenant_id, subject.id, attribution.client_id "
+        "FROM eligible_subjects subject LEFT JOIN source_record_attribution attribution "
+        "ON attribution.observation_id = subject.observation_id)"
         if home_compact
         else ""
     )

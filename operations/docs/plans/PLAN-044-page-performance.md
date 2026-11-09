@@ -1,6 +1,6 @@
 # PLAN-044 — Navigation and Computers performance
 
-Status: active. On 2026-11-09 the user authorized autonomous performance work, validation, commit, and push as needed. Home target: 1.5 seconds or less; hard maximum: 2.0 seconds. Preserve the agreed Home design and existing domain-owned summaries. No schema changes or local performance measurements.
+Status: active. On 2026-11-09 the user authorized autonomous performance work, validation, commit, and push as needed. Home target: 1.5 seconds or less; hard maximum: 2.0 seconds. Preserve the agreed Home design and existing domain-owned summaries. The user also authorized an additive tenant-checked bulk attribution function via migration and focused tests; production deployment approval remains separate. No table or data-model changes.
 
 ## Home requirements and domain-data inventory (2026-11-05)
 
@@ -465,3 +465,41 @@ The production request, diagnostics and cancellation ran under the recorded
 authorization. Next: validate and release this focused change, then retry one
 bounded Home request; cancel only its own active statement if the five-second
 cap expires.
+
+2026-11-09 follow-up release: `599dc916` is on `origin/master` and
+`a-m-rose/master`; origin deployment started automatically. Operations is
+healthy and serves the new source-record CTE. The authenticated Home request
+still exceeded five seconds, and its matching statement was canceled. EXPLAIN
+estimated total cost fell from 566,147 to 121,907; this remains estimate-only
+and does not satisfy the latency target. A read-only count found 13,327 active
+source-record findings across 5,071 records, all uncovered. The runtime role
+cannot read `entity_observation_current` directly, so further set-based
+attribution would need a separately reviewed security-definer/database design.
+No migration is pending from this change. **Next:** inspect remaining query
+costs within the no-schema scope before authorizing another production change;
+the ≤1.5-second goal remains unverified and unmet.
+
+2026-11-09 bottleneck check: a production sample of 40 distinct active source
+records called `computer_client_independent_evidence` 40 times in 0.538 seconds;
+38 results had a client. The active population contains 5,071 distinct source
+records, so the current per-record path is the remaining performance blocker.
+The app role cannot read the protected observation tables directly; preserving
+the evidence rules while batching requires a tenant-checked security-definer
+database function and migration. The user authorized this additive function and
+focused tests on 2026-11-09; production push/deployment authorization remains
+separate. PLAN-049's old migration 0406 must move to 0407 or later because this
+plan now owns 0406 after PLAN-055's 0405.
+
+2026-11-09 implementation: migration 0406 adds a tenant-checked
+security-definer batch function. It resolves current source observations and
+group identities in sets, deduplicates complete identities before link proof,
+and retains the scalar function for other callers. Home passes its distinct
+observation IDs to the batch function. Focused PostgreSQL tests cover direct
+instance clients, operator and automatic mapping evidence, stale/unproved or
+ambiguous mappings, duplicate input, tenant guard and grants; all three pass.
+The existing Issues suite also has one unrelated source-text assertion failure
+against unchanged `views.py`. Django checks pass; migration parity reports no
+model changes. No production push has been approved for migration 0406.
+**Next:** finish diff and migration-set review, commit the local change, then
+request explicit approval for an origin push including migration 0406 and its
+automatic Portainer deployment. After approval, measure one bounded Home GET.

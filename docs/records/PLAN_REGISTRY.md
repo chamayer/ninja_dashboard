@@ -98,9 +98,9 @@
 - Blueprint: docs/plans/PLAN-049-active-findings-index.md
 - Source: docs/plans/PLAN-049-active-findings-index.md
 - Section: PLAN-049 — Index active findings by subject
-- Related plans: Found by PLAN-012's follow-up review. PLAN-042/PLAN-044 own the Coverage-view (/inventory/computers/) performance, not /devices/. PLAN-055 claims migration 0405; this plan must rebase and renumber its migration to 0406 or later. PLAN-019 F05 owns closed-finding retention.
-- Resume gate: Implemented, validated locally and committed on branch plan049-active-findings-index (4cb502e0, worktree .work/plan049); not merged. Next: rebase after PLAN-055's migration 0405, renumber this migration to 0406 or later, then release with approval of the pending migrations and a read-only post-deploy plan check.
-- Last checked: 2026-11-03 (devices_page severe-findings subquery 2.3 s reading all 29,557 active severe findings; Operations suite failures identical to the branch base).
+- Related plans: Found by PLAN-012's follow-up review. PLAN-042/PLAN-044 own the Coverage-view (/inventory/computers/) performance, not /devices/. PLAN-055 claims migration 0405; PLAN-044 now owns 0406 for its authorized bulk attribution function, so PLAN-049 must rebase and use 0407 or later. PLAN-019 F05 owns closed-finding retention.
+- Resume gate: Implemented, validated locally and committed on branch plan049-active-findings-index (4cb502e0); worktree is absent. Rebase after PLAN-044's migration 0406, renumber this migration to 0407 or later, then release with approval of the pending migrations and a read-only post-deploy plan check.
+- Last checked: 2026-11-09 (branch still contains migration 0404 at 4cb502e0; 0405 is now on master; PLAN-044 has assigned migration 0406. Its rebase and renumber remain pending).
 
 
 ## PLAN-048 — Source records report typed facts, not JSON parsed on read
@@ -163,7 +163,7 @@
 
 ## PLAN-044 — Navigation and Computers performance
 
-- Scope: Achieve ordinary Home response time ≤1.5 seconds (2.0-second hard maximum), preserving the agreed domain-owned Operations overview, supported trends of 30 days or less, current Coverage totals without a separate Home trend, and detailed client portfolio on Clients.
+- Scope: Achieve ordinary Home response time ≤1.5 seconds (2.0-second hard maximum), preserving the agreed domain-owned Operations overview, supported trends of 30 days or less, current Coverage totals without a separate Home trend, and detailed client portfolio on Clients. User authorized additive migration 0406 for a tenant-checked bulk source-attribution function and focused tests on 2026-11-09; no table/data-model changes.
 - Status: active
 - Defined: 2026-11-02
 - Started: 2026-11-02
@@ -171,9 +171,9 @@
 - Blueprint: operations/BLUEPRINT.md
 - Source: operations/docs/plans/PLAN-044-page-performance.md
 - Section: PLAN-044 — Navigation and Computers performance
-- Related plans: PLAN-042 supplies prior performance evidence; PLAN-012 retains Computer semantics and verification; PLAN-043 independently owns issue review in views.py. PLAN-019 source-record history is now complete and available. PLAN-003/004 contracts remain unchanged.
-- Resume gate: User authorized autonomous measurement, focused fixes, validation, commit/push, and then explicitly authorized live-production measurement on 2026-11-09. Keep measurements bounded to ordinary read-only page requests and diagnostics; preserve the approved Home design and no-schema approach. Review automatic deployment effects and the pending migration set before an `origin` push.
-- Last checked: 2026-11-09 (`9fab308d` deployed; Operations healthy, no migrations pending. Bounded authenticated Home request exceeded 5 seconds and its query was canceled. EXPLAIN estimates 63,144 selected rows; 13,327 active source-record findings span 5,071 subjects. Home-only attribution deduplication is under development; pending commit and measurement. See detailed handoff).
+- Related plans: PLAN-042 supplies prior performance evidence; PLAN-012 retains Computer semantics and verification; PLAN-043 independently owns issue review in views.py. PLAN-019 source-record history is complete. PLAN-003/004 contracts remain unchanged. PLAN-049 follows this plan's migration 0406 and must use 0407 or later.
+- Resume gate: User authorized autonomous performance work, additive migration 0406, and focused tests on 2026-11-09. Production commit/push/deployment still requires separate approval that includes pending migrations. Preserve the approved Home design and tenant evidence rules.
+- Last checked: 2026-11-09 (`599dc916` deployed to origin and mirror; Operations healthy. Home exceeded 5 seconds and its query was canceled. EXPLAIN estimated cost fell 566,147→121,907. The user authorized migration 0406 and focused tests; the batch function and Home wiring are implemented locally, and 3 PostgreSQL tests pass. Production push/deployment approval remains pending and must include 0406. PLAN-049 follows at 0407+). See detailed handoff.
 
 ## PLAN-043 — Useful issue review
 

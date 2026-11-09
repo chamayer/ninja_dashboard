@@ -10,18 +10,17 @@ That record is historical and must be verified against current files before reus
 **Goal:** Get ordinary Home response time to ≤1.5 seconds (2.0 seconds hard
 maximum), preserving the agreed domain-owned overview, supported trends,
 Coverage totals, and Clients portfolio boundary. No schema changes.
-**Checkpoint:** `9fab308d` is pushed to both remotes and deployed; startup
-reported no pending migrations and Operations is healthy. The bounded
-authenticated Home request still exceeded five seconds; its database statement
-was canceled. Read-only EXPLAIN estimates 63,144 selected rows. Active
-source-record findings repeat 5,071 records across 13,327 findings. The local
-Home-only follow-up computes source-record client attribution once per distinct
-eligible record; regular Issues selections are unchanged. Python compilation,
-plan-registry validation, and whitespace checks pass; local Ruff is unavailable.
-**Next:** complete review, commit/push this focused follow-up, then time one
-bounded ordinary Home request. See the
+**Checkpoint:** `599dc916` is on both remotes and deployed; Operations is
+healthy. A 40-record attribution sample took 0.538 seconds; 5,071 active source
+records require the same protected evidence lookup. The user authorized an
+additive tenant-checked bulk security-definer function and focused tests. PLAN-044
+owns migration 0406 after 0405; PLAN-049 must rebase its unmerged index to 0407
+or later. Migration 0406 and Home query wiring are implemented locally; the
+focused PostgreSQL tests pass. One unrelated stale source-text Issues assertion
+fails on unchanged `views.py`. **Next:** review and commit the local change, then
+request origin push approval including migration 0406 and automatic Portainer
+deployment. See the
 [handoff](docs/plans/PLAN-044-page-performance.md).
-See the [handoff](docs/plans/PLAN-044-page-performance.md).
 
 ## PLAN-015 — Identity reconciliation
 

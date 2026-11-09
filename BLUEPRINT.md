@@ -19,8 +19,8 @@ validation results, or completed-plan summaries here.
 
 ## Next action — active plan routing
 
-- PLAN-049's planned migration 0404 conflicts with the tracked 0404; rebase it
-  after PLAN-055's 0405 and renumber to 0406 or later.
+- PLAN-044 owns migration 0406; PLAN-049 must rebase its unmerged migration to
+  0407 or later.
 
 - **PLAN-054 — active.** Verify production stability after the 0.144.3 deadlock
   repair; see the [handoff](docs/plans/PLAN-054-source-collection-deadlock.md).
@@ -48,10 +48,8 @@ validation results, or completed-plan summaries here.
 - **PLAN-016 — active.** Next: implement the bounded, tenant-scoped,
   read-only explorer and focused tests. See the [plan](operations/docs/plans/PLAN-016-admin-sql-explorer.md)
   and [Operations checkpoint](operations/BLUEPRINT.md).
-- **PLAN-044 — active.** Release the source-record attribution deduplication,
-  then measure ordinary Home response time;
-  see the
-  [Operations checkpoint](operations/BLUEPRINT.md).
+- **PLAN-044 — active.** Request deployment approval for migration 0406 after
+  local review; see the [Operations checkpoint](operations/BLUEPRINT.md).
 
 Completed and ready plans remain in the registry; their details stay in their
 registered source documents. Update this index only when active status,
