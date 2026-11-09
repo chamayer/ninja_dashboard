@@ -15,16 +15,17 @@ reported no pending migrations and Operations is healthy. PLAN-043 issue review
 was already committed as `cab7e6f2`. The deployed authenticated Home request
 exceeded the five-second client wait and later returned 500: `mapping_query()`
 read an undefined `groups` name. The request's Issues aggregate remained active
-for about 98 seconds. Its production plan estimates 63,144 rows through the
-wide window step; Home was separately recomputing Issues selection for open,
-paused, mapping, and attention values. Current local fix restores the taxonomy
-variable and makes the Issues owner return Home totals and attention from one
-compact selection, preserving action deduplication, covered-item filtering,
-scope and priority semantics. The Inventory read remains split at 0.80 seconds
-versus 1.54 seconds with exact parity in the prior read-only snapshot. Python
-compilation and targeted Ruff checks pass; no tests were run. **Next:** review,
-commit and push this focused fix, then measure one bounded ordinary Home GET in
-production. Continue to ≤1.5 seconds, with 2.0 seconds as the hard maximum.
+for about 98 seconds. Production EXPLAIN estimated 63,144 rows through the
+window step; Home repeated the Issues selection for counts, mapping and
+attention. A combined compact read still timed out at five seconds and its
+window query ran for 108 seconds; that abandoned read was canceled. The current
+local revision removes global ranking from Home and deduplicates only the two
+documented shared-action types, preserving their admin-first representative
+and covered-item rules. The `mapping_query()` name is also fixed. Python
+compilation, targeted Ruff, registry and whitespace checks pass; no tests were
+run. **Next:** commit and push this revised owner query, then measure one
+bounded ordinary Home GET. See the
+[handoff](docs/plans/PLAN-044-page-performance.md).
 See the [handoff](docs/plans/PLAN-044-page-performance.md).
 
 ## PLAN-015 — Identity reconciliation

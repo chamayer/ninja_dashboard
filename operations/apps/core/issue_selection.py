@@ -363,14 +363,38 @@ def _filtered_sql(
             " AND owner.effective_client_id = i.client_id"
             " AND owner.state IN ('resolved', 'decision_protected')))"
         )
+    filtered_cte = "filtered AS MATERIALIZED" if home_compact else "filtered AS"
     sql = f"""
         WITH items AS ({items}),
-        filtered AS (
+        {filtered_cte} (
             SELECT i.*, {_SEVERITY_RANK_SQL} AS severity_rank{label_columns}
               FROM items i{label_joins}
              WHERE {" AND ".join(where)}
+        )
+    """
+    if home_compact:
+        params["shared_action_types"] = [
+            "unmatched_source_group",
+            "client_unattached_group",
+        ]
+        return sql + """
+        , shared_actions AS (
+            SELECT DISTINCT ON (action_key, status) *
+              FROM filtered
+             WHERE type_name = ANY(%(shared_action_types)s)
+             ORDER BY action_key, status,
+                      (namespace = 'admin') DESC, severity_rank, id
         ),
-        ranked AS (
+        selected AS (
+            SELECT * FROM filtered
+             WHERE type_name <> ALL(%(shared_action_types)s) AND NOT covered
+            UNION ALL
+            SELECT * FROM shared_actions WHERE NOT covered
+        )
+        """, params
+
+    sql += f"""
+        , ranked AS (
             SELECT filtered.*,
                    row_number() OVER (
                        PARTITION BY action_key, status
