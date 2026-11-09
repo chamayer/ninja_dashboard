@@ -13,6 +13,8 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from django.db import connection, transaction
+
 from shared import software_coverage, software_settings
 
 from .computer_reads import current_computer_sql
@@ -210,6 +212,89 @@ def rare_limit_preview(distribution: dict[int, int], limit: int, current: int) -
     return {
         "limit": limit, "total": total, "rare": rare, "non_approved": total - rare,
         "moves": abs(rare - rare_now),
+    }
+
+
+def home_summary() -> dict:
+    """Current installed-title approvals and title-linked risk count for Home."""
+    with transaction.atomic(), connection.cursor() as cursor:
+        cursor.execute("SET LOCAL operations.tenant_id = 1")
+        cursor.execute(
+            f"""
+            WITH current_titles AS (
+                SELECT sic.tenant_id, sic.canonical_name,
+                       mode() WITHIN GROUP (ORDER BY sic.publisher) AS publisher
+                  FROM operations.software_installations_current sic
+                  JOIN operations.devices d
+                    ON d.tenant_id = sic.tenant_id AND d.id = sic.device_id
+                 WHERE sic.tenant_id = 1
+                   AND sic.deleted_at IS NULL
+                   AND sic.stale_since IS NULL
+                   AND d.deleted_at IS NULL
+                   AND {current_computer_sql('d')}
+                 GROUP BY sic.tenant_id, sic.canonical_name
+            ), {TITLE_STATUS_CTES}, risk_titles AS (
+                SELECT DISTINCT lower(finding.finding_details->>'canonical_name') AS title_key
+                  FROM operations.findings finding
+                  JOIN operations.finding_types finding_type
+                    ON finding_type.id = finding.finding_type_id
+                 WHERE finding.tenant_id = 1
+                   AND finding.status IN ('open', 'acknowledged', 'investigating')
+                   AND finding_type.issue_category = 'Software & security'
+                   AND finding_type.subject_scope IN ('software_product', 'software_version')
+                   AND (finding_type.concern_signal
+                        OR finding_type.name IN ('vulnerable_software', 'eol_runtime'))
+                   AND COALESCE(finding.finding_details->>'canonical_name', '') <> ''
+                UNION
+                SELECT DISTINCT lower(installation.canonical_name) AS title_key
+                  FROM operations.findings finding
+                  JOIN operations.finding_types finding_type
+                    ON finding_type.id = finding.finding_type_id
+                  JOIN operations.software_installations_current installation
+                    ON installation.tenant_id = finding.tenant_id
+                   AND installation.installation_uuid = finding.subject_id
+                   AND installation.deleted_at IS NULL
+                   AND installation.stale_since IS NULL
+                  JOIN operations.devices device
+                    ON device.tenant_id = installation.tenant_id
+                   AND device.id = installation.device_id
+                   AND device.deleted_at IS NULL
+                   AND {current_computer_sql('device')}
+                 WHERE finding.tenant_id = 1
+                   AND finding.status IN ('open', 'acknowledged', 'investigating')
+                   AND finding.subject_type = 'software_installation'
+                   AND finding_type.issue_category = 'Software & security'
+                   AND finding_type.subject_scope = 'software_installation'
+                   AND finding_type.concern_signal
+            ), classified_titles AS (
+                SELECT lower(sic.canonical_name) AS title_key,
+                       {TITLE_STATUS} AS approval,
+                       risk.title_key IS NOT NULL AS has_risk
+                  FROM current_titles sic
+                  {TITLE_STATUS_JOINS}
+                  LEFT JOIN risk_titles risk
+                    ON risk.title_key = lower(sic.canonical_name)
+            )
+            SELECT approval, COUNT(*)::int,
+                   COUNT(*) FILTER (WHERE has_risk)::int,
+                   GROUPING(approval)::int AS is_total
+              FROM classified_titles
+             GROUP BY GROUPING SETS ((approval), ())
+            """
+        )
+        rows = cursor.fetchall()
+    approvals: dict[str, int] = {}
+    installed_titles = risk_titles = 0
+    for approval, count, risks, is_total in rows:
+        if is_total:
+            installed_titles = count
+            risk_titles = risks
+        elif approval is not None:
+            approvals[approval] = count
+    return {
+        "installed_titles": installed_titles,
+        "approval_counts": approvals,
+        "risk_titles": risk_titles,
     }
 
 

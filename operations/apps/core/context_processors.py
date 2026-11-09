@@ -12,7 +12,7 @@ from .models import Client, ClientCandidate, EntityCandidate, Finding, MergeCand
 # The Issues badge is the queue's Open count (independent corrective actions,
 # PLAN-003 R3). It is shared by every page render, so it is cached briefly
 # per process rather than recalculated on each request.
-_NAV_ISSUES_CACHE_SECONDS = 60
+_NAV_COUNTS_CACHE_SECONDS = 60
 
 
 def _nav_issues_count(tenant_id: int) -> int:
@@ -20,7 +20,7 @@ def _nav_issues_count(tenant_id: int) -> int:
     value = cache.get(key)
     if value is None:
         value = issue_selection.count(issue_selection.Scope(status="open"))
-        cache.set(key, value, _NAV_ISSUES_CACHE_SECONDS)
+        cache.set(key, value, _NAV_COUNTS_CACHE_SECONDS)
     return value
 
 
@@ -29,6 +29,20 @@ _FINDING_ACTIVE_STATUSES = (
     Finding.Status.ACKNOWLEDGED,
     Finding.Status.INVESTIGATING,
 )
+
+
+def _nav_patching_count(tenant_id: int) -> int:
+    """Reuse the navigation total with the same freshness bound as Issues."""
+    key = f"nav_patching_open:{tenant_id}"
+    value = cache.get(key)
+    if value is None:
+        value = Finding.objects.filter(
+            tenant_id=tenant_id,
+            finding_type__issue_category="Patching & support",
+            status__in=_FINDING_ACTIVE_STATUSES,
+        ).count()
+        cache.set(key, value, _NAV_COUNTS_CACHE_SECONDS)
+    return value
 
 
 def _active_section(request: HttpRequest) -> str:
@@ -78,12 +92,13 @@ def brand(request: HttpRequest) -> dict:
 
     if getattr(request, "user", None) and request.user.is_authenticated:
         tenant_id = getattr(request, "tenant_id", 1)
-        ctx["clients"] = list(
-            Client.objects.filter(
-                tenant_id=tenant_id,
-                deleted_at__isnull=True,
-            ).order_by("display_name")
-        )
+        if ctx["active_section"] != "home":
+            ctx["clients"] = list(
+                Client.objects.filter(
+                    tenant_id=tenant_id,
+                    deleted_at__isnull=True,
+                ).order_by("display_name")
+            )
         ctx["nav_findings_count"] = _nav_issues_count(tenant_id)
         # These badges are rendered only in the application admin tabs, so
         # avoid even their small count queries on ordinary operator pages.
@@ -103,11 +118,7 @@ def brand(request: HttpRequest) -> dict:
                 tenant_id=tenant_id,
                 status=EntityCandidate.Status.PENDING,
             ).count()
-        ctx["nav_patching_open"] = Finding.objects.filter(
-            tenant_id=tenant_id,
-            finding_type__issue_category="Patching & support",
-            status__in=_FINDING_ACTIVE_STATUSES,
-        ).count()
+        ctx["nav_patching_open"] = _nav_patching_count(tenant_id)
     else:
         ctx["clients"] = []
 

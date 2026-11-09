@@ -8,11 +8,13 @@ from __future__ import annotations
 
 import json
 import uuid
+from datetime import timedelta
 
 from django.contrib.auth.decorators import login_required
-from django.db import connection
+from django.db import connection, transaction
 from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import render
+from django.utils import timezone
 
 RESULT_LABELS = {
     "supported": "Supported",
@@ -40,6 +42,54 @@ RULE_LABELS = {
 def _rows(cur) -> list[dict]:
     columns = [c.name for c in cur.description]
     return [dict(zip(columns, row, strict=True)) for row in cur.fetchall()]
+
+
+def home_summary(*, now=None) -> dict:
+    """Current source-record inventory and its 30-day historical total."""
+    now = now or timezone.now()
+    cutoff = now - timedelta(days=30)
+    with transaction.atomic(), connection.cursor() as cursor:
+        cursor.execute("SET LOCAL operations.tenant_id = 1")
+        cursor.execute(
+            """
+            SELECT COUNT(*) FILTER (WHERE source_record.presence = 'present')::int,
+                   MAX(metadata.last_seen_at)
+              FROM operations.source_record_subjects source_record
+              LEFT JOIN operations.v_entity_observation_admin_metadata metadata
+                ON metadata.tenant_id = source_record.tenant_id
+               AND metadata.observation_id = source_record.observation_id
+             WHERE source_record.tenant_id = 1
+               AND source_record.subject_kind = 'record'
+            """,
+        )
+        current, latest = cursor.fetchone()
+        cursor.execute(
+            """
+            SELECT COUNT(DISTINCT source_record.id)::int
+              FROM operations.entity_observation_history history
+              JOIN operations.source_record_subjects source_record
+                ON source_record.tenant_id = history.tenant_id
+               AND source_record.source_instance_id = history.source_instance_id
+               AND source_record.external_namespace = history.external_namespace
+               AND source_record.parent_external_namespace = history.parent_external_namespace
+               AND source_record.parent_external_id = history.parent_external_id
+               AND source_record.external_id = history.external_id
+               AND source_record.subject_kind = 'record'
+             WHERE history.tenant_id = 1
+               AND history.active
+               AND history.effective_from <= %s
+               AND (history.effective_to IS NULL OR history.effective_to > %s)
+            """,
+            [cutoff, cutoff],
+        )
+        historical = cursor.fetchone()[0]
+    change = current - historical
+    return {
+        "current": current,
+        "total_30d_ago": historical,
+        "trend_30d": f"{change:+,} net over 30 days · {historical:,} then",
+        "latest": latest,
+    }
 
 
 def load_subject(cur, tenant_id: int, subject_id: uuid.UUID) -> dict | None:

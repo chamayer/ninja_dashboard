@@ -10,11 +10,12 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from django.db import connection
-from django.db.models import QuerySet
+from django.db import connection, transaction
+from django.db.models import Count, Q, QuerySet
 from django.db.models.expressions import RawSQL
 from django.http import Http404
 
+from .device_status import get_device_status_policy, recent_contact_sql
 from .models import Device
 
 
@@ -109,3 +110,30 @@ def current_computer_sql(alias: str = "") -> str:
     """
     prefix = f"{alias}." if alias else ""
     return f"{prefix}lifecycle_status <> 'retired'"
+
+
+def home_summary(*, active_device_days: int | None = None) -> dict[str, int]:
+    """Fleet Computer counts using the same current and activity rules as Home."""
+    if active_device_days is None:
+        active_device_days = get_device_status_policy(1)["active_device_days"]
+    devices = Device.objects.filter(tenant_id=1, deleted_at__isnull=True)
+    counts = devices.aggregate(
+        retired=Count("id", filter=Q(lifecycle_status=Device.LifecycleStatus.RETIRED)),
+        needs_review=Count(
+            "id", filter=Q(lifecycle_status=Device.LifecycleStatus.PENDING_CLEANUP)
+        ),
+    )
+    with transaction.atomic(), connection.cursor() as cursor:
+        cursor.execute("SET LOCAL operations.tenant_id = 1")
+        cursor.execute(
+            f"""
+            SELECT COUNT(*)::int,
+                   COUNT(*) FILTER (
+                       WHERE {recent_contact_sql('v.last_contact_at', effective_computer_client_sql('v'), active_device_days)}
+                   )::int
+              FROM operations.v_device v
+             WHERE v.tenant_id = 1 AND {current_computer_sql('v')}
+            """
+        )
+        total, active = cursor.fetchone()
+    return {**counts, "total": total, "active": active}

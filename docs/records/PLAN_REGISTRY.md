@@ -24,9 +24,9 @@
 - Blueprint: docs/plans/PLAN-054-source-collection-deadlock.md
 - Source: docs/plans/PLAN-054-source-collection-deadlock.md
 - Section: PLAN-054 — Source collection deadlock repair
-- Related plans: PLAN-045 introduced invalidation; PLAN-019 awaits collection recovery. Earlier local notes called this PLAN-052, which the remote registry assigned to unrelated Ninja VM analysis.
-- Resume gate: Release preparation authorized; separate commit and push approvals required. No new migrations. Production reads authorized; manual collections need separate authorization.
-- Last checked: 2026-11-04 (isolated 0.144.2 release on current origin/master; 49 focused tests pass including five PostgreSQL concurrency cases. Production ledgers match all release migrations. No commit or push yet).
+- Related plans: PLAN-045 introduced invalidation; PLAN-019 closed after collection recovered. Earlier local notes called this PLAN-052, which the remote registry assigned to unrelated Ninja VM analysis.
+- Resume gate: Release 0.144.2 committed and pushed with approval; next observe scheduled source runs. Manual collection, further production mutations, commits and pushes require their own authorization.
+- Last checked: 2026-11-04 (0.144.2 `fb823658` pushed to both remotes and deployed by Portainer; 49 focused tests pass. Ingest/Jobs version and health verified; readiness and Operations health pass. No new deadlocks observed; source collection recovery and workload waits remain unverified. Earlier local PLAN-052 ID conflicted with an unrelated remote plan; release uses PLAN-054).
 
 ## PLAN-053 — Ninja activity retention
 
@@ -160,6 +160,20 @@
 - Related plans: PLAN-004 owns source associations and identity; PLAN-015 owns separately approved identity repairs; PLAN-036 supplies record-first evaluation. PLAN-054 repairs source-write lock ordering; PLAN-045 now bounds projector transactions without changing that guard contract. This plan changes client ownership projection, not duplicate merges.
 - Resume gate: —
 - Last checked: 2026-11-05 (0.144.8 `60ddb296` deployed to origin and mirror; SentinelOne collected 4,487 source observations, its ownership successor completed without waiting for the resolver, dirty rows returned to 0, platform health completed in 17 seconds versus 6 minutes 23 seconds on 0.144.7, and no deadlocks were logged in the preceding 15 minutes. A one-time Jobs claim unique-key violation restarted the worker; it recovered healthy and the queue follow-up is recorded in TODO.md).
+
+## PLAN-044 — Navigation and Computers performance
+
+- Scope: Achieve ordinary Home response time ≤1.5 seconds (2.0-second hard maximum), preserving the agreed domain-owned Operations overview, supported trends of 30 days or less, current Coverage totals without a separate Home trend, and detailed client portfolio on Clients.
+- Status: active
+- Defined: 2026-11-02
+- Started: 2026-11-02
+- Completed: —
+- Blueprint: operations/BLUEPRINT.md
+- Source: operations/docs/plans/PLAN-044-page-performance.md
+- Section: PLAN-044 — Navigation and Computers performance
+- Related plans: PLAN-042 supplies prior performance evidence; PLAN-012 retains Computer semantics and verification; PLAN-043 independently owns issue review in views.py. PLAN-019 source-record history is now complete and available. PLAN-003/004 contracts remain unchanged.
+- Resume gate: User authorized autonomous measurement, focused fixes, validation, commit/push, and then explicitly authorized live-production measurement on 2026-11-09. Keep measurements bounded to ordinary read-only page requests and diagnostics; preserve the approved Home design and no-schema approach. Review automatic deployment effects and the pending migration set before an `origin` push.
+- Last checked: 2026-11-09 (HEAD `cdc9c6db`; authenticated production Home GET returned 200/195,676 bytes but exceeded the five-second client wait for response headers. The current Inventory owner summary was split after a production read-only comparison: 0.80 seconds versus 1.54 seconds, exact parity on one repeatable snapshot. This is component evidence; the deployed page predates the local Home refactor. No migrations are pending. Home and PLAN-043 changes remain local and uncommitted; see detailed handoff).
 
 ## PLAN-043 — Useful issue review
 
@@ -677,15 +691,15 @@ do not open competing blueprints for the same work.
 ## PLAN-019 — Data pipeline correctness and source-record retention (PLAN-017 follow-up)
 
 - Scope: Fix PLAN-017's confirmed acquisition, publication and retention defects in order: F07 contract, F01 receipt, F02 cap detection and bounded continuation, F03 enqueue order, F09 all-source daily presence (assess first), U04 generation fence with F06 stage map, F08 separate sites scope, and the ADR 0045 first-observed anchor and significant-change trail
-- Status: active
+- Status: completed
 - Defined: 2026-10-26
 - Started: 2026-10-26
-- Completed: —
-- Blueprint: BLUEPRINT.md
+- Completed: 2026-11-04
+- Blueprint: docs/plans/PLAN-019-data-pipeline-correctness-and-retention.md
 - Source: docs/plans/PLAN-019-data-pipeline-correctness-and-retention.md
 - Section: PLAN-019 — Data pipeline correctness and source-record retention (PLAN-017 follow-up)
-- Resume gate: Executing this plan or any step requires separate explicit user approval. Coordinates with PLAN-002/005/007, which keep their own statuses and gates; F04 stays with PLAN-012.
-- Last checked: 2026-10-26 (Step 1 and Step 2 (U04, migration 0349) deployed in 0.129.0; F09 decided: no daily presence; next is Step 3 with its own approval).
+- Resume gate: Complete. F04 remains with PLAN-012; F05 remains with R08/PLAN-006.
+- Last checked: 2026-11-04 (completed through releases 0.144.0/0.144.1; production validation recorded in the plan: activities succeeded, three complete SentinelOne snapshots, migration 0404 applied with first-seen on 34,141 source records. Failed-sites-fetch path remains unit-tested only. F04 stays with PLAN-012; F05 with R08/PLAN-006).
 - Activity retention (received 2026-10-28 from PLAN-022) moved to PLAN-053 on 2026-11-04.
 
 ## PLAN-020 — Operations entity links in tables

@@ -71,7 +71,9 @@ Selection: page rows by checkbox, or every row of this exact group across pages
                 </td>
                 <td class="muted">
                     {{ row.context|default:"—" }}
+                    {% if row.first_seen_at %}<br><span style="font-size:.72rem;">First seen {{ row.first_seen_at|date:"Y-m-d H:i" }}</span>{% endif %}
                     {% if row.detected_at %}<br><span style="font-size:.72rem;">Last detected {{ row.detected_at|date:"Y-m-d H:i" }}</span>{% endif %}
+                    {% if row.status == "resolved" and row.closed_at %}<br><span style="font-size:.72rem;">Closed {{ row.closed_at|date:"Y-m-d H:i" }}</span>{% endif %}
                     {% if approval_leaf and row.fleet_device_count %}<br><span style="font-size:.72rem;">Affected Computers: {{ row.fleet_device_count }}</span>{% endif %}
                 </td>
                 <td>

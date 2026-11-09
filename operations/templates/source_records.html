@@ -5,7 +5,7 @@
 <p>{% if source_name %}<a href="{% url 'sources_status' %}">← Sources</a>{% else %}<a href="{% url 'inventory_computers' %}">← Inventory</a>{% endif %}</p>
 <div class="card" style="margin-bottom:1rem;">
   <h1 style="margin:0;">{% if source_name %}{{ source_name }} source records{% if source_client_name %} · {{ source_client_name }}{% endif %}{% else %}Inventory source records{% endif %}</h1>
-  <p class="muted">{{ total }} current observation record{{ total|pluralize }}. Source records are evidence, not a Computer total: Computer attachment, client attribution, and parent-record association are shown separately.</p>
+  <p class="muted">{{ total }} matching source record{{ total|pluralize }}. Source records are evidence, not a Computer total: Computer attachment, client attribution, and parent-record association are shown separately. Open a record to review when it was first seen and its withdrawal or return history.</p>
   <p><a href="{% url 'source_record_cases' %}">Source record cases</a> — records of one source that share a hardware identifier.</p>
   {% include "_csv_download.html" %}
 </div>
@@ -44,7 +44,7 @@
       <tr>
         <td>{{ record.source_name }}</td>
         <td>{{ record.entity_type_label }}{% if record.layout %}<br><span class="muted">{{ record.layout }}</span>{% endif %}</td>
-        <td>{% if record.restricted %}<span class="muted">Details not shown (restricted layout)</span><br>{% elif record.reported_name %}<strong>{{ record.reported_name }}</strong><br>{% endif %}<code>{{ record.external_id }}</code>{% if record.parent_external_id %}<br><span class="muted">parent <code>{{ record.parent_external_id }}</code></span>{% endif %}{% if record.group_name or record.group_id %}<br><span class="muted">in {{ record.group_name|default:record.group_id }}</span>{% endif %}
+        <td>{% if record.source_subject_id %}<a href="{% url 'source_record_detail' subject_id=record.source_subject_id %}">{% endif %}{% if record.restricted %}<span class="muted">Details not shown (restricted layout)</span><br>{% elif record.reported_name %}<strong>{{ record.reported_name }}</strong><br>{% endif %}<code>{{ record.external_id }}</code>{% if record.source_subject_id %}</a>{% endif %}{% if record.parent_external_id %}<br><span class="muted">parent <code>{{ record.parent_external_id }}</code></span>{% endif %}{% if record.group_name or record.group_id %}<br><span class="muted">in {{ record.group_name|default:record.group_id }}</span>{% endif %}
           <div style="font-size:.8rem;">{% if record.source_url %}<a href="{{ record.source_url }}" target="_blank" rel="noopener">Open in {{ record.source_name }} →</a>{% endif %}{% if may_view_evidence and record.device_entity_id %} <a href="{% url 'entity_admin_detail' record.device_entity_id %}?observation={{ record.observation_id }}#source-identities">View evidence</a>{% endif %}</div></td>
         <td>{% if record.active %}<span class="badge badge-low">Present</span>{% else %}<span class="badge badge-high">Withdrawn</span>{% endif %}</td>
         <td>{% if record.reported_online == True %}Online{% elif record.reported_online == False %}Offline{% else %}—{% endif %}</td>

@@ -28,7 +28,6 @@ from django.db.models import (
     CharField,
     Count,
     F,
-    Max,
     Q,
     UUIDField,
     Value,
@@ -72,9 +71,14 @@ from . import capability as capability_evidence
 from . import category as category_evidence
 from . import (
     client_domains,
+    client_workspace as client_workspace_reads,
     computer_naming,
+    computer_reads as computer_reads_summary,
+    coverage_reads,
     finding_registry,
     issue_selection,
+    patching_reads,
+    source_record_views as source_record_summary,
     requirement_baselines,
     software_decision_rules,
     software_review,
@@ -223,18 +227,7 @@ def _safe_ninja_external_id_integer_sql(alias: str) -> str:
     a numeric but oversized foreign ID out of Ninja's integer-keyed tables.
     ``alias`` is internal, fixed SQL supplied by the caller.
     """
-    return f"""CASE
-        WHEN {alias}.external_id ~ '^\\d+$'
-         AND (
-             length({alias}.external_id) < 10
-             OR (
-                 length({alias}.external_id) = 10
-                 AND {alias}.external_id <= '2147483647'
-             )
-         )
-        THEN {alias}.external_id::integer
-        ELSE NULL::integer
-    END"""
+    return patching_reads.safe_ninja_device_id_sql(alias)
 
 
 def _ninja_patch_device_ids(links) -> list[int]:
@@ -779,111 +772,6 @@ def _registered_sources() -> tuple[str, ...]:
         return _SOURCES_FALLBACK
 
 
-_DASHBOARD_DOMAIN_CATEGORIES = {
-    finding_registry.PATCHING: "patching",
-    finding_registry.AGENTS: "compliance",
-    finding_registry.SOFTWARE: "software",
-    finding_registry.INVENTORY: "inventory",
-}
-
-_DASHBOARD_STATE_LABELS = {
-    "needs_action": "Needs action",
-    "review": "Review",
-    "monitor": "Monitor",
-    "on_track": "On track",
-    "delayed": "Data delayed",
-    "unavailable": "Data unavailable",
-}
-
-_DASHBOARD_PRIORITY_LABELS = {
-    "immediate": "Act now",
-    "soon": "Review next",
-    "routine": "Monitor",
-    "none": "No current concerns",
-}
-
-_DASHBOARD_STATE_PRIORITY = {
-    "needs_action": 3,
-    "review": 2,
-    "monitor": 1,
-    "on_track": 0,
-    "delayed": 0,
-    "unavailable": 0,
-}
-
-_CLIENT_DOMAIN_LABELS = {
-    "patching": "Patching",
-    "coverage": "Compliance",
-    "software": "Software",
-    "identity": "Inventory",
-    "lifecycle": "Inventory",
-    "data_quality": "Inventory",
-}
-
-
-def _empty_issue_stats() -> dict:
-    return {"severities": {}, "types": {}, "subjects": {}, "total": 0, "new": 0}
-
-
-def _issue_state_from_stats(
-    stats: dict, *, has_data: bool = True, data_delayed: bool = False
-) -> tuple[str, str, str]:
-    issue_state = _dashboard_issue_state(stats["severities"])
-    display_state = _dashboard_display_state(
-        issue_state, has_data=has_data, data_delayed=data_delayed
-    )
-    return issue_state, display_state, _DASHBOARD_STATE_LABELS[display_state]
-
-
-def _dashboard_issue_state(severity_counts: dict[str, int]) -> str:
-    """Return an operational state without treating data freshness as health."""
-    if severity_counts.get("critical", 0):
-        return "needs_action"
-    if severity_counts.get("high", 0):
-        return "review"
-    if (
-        severity_counts.get("medium", 0)
-        or severity_counts.get("low", 0)
-        or severity_counts.get("info", 0)
-    ):
-        return "monitor"
-    return "on_track"
-
-
-def _dashboard_display_state(
-    issue_state: str, *, has_data: bool = True, data_delayed: bool = False
-) -> str:
-    """Keep delayed/unavailable data distinct without hiding known problems."""
-    if not has_data:
-        return "unavailable"
-    if data_delayed and issue_state == "on_track":
-        return "delayed"
-    return issue_state
-
-
-def _dashboard_priority(domains: list[dict]) -> tuple[str, str]:
-    """Derive client priority and a short, human-readable reason."""
-    contributing = [
-        domain for domain in domains if _DASHBOARD_STATE_PRIORITY[domain["issue_state"]] > 0
-    ]
-    if not contributing:
-        return "none", ""
-
-    highest = max(_DASHBOARD_STATE_PRIORITY[domain["issue_state"]] for domain in contributing)
-    priority = {3: "immediate", 2: "soon", 1: "routine"}[highest]
-    names = [domain["name"] for domain in contributing]
-    match names:
-        case [name]:
-            reason = name
-        case [first, second]:
-            reason = f"{first} and {second}"
-        case [first, *others]:
-            reason = f"{first} + {len(others)} more areas"
-        case []:  # Defensive only; contributing is known to be non-empty.
-            reason = ""
-    return priority, reason
-
-
 @require_GET
 @transaction.non_atomic_requests
 def healthz(request: HttpRequest) -> JsonResponse:
@@ -891,933 +779,177 @@ def healthz(request: HttpRequest) -> JsonResponse:
 
 
 @login_required
-def home(request: HttpRequest) -> HttpResponse:  # noqa: PLR0912, PLR0915
+def home(request: HttpRequest) -> HttpResponse:
+    """Compose domain-owned Home summaries and the governed attention queue."""
     now = timezone.now()
     device_policy = get_device_status_policy()
     active_device_days = device_policy["active_device_days"]
-    source_delay_hours = device_policy["source_delay_hours"]
-    yesterday = now - timedelta(hours=24)
-    stale_before = now - timedelta(hours=source_delay_hours)
-    clients = list(
-        Client.objects.filter(tenant_id=1, deleted_at__isnull=True).order_by("display_name")
+    client_summary = client_workspace_reads.home_summary(now=now)
+    computer_summary = computer_reads_summary.home_summary(
+        active_device_days=active_device_days
     )
+    inventory_summary = source_record_summary.home_summary(now=now)
+    issue_summary = issue_selection.home_summary()
+    issue_categories = issue_summary["categories"]
+    inventory_issues = issue_categories[finding_registry.INVENTORY]
+    collection_issues = issue_categories[finding_registry.COLLECTION]
+    patch_issues = issue_categories[finding_registry.PATCHING]
+    patch_summary = patching_reads.home_summary(now=now, policy=device_policy)
+    coverage_summary = coverage_reads.home_summary()
+    software_summary = software_review.home_summary()
+    sources_summary = _sources_home_summary(now)
+    jobs_summary = _jobs_home_summary(now)
 
-    # One grouped device query supplies all client counts and the global,
-    # mutually-exclusive device mix. Retired devices remain visible as
-    # secondary context but never inflate the active total.
-    device_counts: dict = {}
-    device_mix = {"workstations": 0, "servers": 0, "virtual": 0, "other": 0}
-    retired_devices = 0
-    review_devices = 0
-    retired_devices = Device.objects.filter(
-        tenant_id=1,
-        deleted_at__isnull=True,
-        lifecycle_status=Device.LifecycleStatus.RETIRED,
-    ).count()
-    device_rollup = (
-        current_computers(Device.objects.filter(tenant_id=1, deleted_at__isnull=True))
-        .annotate(
-            effective_client_id=Case(
-                When(id__in=effectively_owned_device_ids(1), then=F("client_id")),
-                default=Value(None), output_field=UUIDField(),
-            )
-        )
-        .values("effective_client_id", "lifecycle_status", "device_role", "device_type")
-        .annotate(n=Count("id"))
-    )
-    for row in device_rollup:
-        count = row["n"]
-        if row["lifecycle_status"] == Device.LifecycleStatus.PENDING_CLEANUP:
-            review_devices += count
-        client_id = row["effective_client_id"]
-        device_counts[client_id] = device_counts.get(client_id, 0) + count
-        if row["device_type"] == Device.DeviceType.VM:
-            device_mix["virtual"] += count
-        elif row["device_role"] == "server":
-            device_mix["servers"] += count
-        elif row["device_role"] == "workstation":
-            device_mix["workstations"] += count
-        else:
-            device_mix["other"] += count
-    total_devices = sum(device_counts.values())
-    with transaction.atomic(), connection.cursor() as cur:
-        cur.execute("SET LOCAL operations.tenant_id = 1")
-        cur.execute(
-            f"""
-            SELECT COUNT(*)::int,
-                   COUNT(*) FILTER (
-                       WHERE {recent_contact_sql("v.last_contact_at", effective_computer_client_sql("v"), active_device_days)}
-                   )::int
-            FROM operations.v_device v
-            WHERE v.tenant_id = 1
-              AND {current_computer_sql("v")}
-            """
-        )
-        total_devices, active_devices = cur.fetchone()
-
-    # One grouping-set scan supplies both the per-client/domain rollup and
-    # the fleet-wide attention list. Keeping the two aggregate levels in one
-    # current-read query avoids scanning active findings twice while retaining
-    # exact distinct-subject/client counts at each level.
-    with transaction.atomic(), connection.cursor() as cur:
-        cur.execute("SET LOCAL operations.tenant_id = 1")
-        cur.execute(
-            """
-            WITH active AS MATERIALIZED (
-                SELECT CASE WHEN finding.subject_type = 'device' AND NOT EXISTS (
-                           SELECT 1 FROM operations.computer_client_ownership owner
-                            WHERE owner.tenant_id = finding.tenant_id
-                              AND owner.device_id = finding.subject_id
-                              AND owner.effective_client_id = finding.client_id
-                              AND owner.state IN ('resolved', 'decision_protected')
-                       ) THEN NULL
-                       WHEN finding.subject_type = 'source_record' THEN (
-                           SELECT operations.computer_client_independent_evidence(
-                                      subject.tenant_id, subject.observation_id)
-                             FROM operations.source_record_subjects subject
-                            WHERE subject.tenant_id = finding.tenant_id
-                              AND subject.id = finding.subject_id
-                       ) ELSE finding.client_id END AS client_id,
-                       finding_type.issue_category,
-                       finding_type.name AS type_name, finding.severity,
-                       finding.subject_id, finding.first_seen_at,
-                       COALESCE(finding.last_detected_at, finding.last_seen_at) AS updated_at
-                FROM operations.findings finding
-                JOIN operations.finding_types finding_type
-                  ON finding_type.id = finding.finding_type_id
-                WHERE finding.tenant_id = 1 AND finding.condition_namespace = 'entity'
-                  AND finding.status IN ('open', 'acknowledged', 'investigating')
-                  AND (finding.snoozed_until IS NULL OR finding.snoozed_until < %s)
-            )
-            SELECT client_id, issue_category, type_name, severity,
-                   COUNT(*)::int AS finding_count,
-                   COUNT(DISTINCT subject_id)::int AS subject_count,
-                   COUNT(*) FILTER (WHERE first_seen_at >= %s)::int AS new_count,
-                   GROUPING(client_id) AS is_fleet_rollup,
-                   COUNT(DISTINCT client_id)::int AS client_count,
-                   MAX(updated_at) AS updated_at,
-                   MAX(CASE severity
-                       WHEN 'critical' THEN 5 WHEN 'high' THEN 4
-                       WHEN 'medium' THEN 3 WHEN 'low' THEN 2 ELSE 1 END)::int
-                       AS severity_level
-            FROM active
-            GROUP BY GROUPING SETS (
-                (client_id, issue_category, type_name, severity),
-                (issue_category, type_name)
-            )
-            """,
-            [now, yesterday],
-        )
-        grouped_issue_rows = cur.fetchall()
-
-    issue_rows = []
-    attention_group_rows = []
-    for row in grouped_issue_rows:
-        (
-            client_id,
-            issue_category,
-            type_name,
-            severity,
-            finding_count,
-            subject_count,
-            new_count,
-            is_fleet_rollup,
-            client_count,
-            updated_at,
-            severity_level,
-        ) = row
-        if is_fleet_rollup:
-            attention_group_rows.append(
-                {
-                    "finding_type__name": type_name,
-                    "finding_type__issue_category": issue_category or "",
-                    "count": finding_count,
-                    "clients": client_count,
-                    "subjects": subject_count,
-                    "new": new_count,
-                    "updated_at": updated_at,
-                    "severity_level": severity_level,
-                }
-            )
-        elif issue_category in _DASHBOARD_DOMAIN_CATEGORIES:
-            issue_rows.append(
-                {
-                    "client_id": client_id,
-                    "finding_type__issue_category": issue_category,
-                    "finding_type__name": type_name,
-                    "severity": severity,
-                    "n": finding_count,
-                    "subjects": subject_count,
-                    "new": new_count,
-                }
-            )
-    client_domain_stats: dict = {}
-    global_domain_stats = {
-        name: {"severities": {}, "types": {}, "subjects": {}, "total": 0, "new_total": 0}
-        for name in ("patching", "compliance", "software", "inventory")
-    }
-    global_category_counts: dict[str, int] = {}
-    for row in issue_rows:
-        category_name = row["finding_type__issue_category"]
-        domain_name = _DASHBOARD_DOMAIN_CATEGORIES[category_name]
-        global_category_counts[category_name] = (
-            global_category_counts.get(category_name, 0) + row["n"]
-        )
-        client_stats = client_domain_stats.setdefault(row["client_id"], {}).setdefault(
-            domain_name,
-            {"severities": {}, "types": {}, "subjects": {}, "total": 0, "new_total": 0},
-        )
-        for stats in (client_stats, global_domain_stats[domain_name]):
-            severity = row["severity"]
-            type_name = row["finding_type__name"]
-            stats["severities"][severity] = stats["severities"].get(severity, 0) + row["n"]
-            stats["types"][type_name] = stats["types"].get(type_name, 0) + row["n"]
-            stats["subjects"][type_name] = stats["subjects"].get(type_name, 0) + row["subjects"]
-            stats["total"] += row["n"]
-            stats["new_total"] += row["new"]
-
-    # Critical mapping issues: the same selection the Issues link opens, so the
-    # count and its destination cannot disagree (PLAN-003 R3).
-    mapping_scope = issue_selection.mapping_scope()
-    client_mapping_conflict_count = issue_selection.count(mapping_scope)
-    client_mapping_conflict_clients = issue_selection.client_count(mapping_scope)
-    client_mapping_conflict_url = f"{reverse('findings_queue')}?" + urlencode(
-        issue_selection.mapping_query()
-    )
-    client_mapping_all_url = f"{reverse('findings_queue')}?" + urlencode(
-        {
-            key: value
-            for key, value in issue_selection.mapping_query().items()
-            if key in ("category", "type")
-        }
-    )
-
-    patching_by_client: dict = {}
-    source_rows: dict = {}
-    recent_patch_activity = {"installed": 0, "failed": 0}
-    with transaction.atomic(), connection.cursor() as cur:
-        cur.execute("SET LOCAL operations.tenant_id = 1")
-        cur.execute(
-            f"""
-            SELECT v.client_id,
-                   COUNT(*)::int,
-                   COUNT(*) FILTER (
-                       WHERE v.effective_patching_scope = 'Included'
-                   )::int
-            FROM operations.v_device v
-            JOIN operations.computer_client_ownership owner
-              ON owner.tenant_id = v.tenant_id AND owner.device_id = v.device_id
-             AND owner.effective_client_id = v.client_id
-             AND owner.state IN ('resolved', 'decision_protected')
-            WHERE v.tenant_id = 1 AND {current_computer_sql('v')}
-            GROUP BY v.client_id
-            """
-        )
-        patching_by_client = {
-            row[0]: {"total": row[1], "included": row[2]} for row in cur.fetchall()
-        }
-
-        # Shared derived state: never aggregate raw observation history during
-        # an interactive Dashboard request.
-        cur.execute(
-            """
-            SELECT platform, last_observed_at, last_run_ok, last_success_at
-            FROM operations.source_health_current
-            WHERE tenant_id = 1
-            """
-        )
-        source_rows = {
-            row[0]: {
-                "observed_at": row[1],
-                "run_ok": row[2],
-                "success_at": row[3],
-            }
-            for row in cur.fetchall()
-        }
-
-        cur.execute(
-            """
-            SELECT
-                COUNT(*) FILTER (WHERE LOWER(status) = 'installed')::int,
-                COUNT(*) FILTER (WHERE LOWER(status) = 'failed')::int
-            FROM ninja_patches.patch_facts
-            WHERE fact_type = 'install_outcome' AND installed_at >= %s
-            """,
-            [yesterday],
-        )
-        installed, failed = cur.fetchone()
-        recent_patch_activity = {"installed": installed, "failed": failed}
-
-    registered_sources = _registered_sources()
-    source_health = []
-    stale_sources: list[str] = []
-    for source_name in registered_sources:
-        source = source_rows.get(source_name, {})
-        observed_at = source.get("observed_at")
-        stale = observed_at is None or observed_at < stale_before or source.get("run_ok") is False
-        source_health.append({"name": source_name, "updated_at": observed_at, "stale": stale})
-        if stale:
-            stale_sources.append(source_name)
-    sources_ok = len(registered_sources) - len(stale_sources)
-    source_health_by_name = {source["name"]: source for source in source_health}
-    observed_updates = [source["updated_at"] for source in source_health if source["updated_at"]]
-    dashboard_updated_at = max(observed_updates, default=None)
-
-    client_sources: dict = {}
-    for reference in client_source_references():
-        client_sources.setdefault(reference["client_id"], set()).add(reference["source_name"])
-
-    pending_merges_by_client = {
-        row["client_id"]: row["n"]
-        for row in MergeCandidate.objects.filter(
-            tenant_id=1, status=MergeCandidate.Status.OPEN, client_id__isnull=False
-        )
-        .values("client_id")
-        .annotate(n=Count("id"))
-    }
-    pending_merges = sum(pending_merges_by_client.values())
-    if pending_merges:
-        global_inventory = global_domain_stats["inventory"]
-        global_inventory["severities"]["medium"] = (
-            global_inventory["severities"].get("medium", 0) + pending_merges
-        )
-        global_inventory["types"]["merge_candidate"] = pending_merges
-        global_inventory["total"] += pending_merges
-
-    software_catalog_titles = (
-        SoftwareCatalog.objects.filter(Q(tenant_id=1) | Q(tenant_id__isnull=True))
-        .values("canonical_name")
-        .distinct()
-        .count()
-    )
-    software_decision_rows = list(
-        SoftwareDecision.objects.filter(tenant_id=1).values("client_id").annotate(n=Count("id"))
-    )
-    software_decisions_by_client = {
-        row["client_id"]: row["n"] for row in software_decision_rows if row["client_id"] is not None
-    }
-    software_decisions_total = sum(row["n"] for row in software_decision_rows)
-
-    def _stats(client_id, domain_name: str) -> dict:
-        return client_domain_stats.get(client_id, {}).get(
-            domain_name,
-            {"severities": {}, "types": {}, "subjects": {}, "total": 0, "new_total": 0},
-        )
-
-    def _count(stats: dict, type_name: str, *, subjects: bool = False) -> int:
-        bucket = "subjects" if subjects else "types"
-        return stats[bucket].get(type_name, 0)
-
-    def _state(
-        stats: dict, *, has_data: bool = True, data_delayed: bool = False
-    ) -> tuple[str, str]:
-        issue_state = _dashboard_issue_state(stats["severities"])
-        display_state = _dashboard_display_state(
-            issue_state, has_data=has_data, data_delayed=data_delayed
-        )
-        return issue_state, display_state
-
-    def _percent(numerator: int, denominator: int) -> int:
-        return round((numerator / denominator) * 100) if denominator else 0
-
-    ninja_health = source_health_by_name.get("Ninja", {"stale": True, "updated_at": None})
-    any_source_delayed = bool(stale_sources)
-    patch_total = sum(row["total"] for row in patching_by_client.values())
-    patch_included = sum(row["included"] for row in patching_by_client.values())
-    compliance_stats = global_domain_stats["compliance"]
-    missing_devices = _count(compliance_stats, "missing_required_platform", subjects=True)
-    compliance_covered = max(total_devices - missing_devices, 0)
-
-    domain_summaries = []
-    global_specs = [
-        {
-            "key": "patching",
-            "name": "Patching",
-            "description": "Device updates and restart readiness",
-            "value": f"{_percent(patch_included, patch_total)}%",
-            "value_label": "included for updates",
-            "has_data": patch_total > 0,
-            "delayed": ninja_health["stale"],
-            "updated_at": ninja_health["updated_at"],
-            "href": reverse("patching_queue"),
-            "facts": [
-                {
-                    "label": f"{_count(global_domain_stats['patching'], 'patching_stalled')} no recent patch activity",
-                    "href": f"{reverse('patching_queue')}?type=patching_stalled",
-                },
-                {
-                    "label": f"{_count(global_domain_stats['patching'], 'device_never_patched')} no patch installed yet",
-                    "href": f"{reverse('patching_queue')}?type=device_never_patched",
-                },
-                {
-                    "label": f"{_count(global_domain_stats['patching'], 'reboot_pending')} restart required",
-                    "href": f"{reverse('patching_queue')}?type=reboot_pending",
-                },
-            ],
-        },
-        {
-            "key": "compliance",
-            "name": "Security & coverage",
-            "description": "Required security tools and reporting",
-            "value": f"{_percent(compliance_covered, total_devices)}%",
-            "value_label": "devices covered",
-            "has_data": total_devices > 0,
-            "delayed": any_source_delayed,
-            "updated_at": min(observed_updates, default=None),
-            "href": f"{reverse('findings_queue')}?category=agents_reporting",
-            "facts": [
-                {
-                    "label": f"{_count(compliance_stats, 'missing_required_platform')} missing",
-                    "href": f"{reverse('findings_queue')}?type=missing_required_platform",
-                },
-                {
-                    "label": f"{_count(compliance_stats, 'stale_required_platform')} not reporting",
-                    "href": f"{reverse('findings_queue')}?type=stale_required_platform",
-                },
-                {
-                    "label": f"{compliance_stats['total']} need review",
-                    "href": f"{reverse('findings_queue')}?category=agents_reporting",
-                },
-            ],
-        },
-        {
-            "key": "software",
-            "name": "Software",
-            "description": "Applications, classification, and review",
-            "value": f"{software_catalog_titles:,}",
-            "value_label": "applications classified",
-            "has_data": ninja_health["updated_at"] is not None,
-            "delayed": ninja_health["stale"],
-            "updated_at": ninja_health["updated_at"],
-            "href": reverse("software_page"),
-            "facts": [
-                {
-                    "label": f"{global_domain_stats['software']['new_total']} new review items",
-                    "href": f"{reverse('findings_queue')}?category=software_security",
-                },
-                {
-                    "label": f"{global_domain_stats['software']['total']} need review",
-                    "href": f"{reverse('findings_queue')}?category=software_security",
-                },
-                {
-                    "label": f"{software_decisions_total} decisions recorded",
-                    "href": reverse("software_decisions_queue"),
-                },
-            ],
-        },
-        {
-            "key": "inventory",
-            "name": "Inventory",
-            "description": "Devices, ownership, and data quality",
-            "value": f"{total_devices:,}",
-            "value_label": "managed devices",
-            "has_data": total_devices > 0,
-            "delayed": any_source_delayed,
-            "updated_at": dashboard_updated_at,
-            "href": reverse("devices_page"),
-            "facts": [
-                {
-                    "label": f"{global_category_counts.get('identity', 0)} identity reviews",
-                    "href": f"{reverse('findings_queue')}?category=inventory",
-                },
-                {
-                    "label": f"{global_category_counts.get('lifecycle', 0)} lifecycle reviews",
-                    "href": f"{reverse('findings_queue')}?category=inventory",
-                },
-                {
-                    "label": f"{global_category_counts.get('data_quality', 0)} data-quality reviews",
-                    "href": f"{reverse('findings_queue')}?category=inventory",
-                },
-                {
-                    "label": f"{pending_merges} possible duplicates",
-                    "href": f"{reverse('findings_queue')}?type=duplicate_computers",
-                },
-            ],
-        },
-    ]
-    for spec in global_specs:
-        issue_state, display_state = _state(
-            global_domain_stats[spec["key"]],
-            has_data=spec["has_data"],
-            data_delayed=spec["delayed"],
-        )
-        spec["issue_state"] = issue_state
-        spec["state"] = display_state
-        spec["state_label"] = _DASHBOARD_STATE_LABELS[display_state]
-        domain_summaries.append(spec)
-
-    client_rows = []
-    priority_counts = {"immediate": 0, "soon": 0, "routine": 0, "none": 0}
-    for client in clients:
-        client_id = client.id
-        devices = device_counts.get(client_id, 0)
-        patching = patching_by_client.get(client_id, {"total": 0, "included": 0})
-        linked_sources = sorted(client_sources.get(client_id, set()))
-        linked_health = [
-            source_health_by_name[name] for name in linked_sources if name in source_health_by_name
-        ]
-        delayed_links = [source["name"] for source in linked_health if source["stale"]]
-        if not linked_health:
-            data_status = "unavailable"
-            data_label = "Data unavailable"
-            data_detail = "No active data connection"
-            data_sort = 1
-        elif delayed_links:
-            data_status = "delayed"
-            data_label = (
-                f"{delayed_links[0]} delayed"
-                if len(delayed_links) == 1
-                else f"{len(delayed_links)} connections delayed"
-            )
-            data_detail = (
-                "Other connections current" if len(delayed_links) < len(linked_health) else ""
-            )
-            data_sort = 2
-        else:
-            data_status = "current"
-            data_label = "Current"
-            data_detail = f"All {len(linked_health)} connections updated"
-            data_sort = 0
-
-        patch_stats = _stats(client_id, "patching")
-        compliance = _stats(client_id, "compliance")
-        software_stats = _stats(client_id, "software")
-        inventory = _stats(client_id, "inventory")
-        pending_client_merges = pending_merges_by_client.get(client_id, 0)
-        if pending_client_merges:
-            inventory["severities"]["medium"] = (
-                inventory["severities"].get("medium", 0) + pending_client_merges
-            )
-            inventory["types"]["merge_candidate"] = pending_client_merges
-            inventory["total"] += pending_client_merges
-        missing = _count(compliance, "missing_required_platform", subjects=True)
-        compliance_covered_client = max(devices - missing, 0)
-        inventory_issues = inventory["total"]
-
-        domain_specs = [
-            {
-                "key": "patching",
-                "name": "Patching",
-                "stats": patch_stats,
-                "has_data": patching["total"] > 0,
-                "delayed": ninja_health["stale"] and "Ninja" in linked_sources,
-                "detail": (
-                    f"{_percent(patching['included'], patching['total'])}% included"
-                    f" · {_count(patch_stats, 'patching_stalled')} no recent patch activity"
-                ),
-                "href": f"{reverse('patching_queue')}?client={client.slug}",
-            },
-            {
-                "key": "compliance",
-                "name": "Security & coverage",
-                "stats": compliance,
-                "has_data": devices > 0 and bool(linked_health),
-                "delayed": bool(delayed_links),
-                "detail": (
-                    f"{_percent(compliance_covered_client, devices)}% covered"
-                    f" · {missing} missing"
-                ),
-                "href": f"{reverse('findings_queue')}?client={client.slug}&category=agents_reporting",
-            },
-            {
-                "key": "software",
-                "name": "Software",
-                "stats": software_stats,
-                "has_data": "Ninja" in linked_sources,
-                "delayed": ninja_health["stale"] and "Ninja" in linked_sources,
-                "detail": (
-                    f"{software_stats['total']} to review"
-                    f" · {software_decisions_by_client.get(client_id, 0)} decisions"
-                ),
-                "href": reverse("org_software", kwargs={"org_slug": client.slug}),
-            },
-            {
-                "key": "inventory",
-                "name": "Inventory",
-                "stats": inventory,
-                "has_data": devices > 0,
-                "delayed": bool(delayed_links),
-                "detail": f"{devices:,} devices · {inventory_issues} to review",
-                "href": reverse("org_devices", kwargs={"org_slug": client.slug}),
-            },
-        ]
-        domains = []
-        for domain in domain_specs:
-            issue_state, display_state = _state(
-                domain["stats"],
-                has_data=domain["has_data"],
-                data_delayed=domain["delayed"],
-            )
-            domain["issue_state"] = issue_state
-            domain["state"] = display_state
-            domain["state_label"] = _DASHBOARD_STATE_LABELS[display_state]
-            domain["contributes"] = _DASHBOARD_STATE_PRIORITY[issue_state] > 0
-            domains.append(domain)
-
-        priority, priority_reason = _dashboard_priority(domains)
-        priority_counts[priority] += 1
-        client_rows.append(
-            {
-                "client": client,
-                "devices": devices,
-                "priority": priority,
-                "priority_label": _DASHBOARD_PRIORITY_LABELS[priority],
-                "priority_reason": priority_reason,
-                "domains": domains,
-                "data_status": data_status,
-                "data_label": data_label,
-                "data_detail": data_detail,
-                "data_sort": data_sort,
-                "source_updates": linked_health,
-            }
-        )
-
-    priority_order = {"immediate": 0, "soon": 1, "routine": 2, "none": 3}
-    client_rows.sort(
-        key=lambda row: (priority_order[row["priority"]], row["client"].display_name.lower())
-    )
-    total_clients = len(clients)
-    clients_connected = sum(1 for client in clients if client_sources.get(client.id))
-    attention_count = priority_counts["immediate"] + priority_counts["soon"]
-
-    # Data status is an operator summary, not a second work queue.  Every
-    # card deliberately opens the governed Issues inbox; Sources and
-    # Computers remain evidence/control surfaces.
-    active_issue_filter = Q(status__in=_FINDING_ACTIVE_STATUSES) & (
-        Q(snoozed_until__isnull=True) | Q(snoozed_until__lt=now)
-    )
-    source_problem_count = AdminFinding.objects.filter(
-        tenant_id=1,
-        status__in=_FINDING_ACTIVE_STATUSES,
-        finding_type__name="source_failure",
-    ).count()
-    open_issue_count = (
-        Finding.objects.filter(active_issue_filter).count()
-        + AdminFinding.objects.filter(
-            tenant_id=1, status__in=_FINDING_ACTIVE_STATUSES
-        ).count()
-        + EntityCandidate.objects.filter(
-            tenant_id=1, status=EntityCandidate.Status.PENDING
-        ).count()
-    )
-    critical_issue_count = Finding.objects.filter(
-        active_issue_filter, severity="critical"
-    ).count() + AdminFinding.objects.filter(
-        tenant_id=1,
-        status__in=_FINDING_ACTIVE_STATUSES,
-        severity="critical",
-    ).count()
-    patch_subject_count = Finding.objects.filter(
-        active_issue_filter,
-        tenant_id=1,
-        finding_type__issue_category=finding_registry.PATCHING,
-    ).values("subject_id").distinct().count()
-    patch_clear_count = max(total_devices - patch_subject_count, 0)
-    kpis = [
+    domain_summaries = [
         {
             "name": "Clients",
-            "value": f"{total_clients}",
-            "detail": f"{attention_count} need attention",
+            "value": f"{client_summary['total']:,}",
+            "value_label": "active clients",
+            "detail": "Detailed portfolio and client comparisons",
+            "trend": client_summary["trend_30d"],
             "href": reverse("org_index", kwargs={"org_slug": "all"}),
         },
         {
             "name": "Computers",
-            "value": f"{total_devices:,}",
-            "detail": f"{active_devices:,} active · {retired_devices:,} retired",
+            "value": f"{computer_summary['total']:,}",
+            "value_label": "current computers",
+            "detail": (
+                f"{computer_summary['active']:,} active · "
+                f"{computer_summary['needs_review']:,} need review · "
+                f"{computer_summary['retired']:,} retired"
+            ),
             "href": reverse("devices_page"),
-            # ADR-0032: each count opens the matching list.
-            "links": [
-                (f"{active_devices:,} active", reverse("devices_page") + "?state=active"),
-                (
-                    f"{review_devices:,} need review",
-                    reverse("devices_page") + "?lifecycle=pending_cleanup",
-                ),
-                (f"{retired_devices:,} retired", reverse("devices_page") + "?lifecycle=retired"),
-            ],
         },
         {
-            "name": "Issues",
-            "value": f"{open_issue_count:,}",
-            "detail": f"{critical_issue_count} critical · current action queue",
-            "href": reverse("findings_queue"),
+            "name": "Inventory",
+            "value": f"{inventory_summary['current']:,}",
+            "value_label": "current source records",
+            "detail": f"{inventory_issues['open_actions']:,} open inventory actions",
+            "trend": inventory_summary["trend_30d"],
+            "href": reverse("inventory_source_records"),
+            "updated_at": inventory_summary["latest"],
+            "updated_label": "Latest report",
+        },
+        {
+            "name": "Data collection",
+            "value": f"{collection_issues['open_actions']:,}",
+            "value_label": "open collection actions",
+            "detail": f"{collection_issues['paused_actions']:,} paused",
+            "href": f"{reverse('findings_queue')}?category={finding_registry.slug(finding_registry.COLLECTION)}",
         },
         {
             "name": "Patching",
-            "value": f"{_percent(patch_clear_count, total_devices)}%",
-            "detail": f"{patch_subject_count:,} computers need patching attention",
+            "value": f"{patch_summary['included']:,}",
+            "value_label": "current computers in patching scope",
+            "detail": (
+                f"{patch_summary['excluded']:,} excluded · "
+                f"{patch_summary['unmanaged']:,} unmanaged · "
+                f"{patch_summary['actively_patching_percent']:.1f}% actively patching "
+                f"({patch_summary['actively_patching']:,} of {patch_summary['current_total']:,} current) · "
+                f"{patch_issues['open_actions']:,} open actions · "
+                f"30-day in-scope outcomes: {patch_summary['installed_30d']:,} installed, "
+                f"{patch_summary['failed_30d']:,} failed"
+            ),
             "href": reverse("patching_queue"),
+            "updated_at": patch_summary["latest"],
+        },
+        {
+            "name": "Security & coverage",
+            "value_pair": True,
+            "green_value": f"{coverage_summary['meeting']:,}",
+            "red_value": f"{coverage_summary['not_meeting']:,}",
+            "value_label": "Computers meeting / not meeting requirements",
+            "detail": (
+                f"{coverage_summary['stale']:,} stale · "
+                f"{coverage_summary['neutral']:,} no applicable requirements · "
+                f"{coverage_summary['exempt']:,} exempt (excluded)"
+            ),
+            "href": reverse("fleet_coverage"),
+            "updated_at": coverage_summary["evaluated_at"],
         },
         {
             "name": "Software",
-            "value": f"{software_catalog_titles:,}",
-            "detail": f"{global_domain_stats['software']['total']:,} Issues need review",
+            "value": f"{software_summary['installed_titles']:,}",
+            "value_label": "installed software titles",
+            "detail": (
+                f"{software_summary['approval_counts'].get('approve', 0):,} approved · "
+                f"{software_summary['approval_counts'].get('pending', 0):,} awaiting decision · "
+                f"{software_summary['approval_counts'].get('reject', 0):,} rejected · "
+                f"{software_summary['approval_counts'].get('investigate', 0):,} investigating · "
+                f"{software_summary['risk_titles']:,} titles with at least one active risk finding"
+            ),
             "href": reverse("software_page"),
         },
-    ]
-    _issue_categories, issue_type_groups = _operator_issue_taxonomy()
-    issue_group_by_name = {
-        issue_name: group_key
-        for group_key, group in issue_type_groups.items()
-        for issue_name in group["types"]
-    }
-    severity_rank = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
-    severity_from_level = {5: "critical", 4: "high", 3: "medium", 2: "low", 1: "info"}
-    attention_by_type: dict[str, dict] = {}
-    for row in attention_group_rows:
-        type_name = row["finding_type__name"]
-        row_severity = severity_from_level.get(row["severity_level"], "info")
-        item = attention_by_type.setdefault(
-            type_name,
-            {
-                "type_name": type_name,
-                "category": row["finding_type__issue_category"] or "",
-                "count": 0,
-                "clients": 0,
-                "subjects": 0,
-                "new": 0,
-                "severity": row_severity,
-                "updated_at": row["updated_at"],
-            },
-        )
-        item["count"] += row["count"]
-        item["clients"] += row["clients"]
-        item["subjects"] += row["subjects"]
-        item["new"] += row["new"]
-        if severity_rank.get(row_severity, 9) < severity_rank.get(item["severity"], 9):
-            item["severity"] = row_severity
-        if row["updated_at"] and (
-            not item["updated_at"] or row["updated_at"] > item["updated_at"]
-        ):
-            item["updated_at"] = row["updated_at"]
-
-    for row in (
-        AdminFinding.objects.filter(tenant_id=1, status__in=_FINDING_ACTIVE_STATUSES)
-        .values("finding_type__name", "finding_type__issue_category")
-        .annotate(
-            count=Count("id"),
-            new=Count("id", filter=Q(first_detected_at__gte=yesterday)),
-            updated_at=Max("last_detected_at"),
-            severity_level=Max(
-                Case(
-                    When(severity="critical", then=Value(5)),
-                    When(severity="high", then=Value(4)),
-                    When(severity="medium", then=Value(3)),
-                    When(severity="low", then=Value(2)),
-                    default=Value(1),
-                )
-            ),
-        )
-    ):
-        type_name = row["finding_type__name"]
-        row_severity = severity_from_level.get(row["severity_level"], "info")
-        item = attention_by_type.setdefault(
-            type_name,
-            {
-                "type_name": type_name,
-                "category": row["finding_type__issue_category"] or "",
-                "count": 0,
-                "clients": 0,
-                "subjects": 0,
-                "new": 0,
-                "severity": row_severity,
-                "updated_at": row["updated_at"],
-            },
-        )
-        item["count"] += row["count"]
-        item["subjects"] += row["count"]
-        item["new"] += row["new"]
-        if severity_rank.get(row_severity, 9) < severity_rank.get(item["severity"], 9):
-            item["severity"] = row_severity
-        if row["updated_at"] and (
-            not item["updated_at"] or row["updated_at"] > item["updated_at"]
-        ):
-            item["updated_at"] = row["updated_at"]
-
-    pending_candidates = EntityCandidate.objects.filter(
-        tenant_id=1, status=EntityCandidate.Status.PENDING
-    )
-    candidate_count = pending_candidates.count()
-    if candidate_count:
-        candidate_clients = pending_candidates.exclude(client_id__isnull=True).values(
-            "client_id"
-        ).distinct().count()
-        candidate_new = pending_candidates.filter(first_observed_at__gte=yesterday).count()
-        item = attention_by_type.setdefault(
-            "identity_resolution_pending",
-            {
-                "type_name": "identity_resolution_pending",
-                "category": "identity",
-                "count": 0,
-                "clients": 0,
-                "subjects": 0,
-                "new": 0,
-                "severity": "medium",
-                "updated_at": None,
-            },
-        )
-        item["count"] += candidate_count
-        item["clients"] += candidate_clients
-        item["subjects"] += candidate_count
-        item["new"] += candidate_new
-
-    attention_items = []
-    for item in attention_by_type.values():
-        item["label"] = finding_registry.finding_type_name(item["type_name"])
-        issue_group = issue_group_by_name.get(item["type_name"], item["type_name"])
-        item["href"] = (
-            f"{reverse('findings_queue')}?type={issue_group}&issue={item['type_name']}"
-        )
-        if item["clients"]:
-            item["affected"] = (
-                f"{item['subjects']:,} affected · {item['clients']:,} "
-                f"client{'s' if item['clients'] != 1 else ''}"
-            )
-        else:
-            item["affected"] = f"{item['subjects']:,} affected"
-        item["change"] = f"{item['new']:,} new today" if item["new"] else "Ongoing"
-        attention_items.append(item)
-    attention_items.sort(
-        key=lambda item: (
-            severity_rank.get(item["severity"], 9),
-            -item["clients"],
-            -item["count"],
-            item["label"],
-        )
-    )
-
-    affected_clients_by_domain = {
-        key: sum(
-            1
-            for client_stats in client_domain_stats.values()
-            if client_stats.get(key, {}).get("total", 0)
-        )
-        for key in ("patching", "compliance", "software", "inventory")
-    }
-    for summary in domain_summaries:
-        summary["issue_count"] = global_domain_stats[summary["key"]]["total"]
-        summary["affected_clients"] = affected_clients_by_domain[summary["key"]]
-        if summary["key"] == "patching":
-            summary["value"] = f"{_percent(patch_clear_count, total_devices)}%"
-            summary["value_label"] = "computers without patch Issues"
-
-    configured_sources, configured_sources_available = _configured_source_data_status(now)
-    configured_sources_current = sum(
-        not source["needs_attention"] for source in configured_sources
-    )
-    configured_updates = [
-        source["observed_at"] for source in configured_sources if source["observed_at"]
-    ]
-    jobs_health = _jobs_control_health()
-    jobs_summary = jobs_health.get("summary", {})
-    current_runtime_kinds = {
-        str(runtime.get("runtime_kind"))
-        for runtime in jobs_health["runtimes"]
-        if not runtime.get("stopped_at")
-        and (heartbeat := parse_datetime(str(runtime.get("heartbeat_at") or "")))
-        and now - heartbeat <= timedelta(minutes=3)
-    }
-    if not jobs_health["available"]:
-        jobs_label = "Job status unavailable"
-    elif not {"scheduler", "worker"}.issubset(current_runtime_kinds):
-        jobs_label = "Job processing needs attention"
-    elif int(jobs_summary.get("contained_claims") or 0):
-        jobs_label = "Job processing needs recovery"
-    else:
-        jobs_label = "Jobs processing normally"
-    system_status = {
-        "sources_available": configured_sources_available,
-        "sources_current": configured_sources_current,
-        "sources_total": len(configured_sources),
-        "source_problems": source_problem_count,
-        "jobs_label": jobs_label,
-        "jobs_running": int(jobs_summary.get("running_runs") or 0),
-        "jobs_waiting": int(jobs_summary.get("waiting_runs") or 0),
-        "processed_at": max(configured_updates, default=dashboard_updated_at),
-    }
-
-    issues_opened_24h = Finding.objects.filter(
-        tenant_id=1, first_seen_at__gte=yesterday
-    ).count() + AdminFinding.objects.filter(
-        tenant_id=1, first_detected_at__gte=yesterday
-    ).count() + EntityCandidate.objects.filter(
-        tenant_id=1,
-        status=EntityCandidate.Status.PENDING,
-        first_observed_at__gte=yesterday,
-    ).count()
-    issues_closed_24h = Finding.objects.filter(
-        tenant_id=1, closed_at__gte=yesterday
-    ).count() + AdminFinding.objects.filter(
-        tenant_id=1, resolved_at__gte=yesterday
-    ).count()
-    movement = [
         {
-            "label": "Issues opened",
-            "value": issues_opened_24h,
+            "name": "Issues",
+            "value": f"{issue_summary['open_actions']:,}",
+            "value_label": "open independent actions",
+            "detail": (
+                f"{issue_summary['critical_actions']:,} critical · "
+                f"{issue_summary['paused_actions']:,} paused"
+            ),
             "href": reverse("findings_queue"),
         },
-        {
-            "label": "Issues closed",
-            "value": issues_closed_24h,
-            "href": f"{reverse('findings_queue')}?status=resolved",
-        },
-        {
-            "label": "Patches installed",
-            "value": recent_patch_activity["installed"],
-            "href": f"{reverse('patch_activity_search_page')}?days=1&status=Installed",
-        },
-        {
-            "label": "Patch failures",
-            "value": recent_patch_activity["failed"],
-            "href": f"{reverse('patch_activity_search_page')}?days=1&status=Failed",
-        },
-        {
-            "label": "New software Issues",
-            "value": global_domain_stats["software"]["new_total"],
-            "href": f"{reverse('findings_queue')}?category=software_security",
-        },
     ]
+    if request.user.is_staff:
+        domain_summaries.extend(
+            [
+                {
+                    "name": "Sources",
+                    "value": f"{sources_summary['total']:,}",
+                    "value_label": "configured source bindings",
+                    "detail": (
+                        f"{sources_summary['current']:,} current · "
+                        f"{sources_summary['attention']:,} need attention"
+                        if sources_summary["available"]
+                        else "Source status unavailable"
+                    ),
+                    "href": reverse("sources_status"),
+                    "updated_at": sources_summary["latest"],
+                },
+                {
+                    "name": "Jobs",
+                    "value": f"{jobs_summary['running']:,}",
+                    "value_label": "running jobs",
+                    "detail": (
+                        f"{jobs_summary['waiting']:,} waiting · "
+                        f"{jobs_summary['contained']:,} held for recovery · {jobs_summary['label']}"
+                    ),
+                    "href": reverse("admin_jobs"),
+                },
+            ]
+        )
 
+    attention_items = issue_selection.home_attention_items()
+    mapping_query = issue_selection.mapping_query()
+    client_mapping_conflict_url = f"{reverse('findings_queue')}?" + urlencode(mapping_query)
+    client_mapping_all_url = f"{reverse('findings_queue')}?" + urlencode(
+        {key: value for key, value in mapping_query.items() if key in ("category", "type")}
+    )
+    system_status = {
+        "sources_available": sources_summary["available"],
+        "sources_current": sources_summary["current"],
+        "sources_total": sources_summary["total"],
+        "source_problems": sources_summary["attention"],
+        "jobs_label": jobs_summary["label"],
+        "jobs_running": jobs_summary["running"],
+        "jobs_waiting": jobs_summary["waiting"],
+        "processed_at": sources_summary["latest"],
+    }
     return render(
         request,
         "home.html",
         {
-            "total_devices": total_devices,
-            "active_devices": active_devices,
-            "active_device_days": active_device_days,
-            "retired_devices": retired_devices,
-            "device_mix": device_mix,
-            "total_clients": total_clients,
-            "open_client_candidates": ClientCandidate.objects.filter(
-                tenant_id=1, status=ClientCandidate.Status.OPEN
-            ).count(),
-            "clients_connected": clients_connected,
-            "kpis": kpis,
-            "attention_items": attention_items[:6],
-            "attention_group_count": len(attention_items),
-            "client_mapping_conflict_count": client_mapping_conflict_count,
-            "client_mapping_conflict_clients": client_mapping_conflict_clients,
+            "total_clients": client_summary["total"],
+            "domain_summaries": domain_summaries,
+            "attention_items": attention_items,
+            "client_mapping_conflict_count": issue_summary["mapping_actions"],
+            "client_mapping_conflict_clients": issue_summary["mapping_clients"],
             "client_mapping_conflict_url": client_mapping_conflict_url,
             "client_mapping_all_url": client_mapping_all_url,
-            "domain_summaries": domain_summaries,
-            "movement": movement,
             "system_status": system_status,
-            "client_rows": client_rows,
-            "priority_counts": priority_counts,
-            "attention_count": attention_count,
-            "source_health": source_health,
-            "sources_ok": sources_ok,
-            "sources_total": len(registered_sources),
-            "stale_sources": stale_sources,
-            "dashboard_updated_at": dashboard_updated_at,
-            "recent_activity": {
-                "patch_installed": recent_patch_activity["installed"],
-                "patch_failed": recent_patch_activity["failed"],
-                "software_new": global_domain_stats["software"]["new_total"],
-            },
-            "initial_view": request.GET.get("view", "all"),
         },
     )
-
 
 def _type_summary_from_counts(counts: dict[str, int]) -> list[tuple[str, str, int]]:
     """(type_value, type_label, count) for device types present in a count map."""
@@ -5089,6 +4221,7 @@ def _candidate_issue_rows(candidate_ids) -> dict[str, dict]:
             "record_id": candidate.external_id,
             "entity_class": candidate.proposed_entity_class.display_name,
             "client": candidate.client,
+            "first_observed_at": candidate.first_observed_at,
             "last_observed_at": candidate.last_observed_at,
             "review_url": reverse("entity_candidate_detail", kwargs={"candidate_id": candidate.id}),
         }
@@ -5151,6 +4284,8 @@ def _hydrate_issue_items(request, items, issue_categories, issue_type_groups) ->
             entity = entity_rows[key]
             finding = entity["f"]
             row.update(entity)
+            row["first_seen_at"] = finding.first_seen_at
+            row["closed_at"] = finding.closed_at
             row["issue_label"] = entity["issue_display_label"]
             row["review_url"] = (
                 entity["review_url"] + "?" + urlencode({"return": request.get_full_path()})
@@ -5167,6 +4302,8 @@ def _hydrate_issue_items(request, items, issue_categories, issue_type_groups) ->
         elif item["namespace"] == "admin" and key in admin_rows:
             admin = admin_rows[key]
             finding = admin["finding"]
+            row["first_seen_at"] = finding.first_detected_at
+            row["closed_at"] = finding.resolved_at
             row["issue_label"] = admin["issue_label"]
             row["subject_label"] = admin["client_name"]
             row["subject_url"] = admin["client_url"]
@@ -5188,6 +4325,7 @@ def _hydrate_issue_items(request, items, issue_categories, issue_type_groups) ->
             row["selectable"] = True
         elif item["kind"] == "candidate" and key in candidate_rows:
             candidate = candidate_rows[key]
+            row["first_seen_at"] = candidate["first_observed_at"]
             row["issue_label"] = finding_registry.finding_type_name(item["type_name"])
             row["subject_label"] = (
                 candidate["client"].display_name if candidate["client"] else "Unassigned client"
@@ -9658,6 +8796,47 @@ def _jobs_control_health() -> dict:
     result["issues"] = list(dict.fromkeys(issues))
     result["ok"] = not result["issues"]
     return result
+
+
+def _jobs_home_summary(now: datetime) -> dict:
+    """Read only the job counts and heartbeats shown on Home."""
+    try:
+        with transaction.atomic(), connection.cursor() as cur:
+            cur.execute("SET LOCAL operations.tenant_id = 1")
+            _count, health_rows = _jobs_diagnostic_query("health", cursor=cur)
+            _count, runtime_rows = _jobs_diagnostic_query("runtimes", cursor=cur)
+    except DatabaseError:
+        log.exception("Home Jobs summary query failed")
+        return {
+            "available": False,
+            "label": "Job status unavailable",
+            "running": 0,
+            "waiting": 0,
+            "contained": 0,
+        }
+
+    summary = health_rows[0] if health_rows else {}
+    runtime_kinds = {
+        str(runtime.get("runtime_kind"))
+        for runtime in runtime_rows
+        if not runtime.get("stopped_at")
+        and (heartbeat := parse_datetime(str(runtime.get("heartbeat_at") or "")))
+        and now - heartbeat <= timedelta(minutes=3)
+    }
+    if not {"scheduler", "worker"}.issubset(runtime_kinds):
+        label = "Job processing needs attention"
+    elif int(summary.get("contained_claims") or 0):
+        label = "Job processing needs recovery"
+    else:
+        label = "Jobs processing normally"
+
+    return {
+        "available": True,
+        "label": label,
+        "running": int(summary.get("running_runs") or 0),
+        "waiting": int(summary.get("waiting_runs") or 0),
+        "contained": int(summary.get("contained_claims") or 0),
+    }
 
 
 @login_required
@@ -15322,9 +14501,8 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
                 SELECT hudu.observation_id, hudu.device_id, hudu.client_id,
                        hudu.hostname,
                        lifecycle.record_lifecycle = 'archived' AS is_archived,
-                       BOOL_OR(hudu.card_source IS NOT NULL AND hudu.card_id IS NOT NULL)
-                           AS has_links
-                FROM operations.v_hudu_computer_inventory_evidence_current hudu
+                       hudu.has_relayed_cards AS has_links
+                FROM operations.v_hudu_computer_inventory_observation_current hudu
                 JOIN operations.devices device
                   ON device.tenant_id = hudu.tenant_id
                  AND device.id = hudu.device_id
@@ -15338,8 +14516,6 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
                 LEFT JOIN operations.v_device_source_record_lifecycle_current lifecycle
                   ON lifecycle.tenant_id = hudu.tenant_id
                  AND lifecycle.observation_id = hudu.observation_id
-                GROUP BY hudu.observation_id, hudu.device_id, hudu.client_id,
-                         hudu.hostname, lifecycle.record_lifecycle
                 """,
             )
             hudu_rows = cur.fetchall()
@@ -15459,21 +14635,19 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
                 "SELECT name FROM operations.agents WHERE entity_type LIKE 'agent.%%'"
             )
             agent_platforms = {row[0] for row in cur.fetchall()}
+            # Include unattached and withdrawn records. This safe reader has
+            # the same identities without the rich metadata JSON projection.
             cur.execute(
                 """
-                SELECT source.name, COUNT(*)::int
-                  FROM operations.v_entity_observation_admin_metadata observation
-                  JOIN operations.source_instances instance
-                    ON instance.tenant_id = observation.tenant_id
-                   AND instance.id = observation.source_instance_id
-                  JOIN operations.sources source ON source.id = instance.source_id
+                SELECT observation.source_name, COUNT(*)::int
+                  FROM operations.v_device_source_record_lifecycle_current observation
                  WHERE observation.tenant_id = 1
                    AND (
                        observation.entity_type LIKE 'agent.%%'
                        OR observation.entity_type = 'vm.guest'
                        OR observation.entity_type = 'cmdb.asset'
                    )
-                 GROUP BY source.name
+                 GROUP BY observation.source_name
                 """
             )
             source_record_counts = {name: count for name, count in cur.fetchall()}
@@ -15797,7 +14971,7 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
     def observation_age_label(at: datetime | None) -> str:
         if at is None:
             return ""
-        seconds = max(0, int((timezone.now() - at).total_seconds()))
+        seconds = max(0, int((coverage_now - at).total_seconds()))
         if seconds < 3600:
             return f"{max(1, seconds // 60)}m"
         if seconds < 86400:
@@ -15835,9 +15009,9 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
         )
 
         record_age = ""
-        if record_status == "Withdrawn" and observation:
+        if (presentation or agents_query) and record_status == "Withdrawn" and observation:
             record_age = observation_age_label(observation["withdrawn_at"])
-        elif record_status in {"Offline", "Stale"}:
+        elif (presentation or agents_query) and record_status in {"Offline", "Stale"}:
             record_age = observation_age_label(source_contact_at)
 
         if platform == "SentinelOne" and row["s1_exempt"]:
@@ -15864,7 +15038,7 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
             "Withdrawn": f"{platform} previously reported this Computer but no longer does.",
             "No record": f"No current {platform} record is linked to this Computer.",
             "No status": f"{platform} still lists this Computer but does not say whether it is online.",
-        }[record_status]
+        }[record_status] if presentation else ""
         rule_tooltip = {
             "Required": f"{platform} is required for this Computer.",
             "Missing": f"{platform} is required, but no qualifying current record was found.",
@@ -15883,19 +15057,19 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
             ),
             "N/A": f"{platform} is not required for this Computer.",
             "Exempt": "This Computer has a saved SentinelOne exemption.",
-        }[rule_status]
+        }[rule_status] if presentation else ""
         return {
             "platform": platform,
             "record_status": record_status,
             "record_age": record_age,
             "record_url": agent_filter_url(platform, state=record_status) if presentation else "",
-            "record_tooltip": record_tooltip if presentation else "",
+            "record_tooltip": record_tooltip,
             "rule_status": rule_status,
             "rule_label": rule_label,
             "rule_url": agent_filter_url(platform, requirement=rule_status)
             if presentation
             else "",
-            "rule_tooltip": rule_tooltip if presentation else "",
+            "rule_tooltip": rule_tooltip,
             "possible_match": possible_match,
             "attention": rule_status in {"Missing", "Stale"},
         }
@@ -15918,7 +15092,7 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
                 if value
             )
             for cell in row["platform_cells_by_name"].values()
-        ).lower()
+        ).lower() if agents_query else ""
 
     def agent_condition_matches(row: dict, condition: dict) -> bool:
         cell = row["platform_cells_by_name"][condition["agent"]]
@@ -16869,7 +16043,13 @@ def source_records(
         page_number = 1
     page_size = 100
 
-    clauses = ["observation.tenant_id = %s"]
+    clauses = [
+        "observation.tenant_id = %s",
+        "EXISTS (SELECT 1 FROM operations.source_record_subjects record_subject "
+        "WHERE record_subject.tenant_id = observation.tenant_id "
+        "AND record_subject.observation_id = observation.observation_id "
+        "AND record_subject.subject_kind = 'record')",
+    ]
     params: list[object] = [tenant_id]
     if source_filter is not None:
         clauses.append("observation.source_instance_id = %s")
@@ -16951,10 +16131,16 @@ def source_records(
         total = cur.fetchone()[0]
         cur.execute(
             """
-            SELECT DISTINCT entity_type
-              FROM operations.v_entity_observation_admin_metadata
-             WHERE tenant_id = %s
-             ORDER BY entity_type
+            SELECT DISTINCT observation.entity_type
+              FROM operations.v_entity_observation_admin_metadata observation
+             WHERE observation.tenant_id = %s
+               AND EXISTS (
+                   SELECT 1 FROM operations.source_record_subjects record_subject
+                    WHERE record_subject.tenant_id = observation.tenant_id
+                      AND record_subject.observation_id = observation.observation_id
+                      AND record_subject.subject_kind = 'record'
+               )
+             ORDER BY observation.entity_type
             """,
             (tenant_id,),
         )
@@ -16964,10 +16150,16 @@ def source_records(
         ]
         cur.execute(
             """
-            SELECT DISTINCT source_layout
-              FROM operations.v_entity_observation_admin_metadata
-             WHERE tenant_id = %s AND source_layout IS NOT NULL
-             ORDER BY source_layout
+            SELECT DISTINCT observation.source_layout
+              FROM operations.v_entity_observation_admin_metadata observation
+             WHERE observation.tenant_id = %s AND observation.source_layout IS NOT NULL
+               AND EXISTS (
+                   SELECT 1 FROM operations.source_record_subjects record_subject
+                    WHERE record_subject.tenant_id = observation.tenant_id
+                      AND record_subject.observation_id = observation.observation_id
+                      AND record_subject.subject_kind = 'record'
+               )
+             ORDER BY observation.source_layout
             """,
             (tenant_id,),
         )
@@ -17019,7 +16211,7 @@ def source_records(
                    -- Operations proposed this record as something other than a Computer.
                    {_PROPOSED_OTHER_SQL},
                    observation.restricted, observation.reported_online,
-                   computer_client.slug
+                   computer_client.slug, source_subject.id
               FROM page observation
               JOIN operations.source_instances instance
                 ON instance.tenant_id = observation.tenant_id AND instance.id = observation.source_instance_id
@@ -17038,6 +16230,10 @@ def source_records(
               LEFT JOIN operations.clients client
                 ON client.tenant_id = observation.tenant_id AND client.id = {_SOURCE_RECORD_CLIENT_SQL}
                AND client.deleted_at IS NULL
+              JOIN operations.source_record_subjects source_subject
+                ON source_subject.tenant_id = observation.tenant_id
+               AND source_subject.observation_id = observation.observation_id
+               AND source_subject.subject_kind = 'record'
               LEFT JOIN group_mapping
                 ON group_mapping.tenant_id = observation.tenant_id
                AND group_mapping.source_id = instance.source_id
@@ -17068,6 +16264,7 @@ def source_records(
                 "client_slug": row[11],
                 "client_name": row[12],
                 "computer_client_slug": row[27],
+                "source_subject_id": row[28],
                 "has_computer": row[13],
                 "has_client": row[14],
                 "has_parent": row[15],
@@ -19460,6 +18657,23 @@ def _configured_source_data_status(now: datetime) -> tuple[list[dict], bool]:
             }
         )
     return sources, True
+
+
+def _sources_home_summary(now: datetime) -> dict:
+    """Current source-binding status for Home."""
+    sources, available = _configured_source_data_status(now)
+    current = sum(not source["needs_attention"] for source in sources)
+    latest = max(
+        (source["observed_at"] for source in sources if source["observed_at"]),
+        default=None,
+    )
+    return {
+        "available": available,
+        "total": len(sources),
+        "current": current,
+        "attention": len(sources) - current,
+        "latest": latest,
+    }
 
 
 def _admin_health_attention_items(

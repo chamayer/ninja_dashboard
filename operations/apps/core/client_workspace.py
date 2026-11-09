@@ -790,3 +790,20 @@ def build_client_directory(clients: list) -> dict:
         "all_location_count": sum(locations.values()),
         "all_user_count": sum(users.values()),
     }
+
+
+def home_summary(*, now=None) -> dict[str, int | str]:
+    """Current active-client total and the same total 30 days earlier."""
+    now = now or timezone.now()
+    cutoff = now - timedelta(days=30)
+    totals = Client.objects.filter(tenant_id=1).aggregate(
+        total=Count("id", filter=Q(deleted_at__isnull=True)),
+        total_30d_ago=Count(
+            "id",
+            filter=Q(created_at__lte=cutoff)
+            & (Q(deleted_at__isnull=True) | Q(deleted_at__gt=cutoff)),
+        ),
+    )
+    change = totals["total"] - totals["total_30d_ago"]
+    totals["trend_30d"] = f"{change:+,} net over 30 days · {totals['total_30d_ago']:,} then"
+    return totals

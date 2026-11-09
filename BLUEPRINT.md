@@ -48,9 +48,10 @@ validation results, or completed-plan summaries here.
 - **PLAN-016 — active.** Next: implement the bounded, tenant-scoped,
   read-only explorer and focused tests. See the [plan](operations/docs/plans/PLAN-016-admin-sql-explorer.md)
   and [Operations checkpoint](operations/BLUEPRINT.md).
-- **PLAN-019 — active.** Released in 0.144.1; waiting on one activities run
-  and one successful SentinelOne run (SentinelOne deadlocks since
-  2026-11-04), then close. See the [plan](docs/plans/PLAN-019-data-pipeline-correctness-and-retention.md).
+- **PLAN-044 — active.** Isolate Home changes from PLAN-043, then deploy and
+  measure the full Home request in authorized live production;
+  see the
+  [Operations checkpoint](operations/BLUEPRINT.md).
 
 Completed and ready plans remain in the registry; their details stay in their
 registered source documents. Update this index only when active status,

@@ -4,41 +4,31 @@
 
 {% block content %}
 <style>
-  .dashboard-heading {
-    display: flex; justify-content: space-between; gap: 1rem;
-    align-items: flex-start; margin-bottom: 1rem;
-  }
-  .dashboard-heading h1 { margin-bottom: 0.2rem; }
-  .dashboard-heading p { margin: 0; color: var(--muted); }
-  .dashboard-scope { text-align: right; font-size: 0.82rem; }
-  .dashboard-scope strong { display: block; }
-  .dashboard-scope span { display: block; margin-top: 0.15rem; color: var(--muted); }
-
-  .dashboard-fleet {
-    display: grid; grid-template-columns: repeat(5, minmax(0, 1fr));
-    margin-bottom: 0.8rem; overflow: hidden; background: var(--surface);
-    border: 1px solid var(--border); border-radius: 7px;
-  }
-  .fleet-stat {
-    min-width: 0; padding: 0.8rem 1rem; border-right: 1px solid var(--border);
-    color: inherit; text-decoration: none;
-  }
-  .fleet-stat:last-child { border-right: 0; }
-  .fleet-stat-label {
-    display: block; color: var(--muted); font-size: 0.7rem; font-weight: 700;
-    letter-spacing: 0.055em; text-transform: uppercase;
-  }
-  .fleet-stat-value { display: inline-block; margin-top: 0.1rem; color: #1e40af; font-size: 1.6rem; font-weight: 700; }
-  .fleet-stat-note { margin-left: 0.3rem; color: var(--muted); font-size: 0.72rem; }
-  .fleet-stat-detail { display: block; margin-top: 0.25rem; color: var(--muted); font-size: 0.68rem; line-height: 1.35; }
-
+  .dashboard-heading { display:flex; justify-content:space-between; gap:1rem; align-items:flex-start; margin-bottom:1rem; }
+  .dashboard-heading h1 { margin-bottom:.2rem; }
+  .dashboard-heading p { margin:0; color:var(--muted); }
+  .dashboard-scope { text-align:right; font-size:.82rem; }
+  .dashboard-scope strong { display:block; }
+  .operations-areas { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:.7rem; margin-bottom:1rem; }
+  .area-card { display:block; padding:.9rem 1rem; color:inherit; text-decoration:none; }
+  .area-head h2 { margin:0; font-size:.9rem; }
+  .area-value { display:block; margin-top:.55rem; color:#1e40af; font-size:1.55rem; font-weight:750; }
+  .area-value-pair { display:flex; align-items:baseline; gap:.35rem; margin-top:.55rem; font-size:1.55rem; font-weight:750; }
+  .area-value-pair .area-value { display:inline; margin:0; font-size:inherit; }
+  .area-value-good { color:#166534; }
+  .area-value-bad { color:#b91c1c; }
+  .area-value-separator { color:var(--muted); font-size:.9em; }
+  .area-label { display:block; min-height:1.8em; color:var(--muted); font-size:.68rem; line-height:1.3; }
+  .area-detail { margin:.65rem 0 0; padding-top:.55rem; border-top:1px solid var(--border); color:#374151; font-size:.72rem; }
+  .area-trend { margin:.4rem 0 0; color:#374151; font-size:.72rem; }
+  .area-updated { margin:.35rem 0 0; color:var(--muted); font-size:.65rem; }
   .dashboard-briefing { margin-bottom:1rem; }
   .briefing-card { padding:0; overflow:hidden; }
   .briefing-head { display:flex; justify-content:space-between; align-items:baseline; gap:1rem; padding:.8rem 1rem .6rem; border-bottom:1px solid var(--border); }
   .briefing-head h2 { margin:0; font-size:.95rem; }
   .briefing-head a { font-size:.75rem; font-weight:700; white-space:nowrap; }
   .briefing-list { list-style:none; margin:0; padding:0; }
-  .briefing-list li { display:grid; grid-template-columns:minmax(220px, 1fr) minmax(150px, .55fr) 110px auto; gap:.75rem; align-items:center; padding:.62rem 1rem; border-bottom:1px solid var(--border); font-size:.78rem; }
+  .briefing-list li { display:grid; grid-template-columns:minmax(220px,1fr) minmax(150px,.55fr) auto; gap:.75rem; align-items:center; padding:.62rem 1rem; border-bottom:1px solid var(--border); font-size:.78rem; }
   .briefing-list li:last-child { border-bottom:0; }
   .briefing-list a { color:inherit; text-decoration:none; font-weight:650; }
   .briefing-list a:hover { color:var(--accent); }
@@ -46,160 +36,72 @@
   .briefing-label { display:flex; gap:.55rem; align-items:center; min-width:0; }
   .briefing-open { text-align:right; font-weight:700; white-space:nowrap; }
   .briefing-severity { width:.5rem; height:.5rem; flex:0 0 auto; border-radius:999px; }
-  .briefing-severity-critical { background:#dc2626; }.briefing-severity-high { background:#ea580c; }.briefing-severity-medium { background:#d99a00; }.briefing-severity-low,.briefing-severity-info { background:#2563eb; }
-  .client-mapping-alert { margin:0 0 1rem; padding:.85rem 1rem; color:#7f1d1d; background:#fff1f2; border:1px solid #fecdd3; border-left:4px solid #dc2626; border-radius:7px; }
-  .client-mapping-alert h2 { margin:0; font-size:.95rem; }.client-mapping-alert p { margin:.3rem 0 0; font-size:.78rem; }.client-mapping-alert a { color:#991b1b; font-weight:750; }
-  .change-value { min-width:3rem; color:#1e40af; font-weight:700; text-align:right; }
-
-  .operations-areas { display:grid; grid-template-columns:repeat(4, minmax(0, 1fr)); gap:.7rem; margin-bottom:1rem; }
-  .area-card { display:block; padding:.9rem 1rem; color:inherit; text-decoration:none; }
-  .area-head { display:flex; justify-content:space-between; gap:.5rem; align-items:baseline; }
-  .area-head h2 { margin:0; font-size:.9rem; }
-  .area-state { color:var(--muted); font-size:.68rem; font-weight:700; }
-  .area-value { display:block; margin-top:.55rem; color:#1e40af; font-size:1.55rem; font-weight:750; }
-  .area-label { display:block; min-height:1.8em; color:var(--muted); font-size:.68rem; line-height:1.3; }
-  .area-detail { margin:.65rem 0 0; padding-top:.55rem; border-top:1px solid var(--border); color:#374151; font-size:.72rem; }
-
-  .movement-card { margin-top:.8rem; padding:0; overflow:hidden; }
-  .movement-head { padding:.7rem 1rem; border-bottom:1px solid var(--border); }
-  .movement-head h2 { margin:0; font-size:.9rem; }
-  .movement-grid { display:grid; grid-template-columns:repeat(5, minmax(0, 1fr)); }
-  .movement-item { padding:.7rem 1rem; color:inherit; text-decoration:none; border-right:1px solid var(--border); }
-  .movement-item:last-child { border-right:0; }
-  .movement-value { display:block; color:#1e40af; font-size:1.15rem; font-weight:750; }
-  .movement-label { display:block; margin-top:.12rem; color:var(--muted); font-size:.68rem; }
+  .briefing-severity-critical { background:#dc2626; }
+  .briefing-severity-high { background:#ea580c; }
+  .briefing-severity-medium { background:#d99a00; }
+  .briefing-severity-low,.briefing-severity-info { background:#2563eb; }
+  .client-mapping-alert { margin:0 0 .8rem; padding:.85rem 1rem; color:#7f1d1d; background:#fff1f2; border:1px solid #fecdd3; border-left:4px solid #dc2626; border-radius:7px; }
+  .client-mapping-alert h2 { margin:0; font-size:.95rem; }
+  .client-mapping-alert p { margin:.3rem 0 0; font-size:.78rem; }
+  .client-mapping-alert a { color:#991b1b; font-weight:750; }
   .system-line { display:flex; align-items:center; gap:.9rem; margin-top:.8rem; padding:.7rem .85rem; background:#fafbfc; border:1px solid var(--border); border-radius:7px; font-size:.72rem; }
   .system-line strong { white-space:nowrap; }
   .system-line a { font-weight:700; white-space:nowrap; }
   .system-line .system-links { margin-left:auto; display:flex; gap:.8rem; }
-
-  .client-card { padding: 0; overflow: visible; }
-  .client-card-head { padding: 1rem 1rem 0.75rem; background: var(--surface); border-bottom: 1px solid var(--border); border-radius: 6px 6px 0 0; }
-  .client-card-title { display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; }
-  .client-card-title h2 { margin: 0; }
-  .client-card-title .client-new-link { font-size: 0.72rem; vertical-align: middle; text-decoration: none; }
-  .client-card-title span { color: var(--muted); font-size: 0.72rem; }
-  .client-controls { display: flex; align-items: center; gap: 0.45rem; margin-top: 0.75rem; flex-wrap: wrap; }
-  .client-chips { display: flex; flex: 1; gap: 0.3rem; flex-wrap: wrap; }
-  .client-chip {
-    padding: 0.33rem 0.65rem; color: #374151; background: #fff;
-    border: 1px solid var(--border); border-radius: 999px; cursor: pointer; font-size: 0.76rem;
+  .client-portfolio-link { margin:.1rem 0 .85rem; text-align:right; font-size:.76rem; font-weight:700; }
+  @media (max-width:1000px) {
+    .operations-areas { grid-template-columns:repeat(2,minmax(0,1fr)); }
+    .briefing-list li { grid-template-columns:minmax(180px,1fr) minmax(130px,.6fr) auto; }
   }
-  .client-chip:hover { border-color: var(--accent); }
-  .client-chip.active { color: #fff; background: #1e40af; border-color: #1e40af; }
-  .client-search {
-    padding: 0.42rem 0.55rem; color: #374151; background: #fff;
-    border: 1px solid var(--border); border-radius: 5px; font-size: 0.76rem;
-  }
-  .client-search { width: 190px; }
-  .client-table-wrap { overflow: visible; }
-  .client-table { min-width: 1100px; }
-  .client-table th, .client-table td { padding: 0.55rem 0.65rem; vertical-align: middle; }
-  .client-table thead th {
-    position: sticky; top: 0; z-index: 5;
-    box-shadow: inset 0 -1px 0 var(--border), 0 2px 4px rgba(17, 24, 39, 0.06);
-  }
-  .client-sort-button {
-    display: inline-flex; align-items: center; gap: 0.25rem; padding: 0;
-    color: inherit; background: none; border: 0; font: inherit; font-weight: 700;
-    cursor: pointer; white-space: nowrap;
-  }
-  .client-sort-button:hover { color: var(--accent); }
-  .client-sort-button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 2px; }
-  .sort-indicator { width: 0.7rem; color: var(--muted); font-size: 0.65rem; }
-  th[aria-sort="ascending"] .sort-indicator::before { content: "▲"; }
-  th[aria-sort="descending"] .sort-indicator::before { content: "▼"; }
-  .client-table tbody tr { border-bottom: 1px solid var(--border); }
-  .client-table tbody tr:last-child { border-bottom: 0; }
-  .client-table tr[data-priority="immediate"] { background: linear-gradient(90deg, #fff7f6 0, #fff 26%); }
-  .client-name { min-width: 145px; }
-  .client-name a { color: #1a1a2e; font-weight: 700; text-decoration: none; }
-  .priority-badge { display: inline-block; padding: 0.22rem 0.42rem; border-radius: 5px; font-size: 0.68rem; font-weight: 700; white-space: nowrap; }
-  .priority-immediate { color: #b91c1c; background: #fee2e2; }
-  .priority-soon { color: #92400e; background: #fef3c7; }
-  .priority-routine { color: #1d4ed8; background: #dbeafe; }
-  .priority-none { color: #047857; background: #d1fae5; }
-  .priority-reason, .cell-detail { display: block; margin-top: 0.18rem; color: var(--muted); font-size: 0.66rem; line-height: 1.3; }
-  .domain-cell { min-width: 130px; }
-  .domain-cell a { color: #1a1a2e; font-size: 0.76rem; font-weight: 700; text-decoration: none; white-space: nowrap; }
-  .state-dot { display: inline-block; width: 7px; height: 7px; margin-right: 0.3rem; border-radius: 50%; }
-  .dot-needs_action { background: #dc2626; }
-  .dot-review { background: #d99a00; }
-  .dot-monitor { background: #2563eb; }
-  .dot-on_track { background: #15803d; }
-  .dot-delayed, .dot-unavailable { background: #7b8493; }
-  .data-status { min-width: 112px; font-size: 0.76rem; font-weight: 700; }
-  .data-delayed, .data-unavailable { color: #596273; }
-  .no-clients { display: none; padding: 1rem; color: var(--muted); }
-
-  @media (max-width: 1000px) {
-    .operations-areas { grid-template-columns:repeat(2, minmax(0, 1fr)); }
-    .dashboard-fleet, .movement-grid { grid-template-columns:repeat(3, minmax(0, 1fr)); }
-    .briefing-list li { grid-template-columns:minmax(180px, 1fr) minmax(130px, .6fr) auto; }
-    .briefing-list .briefing-change { display:none; }
-  }
-  @media (max-width: 1160px) {
-    .client-table-wrap { overflow-x: auto; }
-    .client-table thead th { position: static; }
-  }
-  @media (max-width: 720px) {
-    .dashboard-heading { display: block; }
-    .dashboard-scope { margin-top: 0.5rem; text-align: left; }
-    .dashboard-fleet, .movement-grid, .operations-areas { grid-template-columns: 1fr; }
-    .fleet-stat, .movement-item { border-right:0; border-bottom:1px solid var(--border); }
+  @media (max-width:720px) {
+    .dashboard-heading { display:block; }
+    .dashboard-scope { margin-top:.5rem; text-align:left; }
+    .operations-areas { grid-template-columns:1fr; }
     .briefing-list li { grid-template-columns:1fr auto; }
     .briefing-list .briefing-affected { grid-column:1 / -1; }
     .system-line { align-items:flex-start; flex-wrap:wrap; }
     .system-line .system-links { width:100%; margin-left:0; }
-    .client-card-title { display: block; }
-    .client-card-title span { display: block; margin-top: 0.2rem; }
-    .client-search { width: 100%; }
   }
 </style>
 
 <div class="dashboard-heading">
   <div>
     <h1>Operations overview</h1>
-    <p>What is happening across your clients and where attention is needed.</p>
+    <p>Current totals and supported 30-day trends across Operations.</p>
   </div>
-  <div class="dashboard-scope">
-    <strong>Across all {{ total_clients }} clients</strong>
-    {% if dashboard_updated_at %}
-    <span title="{{ dashboard_updated_at|date:'F j, Y g:i A T' }}">Last updated {{ dashboard_updated_at|timesince }} ago · {{ dashboard_updated_at|date:"M j, Y g:i A T" }}</span>
-    {% else %}
-    <span>Update time unavailable</span>
-    {% endif %}
-  </div>
+  <div class="dashboard-scope"><strong>Across all {{ total_clients }} clients</strong></div>
 </div>
 
-{% if client_mapping_conflict_count %}
-<section class="client-mapping-alert" aria-label="Critical client mapping issues">
-  <h2>Critical mapping issues ({{ client_mapping_conflict_count }})</h2>
-  <p>Source-client attribution is unresolved or contradictory{% if client_mapping_conflict_clients %} for {{ client_mapping_conflict_clients }} known client{{ client_mapping_conflict_clients|pluralize }}{% endif %}. Client-scoped inventory and coverage can be misattributed. <a href="{{ client_mapping_conflict_url }}">Review these {{ client_mapping_conflict_count }} →</a> · <a href="{{ client_mapping_all_url }}">View all mapping issues</a></p>
-</section>
-{% endif %}
-
-<section class="dashboard-fleet" aria-label="Operations at a glance">
-  {% for kpi in kpis %}
-  {% if kpi.links %}
-  <div class="fleet-stat">
-    <a href="{{ kpi.href }}" style="color:inherit; text-decoration:none;">
-      <span class="fleet-stat-label">{{ kpi.name }}</span>
-      <span class="fleet-stat-value">{{ kpi.value }}</span>
-    </a>
-    <span class="fleet-stat-detail">{% for label, url in kpi.links %}<a href="{{ url }}">{{ label }}</a>{% if not forloop.last %} · {% endif %}{% endfor %}</span>
-  </div>
-  {% else %}
-  <a class="fleet-stat" href="{{ kpi.href }}">
-    <span class="fleet-stat-label">{{ kpi.name }}</span>
-    <span class="fleet-stat-value">{{ kpi.value }}</span>
-    <span class="fleet-stat-detail">{{ kpi.detail }}</span>
+<section class="operations-areas" aria-label="Operational areas">
+  {% for area in domain_summaries %}
+  <a class="card area-card" href="{{ area.href }}">
+    <span class="area-head"><h2>{{ area.name }}</h2></span>
+    {% if area.value_pair %}
+    <span class="area-value-pair" aria-label="{{ area.value_label }}">
+      <span class="area-value area-value-good">{{ area.green_value }}</span>
+      <span class="area-value-separator" aria-hidden="true">/</span>
+      <span class="area-value area-value-bad">{{ area.red_value }}</span>
+    </span>
+    {% else %}<span class="area-value">{{ area.value }}</span>{% endif %}
+    <span class="area-label">{{ area.value_label }}</span>
+    <p class="area-detail">{{ area.detail }}</p>
+    {% if area.trend %}<p class="area-trend">{{ area.trend }}</p>{% endif %}
+    {% if area.updated_at %}<p class="area-updated">{{ area.updated_label|default:"Updated" }} {{ area.updated_at|timesince }} ago</p>{% endif %}
   </a>
-  {% endif %}
   {% endfor %}
 </section>
 
+<section class="client-portfolio-link" aria-label="Client portfolio">
+  <a href="{% url 'org_index' org_slug='all' %}">View the detailed client portfolio →</a>
+</section>
+
 <section class="dashboard-briefing" aria-label="Current operations briefing">
+  {% if client_mapping_conflict_count %}
+  <section class="client-mapping-alert" aria-label="Critical client mapping issues">
+    <h2>Critical mapping issues ({{ client_mapping_conflict_count }})</h2>
+    <p>Source-client attribution is unresolved or contradictory{% if client_mapping_conflict_clients %} for {{ client_mapping_conflict_clients }} known clients{% endif %}. Client-scoped inventory and coverage can be misattributed. <a href="{{ client_mapping_conflict_url }}">Review these {{ client_mapping_conflict_count }} →</a> · <a href="{{ client_mapping_all_url }}">View all mapping issues</a></p>
+  </section>
+  {% endif %}
   <article class="card briefing-card">
     <div class="briefing-head"><h2>What needs attention</h2><a href="{% url 'findings_queue' %}">Open all Issues →</a></div>
     <ul class="briefing-list">
@@ -207,7 +109,6 @@
       <li>
         <span class="briefing-label"><span class="briefing-severity briefing-severity-{{ item.severity }}"></span><a href="{{ item.href }}">{{ item.label }}</a></span>
         <span class="muted briefing-affected">{{ item.affected }}</span>
-        <span class="muted briefing-change">{{ item.change }}</span>
         <a class="briefing-open" href="{{ item.href }}">Open →</a>
       </li>
       {% empty %}<li class="muted">No current Issues need review.</li>{% endfor %}
@@ -215,157 +116,12 @@
   </article>
 </section>
 
-<section class="operations-areas" aria-label="Operational areas">
-  {% for area in domain_summaries %}
-  <a class="card area-card" href="{{ area.href }}">
-    <span class="area-head"><h2>{{ area.name }}</h2><span class="area-state">{{ area.state_label }}</span></span>
-    <span class="area-value">{{ area.value }}</span>
-    <span class="area-label">{{ area.value_label }}</span>
-    <p class="area-detail">{{ area.issue_count|default:0 }} Issues · {% if area.affected_clients %}{{ area.affected_clients }} clients affected{% elif area.issue_count %}portfolio-wide review{% else %}no clients affected{% endif %}</p>
-  </a>
-  {% endfor %}
-</section>
-
-<section class="card client-card" id="clients">
-  <div class="client-card-head">
-    <div class="client-card-title">
-      <h2>Client portfolio{% if open_client_candidates %} <a class="badge badge-high client-new-link" href="{% url 'inventory_clients' %}#new-clients" title="Source clients not yet set up in Operations: accept as a new client, map to an existing one, or exclude">{{ open_client_candidates }} new</a>{% endif %}</h2>
-      <span>Clients needing attention appear first · click a heading to sort</span>
-    </div>
-    <div class="client-controls">
-      <div class="client-chips" role="group" aria-label="Client priority filter">
-        <button class="client-chip active" type="button" data-filter="all">All {{ total_clients }}</button>
-        <button class="client-chip" type="button" data-filter="attention">Needs attention {{ attention_count }}</button>
-        <button class="client-chip" type="button" data-filter="immediate">Act now {{ priority_counts.immediate }}</button>
-        <button class="client-chip" type="button" data-filter="soon">Review next {{ priority_counts.soon }}</button>
-        <button class="client-chip" type="button" data-filter="routine">Monitor {{ priority_counts.routine }}</button>
-        <button class="client-chip" type="button" data-filter="none">No current concerns {{ priority_counts.none }}</button>
-      </div>
-      <input class="client-search" id="client-search" type="search" placeholder="Search clients…" aria-label="Search clients">
-    </div>
-  </div>
-  <div class="client-table-wrap">
-    <table class="client-table" id="client-table" data-no-sort>
-      <thead>
-        <tr>
-          <th><button class="client-sort-button" type="button" data-sort="name">Client<span class="sort-indicator" aria-hidden="true"></span></button></th>
-          <th><button class="client-sort-button" type="button" data-sort="priority">Priority<span class="sort-indicator" aria-hidden="true"></span></button></th>
-          <th><button class="client-sort-button" type="button" data-sort="devices">Devices<span class="sort-indicator" aria-hidden="true"></span></button></th>
-          <th><button class="client-sort-button" type="button" data-sort="patching">Patching<span class="sort-indicator" aria-hidden="true"></span></button></th>
-          <th><button class="client-sort-button" type="button" data-sort="compliance">Security<span class="sort-indicator" aria-hidden="true"></span></button></th>
-          <th><button class="client-sort-button" type="button" data-sort="software">Software<span class="sort-indicator" aria-hidden="true"></span></button></th>
-          <th><button class="client-sort-button" type="button" data-sort="inventory">Inventory<span class="sort-indicator" aria-hidden="true"></span></button></th>
-          <th><button class="client-sort-button" type="button" data-sort="data">Data status<span class="sort-indicator" aria-hidden="true"></span></button></th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for row in client_rows %}
-        <tr data-name="{{ row.client.display_name|lower }}" data-priority="{{ row.priority }}" data-devices="{{ row.devices }}" data-patching="{{ row.domains.0.state }}" data-compliance="{{ row.domains.1.state }}" data-software="{{ row.domains.2.state }}" data-inventory="{{ row.domains.3.state }}" data-data="{{ row.data_sort }}">
-          <td class="client-name"><a href="{% url 'org_index' org_slug=row.client.slug %}">{{ row.client.display_name }}</a></td>
-          <td>
-            <span class="priority-badge priority-{{ row.priority }}">{{ row.priority_label }}</span>
-            {% if row.priority_reason %}<span class="priority-reason">{{ row.priority_reason }}</span>{% endif %}
-          </td>
-          <td><strong>{{ row.devices }}</strong><span class="cell-detail">managed</span></td>
-          {% for domain in row.domains %}
-          <td class="domain-cell">
-            <a href="{{ domain.href }}" title="Open {{ row.client.display_name }} → {{ domain.name }}"><span class="state-dot dot-{{ domain.state }}"></span>{{ domain.state_label }}</a>
-            <span class="cell-detail">{{ domain.detail }}</span>
-          </td>
-          {% endfor %}
-          <td class="data-status data-{{ row.data_status }}">{{ row.data_label }}{% if row.data_detail %}<span class="cell-detail">{{ row.data_detail }}</span>{% endif %}</td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-    <p class="no-clients" id="no-clients">No clients match the current controls.</p>
-  </div>
-</section>
-
-<section class="card movement-card" aria-label="Changes in the last 24 hours">
-  <div class="movement-head"><h2>What changed in the last 24 hours</h2></div>
-  <div class="movement-grid">
-    {% for item in movement %}
-    <a class="movement-item" href="{{ item.href }}"><span class="movement-value">{{ item.value }}</span><span class="movement-label">{{ item.label }}</span></a>
-    {% endfor %}
-  </div>
-</section>
-
 <section class="system-line" aria-label="Data and processing status">
   <strong>Data and processing</strong>
   {% if system_status.sources_available %}<span>{{ system_status.sources_current }} of {{ system_status.sources_total }} data sources current</span>{% else %}<span>Source status unavailable</span>{% endif %}
   <span>{{ system_status.jobs_label }}{% if system_status.jobs_running %} · {{ system_status.jobs_running }} running{% endif %}{% if system_status.jobs_waiting %} · {{ system_status.jobs_waiting }} waiting{% endif %}</span>
-  {% if system_status.processed_at %}<span>Latest data {{ system_status.processed_at|timesince }} ago</span>{% endif %}
+  {% if system_status.processed_at %}<span>Latest source update {{ system_status.processed_at|timesince }} ago</span>{% endif %}
   {% if request.user.is_staff %}<span class="system-links"><a href="{% url 'admin_data' %}">Data →</a><a href="{% url 'admin_jobs' %}">Jobs →</a></span>{% endif %}
 </section>
 
-{{ initial_view|json_script:"dashboard-initial-view" }}
-<script>
-(() => {
-  const storageKey = "operationsDashboardControls";
-  const tableBody = document.querySelector("#client-table tbody");
-  const rows = Array.from(tableBody.querySelectorAll("tr"));
-  const chips = Array.from(document.querySelectorAll(".client-chip"));
-  const filterLinks = Array.from(document.querySelectorAll(".dashboard-filter-link"));
-  const sortButtons = Array.from(document.querySelectorAll(".client-sort-button"));
-  const search = document.querySelector("#client-search");
-  const noClients = document.querySelector("#no-clients");
-  const validFilters = new Set(["all", "attention", "immediate", "soon", "routine", "none"]);
-  const validSorts = new Set(["name", "priority", "devices", "patching", "compliance", "software", "inventory", "data"]);
-  const priorityRank = {immediate: 3, soon: 2, routine: 1, none: 0};
-  const domainRank = {needs_action: 5, review: 4, monitor: 3, delayed: 2, unavailable: 1, on_track: 0};
-  let saved = {};
-  try { saved = JSON.parse(sessionStorage.getItem(storageKey) || "{}"); } catch (_error) { saved = {}; }
-  const requested = JSON.parse(document.querySelector("#dashboard-initial-view").textContent);
-  let activeFilter = validFilters.has(requested) && requested !== "all" ? requested : (validFilters.has(saved.filter) ? saved.filter : "all");
-  let activeSort = validSorts.has(saved.sort) ? saved.sort : "priority";
-  let sortDirection = saved.sortDirection === "asc" || saved.sortDirection === "desc" ? saved.sortDirection : (activeSort === "name" ? "asc" : "desc");
-  search.value = saved.search || "";
-
-  function matchesFilter(row) {
-    if (activeFilter === "all") return true;
-    if (activeFilter === "attention") return ["immediate", "soon"].includes(row.dataset.priority);
-    return row.dataset.priority === activeFilter;
-  }
-  function compareRows(a, b) {
-    let result;
-    if (activeSort === "name") result = a.dataset.name.localeCompare(b.dataset.name);
-    else if (activeSort === "priority") result = priorityRank[a.dataset.priority] - priorityRank[b.dataset.priority];
-    else if (activeSort === "devices" || activeSort === "data") result = Number(a.dataset[activeSort]) - Number(b.dataset[activeSort]);
-    else result = domainRank[a.dataset[activeSort]] - domainRank[b.dataset[activeSort]];
-    return (sortDirection === "asc" ? result : -result) || a.dataset.name.localeCompare(b.dataset.name);
-  }
-  function render() {
-    const query = search.value.trim().toLowerCase();
-    let visible = 0;
-    rows.sort(compareRows).forEach((row) => {
-      tableBody.appendChild(row);
-      const show = matchesFilter(row) && (!query || row.dataset.name.includes(query));
-      row.hidden = !show;
-      if (show) visible += 1;
-    });
-    chips.forEach((chip) => chip.classList.toggle("active", chip.dataset.filter === activeFilter));
-    sortButtons.forEach((button) => {
-      const selected = button.dataset.sort === activeSort;
-      button.closest("th").setAttribute("aria-sort", selected ? (sortDirection === "asc" ? "ascending" : "descending") : "none");
-    });
-    noClients.style.display = visible ? "none" : "block";
-    sessionStorage.setItem(storageKey, JSON.stringify({filter: activeFilter, search: search.value, sort: activeSort, sortDirection}));
-  }
-  chips.forEach((chip) => chip.addEventListener("click", () => { activeFilter = chip.dataset.filter; render(); }));
-  filterLinks.forEach((link) => link.addEventListener("click", (event) => {
-    event.preventDefault(); activeFilter = link.dataset.filter; render(); document.querySelector("#clients").scrollIntoView({behavior: "smooth"});
-  }));
-  search.addEventListener("input", render);
-  sortButtons.forEach((button) => button.addEventListener("click", () => {
-    if (activeSort === button.dataset.sort) sortDirection = sortDirection === "asc" ? "desc" : "asc";
-    else {
-      activeSort = button.dataset.sort;
-      sortDirection = activeSort === "name" ? "asc" : "desc";
-    }
-    render();
-  }));
-  render();
-})();
-</script>
 {% endblock %}
