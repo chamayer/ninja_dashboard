@@ -99,7 +99,10 @@ def brand(request: HttpRequest) -> dict:
                     deleted_at__isnull=True,
                 ).order_by("display_name")
             )
-        ctx["nav_findings_count"] = _nav_issues_count(tenant_id)
+        home_count = getattr(request, "home_issues_open_count", None)
+        ctx["nav_findings_count"] = (
+            home_count if home_count is not None else _nav_issues_count(tenant_id)
+        )
         # These badges are rendered only in the application admin tabs, so
         # avoid even their small count queries on ordinary operator pages.
         if request.path_info.startswith("/admin/"):

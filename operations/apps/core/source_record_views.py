@@ -65,20 +65,22 @@ def home_summary(*, now=None) -> dict:
         current, latest = cursor.fetchone()
         cursor.execute(
             """
-            SELECT COUNT(DISTINCT source_record.id)::int
-              FROM operations.entity_observation_history history
-              JOIN operations.source_record_subjects source_record
-                ON source_record.tenant_id = history.tenant_id
-               AND source_record.source_instance_id = history.source_instance_id
-               AND source_record.external_namespace = history.external_namespace
-               AND source_record.parent_external_namespace = history.parent_external_namespace
-               AND source_record.parent_external_id = history.parent_external_id
-               AND source_record.external_id = history.external_id
+            SELECT COUNT(*)::int
+              FROM operations.source_record_subjects source_record
+             WHERE source_record.tenant_id = 1
                AND source_record.subject_kind = 'record'
-             WHERE history.tenant_id = 1
-               AND history.active
-               AND history.effective_from <= %s
-               AND (history.effective_to IS NULL OR history.effective_to > %s)
+               AND EXISTS (
+                   SELECT 1 FROM operations.entity_observation_history history
+                    WHERE history.tenant_id = source_record.tenant_id
+                      AND history.source_instance_id = source_record.source_instance_id
+                      AND history.external_namespace = source_record.external_namespace
+                      AND history.parent_external_namespace = source_record.parent_external_namespace
+                      AND history.parent_external_id = source_record.parent_external_id
+                      AND history.external_id = source_record.external_id
+                      AND history.active
+                      AND history.effective_from <= %s
+                      AND (history.effective_to IS NULL OR history.effective_to > %s)
+               )
             """,
             [cutoff, cutoff],
         )

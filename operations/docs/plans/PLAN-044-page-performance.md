@@ -1,6 +1,223 @@
 # PLAN-044 — Navigation and Computers performance
 
-Status: active. On 2026-11-09 the user authorized autonomous performance work, validation, commit, and push as needed. Home target: 1.5 seconds or less; hard maximum: 2.0 seconds. Preserve the agreed Home design and existing domain-owned summaries. The user also authorized an additive tenant-checked bulk attribution function via migration and focused tests; production deployment approval remains separate. No table or data-model changes.
+Status: active. The current Home implementation plan below supersedes older next-action and authorization notes. The user authorized implementation of this reviewed plan; work is in progress. Home target: ≤1.5 seconds, with an ordinary response under 2 seconds required. Migration 0406 is already applied; no additional schema is proposed. Commit and push approvals remain separate; an origin push approval must include automatic deployment and any reviewed pending migrations.
+
+## Home implementation plan — 2026-11-09 review
+
+### Goal and scope
+
+Make the complete authenticated Home request meet the latency target while
+retaining the domain overview, supported trends, attention list, known-client
+impact counts, and source/job status. Home composes owner results. Client impact
+counts distinct clients associated with the selected issues; evaluation maintains
+those associations. Home does not re-prove source ownership to display this KPI.
+Tenant isolation and current ownership checks for client-scoped access and writes
+remain required; the reporting count does not replace those checks.
+
+This is a plan for scoped edits to existing owners. No new summary framework,
+table, function version, dependency, or blanket cache is proposed. An additional
+migration or data-model change requires a concrete proposal and approval. Do not
+edit applied migration 0406. PLAN-049's independent index work retains 0407+;
+this plan does not reserve another migration number. Coordinate any ingest
+publication changes with PLAN-054's source/findings lock-order work.
+
+### KPI contract to preserve
+
+| Area | Home values |
+| --- | --- |
+| Clients | Active total and supported 30-day comparison; portfolio detail stays on Clients. |
+| Computers | Current total, active, needs review, retired. |
+| Inventory | Present source-record total, same-population 30-day comparison, latest-report freshness. |
+| Data collection | Open collection actions, with paused actions as secondary context. |
+| Patching | In-scope/excluded/unmanaged counts; actively patching count and percentage; 30-day installed/failed patch outcomes for in-scope machines. Percentage denominator is all current Computers; numerator uses the owner's active, in-scope, recent-activity rule. Outcomes count patches, not Computers. |
+| Coverage | Meeting/missing pair, stale separately, neutral separately, exemptions handled by the owner, evaluation freshness. No Coverage trend or new history. |
+| Software | Distinct installed titles, owner-defined approval breakdown, distinct installed titles with active title-linked risk findings. Verify that the "approved" label follows effective Software decisions/policy. |
+| Issues | Open independent actions, critical actions, paused secondary context; prioritized attention and critical mapping alert retain known-client impact counts. |
+| Sources and Jobs | Current source freshness and job processing status in the shared footer; staff cards reuse those results. |
+
+Retain the existing attention ordering unless review identifies a separate
+correctness issue. Unknown client attribution is not proof of no impact. Do not
+silently substitute raw finding counts for independent actions, remove KPIs to
+meet latency, or change a domain population to match an easier query.
+
+### Confirmed checkpoint and evidence
+
+At the design review, HEAD and both local remote-tracking tips were `e9439cc5`.
+A production read of the migration ledger confirmed 0406 applied. Earlier notes calling that commit
+local-only or awaiting its migration deployment are superseded.
+
+The complete static review covered Home composition, every feeder's SQL and
+supporting views, tenant/session/authentication middleware, navigation context,
+and Home/base templates. Templates have no follow-up data fetches or external
+script/style dependencies. Summaries execute sequentially. Navigation Issues
+and Patching counts have separate 60-second process-local caches.
+
+One read-only sample per feeder used the deployed Django readers/runtime role
+with a 3-second statement cap; each feeder used its own transaction:
+
+| Feeder | Elapsed | Evidence |
+| --- | --- | --- |
+| Device policy | 0.111 s | Includes initial database connection; SQL itself 0.015 s. |
+| Clients | 0.010 s | Current and historical aggregate. |
+| Computers | 0.149 s | Lifecycle and current/activity reads. |
+| Inventory | 1.328 s | Current/freshness SELECT 0.641 s; history SELECT 0.679 s. |
+| Issues | >3 s | Statement canceled by its timeout. |
+| Patching | >3 s | Independent statement timeout. |
+| Coverage | 0.110 s | Stored verdict aggregation. |
+| Software | >3 s | Independent statement timeout. |
+| Sources | 0.243 s | Latest source-run/success selection. |
+| Jobs | 0.103 s | Health and runtime diagnostics. |
+| Navigation Issues, cold | SQL error | SQLSTATE 42P01: source_client alias referenced without its join. |
+| Navigation Patching, cold | 0.292 s | Separate active-finding count. |
+
+These samples are not a summed page baseline. No full HTTP/browser success or
+under-two-second result is established. Session/authentication/network costs
+were not isolated. An empty-context template initialization sample is not a
+representative full render and is excluded from the latency budget.
+
+Read-only EXPLAIN estimates identify JIT in Issues and Software, a substantial
+source-link selection in Patching, and live installation/title grouping in
+Software; estimates do not prove where elapsed time is spent. Existing Software
+title rollup lacks lifecycle invalidation and cannot simply replace live counts.
+
+The deployed attribution helper plus input selection separately measured 1.789 s
+for 5,072 observations. The earlier 4.09 s sum of six chunks repeats work and
+must not be treated as a single full-helper timing. Diagnostic execution of the
+equivalent helper body found 191 groups and 171 scalar name proofs; proof work
+was roughly 0.15 s. This does not justify another proof-function rewrite.
+
+### Ordered implementation
+
+1. **Audit and repair stored issue-client publication.** Trace the existing
+   finding client IDs used by the selected action population. Source-record
+   evaluation already computes independent evidence and supplies client_id to
+   publication. Its open/acknowledged upsert refreshes that ID; its
+   investigating/suppressed update refreshes details/timestamps but omits it.
+   Repair that maintenance gap while preserving operator status and snooze.
+   Check existing reassessment/invalidation on mapping changes and unknown
+   attribution. Surface a concrete uncovered path before expanding scope; do
+   not label stale association as current or fall back to an inherited
+   observation client. Keep current-access ownership guards intact.
+2. **Simplify Issues aggregation and repair navigation.** Keep one shared
+   independent-action definition, including covered representatives, shared
+   action keys, pending candidates, severity, and pause rules. Home counts
+   distinct recorded client associations from those selected actions instead
+   of invoking the bulk ownership proof. Remove attribution CTEs made obsolete
+   by this change; retain the applied database helper for compatibility.
+   Repair the ordinary selector's missing source_client alias. Supply Home's
+   already computed open-action total to navigation through request context,
+   preserving the standalone cached badge path for other pages. Keep Patching's
+   badge definition separate unless parity with a Home count is demonstrated.
+3. **Narrow Patching in its owner.** Reconcile the denominator: the current
+   query begins with resolved owners, whereas the KPI denominator is all current
+   Computers. Preserve ownership restrictions for the numerator and outcomes;
+   explain unresolved scope rather than classifying it as unmanaged by default.
+   Inspect the source-link/activity/outcome plan, restrict inputs to the required
+   population and time windows, and reuse existing domain projections where
+   their meaning matches. Preserve counts across multiple links and patch facts.
+4. **Narrow Software in its owner.** Confirm the title population and approval
+   meaning against the Software page and effective decisions, including publisher
+   decisions. Then remove unnecessary installation-level work from title-level
+   aggregation where equivalent. Preserve distinct title risk counting and
+   lifecycle/stale-installation exclusions. Do not replace live reads with the
+   existing lifecycle-insensitive rollup. Propose any genuinely missing domain
+   state separately instead of adding another Home-specific abstraction.
+5. **Reduce Inventory read cost.** Keep the agreed admitted-record population,
+   current presence, reporting freshness, and exact 30-day comparison. Inspect
+   the metadata and historical joins for unnecessary work; reuse the existing
+   history and owner reader. Do not substitute run/event counts for a trend or
+   add snapshots without review. Leave the already inexpensive owner readers
+   alone unless new evidence identifies a correctness problem.
+6. **Validate and release the reviewed changes.** Check the final runtime file
+   and packaging list; run the small existing checks below. Prepare a concrete
+   diff and list any pending migrations before separate commit/push approvals.
+   An approved origin push triggers Portainer automatically; push the secondary
+   mirror afterward, with no separate redeploy. Verify deployment and measure
+   the complete authenticated request using the approved bounded diagnostics.
+   If a rehearsal is available, measure there before release. If the target is
+   still missed, identify the remaining feeder before proposing another change.
+
+### Affected files
+
+- `operations/apps/core/issue_selection.py`, `context_processors.py`, and
+  `views.py`: action aggregation, navigation reuse, and composition.
+- `ingest/source_records.py`: issue-client publication maintenance.
+- `operations/apps/core/patching_reads.py`, `software_review.py`, and
+  `source_record_views.py`: domain-owned read reductions and KPI correctness.
+- `operations/templates/home.html` only if a reviewed label/freshness correction
+  is needed; no layout rewrite is planned.
+- This handoff, module/root blueprints, and plan registry for continuity.
+  Existing focused test files only when needed and authorized; no broad suite
+  or speculative new test files.
+
+### Implementation checkpoint
+
+The scoped readers and publication updates are in the worktree. Small synthetic
+PostgreSQL checks exercised the complete Home Issues aggregation, ordinary/Home
+selection parity, recorded-client batch refresh and publication for investigating
+and suppressed episodes with preserved status and snooze, the Patching population and activity window, Inventory history parity, and Software
+title/publisher and risk parity. A non-superuser tenant-RLS fixture and a stale
+recorded-client fixture checked tenant and current client-scoped Issues access.
+The Home navigation zero and standalone fallback paths were checked separately. These functional checks do not establish a response
+time or production behavior. Existing Issues fixtures need updates to cover the
+new behavior; the user requested no further testing. Source-record client
+associations can lag while queued reassessment is pending and are labeled recorded.
+Software's existing owner status treats the absence of a matching prompt or reject
+finding and investigate decision as its default bucket, so Home describes that
+bucket as having no open decision issue rather than claiming explicit approval.
+Patching reports unresolved ownership separately from unmanaged scope.
+
+A shared source-group action can contain both an unmatched and an unattached
+finding. Issues filters by type before picking a representative; Home formerly
+picked one representative across types, so an attention count could differ from
+its type-filtered link. The attention rows now select representatives per type,
+while overall action totals still deduplicate across types. The same action may
+therefore appear in both relevant attention rows; each row matches its drilldown.
+Critical, category-critical and critical-mapping totals likewise filter severity
+and mapping type before selecting representatives, matching Issues scopes even
+when records representing one action have different severities. A synthetic
+PostgreSQL check also confirms that a covered selected representative stays
+excluded instead of exposing its uncovered sibling.
+
+### Acceptance evidence and remaining gates
+
+| Requirement | Current evidence | Remaining |
+| --- | --- | --- |
+| Stored issue clients and access | Synthetic PostgreSQL checks cover changed/null associations, status and snooze preservation, tenant RLS and current client-scoped source evidence. Mapping changes enqueue reassessment. | Associations can lag while reassessment is pending; existing regression coverage is incomplete; the user requested no further testing. |
+| Issues and navigation | Synthetic checks cover representative parity, type and severity drilldowns, recorded-client counts, zero reuse and cold fallback. | Existing Issues fixture and obsolete batch-query assertion remain outdated; no further testing was requested. |
+| Patching | Synthetic checks cover all-current denominator, unresolved ownership, duplicate links, activity window and outcomes. | Measure the owner reader in an authorized environment. |
+| Software | Synthetic parity covers modal-publisher ties/nulls, lifecycle, title decisions, publisher investigation and title-linked risk. | Measure the owner reader in an authorized environment; the owner's default bucket is not proof of explicit approval. |
+| Inventory | Synthetic history parity covers duplicate and expired history and tenant scope; current/freshness population remains unchanged. | Measure the owner reader in an authorized environment. |
+| Release and end-to-end latency | Runtime files are included in the Docker build; no new migration is proposed. Django check and 55 existing focused tests pass. | Review remaining pending migrations before separately approved commit and push; verify deployment and a bounded authenticated request in an authorized environment. The response-time target remains unproven. |
+
+### Validation and completion
+
+Keep testing light: reuse relevant existing Home/navigation/Issues and
+source-publication checks; exercise only the cases changed. Confirm distinct
+clients across repeated issues, null/changed clients, preserved investigating
+status, independent-action parity, cold navigation, patch denominator, and
+distinct software titles. If existing checks cannot cover a material gap,
+describe it and obtain approval before adding/changing test coverage. Earlier
+0406 tests do not validate these proposed fixes; the previously observed stale
+Issues source-text assertion must be reported or reconciled within scope.
+
+Run applicable Django checks, changed-file syntax/lint, plan-registry validation,
+and git diff --check. Use only small synthetic/local functional checks; no local
+performance runs or full-fleet producer passes. Production diagnostics remain
+read-only and bounded; cancel only the identified diagnostic statement if its
+client disconnects. Do not treat a timeout as a measured completion time.
+
+Completion requires matching displayed counts/drilldowns, preserved tenant and
+ownership protections, healthy deployed services after an approved release, and
+a successful complete authenticated Home response under 2 seconds (target
+≤1.5 seconds), including a cold navigation-cache path. Component timings and
+estimated plans alone cannot close the plan. Record permission level, cache
+state, response status, timing, and limitations; do not promise load capacity
+from a single request.
+
+**Current next action:** Continue the implementation and validation recorded in
+the [Operations checkpoint](../../BLUEPRINT.md). Historical notes below retain prior scope and evidence; their old
+next-action/approval statements do not override this checkpoint.
 
 ## Home requirements and domain-data inventory (2026-11-05)
 
@@ -500,6 +717,6 @@ ambiguous mappings, duplicate input, tenant guard and grants; all three pass.
 The existing Issues suite also has one unrelated source-text assertion failure
 against unchanged `views.py`. Django checks pass; migration parity reports no
 model changes. No production push has been approved for migration 0406.
-**Next:** finish diff and migration-set review, commit the local change, then
-request explicit approval for an origin push including migration 0406 and its
-automatic Portainer deployment. After approval, measure one bounded Home GET.
+Commit `e9439cc5` is local only. **Next:** obtain explicit approval for an
+origin push including migration 0406 and its automatic Portainer deployment.
+After approval, measure one bounded Home GET.

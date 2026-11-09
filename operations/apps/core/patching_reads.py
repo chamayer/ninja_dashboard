@@ -36,9 +36,10 @@ def home_summary(*, now: datetime | None = None, policy: dict[str, int] | None =
             f"""
             WITH current_computers AS (
                 SELECT device.device_id, device.client_id, device.last_contact_at,
-                       device.effective_patching_scope
+                       device.effective_patching_scope,
+                       owner.device_id IS NOT NULL AS has_owner
                   FROM operations.v_device device
-                  JOIN operations.computer_client_ownership owner
+                  LEFT JOIN operations.computer_client_ownership owner
                     ON owner.tenant_id = device.tenant_id
                    AND owner.device_id = device.device_id
                    AND owner.effective_client_id = device.client_id
@@ -49,25 +50,27 @@ def home_summary(*, now: datetime | None = None, policy: dict[str, int] | None =
                 SELECT DISTINCT link.device_id,
                        {safe_ninja_device_id_sql('link')} AS ninja_device_id
                   FROM operations.v_device_source_link link
+                  JOIN current_computers computer ON computer.device_id = link.device_id
+                   AND computer.has_owner
                   JOIN operations.sources source ON source.id = link.source_id
                  WHERE link.tenant_id = 1 AND lower(source.name) = 'ninja'
             ), patch_activity AS (
-                SELECT link.device_id, MAX(activity.last_patch_activity_at) AS last_activity
+                SELECT DISTINCT link.device_id
                   FROM ninja_links link
                   JOIN ninja_patches.device_patch_activity activity
                     ON activity.device_id = link.ninja_device_id
-                 GROUP BY link.device_id
+                   AND activity.last_patch_activity_at >= %s
             ), posture AS (
                 SELECT computer.*,
                        {recent_contact_sql('computer.last_contact_at', 'computer.client_id', policy['active_device_days'])} AS is_active,
-                       activity.last_activity >= %s AS has_recent_activity
+                       activity.device_id IS NOT NULL AS has_recent_activity
                   FROM current_computers computer
                   LEFT JOIN patch_activity activity USING (device_id)
             ), included_ninja_devices AS (
                 SELECT DISTINCT link.ninja_device_id
                   FROM posture computer
                   JOIN ninja_links link USING (device_id)
-                 WHERE computer.effective_patching_scope = 'Included'
+                 WHERE computer.has_owner AND computer.effective_patching_scope = 'Included'
                    AND link.ninja_device_id IS NOT NULL
             ), outcomes AS (
                 SELECT COUNT(*) FILTER (WHERE lower(fact.status) = 'installed')::int AS installed,
@@ -79,11 +82,14 @@ def home_summary(*, now: datetime | None = None, policy: dict[str, int] | None =
                    AND fact.installed_at >= %s
             )
             SELECT COUNT(*)::int AS current_total,
-                   COUNT(*) FILTER (WHERE effective_patching_scope = 'Included')::int AS included,
-                   COUNT(*) FILTER (WHERE effective_patching_scope = 'Excluded')::int AS excluded,
-                   COUNT(*) FILTER (WHERE effective_patching_scope = 'Unmanaged')::int AS unmanaged,
+                   COUNT(*) FILTER (WHERE has_owner AND effective_patching_scope = 'Included')::int AS included,
+                   COUNT(*) FILTER (WHERE has_owner AND effective_patching_scope = 'Excluded')::int AS excluded,
+                   COUNT(*) FILTER (WHERE has_owner AND effective_patching_scope = 'Unmanaged')::int AS unmanaged,
+                   COUNT(*) FILTER (WHERE NOT has_owner)::int AS unresolved,
+                   COUNT(*) FILTER (WHERE has_owner AND
+                       COALESCE(effective_patching_scope, '') NOT IN ('Included', 'Excluded', 'Unmanaged'))::int AS unspecified,
                    COUNT(*) FILTER (
-                       WHERE is_active AND effective_patching_scope = 'Included'
+                       WHERE has_owner AND is_active AND effective_patching_scope = 'Included'
                          AND has_recent_activity
                    )::int AS actively_patching,
                    COALESCE(MAX(outcomes.installed), 0)::int,
@@ -97,12 +103,25 @@ def home_summary(*, now: datetime | None = None, policy: dict[str, int] | None =
             ],
         )
         row = cursor.fetchone()
-    current_total, included, excluded, unmanaged, actively_patching, installed, failed, latest = row
+    (
+        current_total,
+        included,
+        excluded,
+        unmanaged,
+        unresolved,
+        unspecified,
+        actively_patching,
+        installed,
+        failed,
+        latest,
+    ) = row
     return {
         "current_total": current_total,
         "included": included,
         "excluded": excluded,
         "unmanaged": unmanaged,
+        "unresolved": unresolved,
+        "unspecified": unspecified,
         "actively_patching": actively_patching,
         "actively_patching_percent": (
             round(100 * actively_patching / current_total, 1) if current_total else 0.0

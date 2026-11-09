@@ -48,8 +48,8 @@ validation results, or completed-plan summaries here.
 - **PLAN-016 — active.** Next: implement the bounded, tenant-scoped,
   read-only explorer and focused tests. See the [plan](operations/docs/plans/PLAN-016-admin-sql-explorer.md)
   and [Operations checkpoint](operations/BLUEPRINT.md).
-- **PLAN-044 — active.** Request deployment approval for migration 0406 after
-  local review; see the [Operations checkpoint](operations/BLUEPRINT.md).
+- **PLAN-044 — active.** Review the implemented Home changes and release gates;
+  see the [Operations checkpoint](operations/BLUEPRINT.md).
 
 Completed and ready plans remain in the registry; their details stay in their
 registered source documents. Update this index only when active status,

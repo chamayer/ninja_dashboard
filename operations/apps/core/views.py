@@ -790,6 +790,7 @@ def home(request: HttpRequest) -> HttpResponse:
     )
     inventory_summary = source_record_summary.home_summary(now=now)
     issue_summary, attention_items = issue_selection.home_data()
+    request.home_issues_open_count = issue_summary["open_actions"]
     issue_categories = issue_summary["categories"]
     inventory_issues = issue_categories[finding_registry.INVENTORY]
     collection_issues = issue_categories[finding_registry.COLLECTION]
@@ -844,6 +845,8 @@ def home(request: HttpRequest) -> HttpResponse:
             "detail": (
                 f"{patch_summary['excluded']:,} excluded · "
                 f"{patch_summary['unmanaged']:,} unmanaged · "
+                f"{patch_summary.get('unresolved', 0):,} ownership unresolved · "
+                f"{patch_summary.get('unspecified', 0):,} scope unspecified · "
                 f"{patch_summary['actively_patching_percent']:.1f}% actively patching "
                 f"({patch_summary['actively_patching']:,} of {patch_summary['current_total']:,} current) · "
                 f"{patch_issues['open_actions']:,} open actions · "
@@ -872,7 +875,7 @@ def home(request: HttpRequest) -> HttpResponse:
             "value": f"{software_summary['installed_titles']:,}",
             "value_label": "installed software titles",
             "detail": (
-                f"{software_summary['approval_counts'].get('approve', 0):,} approved · "
+                f"{software_summary['approval_counts'].get('approve', 0):,} without an open decision issue · "
                 f"{software_summary['approval_counts'].get('pending', 0):,} awaiting decision · "
                 f"{software_summary['approval_counts'].get('reject', 0):,} rejected · "
                 f"{software_summary['approval_counts'].get('investigate', 0):,} investigating · "

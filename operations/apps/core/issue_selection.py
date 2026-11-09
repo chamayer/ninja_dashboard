@@ -150,51 +150,23 @@ def _items_sql(
         " jsonb_build_object('external_id', c.external_id,"
         " 'record_type', c.external_namespace), '{}'::jsonb"
     )
-    ownership_join = (
-        " LEFT JOIN effective_owners owner"
-        " ON owner.tenant_id = f.tenant_id AND owner.device_id = f.subject_id"
-        " AND owner.effective_client_id = f.client_id"
-        if home_compact
-        else ""
+    # Home reports the recorded association on selected actions. Other Issues
+    # readers retain their current ownership checks for filtering and access.
+    client_expression = (
+        "f.client_id" if home_compact else
+        "CASE WHEN f.subject_type = 'device' AND NOT EXISTS ("
+        "SELECT 1 FROM operations.computer_client_ownership owner "
+        "WHERE owner.tenant_id = f.tenant_id AND owner.device_id = f.subject_id "
+        "AND owner.effective_client_id = f.client_id "
+        "AND owner.state IN ('resolved', 'decision_protected')) THEN NULL "
+        "WHEN f.subject_type = 'source_record' THEN "
+        "(SELECT operations.computer_client_independent_evidence("
+        "subject.tenant_id, subject.observation_id) "
+        "FROM operations.source_record_subjects subject "
+        "WHERE subject.tenant_id = f.tenant_id AND subject.id = f.subject_id) "
+        "ELSE f.client_id END"
     )
-    source_record_join = (
-        "LEFT JOIN source_record_clients source_client "
-        "ON source_client.tenant_id = f.tenant_id AND source_client.id = f.subject_id"
-        if home_compact
-        else ""
-    )
-    source_record_cte = (
-        "WITH eligible_subjects AS MATERIALIZED ("
-        "SELECT DISTINCT subject.tenant_id, subject.id, subject.observation_id "
-        "FROM (SELECT DISTINCT f.tenant_id, f.subject_id "
-        "FROM operations.findings f "
-        "JOIN operations.finding_types t ON t.id = f.finding_type_id "
-        "WHERE f.tenant_id = %(tenant)s AND f.subject_type = 'source_record' AND "
-        + " AND ".join(finding_where)
-        + ") eligible JOIN operations.source_record_subjects subject "
-        "ON subject.tenant_id = eligible.tenant_id AND subject.id = eligible.subject_id), "
-        "source_record_observations AS MATERIALIZED ("
-        "SELECT DISTINCT observation_id FROM eligible_subjects WHERE observation_id IS NOT NULL), "
-        "source_record_attribution AS MATERIALIZED ("
-        "SELECT * FROM operations.computer_client_independent_evidence_batch("
-        "%(tenant)s, ARRAY(SELECT observations.observation_id "
-        "FROM source_record_observations observations))), "
-        "source_record_clients AS MATERIALIZED ("
-        "SELECT subject.tenant_id, subject.id, attribution.client_id "
-        "FROM eligible_subjects subject LEFT JOIN source_record_attribution attribution "
-        "ON attribution.observation_id = subject.observation_id)"
-        if home_compact
-        else ""
-    )
-    unowned_device = (
-        "owner.device_id IS NULL"
-        if home_compact
-        else "NOT EXISTS (SELECT 1 FROM operations.computer_client_ownership owner"
-        " WHERE owner.tenant_id = f.tenant_id AND owner.device_id = f.subject_id"
-        " AND owner.effective_client_id = f.client_id"
-        " AND owner.state IN ('resolved', 'decision_protected'))"
-    )
-    sql = f"""{source_record_cte}
+    sql = f"""
         SELECT 'finding'::text AS kind, f.id, f.condition_namespace::text AS namespace,
                t.name::text AS type_name, t.issue_category::text AS issue_category
                {label_column},
@@ -203,9 +175,7 @@ def _items_sql(
                     WHEN f.snoozed_until > now() THEN 'paused' ELSE 'open' END AS status,
                COALESCE(f.status = ANY(%(active)s) AND s.attention = 'covered', false) AS covered,
                COALESCE(s.covered_by, '{{}}'::uuid[]) AS covered_by,
-               CASE WHEN f.subject_type = 'device' AND {unowned_device} THEN NULL
-                    WHEN f.subject_type = 'source_record' THEN source_client.client_id
-                    ELSE f.client_id END AS client_id,
+               {client_expression} AS client_id,
                f.subject_type::text AS subject_type, f.subject_id,
                CASE t.name
                    WHEN 'unmatched_source_group' THEN 'source_group:'
@@ -219,9 +189,7 @@ def _items_sql(
                {detail_columns}
           FROM operations.findings f
           JOIN operations.finding_types t ON t.id = f.finding_type_id
-          {ownership_join}
           LEFT JOIN operations.finding_state s ON s.finding_id = f.id{state_filter}
-          {source_record_join}
           LEFT JOIN operations.source_bindings b
             ON t.name = 'client_unattached_group' AND b.tenant_id = f.tenant_id
            AND b.id::text = f.subject_ref->>'source_binding_id'
@@ -401,18 +369,8 @@ def _filtered_sql(
             " AND owner.state IN ('resolved', 'decision_protected')))"
         )
     filtered_cte = "filtered AS MATERIALIZED" if home_compact else "filtered AS"
-    ownership_cte = (
-        "effective_owners AS MATERIALIZED ("
-        "SELECT tenant_id, device_id, effective_client_id "
-        "FROM operations.computer_client_ownership "
-        "WHERE tenant_id = %(tenant)s "
-        "AND state IN ('resolved', 'decision_protected')),"
-        if home_compact
-        else ""
-    )
     sql = f"""
-        WITH {ownership_cte}
-        items AS ({items}),
+        WITH items AS ({items}),
         {filtered_cte} (
             SELECT i.*, {_SEVERITY_RANK_SQL} AS severity_rank{label_columns}
               FROM items i{label_joins}
@@ -621,10 +579,49 @@ def home_data(*, attention_limit: int = 6) -> tuple[dict[str, Any], list[dict[st
         Scope(status="open_paused"), summary=True, home_compact=True
     )
     params["mapping_types"] = list(mapping_types())
+    # A type-filtered Issues link ranks only that type. Shared actions need a
+    # separate type-level representative for attention; global totals retain
+    # the single representative across both source-group finding types.
+    # Critical and mapping scopes also filter before choosing a representative.
     with connection.cursor() as cursor:
         cursor.execute(
             sql
             + """
+            , shared_issue_actions AS (
+                SELECT DISTINCT ON (action_key, status, type_name) *
+                  FROM filtered
+                 WHERE type_name = ANY(%(shared_action_types)s) AND status = 'open'
+                 ORDER BY action_key, status, type_name,
+                          (namespace = 'admin') DESC, severity_rank, id
+            ), critical_shared AS (
+                SELECT DISTINCT ON (action_key, status) *
+                  FROM filtered
+                 WHERE type_name = ANY(%(shared_action_types)s)
+                   AND status = 'open' AND severity = 'critical'
+                 ORDER BY action_key, status,
+                          (namespace = 'admin') DESC, severity_rank, id
+            ), critical_actions AS (
+                SELECT * FROM filtered
+                 WHERE type_name <> ALL(%(shared_action_types)s)
+                   AND status = 'open' AND severity = 'critical' AND NOT covered
+                UNION ALL
+                SELECT * FROM critical_shared WHERE NOT covered
+            ), mapping_shared AS (
+                SELECT DISTINCT ON (action_key, status) *
+                  FROM filtered
+                 WHERE type_name = ANY(%(shared_action_types)s)
+                   AND type_name = ANY(%(mapping_types)s)
+                   AND status = 'open' AND severity = 'critical'
+                 ORDER BY action_key, status,
+                          (namespace = 'admin') DESC, severity_rank, id
+            ), critical_mapping_actions AS (
+                SELECT * FROM filtered
+                 WHERE type_name <> ALL(%(shared_action_types)s)
+                   AND type_name = ANY(%(mapping_types)s)
+                   AND status = 'open' AND severity = 'critical' AND NOT covered
+                UNION ALL
+                SELECT * FROM mapping_shared WHERE NOT covered
+            )
             SELECT type_name, issue_category, severity, status,
                    count(*)::int AS action_count,
                    count(DISTINCT client_id)::int AS client_count,
@@ -638,19 +635,34 @@ def home_data(*, attention_limit: int = 6) -> tuple[dict[str, Any], list[dict[st
                    GROUPING(type_name)::int AS total_row,
                    count(*) FILTER (WHERE status = 'open')::int AS total_open_actions,
                    count(*) FILTER (WHERE status = 'paused')::int AS total_paused_actions,
-                   count(*) FILTER (WHERE status = 'open' AND severity = 'critical')::int
-                       AS total_critical_actions,
-                   count(*) FILTER (WHERE status = 'open' AND severity = 'critical'
-                       AND type_name = ANY(%(mapping_types)s))::int AS mapping_actions,
-                   count(DISTINCT client_id) FILTER (WHERE status = 'open'
-                       AND severity = 'critical'
-                       AND type_name = ANY(%(mapping_types)s))::int AS mapping_clients
+                   (SELECT count(*)::int FROM critical_actions) AS total_critical_actions,
+                   (SELECT count(*)::int FROM critical_mapping_actions) AS mapping_actions,
+                   (SELECT count(DISTINCT client_id)::int FROM critical_mapping_actions)
+                       AS mapping_clients
               FROM selected
              GROUP BY GROUPING SETS (
                  (type_name, issue_category, severity, status),
                  (type_name, issue_category, status),
                  ()
              )
+            HAVING GROUPING(type_name) = 1 OR GROUPING(severity) = 0
+                OR type_name <> ALL(%(shared_action_types)s)
+            UNION ALL
+            SELECT type_name, issue_category, NULL::text AS severity, status,
+                   count(*)::int, count(DISTINCT client_id)::int,
+                   count(DISTINCT (subject_type, subject_id))
+                       FILTER (WHERE subject_id IS NOT NULL)::int,
+                   MAX(CASE severity WHEN 'critical' THEN 5 WHEN 'high' THEN 4
+                       WHEN 'medium' THEN 3 WHEN 'low' THEN 2 ELSE 1 END)::int,
+                   1, 0, 0, 0, 0, 0, 0
+              FROM shared_issue_actions
+             WHERE NOT covered
+             GROUP BY type_name, issue_category, status
+            UNION ALL
+            SELECT type_name, issue_category, NULL::text, 'open'::text,
+                   count(*)::int, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0
+              FROM critical_actions
+             GROUP BY type_name, issue_category
             """,
             params,
         )
@@ -685,10 +697,11 @@ def home_data(*, attention_limit: int = 6) -> tuple[dict[str, Any], list[dict[st
         "categories": category_counts,
     }
     attention = []
+    critical_category_row = 2
     for (
         type_name,
         category,
-        severity,
+        _severity,
         status,
         count,
         clients,
@@ -710,6 +723,10 @@ def home_data(*, attention_limit: int = 6) -> tuple[dict[str, Any], list[dict[st
                 mapping_actions=mapping_actions,
                 mapping_clients=mapping_clients,
             )
+        elif attention_row == critical_category_row:
+            category_name = type_categories.get(type_name)
+            if category_name:
+                category_counts[category_name]["critical_actions"] += count
         elif attention_row:
             if status != "open":
                 continue
@@ -727,7 +744,7 @@ def home_data(*, attention_limit: int = 6) -> tuple[dict[str, Any], list[dict[st
                 + urlencode({"type": issue_group, "issue": type_name}),
             }
             item["affected"] = (
-                f"{subjects:,} affected · {clients:,} client{'s' if clients != 1 else ''}"
+                f"{subjects:,} affected · {clients:,} recorded client{'s' if clients != 1 else ''}"
                 if clients
                 else f"{subjects:,} affected"
             )
@@ -738,8 +755,6 @@ def home_data(*, attention_limit: int = 6) -> tuple[dict[str, Any], list[dict[st
                 category_totals = category_counts[category_name]
                 if status == "open":
                     category_totals["open_actions"] += count
-                    if severity == "critical":
-                        category_totals["critical_actions"] += count
                 elif status == "paused":
                     category_totals["paused_actions"] += count
 

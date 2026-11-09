@@ -35,7 +35,7 @@ SELECT finding.id::text, finding_type.name, finding.severity, finding.finding_de
 # per title (ADR-0039) so the overview agrees with Issues and Software review:
 # rejected while a rejected-software finding is open, awaiting while an
 # undecided-software prompt is open, investigating while an investigate
-# decision applies, otherwise decided. Each set is built once and hash-joined
+# decision applies, otherwise no open decision issue. Each set is built once and hash-joined
 # to the title rows (alias ``sic``); a per-row EXISTS would rescan findings.
 TITLE_STATUSES = ("reject", "pending", "investigate", "approve")
 TITLE_STATUS_CTES = """
@@ -216,14 +216,14 @@ def rare_limit_preview(distribution: dict[int, int], limit: int, current: int) -
 
 
 def home_summary() -> dict:
-    """Current installed-title approvals and title-linked risk count for Home."""
+    """Current title decision states and title-linked risk count for Home."""
     with transaction.atomic(), connection.cursor() as cursor:
         cursor.execute("SET LOCAL operations.tenant_id = 1")
         cursor.execute(
             f"""
-            WITH current_titles AS (
-                SELECT sic.tenant_id, sic.canonical_name,
-                       mode() WITHIN GROUP (ORDER BY sic.publisher) AS publisher
+            WITH title_publishers AS (
+                SELECT sic.tenant_id, sic.canonical_name, sic.publisher,
+                       count(sic.publisher) AS publisher_count
                   FROM operations.software_installations_current sic
                   JOIN operations.devices d
                     ON d.tenant_id = sic.tenant_id AND d.id = sic.device_id
@@ -232,7 +232,12 @@ def home_summary() -> dict:
                    AND sic.stale_since IS NULL
                    AND d.deleted_at IS NULL
                    AND {current_computer_sql('d')}
-                 GROUP BY sic.tenant_id, sic.canonical_name
+                 GROUP BY sic.tenant_id, sic.canonical_name, sic.publisher
+            ), current_titles AS (
+                SELECT DISTINCT ON (tenant_id, canonical_name)
+                       tenant_id, canonical_name, publisher
+                  FROM title_publishers
+                 ORDER BY tenant_id, canonical_name, publisher_count DESC, publisher NULLS LAST
             ), {TITLE_STATUS_CTES}, risk_titles AS (
                 SELECT DISTINCT lower(finding.finding_details->>'canonical_name') AS title_key
                   FROM operations.findings finding

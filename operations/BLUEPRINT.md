@@ -7,20 +7,38 @@ That record is historical and must be verified against current files before reus
 
 ## PLAN-044 — Navigation and Computers performance
 
-**Goal:** Get ordinary Home response time to ≤1.5 seconds (2.0 seconds hard
-maximum), preserving the agreed domain-owned overview, supported trends,
-Coverage totals, and Clients portfolio boundary. No schema changes.
-**Checkpoint:** `599dc916` is on both remotes and deployed; Operations is
-healthy. A 40-record attribution sample took 0.538 seconds; 5,071 active source
-records require the same protected evidence lookup. The user authorized an
-additive tenant-checked bulk security-definer function and focused tests. PLAN-044
-owns migration 0406 after 0405; PLAN-049 must rebase its unmerged index to 0407
-or later. Migration 0406 and Home query wiring are implemented locally; the
-focused PostgreSQL tests pass. One unrelated stale source-text Issues assertion
-fails on unchanged `views.py`. **Next:** review and commit the local change, then
-request origin push approval including migration 0406 and automatic Portainer
-deployment. See the
-[handoff](docs/plans/PLAN-044-page-performance.md).
+**Goal:** Ordinary Home ≤1.5 seconds; hard maximum under 2 seconds. Preserve
+the agreed domain KPIs, supported trends, known-client impact counts, and
+Clients portfolio boundary.
+**Scope/files:** Home/Issues/navigation readers and template, source-record
+finding publication, Patching, Software, and Inventory owner readers. Exact
+files, ordered steps, decisions, and acceptance checks are in the
+[current implementation plan](docs/plans/PLAN-044-page-performance.md#home-implementation-plan--2026-11-09-review).
+**Checkpoint:** `e9439cc5` is the confirmed baseline; migration 0406 is
+applied. Source assessment refreshes recorded client IDs, including retained
+unknown findings; mapping changes enqueue reassessment, so IDs can lag. Home
+Issues uses recorded IDs and reuses its open count for navigation. Shared
+source-group attention rows and critical totals match their filtered Issues scopes
+while the overall action total remains deduplicated. Patching
+counts all current Computers and narrows owned activity/outcomes. Inventory uses
+an existence check for history. Software groups publisher counts before selecting
+a title's modal publisher; its label no longer claims unproven approvals. No new
+schema is proposed. PLAN-049 must use migration 0407 or later.
+**Validation:** 55 existing source-record/Home/navigation tests and Django check
+pass. Synthetic PostgreSQL checks cover Issues selection parity, attribution,
+Patching activity/outcomes, Inventory history, Software title/publisher/risk
+parity, publication status/snooze, covered representatives, Home/drilldown and
+differing-severity counts,
+RLS, and client-scoped source evidence. A real Home template/context smoke check confirms navigation
+reuse and card labels; cold fallback and both batch-helper
+PostgreSQL checks pass. No latency improvement has been measured. The old Issues fixture lacks issue_category; an
+existing Home attribution assertion expects the superseded batch query and fails.
+The user requested no further testing. Runtime files are included by Docker.
+Whole-file formatting/lint checks report existing violations outside this change.
+**Next:** Review the implementation and remaining gates in the
+[acceptance evidence](docs/plans/PLAN-044-page-performance.md#acceptance-evidence-and-remaining-gates).
+Respect the request to stop further testing. Full-request timing, commit, and
+deployment require the applicable authorization.
 
 ## PLAN-015 — Identity reconciliation
 

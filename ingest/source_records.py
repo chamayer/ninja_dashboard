@@ -1857,6 +1857,23 @@ def assess_records(
         ],
     )
     type_ids = finding_type_ids(cur)
+    # Unknown or resolved assessments can retain operator-managed findings.
+    # Refresh their recorded association independently of each rule result.
+    if records:
+        cur.execute(
+            """
+            UPDATE operations.findings f
+               SET client_id = attribution.client_id
+              FROM unnest(%s::uuid[], %s::uuid[]) AS attribution(subject_id, client_id)
+             WHERE f.tenant_id = %s AND f.condition_namespace = 'entity'
+               AND f.subject_type = 'source_record' AND f.subject_id = attribution.subject_id
+               AND f.finding_type_id = ANY(%s)
+               AND f.status IN ('open', 'acknowledged', 'investigating', 'suppressed')
+               AND f.client_id IS DISTINCT FROM attribution.client_id
+            """,
+            ([r["id"] for r in records], [r["client_id"] for r in records],
+             tenant_id, list(type_ids.values())),
+        )
     active_keys = active_native_keys(
         cur, tenant_id, "source_record", [r["id"] for r in records]
     )
@@ -2021,12 +2038,12 @@ def publish_finding(
     cur.execute(
         """
         UPDATE operations.findings
-           SET finding_details = %s::jsonb, last_seen_at = %s, last_detected_at = %s
+           SET client_id = %s, finding_details = %s::jsonb, last_seen_at = %s, last_detected_at = %s
          WHERE tenant_id = %s AND condition_namespace = 'entity' AND condition_key = %s
            AND status IN ('investigating', 'suppressed')
         RETURNING id
         """,
-        (json.dumps(details), now, now, tenant_id, key),
+        (client_id, json.dumps(details), now, now, tenant_id, key),
     )
     row = cur.fetchone()
     if row:

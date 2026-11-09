@@ -172,8 +172,8 @@
 - Source: operations/docs/plans/PLAN-044-page-performance.md
 - Section: PLAN-044 — Navigation and Computers performance
 - Related plans: PLAN-042 supplies prior performance evidence; PLAN-012 retains Computer semantics and verification; PLAN-043 independently owns issue review in views.py. PLAN-019 source-record history is complete. PLAN-003/004 contracts remain unchanged. PLAN-049 follows this plan's migration 0406 and must use 0407 or later.
-- Resume gate: User authorized autonomous performance work, additive migration 0406, and focused tests on 2026-11-09. Production commit/push/deployment still requires separate approval that includes pending migrations. Preserve the approved Home design and tenant evidence rules.
-- Last checked: 2026-11-09 (`599dc916` deployed to origin and mirror; Operations healthy. Home exceeded 5 seconds and its query was canceled. EXPLAIN estimated cost fell 566,147→121,907. The user authorized migration 0406 and focused tests; the batch function and Home wiring are implemented locally, and 3 PostgreSQL tests pass. Production push/deployment approval remains pending and must include 0406. PLAN-049 follows at 0407+). See detailed handoff.
+- Resume gate: Home implementation is in progress under the reviewed plan. Keep recorded client-impact counts and existing domain KPIs; no additional schema is proposed. Commit and push require separate approvals; an origin push approval must include automatic deployment and any reviewed pending migrations.
+- Last checked: 2026-11-09 (`e9439cc5` was the reviewed baseline and both local remote-tracking tips; production migration 0406 was confirmed applied. Whole-Home feeder review found independent Issues, Patching, and Software statement timeouts at 3 seconds, Inventory at 1.33 seconds, and a confirmed cold navigation SQL alias error. The implementation and focused synthetic PostgreSQL checks are recorded in the Operations blueprint; the user requested no further testing, the old test fixture remains outdated, and full-request latency remains unmeasured. PLAN-049 remains separate at 0407+).
 
 ## PLAN-043 — Useful issue review
 
