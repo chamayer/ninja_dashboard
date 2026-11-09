@@ -10,21 +10,16 @@ That record is historical and must be verified against current files before reus
 **Goal:** Get ordinary Home response time to ≤1.5 seconds (2.0 seconds hard
 maximum), preserving the agreed domain-owned overview, supported trends,
 Coverage totals, and Clients portfolio boundary. No schema changes.
-**Checkpoint:** Commit `9f3769a9` is pushed to both remotes and deployed; startup
-reported no pending migrations and Operations is healthy. PLAN-043 issue review
-was already committed as `cab7e6f2`. The deployed authenticated Home request
-exceeded the five-second client wait and later returned 500: `mapping_query()`
-read an undefined `groups` name. The request's Issues aggregate remained active
-for about 98 seconds. Production EXPLAIN estimated 63,144 rows through the
-window step; Home repeated the Issues selection for counts, mapping and
-attention. A combined compact read still timed out at five seconds and its
-window query ran for 108 seconds; that abandoned read was canceled. The current
-local revision removes global ranking from Home, deduplicates only the two
-documented shared-action types, and replaces a per-finding ownership scan with
-one tenant-scoped join. The `mapping_query()` name is fixed. Python compilation,
-targeted Ruff, registry and whitespace checks pass; no tests were run. **Next:**
-commit and push this owner-query fix, then measure one bounded ordinary Home
-GET. See the
+**Checkpoint:** `9fab308d` is pushed to both remotes and deployed; startup
+reported no pending migrations and Operations is healthy. The bounded
+authenticated Home request still exceeded five seconds; its database statement
+was canceled. Read-only EXPLAIN estimates 63,144 selected rows. Active
+source-record findings repeat 5,071 records across 13,327 findings. The local
+Home-only follow-up computes source-record client attribution once per distinct
+eligible record; regular Issues selections are unchanged. Python compilation,
+plan-registry validation, and whitespace checks pass; local Ruff is unavailable.
+**Next:** complete review, commit/push this focused follow-up, then time one
+bounded ordinary Home request. See the
 [handoff](docs/plans/PLAN-044-page-performance.md).
 See the [handoff](docs/plans/PLAN-044-page-performance.md).
 

@@ -157,6 +157,27 @@ def _items_sql(
         if home_compact
         else ""
     )
+    source_record_join = (
+        "LEFT JOIN source_record_clients source_client "
+        "ON source_client.tenant_id = f.tenant_id AND source_client.id = f.subject_id"
+        if home_compact
+        else ""
+    )
+    source_record_cte = (
+        "WITH source_record_clients AS MATERIALIZED ("
+        "SELECT subject.tenant_id, subject.id, "
+        "operations.computer_client_independent_evidence("
+        "subject.tenant_id, subject.observation_id) AS client_id "
+        "FROM (SELECT DISTINCT f.tenant_id, f.subject_id "
+        "FROM operations.findings f "
+        "JOIN operations.finding_types t ON t.id = f.finding_type_id "
+        "WHERE f.tenant_id = %(tenant)s AND f.subject_type = 'source_record' AND "
+        + " AND ".join(finding_where)
+        + ") eligible JOIN operations.source_record_subjects subject "
+        "ON subject.tenant_id = eligible.tenant_id AND subject.id = eligible.subject_id)"
+        if home_compact
+        else ""
+    )
     unowned_device = (
         "owner.device_id IS NULL"
         if home_compact
@@ -165,7 +186,7 @@ def _items_sql(
         " AND owner.effective_client_id = f.client_id"
         " AND owner.state IN ('resolved', 'decision_protected'))"
     )
-    sql = f"""
+    sql = f"""{source_record_cte}
         SELECT 'finding'::text AS kind, f.id, f.condition_namespace::text AS namespace,
                t.name::text AS type_name, t.issue_category::text AS issue_category
                {label_column},
@@ -175,12 +196,8 @@ def _items_sql(
                COALESCE(f.status = ANY(%(active)s) AND s.attention = 'covered', false) AS covered,
                COALESCE(s.covered_by, '{{}}'::uuid[]) AS covered_by,
                CASE WHEN f.subject_type = 'device' AND {unowned_device} THEN NULL
-                    WHEN f.subject_type = 'source_record' THEN (
-                        SELECT operations.computer_client_independent_evidence(
-                                   subject.tenant_id, subject.observation_id)
-                          FROM operations.source_record_subjects subject
-                         WHERE subject.tenant_id = f.tenant_id AND subject.id = f.subject_id
-                    ) ELSE f.client_id END AS client_id,
+                    WHEN f.subject_type = 'source_record' THEN source_client.client_id
+                    ELSE f.client_id END AS client_id,
                f.subject_type::text AS subject_type, f.subject_id,
                CASE t.name
                    WHEN 'unmatched_source_group' THEN 'source_group:'
@@ -196,6 +213,7 @@ def _items_sql(
           JOIN operations.finding_types t ON t.id = f.finding_type_id
           {ownership_join}
           LEFT JOIN operations.finding_state s ON s.finding_id = f.id{state_filter}
+          {source_record_join}
           LEFT JOIN operations.source_bindings b
             ON t.name = 'client_unattached_group' AND b.tenant_id = f.tenant_id
            AND b.id::text = f.subject_ref->>'source_binding_id'

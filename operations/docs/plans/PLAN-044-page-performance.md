@@ -452,3 +452,16 @@ production snapshot. This is component evidence, not a Home timing. **Next:**
 review, commit and push the ownership-join fix, then time one bounded ordinary
 Home request in production. Continue until ≤1.5 seconds is demonstrated, with
 2.0 seconds as the hard maximum.
+
+2026-11-09 follow-up: `9fab308d` was committed, pushed to both remotes and
+deployed. Its bounded authenticated Home request still exceeded five seconds;
+the matching database statement was canceled. Read-only EXPLAIN estimates
+63,144 rows through the compact selection and identifies a repeated source
+record attribution subplan. Active source-record findings have 13,327 findings
+across 5,071 distinct records. The local Home-only query now materializes that
+attribution once per distinct eligible source record; other Issues callers are
+unchanged. This reduces function calls by 8,256 in the observed active set.
+The production request, diagnostics and cancellation ran under the recorded
+authorization. Next: validate and release this focused change, then retry one
+bounded Home request; cancel only its own active statement if the five-second
+cap expires.
