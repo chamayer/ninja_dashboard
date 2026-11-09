@@ -789,7 +789,7 @@ def home(request: HttpRequest) -> HttpResponse:
         active_device_days=active_device_days
     )
     inventory_summary = source_record_summary.home_summary(now=now)
-    issue_summary = issue_selection.home_summary()
+    issue_summary, attention_items = issue_selection.home_data()
     issue_categories = issue_summary["categories"]
     inventory_issues = issue_categories[finding_registry.INVENTORY]
     collection_issues = issue_categories[finding_registry.COLLECTION]
@@ -920,7 +920,6 @@ def home(request: HttpRequest) -> HttpResponse:
             ]
         )
 
-    attention_items = issue_selection.home_attention_items()
     mapping_query = issue_selection.mapping_query()
     client_mapping_conflict_url = f"{reverse('findings_queue')}?" + urlencode(mapping_query)
     client_mapping_all_url = f"{reverse('findings_queue')}?" + urlencode(

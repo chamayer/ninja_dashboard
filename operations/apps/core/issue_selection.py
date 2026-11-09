@@ -32,6 +32,7 @@ from urllib.parse import urlencode
 
 from django.db import connection
 from django.urls import reverse
+
 from . import finding_registry
 
 TENANT_ID = 1
@@ -110,7 +111,9 @@ def _client_id(slug: str) -> str | None:
     return row[0] if row else None
 
 
-def _items_sql(scope: Scope, *, covered_only: bool = False) -> tuple[str, dict[str, Any]]:
+def _items_sql(
+    scope: Scope, *, covered_only: bool = False, home_compact: bool = False
+) -> tuple[str, dict[str, Any]]:
     """The filtered item relation, before ranking. Columns are documented in ``_ITEM_COLUMNS``."""
     params: dict[str, Any] = {"tenant": TENANT_ID}
     finding_where = [
@@ -126,17 +129,31 @@ def _items_sql(scope: Scope, *, covered_only: bool = False) -> tuple[str, dict[s
         finding_where.append("t.name = ANY(%(types)s)")
         params["types"] = list(scope.types)
     # Candidates are never paused or resolved items of this queue.
-    include_candidates = scope.status == "open" and (
+    include_candidates = scope.status in {"open", "open_paused"} and (
         scope.types is None or "identity_resolution_pending" in scope.types
     )
     # Aggregate consumers need only whether a representative is covered, not
     # the rest of its state. Filtering here uses the existing attention index
     # and avoids hashing all state rows against wide finding JSON values.
     state_filter = " AND s.attention = 'covered'" if covered_only else ""
+    label_column = "" if home_compact else ", t.display_name::text AS issue_label"
+    detail_columns = (
+        "" if home_compact else
+        ", COALESCE(f.last_detected_at, f.last_seen_at) AS detected_at,"
+        " COALESCE(NULLIF(f.finding_details->>'platform', ''),"
+        " NULLIF(f.subject_ref->'legacy_ref'->>'platform', '')) AS platform,"
+        " f.finding_details AS details, f.subject_ref"
+    )
+    candidate_label_column = "" if home_compact else ", ct.display_name::text"
+    candidate_details = (
+        "" if home_compact else ", c.last_observed_at, NULL,"
+        " jsonb_build_object('external_id', c.external_id,"
+        " 'record_type', c.external_namespace), '{}'::jsonb"
+    )
     sql = f"""
         SELECT 'finding'::text AS kind, f.id, f.condition_namespace::text AS namespace,
-               t.name::text AS type_name, t.issue_category::text AS issue_category,
-               t.display_name::text AS issue_label,
+               t.name::text AS type_name, t.issue_category::text AS issue_category
+               {label_column},
                f.severity::text AS severity,
                CASE WHEN f.status = ANY(%(closed)s) THEN 'resolved'
                     WHEN f.snoozed_until > now() THEN 'paused' ELSE 'open' END AS status,
@@ -163,11 +180,8 @@ def _items_sql(scope: Scope, *, covered_only: bool = False) -> tuple[str, dict[s
                         || COALESCE(si.source_id::text, f.subject_ref->>'source_id', '') || ':'
                         || COALESCE(f.subject_ref->>'external_id', '')
                    ELSE 'finding:' || f.id::text
-               END AS action_key,
-               COALESCE(f.last_detected_at, f.last_seen_at) AS detected_at,
-               COALESCE(NULLIF(f.finding_details->>'platform', ''),
-                        NULLIF(f.subject_ref->'legacy_ref'->>'platform', '')) AS platform,
-               f.finding_details AS details, f.subject_ref
+               END AS action_key
+               {detail_columns}
           FROM operations.findings f
           JOIN operations.finding_types t ON t.id = f.finding_type_id
           LEFT JOIN operations.finding_state s ON s.finding_id = f.id{state_filter}
@@ -178,16 +192,13 @@ def _items_sql(scope: Scope, *, covered_only: bool = False) -> tuple[str, dict[s
          WHERE f.tenant_id = %(tenant)s AND {" AND ".join(finding_where)}
     """
     if include_candidates:
-        sql += """
+        sql += f"""
         UNION ALL
-        SELECT 'candidate', c.id, 'candidate', ct.name::text, ct.issue_category::text,
-               ct.display_name::text,
-               ct.default_severity::text, 'open', false, '{}'::uuid[],
-               c.client_id, 'entity_candidate', NULL::uuid, 'candidate:' || c.id::text,
-               c.last_observed_at, NULL,
-               jsonb_build_object('external_id', c.external_id,
-                                  'record_type', c.external_namespace),
-               '{}'::jsonb
+        SELECT 'candidate', c.id, 'candidate', ct.name::text, ct.issue_category::text
+               {candidate_label_column},
+               ct.default_severity::text, 'open', false, '{{}}'::uuid[],
+               c.client_id, 'entity_candidate', NULL::uuid, 'candidate:' || c.id::text
+               {candidate_details}
           FROM operations.entity_candidates c
           JOIN operations.finding_types ct ON ct.name = 'identity_resolution_pending'
          WHERE c.tenant_id = %(tenant)s AND c.status = 'pending'
@@ -211,7 +222,7 @@ _SUBJECT_LABEL_SQL = """
 
 
 def _filtered_sql(
-    scope: Scope, *, labels: bool = False, summary: bool = False
+    scope: Scope, *, labels: bool = False, summary: bool = False, home_compact: bool = False
 ) -> tuple[str, dict[str, Any]]:
     """Items after every scope filter, ranked into corrective actions.
 
@@ -221,7 +232,11 @@ def _filtered_sql(
     labels = labels or bool(scope.q)
     # Related scopes inspect covered_by even on a non-covered state row;
     # preserve the full state join for those scopes and for row consumers.
-    items, params = _items_sql(scope, covered_only=summary and not scope.related_to)
+    items, params = _items_sql(
+        scope,
+        covered_only=summary and not scope.related_to,
+        home_compact=home_compact,
+    )
     where = ["true"]
     if scope.invalid:
         where.append("false")
@@ -360,8 +375,8 @@ def _filtered_sql(
                    row_number() OVER (
                        PARTITION BY action_key, status
                        ORDER BY (namespace = 'admin') DESC, severity_rank, id
-                   ) AS action_rank,
-                   count(*) OVER (PARTITION BY action_key, status) AS action_records
+                   ) AS action_rank
+                   {", count(*) OVER (PARTITION BY action_key, status) AS action_records" if not summary else ""}
               FROM filtered
         )
     """
@@ -519,7 +534,7 @@ def mapping_scope() -> Scope:
 
 def mapping_query() -> dict[str, str]:
     """The Issues URL parameters that open exactly the ``mapping_scope`` selection."""
-    categories, _groups = finding_registry.build_taxonomy()
+    _categories, groups = finding_registry.build_taxonomy()
     group = groups.get(MAPPING_GROUP) or {}
     return {
         "category": group.get("category", ""),
@@ -529,10 +544,48 @@ def mapping_query() -> dict[str, str]:
     }
 
 
-def home_summary() -> dict[str, Any]:
-    """Governed Home action totals, including the existing mapping alert scope."""
-    counts_by_type = counts(Scope(status="open"))
-    categories, _groups = finding_registry.build_taxonomy()
+def home_data(*, attention_limit: int = 6) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    """Build Home action totals and attention from one governed Issues selection."""
+    sql, params = _filtered_sql(
+        Scope(status="open_paused"), summary=True, home_compact=True
+    )
+    params["mapping_types"] = list(mapping_types())
+    with connection.cursor() as cursor:
+        cursor.execute(
+            sql
+            + """
+            SELECT type_name, issue_category, severity, status,
+                   count(*)::int AS action_count,
+                   count(DISTINCT client_id)::int AS client_count,
+                   (count(DISTINCT (subject_type, subject_id))
+                      FILTER (WHERE subject_id IS NOT NULL)
+                    + count(*) FILTER (WHERE kind = 'candidate'))::int AS subject_count,
+                   MAX(CASE severity WHEN 'critical' THEN 5 WHEN 'high' THEN 4
+                       WHEN 'medium' THEN 3 WHEN 'low' THEN 2 ELSE 1 END)::int
+                       AS severity_level,
+                   GROUPING(severity)::int AS attention_row,
+                   GROUPING(type_name)::int AS total_row,
+                   count(*) FILTER (WHERE status = 'open')::int AS total_open_actions,
+                   count(*) FILTER (WHERE status = 'paused')::int AS total_paused_actions,
+                   count(*) FILTER (WHERE status = 'open' AND severity = 'critical')::int
+                       AS total_critical_actions,
+                   count(*) FILTER (WHERE status = 'open' AND severity = 'critical'
+                       AND type_name = ANY(%(mapping_types)s))::int AS mapping_actions,
+                   count(DISTINCT client_id) FILTER (WHERE status = 'open'
+                       AND severity = 'critical'
+                       AND type_name = ANY(%(mapping_types)s))::int AS mapping_clients
+              FROM selected
+             GROUP BY GROUPING SETS (
+                 (type_name, issue_category, severity, status),
+                 (type_name, issue_category, status),
+                 ()
+             )
+            """,
+            params,
+        )
+        rows = cursor.fetchall()
+
+    categories, groups = finding_registry.build_taxonomy()
     type_categories = {
         type_name: category["label"]
         for category in categories
@@ -546,93 +599,86 @@ def home_summary() -> dict[str, Any]:
         }
         for category in categories
     }
-    for (type_name, severity, status), count in counts_by_type.items():
-        category_name = type_categories.get(type_name)
-        if not category_name:
-            continue
-        category = category_counts[category_name]
-        if status == "open":
-            category["open_actions"] += count
-            if severity == "critical":
-                category["critical_actions"] += count
-        elif status == "paused":
-            category["paused_actions"] += count
-    open_actions = sum(
-        count for (_type, _severity, status), count in counts_by_type.items() if status == "open"
-    )
-    paused_actions = sum(
-        count for (_type, _severity, status), count in counts_by_type.items() if status == "paused"
-    )
-    critical_actions = sum(
-        count
-        for (_type, severity, status), count in counts_by_type.items()
-        if severity == "critical" and status == "open"
-    )
-    mapping_actions, mapping_clients = count_and_client_count(mapping_scope())
-    return {
-        "open_actions": open_actions,
-        "paused_actions": paused_actions,
-        "critical_actions": critical_actions,
-        "mapping_actions": mapping_actions,
-        "mapping_clients": mapping_clients,
-        "categories": category_counts,
-    }
-
-
-def home_attention_items(*, limit: int = 6) -> list[dict[str, Any]]:
-    """Prioritized active actions using the same normalized selection as Issues."""
-    sql, params = _filtered_sql(Scope(status="open"), summary=True)
-    with connection.cursor() as cursor:
-        cursor.execute(
-            sql
-            + """
-            SELECT type_name, issue_category, count(*)::int AS action_count,
-                   count(DISTINCT client_id)::int AS client_count,
-                   (count(DISTINCT (subject_type, subject_id))
-                      FILTER (WHERE subject_id IS NOT NULL)
-                    + count(*) FILTER (WHERE kind = 'candidate'))::int AS subject_count,
-                   MAX(CASE severity WHEN 'critical' THEN 5 WHEN 'high' THEN 4
-                       WHEN 'medium' THEN 3 WHEN 'low' THEN 2 ELSE 1 END)::int
-                       AS severity_level
-              FROM selected
-             GROUP BY type_name, issue_category
-             ORDER BY severity_level DESC, client_count DESC, action_count DESC, type_name
-             LIMIT %(limit)s
-            """,
-            {**params, "limit": limit},
-        )
-        rows = cursor.fetchall()
-
-    _categories, groups = finding_registry.build_taxonomy()
     group_by_type = {
         type_name: group_key
         for group_key, group in groups.items()
         for type_name in group["types"]
     }
-    labels_by_type = {
-        type_name: finding_registry.finding_type_name(type_name)
-        for type_name, _category, *_rest in rows
-    }
     severity_names = {5: "critical", 4: "high", 3: "medium", 2: "low", 1: "info"}
-    items = []
-    for type_name, category, count, clients, subjects, severity in rows:
-        label = labels_by_type[type_name]
-        issue_group = group_by_type.get(type_name, type_name)
-        item = {
-            "type_name": type_name,
-            "category": category or "",
-            "label": label,
-            "severity": severity_names.get(severity, "info"),
-            "count": count,
-            "clients": clients,
-            "subjects": subjects,
-            "href": f"{reverse('findings_queue')}?"
-            + urlencode({"type": issue_group, "issue": type_name}),
-        }
-        item["affected"] = (
-            f"{subjects:,} affected · {clients:,} client{'s' if clients != 1 else ''}"
-            if clients
-            else f"{subjects:,} affected"
+    summary = {
+        "open_actions": 0,
+        "paused_actions": 0,
+        "critical_actions": 0,
+        "mapping_actions": 0,
+        "mapping_clients": 0,
+        "categories": category_counts,
+    }
+    attention = []
+    for (
+        type_name,
+        category,
+        severity,
+        status,
+        count,
+        clients,
+        subjects,
+        severity_level,
+        attention_row,
+        total_row,
+        total_open,
+        total_paused,
+        total_critical,
+        mapping_actions,
+        mapping_clients,
+    ) in rows:
+        if total_row:
+            summary.update(
+                open_actions=total_open,
+                paused_actions=total_paused,
+                critical_actions=total_critical,
+                mapping_actions=mapping_actions,
+                mapping_clients=mapping_clients,
+            )
+        elif attention_row:
+            if status != "open":
+                continue
+            label = finding_registry.finding_type_name(type_name)
+            issue_group = group_by_type.get(type_name, type_name)
+            item = {
+                "type_name": type_name,
+                "category": category or "",
+                "label": label,
+                "severity": severity_names.get(severity_level, "info"),
+                "count": count,
+                "clients": clients,
+                "subjects": subjects,
+                "href": f"{reverse('findings_queue')}?"
+                + urlencode({"type": issue_group, "issue": type_name}),
+            }
+            item["affected"] = (
+                f"{subjects:,} affected · {clients:,} client{'s' if clients != 1 else ''}"
+                if clients
+                else f"{subjects:,} affected"
+            )
+            attention.append(item)
+        elif type_name:
+            category_name = type_categories.get(type_name)
+            if category_name:
+                category_totals = category_counts[category_name]
+                if status == "open":
+                    category_totals["open_actions"] += count
+                    if severity == "critical":
+                        category_totals["critical_actions"] += count
+                elif status == "paused":
+                    category_totals["paused_actions"] += count
+
+    severity_rank = {"critical": 5, "high": 4, "medium": 3, "low": 2, "info": 1}
+    attention.sort(
+        key=lambda item: (
+            -severity_rank[item["severity"]],
+            -item["clients"],
+            -item["count"],
+            item["type_name"],
         )
-        items.append(item)
-    return items
+    )
+    return summary, attention[:attention_limit]

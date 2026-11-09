@@ -65,18 +65,20 @@ def test_home_composes_domain_summaries_above_attention_and_keeps_client_detail_
         "home_summary",
         lambda **_kwargs: {"current": 99, "trend_30d": "INVENTORY +3 NET", "latest": None},
     )
-    monkeypatch.setattr(views.issue_selection, "home_summary", lambda: issue_summary)
     monkeypatch.setattr(
         views.issue_selection,
-        "home_attention_items",
-        lambda: [
-            {
-                "severity": "high",
-                "label": "Review finding",
-                "affected": "2 affected",
-                "href": "/issues",
-            }
-        ],
+        "home_data",
+        lambda: (
+            issue_summary,
+            [
+                {
+                    "severity": "high",
+                    "label": "Review finding",
+                    "affected": "2 affected",
+                    "href": "/issues",
+                }
+            ],
+        ),
     )
     monkeypatch.setattr(views.issue_selection, "mapping_query", lambda: {})
     patching_call = {}

@@ -173,7 +173,7 @@
 - Section: PLAN-044 — Navigation and Computers performance
 - Related plans: PLAN-042 supplies prior performance evidence; PLAN-012 retains Computer semantics and verification; PLAN-043 independently owns issue review in views.py. PLAN-019 source-record history is now complete and available. PLAN-003/004 contracts remain unchanged.
 - Resume gate: User authorized autonomous measurement, focused fixes, validation, commit/push, and then explicitly authorized live-production measurement on 2026-11-09. Keep measurements bounded to ordinary read-only page requests and diagnostics; preserve the approved Home design and no-schema approach. Review automatic deployment effects and the pending migration set before an `origin` push.
-- Last checked: 2026-11-09 (HEAD `cdc9c6db`; authenticated production Home GET returned 200/195,676 bytes but exceeded the five-second client wait for response headers. The current Inventory owner summary was split after a production read-only comparison: 0.80 seconds versus 1.54 seconds, exact parity on one repeatable snapshot. This is component evidence; the deployed page predates the local Home refactor. No migrations are pending. Home and PLAN-043 changes remain local and uncommitted; see detailed handoff).
+- Last checked: 2026-11-09 (`9f3769a9` pushed to both remotes and deployed; Operations healthy, no migrations pending. Authenticated Home exceeded the five-second wait and later returned 500 from an undefined `groups` name in `mapping_query()`. Its Issues aggregate remained active about 98 seconds; production EXPLAIN estimates 63,144 rows through the wide window step. The new owner-side compact combined Issues read is under development; see detailed handoff).
 
 ## PLAN-043 — Useful issue review
 

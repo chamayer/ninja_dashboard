@@ -418,36 +418,26 @@ validation, and `git diff --check` pass. No response-time measurement has been
 run. These query reductions are static improvements and do not establish that
 Home meets the latency target.
 
-2026-11-09 performance-goal checkpoint: reconciled the active goal as ordinary
-Home response time ≤1.5 seconds, with 2.0 seconds as the hard maximum. The
-user authorized autonomous measurement, focused fixes, validation, commit, and
-push as needed. The user subsequently authorized direct measurement on live
-production. No migration is pending on the host, and no schema change is in
-scope. Existing uncommitted PLAN-043 and Home work remains preserved.
+2026-11-09 checkpoint: the active target remains ordinary Home ≤1.5 seconds,
+with 2.0 seconds as the hard maximum. Live production measurement, focused
+development, commit and push are authorized. Commit `9f3769a9` is on both
+remotes and deployed. Operations is healthy; startup reported no pending
+migrations.
 
-2026-11-09 live baseline: one authenticated Home GET through Gunicorn returned
-200 and 195,676 bytes, but the probe timed out waiting for response headers
-after five seconds. The live page therefore misses the 2.0-second maximum.
-The temporary session was deleted. A bounded read-only profile of the deployed
-pre-refactor view found its source-record query exceeded a two-second statement
-limit; that version is not the current Home implementation.
+The authenticated deployed Home request exceeded its five-second client wait
+and later returned 500 because `mapping_query()` referenced an undefined
+`groups` name. The request's Issues aggregate remained active for about 98
+seconds. Read-only production EXPLAIN estimated 63,144 rows through a wide
+window step. Home had four separate Issues selections for totals, mapping
+counts, and attention. The local owner-side change combines these results from
+one compact selection while preserving the Issues action representative,
+covered-item, status, mapping, and priority rules. The `mapping_query()` name
+is corrected. Python compilation and targeted Ruff checks pass; no tests were
+run for this change.
 
-The current Inventory owner query combined its current total/freshness and
-30-day total in one CTE statement. Production EXPLAIN showed full scans of
-`entity_observation_current`, `source_record_subjects`, and
-`entity_observation_history`. A measured split into the same two owner-side
-statements improved the Inventory summary from 1.54 seconds to 0.80 seconds on
-one repeatable-read snapshot, with exact result parity. The split is now in
-`source_record_views.home_summary()`; cutoff, admitted-record population,
-freshness, and trend meaning are unchanged. This remains a component result,
-not a full Home timing.
-
-The changed Operations image built locally with the documented workstation CA;
-`manage.py check`, Ruff check, and Python syntax compilation passed. Focused
-pytest could not run because host Python lacks Django/pytest and the runtime
-image omits pytest. Ruff format check flags an unrelated existing expression in
-`source_record_views.py`; it was left untouched. **Next:** isolate the Home
-implementation from PLAN-043 edits, review the exact no-migration deployment
-commit, push as authorized, and measure the complete ordinary Home response on
-live production. Continue with focused fixes until ≤1.5 seconds and ≤2.0 seconds
-maximum are evidenced.
+Inventory's separate current/freshness and historical total reads measured
+0.80 seconds versus 1.54 seconds combined with exact parity in one repeatable
+production snapshot. This is component evidence, not a Home timing. **Next:**
+review, commit and push the focused Issues fix, then time one bounded ordinary
+Home request in production. Continue until ≤1.5 seconds is demonstrated, with
+2.0 seconds as the hard maximum.

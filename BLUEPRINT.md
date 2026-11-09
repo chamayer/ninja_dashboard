@@ -48,8 +48,8 @@ validation results, or completed-plan summaries here.
 - **PLAN-016 — active.** Next: implement the bounded, tenant-scoped,
   read-only explorer and focused tests. See the [plan](operations/docs/plans/PLAN-016-admin-sql-explorer.md)
   and [Operations checkpoint](operations/BLUEPRINT.md).
-- **PLAN-044 — active.** Isolate Home changes from PLAN-043, then deploy and
-  measure the full Home request in authorized live production;
+- **PLAN-044 — active.** Fix the slow/broken Issues owner read, then measure
+  ordinary Home response time in live production;
   see the
   [Operations checkpoint](operations/BLUEPRINT.md).
 
