@@ -432,19 +432,23 @@ four separate Issues selections for totals, mapping counts, and attention. The
 first combined compact selection still timed out at five seconds and its window
 query remained active for 108 seconds; that abandoned read was canceled.
 
-The current local revision removes Home's global ranking window. The documented
-shared action keys are limited to `unmatched_source_group` and
+The local revision removes Home's global ranking window. The documented shared
+action keys are limited to `unmatched_source_group` and
 `client_unattached_group`; only those rows need `DISTINCT ON`, with the same
 admin-first representative ordering and covered-item filtering as the shared
 Issues selector. Other Home items have unique `finding:<id>` keys. Home derives
 totals, mapping counts, and attention groups from this one owner selection.
-The `mapping_query()` name is fixed. Python compilation, targeted Ruff, plan
-registry, and whitespace checks pass; no tests were run. No migration or schema
-change is involved.
+However, that query still ran over 108 seconds. Production EXPLAIN showed the
+device ownership condition invoking a sequential scan of all 5,718 ownership
+rows for each finding. The current local fix materializes the tenant's resolved
+ownership rows once and joins by device/client, preserving the same states and
+attribution. The `mapping_query()` name is fixed. Python compilation, targeted
+Ruff, plan-registry, and whitespace checks pass; no tests were run. No migration
+or schema change is involved.
 
 Inventory's separate current/freshness and historical total reads measured
 0.80 seconds versus 1.54 seconds combined with exact parity in one repeatable
 production snapshot. This is component evidence, not a Home timing. **Next:**
-review, commit and push the narrowed Issues selection, then time one bounded
-ordinary Home request in production. Continue until ≤1.5 seconds is demonstrated,
-with 2.0 seconds as the hard maximum.
+review, commit and push the ownership-join fix, then time one bounded ordinary
+Home request in production. Continue until ≤1.5 seconds is demonstrated, with
+2.0 seconds as the hard maximum.

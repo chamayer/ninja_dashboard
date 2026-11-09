@@ -48,8 +48,8 @@ validation results, or completed-plan summaries here.
 - **PLAN-016 — active.** Next: implement the bounded, tenant-scoped,
   read-only explorer and focused tests. See the [plan](operations/docs/plans/PLAN-016-admin-sql-explorer.md)
   and [Operations checkpoint](operations/BLUEPRINT.md).
-- **PLAN-044 — active.** Fix the slow/broken Issues owner read, then measure
-  ordinary Home response time in live production;
+- **PLAN-044 — active.** Remove the correlated ownership scan from Home's
+  Issues owner query, then measure ordinary Home response time;
   see the
   [Operations checkpoint](operations/BLUEPRINT.md).
 

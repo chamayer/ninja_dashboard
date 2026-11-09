@@ -19,12 +19,12 @@ for about 98 seconds. Production EXPLAIN estimated 63,144 rows through the
 window step; Home repeated the Issues selection for counts, mapping and
 attention. A combined compact read still timed out at five seconds and its
 window query ran for 108 seconds; that abandoned read was canceled. The current
-local revision removes global ranking from Home and deduplicates only the two
-documented shared-action types, preserving their admin-first representative
-and covered-item rules. The `mapping_query()` name is also fixed. Python
-compilation, targeted Ruff, registry and whitespace checks pass; no tests were
-run. **Next:** commit and push this revised owner query, then measure one
-bounded ordinary Home GET. See the
+local revision removes global ranking from Home, deduplicates only the two
+documented shared-action types, and replaces a per-finding ownership scan with
+one tenant-scoped join. The `mapping_query()` name is fixed. Python compilation,
+targeted Ruff, registry and whitespace checks pass; no tests were run. **Next:**
+commit and push this owner-query fix, then measure one bounded ordinary Home
+GET. See the
 [handoff](docs/plans/PLAN-044-page-performance.md).
 See the [handoff](docs/plans/PLAN-044-page-performance.md).
 

@@ -150,6 +150,21 @@ def _items_sql(
         " jsonb_build_object('external_id', c.external_id,"
         " 'record_type', c.external_namespace), '{}'::jsonb"
     )
+    ownership_join = (
+        " LEFT JOIN effective_owners owner"
+        " ON owner.tenant_id = f.tenant_id AND owner.device_id = f.subject_id"
+        " AND owner.effective_client_id = f.client_id"
+        if home_compact
+        else ""
+    )
+    unowned_device = (
+        "owner.device_id IS NULL"
+        if home_compact
+        else "NOT EXISTS (SELECT 1 FROM operations.computer_client_ownership owner"
+        " WHERE owner.tenant_id = f.tenant_id AND owner.device_id = f.subject_id"
+        " AND owner.effective_client_id = f.client_id"
+        " AND owner.state IN ('resolved', 'decision_protected'))"
+    )
     sql = f"""
         SELECT 'finding'::text AS kind, f.id, f.condition_namespace::text AS namespace,
                t.name::text AS type_name, t.issue_category::text AS issue_category
@@ -159,12 +174,7 @@ def _items_sql(
                     WHEN f.snoozed_until > now() THEN 'paused' ELSE 'open' END AS status,
                COALESCE(f.status = ANY(%(active)s) AND s.attention = 'covered', false) AS covered,
                COALESCE(s.covered_by, '{{}}'::uuid[]) AS covered_by,
-               CASE WHEN f.subject_type = 'device' AND NOT EXISTS (
-                        SELECT 1 FROM operations.computer_client_ownership owner
-                         WHERE owner.tenant_id = f.tenant_id AND owner.device_id = f.subject_id
-                           AND owner.effective_client_id = f.client_id
-                           AND owner.state IN ('resolved', 'decision_protected')
-                    ) THEN NULL
+               CASE WHEN f.subject_type = 'device' AND {unowned_device} THEN NULL
                     WHEN f.subject_type = 'source_record' THEN (
                         SELECT operations.computer_client_independent_evidence(
                                    subject.tenant_id, subject.observation_id)
@@ -184,6 +194,7 @@ def _items_sql(
                {detail_columns}
           FROM operations.findings f
           JOIN operations.finding_types t ON t.id = f.finding_type_id
+          {ownership_join}
           LEFT JOIN operations.finding_state s ON s.finding_id = f.id{state_filter}
           LEFT JOIN operations.source_bindings b
             ON t.name = 'client_unattached_group' AND b.tenant_id = f.tenant_id
@@ -364,8 +375,18 @@ def _filtered_sql(
             " AND owner.state IN ('resolved', 'decision_protected')))"
         )
     filtered_cte = "filtered AS MATERIALIZED" if home_compact else "filtered AS"
+    ownership_cte = (
+        "effective_owners AS MATERIALIZED ("
+        "SELECT tenant_id, device_id, effective_client_id "
+        "FROM operations.computer_client_ownership "
+        "WHERE tenant_id = %(tenant)s "
+        "AND state IN ('resolved', 'decision_protected')),"
+        if home_compact
+        else ""
+    )
     sql = f"""
-        WITH items AS ({items}),
+        WITH {ownership_cte}
+        items AS ({items}),
         {filtered_cte} (
             SELECT i.*, {_SEVERITY_RANK_SQL} AS severity_rank{label_columns}
               FROM items i{label_joins}
