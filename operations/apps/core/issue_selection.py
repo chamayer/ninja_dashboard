@@ -150,6 +150,14 @@ def _items_sql(
         " jsonb_build_object('external_id', c.external_id,"
         " 'record_type', c.external_namespace), '{}'::jsonb"
     )
+    covered_by_column = (
+        "" if home_compact else ", COALESCE(s.covered_by, '{}'::uuid[]) AS covered_by"
+    )
+    candidate_covered_by_column = "" if home_compact else ", '{}'::uuid[]"
+    # Compact Home selection ranks only the two shared-action types. Other
+    # findings/candidates pass through individually, so they need no text key.
+    finding_action_fallback = "NULL::text" if home_compact else "'finding:' || f.id::text"
+    candidate_action_key = "NULL::text" if home_compact else "'candidate:' || c.id::text"
     # Home reports the recorded association on selected actions. Other Issues
     # readers retain their current ownership checks for filtering and access.
     client_expression = (
@@ -173,8 +181,8 @@ def _items_sql(
                f.severity::text AS severity,
                CASE WHEN f.status = ANY(%(closed)s) THEN 'resolved'
                     WHEN f.snoozed_until > now() THEN 'paused' ELSE 'open' END AS status,
-               COALESCE(f.status = ANY(%(active)s) AND s.attention = 'covered', false) AS covered,
-               COALESCE(s.covered_by, '{{}}'::uuid[]) AS covered_by,
+               COALESCE(f.status = ANY(%(active)s) AND s.attention = 'covered', false) AS covered
+               {covered_by_column},
                {client_expression} AS client_id,
                f.subject_type::text AS subject_type, f.subject_id,
                CASE t.name
@@ -184,7 +192,7 @@ def _items_sql(
                    WHEN 'client_unattached_group' THEN 'source_group:'
                         || COALESCE(si.source_id::text, f.subject_ref->>'source_id', '') || ':'
                         || COALESCE(f.subject_ref->>'external_id', '')
-                   ELSE 'finding:' || f.id::text
+                   ELSE {finding_action_fallback}
                END AS action_key
                {detail_columns}
           FROM operations.findings f
@@ -201,8 +209,8 @@ def _items_sql(
         UNION ALL
         SELECT 'candidate', c.id, 'candidate', ct.name::text, ct.issue_category::text
                {candidate_label_column},
-               ct.default_severity::text, 'open', false, '{{}}'::uuid[],
-               c.client_id, 'entity_candidate', NULL::uuid, 'candidate:' || c.id::text
+               ct.default_severity::text, 'open', false{candidate_covered_by_column},
+               c.client_id, 'entity_candidate', NULL::uuid, {candidate_action_key}
                {candidate_details}
           FROM operations.entity_candidates c
           JOIN operations.finding_types ct ON ct.name = 'identity_resolution_pending'
@@ -615,23 +623,19 @@ def home_data(*, attention_limit: int = 6) -> tuple[dict[str, Any], list[dict[st
                  ORDER BY action_key, status,
                           (namespace = 'admin') DESC, severity_rank, id
             ), critical_mapping_actions AS (
-                SELECT * FROM filtered
+                SELECT * FROM critical_actions
                  WHERE type_name <> ALL(%(shared_action_types)s)
                    AND type_name = ANY(%(mapping_types)s)
-                   AND status = 'open' AND severity = 'critical' AND NOT covered
                 UNION ALL
                 SELECT * FROM mapping_shared WHERE NOT covered
             )
-            SELECT type_name, issue_category, severity, status,
+            -- Totals need no severity buckets or distinct client/subject sets.
+            -- Build those only for open attention rows in the branches below.
+            SELECT type_name, issue_category, NULL::text AS severity, status,
                    count(*)::int AS action_count,
-                   count(DISTINCT client_id)::int AS client_count,
-                   (count(DISTINCT (subject_type, subject_id))
-                      FILTER (WHERE subject_id IS NOT NULL)
-                    + count(*) FILTER (WHERE kind = 'candidate'))::int AS subject_count,
-                   MAX(CASE severity WHEN 'critical' THEN 5 WHEN 'high' THEN 4
-                       WHEN 'medium' THEN 3 WHEN 'low' THEN 2 ELSE 1 END)::int
-                       AS severity_level,
-                   GROUPING(severity)::int AS attention_row,
+                   0::int AS client_count, 0::int AS subject_count,
+                   0::int AS severity_level,
+                   0::int AS attention_row,
                    GROUPING(type_name)::int AS total_row,
                    count(*) FILTER (WHERE status = 'open')::int AS total_open_actions,
                    count(*) FILTER (WHERE status = 'paused')::int AS total_paused_actions,
@@ -641,12 +645,21 @@ def home_data(*, attention_limit: int = 6) -> tuple[dict[str, Any], list[dict[st
                        AS mapping_clients
               FROM selected
              GROUP BY GROUPING SETS (
-                 (type_name, issue_category, severity, status),
                  (type_name, issue_category, status),
                  ()
              )
-            HAVING GROUPING(type_name) = 1 OR GROUPING(severity) = 0
-                OR type_name <> ALL(%(shared_action_types)s)
+            UNION ALL
+            SELECT type_name, issue_category, NULL::text, status,
+                   count(*)::int, count(DISTINCT client_id)::int,
+                   (count(DISTINCT (subject_type, subject_id))
+                      FILTER (WHERE subject_id IS NOT NULL)
+                    + count(*) FILTER (WHERE kind = 'candidate'))::int,
+                   MAX(CASE severity WHEN 'critical' THEN 5 WHEN 'high' THEN 4
+                       WHEN 'medium' THEN 3 WHEN 'low' THEN 2 ELSE 1 END)::int,
+                   1, 0, 0, 0, 0, 0, 0
+              FROM selected
+             WHERE status = 'open' AND type_name <> ALL(%(shared_action_types)s)
+             GROUP BY type_name, issue_category, status
             UNION ALL
             SELECT type_name, issue_category, NULL::text AS severity, status,
                    count(*)::int, count(DISTINCT client_id)::int,
