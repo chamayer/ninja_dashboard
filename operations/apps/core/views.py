@@ -14515,9 +14515,13 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
                  AND owner.effective_client_id = device.client_id
                  AND owner.effective_client_id = hudu.client_id
                  AND owner.state IN ('resolved', 'decision_protected')
-                LEFT JOIN operations.v_device_source_record_lifecycle_current lifecycle
-                  ON lifecycle.tenant_id = hudu.tenant_id
-                 AND lifecycle.observation_id = hudu.observation_id
+                LEFT JOIN LATERAL (
+                    SELECT lifecycle.record_lifecycle
+                    FROM operations.v_device_source_record_lifecycle_current lifecycle
+                    WHERE lifecycle.tenant_id = hudu.tenant_id
+                      AND lifecycle.observation_id = hudu.observation_id
+                    OFFSET 0
+                ) lifecycle ON TRUE
                 """,
             )
             hudu_rows = cur.fetchall()
