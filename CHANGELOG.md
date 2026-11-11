@@ -2,6 +2,28 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.144.11] — 2026-11-11 — Platform performance recovery corrections
+
+### Fixed
+
+- Scope Coverage's Hudu lifecycle lookup to each requested observation while
+  preserving lifecycle policy and tenant predicates.
+- Skip equal relationship-history assignments while retaining broad stale
+  open-history repair.
+- Publish only CVE match additions, removals and content changes after full
+  recomputation. Preserve surviving IDs, unchanged timestamps, audit history,
+  reclassification targets and safety refreshes; record empty-input removals too.
+- Reduce Home Issues summary projection and grouping work while preserving
+  action counts, categories and attention links.
+
+### Operational notes
+
+- No new migrations. Existing migration 0406 and ingest SQL 119 were verified
+  applied before release. This release also reconciles metadata with the Home
+  and patch-outcome work already present in the preceding deployed commits.
+- Production response-time and background-work improvements require separate
+  acceptance verification. Home cache and Software summary candidates are excluded.
+
 ## [0.144.10] — 2026-11-05 — Apply Jobs claim migration on production roles
 
 ### Fixed
