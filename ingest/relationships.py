@@ -348,6 +348,15 @@ def resolve_current_evidence() -> int:
                  WHERE history.tenant_id = current.tenant_id
                    AND history.evidence_current_id = current.id
                    AND history.effective_to IS NULL
+                   AND ROW(
+                       history.source_entity_id, history.target_entity_id,
+                       history.resolution_status, history.authority_eligible,
+                       history.authority_tier, history.authority_priority
+                   ) IS DISTINCT FROM ROW(
+                       current.source_entity_id, current.target_entity_id,
+                       current.resolution_status, current.authority_eligible,
+                       current.authority_tier, current.authority_priority
+                   )
                 """
             )
         return resolved
