@@ -144,6 +144,7 @@ class _MatcherCursor:
         self.cves = {"cpe-all": "CVE-all", "cpe-v1": "CVE-v1", "cpe-v2": "CVE-v2"}
         self.matches = []
         self.before = []
+        self.desired = []
         self.candidate_queries = 0
         self.result = []
         self.deletes = 0
@@ -161,9 +162,16 @@ class _MatcherCursor:
             self.result = [(self.cves[cpe],) for cpe in params[0] if cpe in self.cves]
         elif sql.startswith("CREATE TEMP TABLE cve_match_before"):
             self.before = list(self.matches)
+        elif sql.startswith("CREATE TEMP TABLE cve_match_desired"):
+            self.desired = []
+        elif sql.startswith("CREATE UNIQUE INDEX cve_match_desired_scope_idx"):
+            pass
         elif sql.startswith("DELETE FROM operations.cve_match"):
             self.deletes += 1
-            self.matches.clear()
+            desired_keys = {row[:5] for row in self.desired}
+            self.matches = [row for row in self.matches if row[:5] in desired_keys]
+        elif sql.startswith("INSERT INTO operations.cve_match AS existing"):
+            self.matches = list(self.desired)
         elif sql.startswith("SELECT EXISTS"):
             self.result = [(set(self.before) != set(self.matches),)]
         elif sql.startswith("SELECT to_regclass"):
@@ -178,8 +186,8 @@ class _MatcherCursor:
         return self.result[0]
 
     def executemany(self, sql, rows):
-        assert "INSERT INTO operations.cve_match" in sql
-        self.matches.extend(rows)
+        assert "INSERT INTO pg_temp.cve_match_desired" in sql
+        self.desired.extend(rows)
 
 
 def _use_cursor(monkeypatch, cursor):

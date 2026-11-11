@@ -35,7 +35,8 @@ Additional built-ins:
     scoring layer, not the matcher — the matcher's job is only to
     fill ``operations.cve_match``.
 
-Every run is a full refresh (``DELETE tenant + INSERT``) and ends by
+Every run recomputes the full desired set and persists only its differences,
+preserving existing IDs and timestamps when match content is unchanged. It ends by
 issuing ``REFRESH MATERIALIZED VIEW operations.v_software_safety`` so
 the software pages see fresh scores immediately.
 
@@ -46,11 +47,9 @@ moved the unit of work from ~21k titles to ~40k product+versions, and the
 ``d0b8aea`` backfill took ``intel.cpes`` from 164,860 rows (ADR-0015,
 2026-08-06) to 1,799,966 (measured 2026-08-12) -- a 10.9x increase. Migration
 090 adds ``intel_ingest_status.last_duration_seconds`` so this run's cost is
-observable instead of inferred. Whether the full rebuild should become
-incremental is a separate, measured decision; do
-not make the matcher incremental on the strength of this note alone, because a
-full rebuild is what currently guarantees no stale match survives a CVE
-withdrawal.
+observable instead of inferred. Matching still examines the full installed
+scope: difference persistence does not skip recomputation or allow a stale match
+to survive a CVE withdrawal.
 """
 
 from __future__ import annotations
@@ -160,7 +159,7 @@ def _parse_version_prefixes(canonical: str) -> list[str]:
 
 
 _INSERT_MATCH = """
-    INSERT INTO operations.cve_match (
+    INSERT INTO pg_temp.cve_match_desired (
         tenant_id, canonical_name, software_version_id, cve_id,
         match_kind, version_range, confidence
     ) VALUES (%s, %s, %s, %s, %s, %s, %s)
@@ -308,6 +307,54 @@ class _CpeCandidateCache:
         return rows
 
 
+def _persist_match_differences(cur) -> None:
+    """Publish the complete staged set without rewriting equal matches."""
+    cur.execute(
+        """
+        DELETE FROM operations.cve_match existing
+        WHERE existing.tenant_id = %s
+          AND NOT EXISTS (
+              SELECT 1 FROM pg_temp.cve_match_desired desired
+              WHERE desired.tenant_id = existing.tenant_id
+                AND desired.canonical_name = existing.canonical_name
+                AND desired.software_version_id IS NOT DISTINCT FROM existing.software_version_id
+                AND desired.cve_id = existing.cve_id
+                AND desired.match_kind = existing.match_kind
+          )
+        """,
+        (_TENANT_ID,),
+    )
+    cur.execute(
+        """
+        INSERT INTO operations.cve_match AS existing (
+            tenant_id, canonical_name, software_version_id, cve_id,
+            match_kind, version_range, confidence
+        )
+        SELECT desired.tenant_id, desired.canonical_name, desired.software_version_id,
+               desired.cve_id, desired.match_kind, desired.version_range, desired.confidence
+        FROM pg_temp.cve_match_desired desired
+        WHERE desired.tenant_id = %s
+          AND NOT EXISTS (
+              SELECT 1 FROM operations.cve_match current
+              WHERE current.tenant_id = desired.tenant_id
+                AND current.canonical_name = desired.canonical_name
+                AND current.software_version_id IS NOT DISTINCT FROM desired.software_version_id
+                AND current.cve_id = desired.cve_id
+                AND current.match_kind = desired.match_kind
+                AND ROW(current.version_range, current.confidence)
+                    IS NOT DISTINCT FROM ROW(desired.version_range, desired.confidence)
+          )
+        ON CONFLICT (tenant_id, canonical_name, software_version_id, cve_id, match_kind)
+        DO UPDATE SET version_range = EXCLUDED.version_range,
+                      confidence = EXCLUDED.confidence,
+                      matched_at = now()
+        WHERE ROW(existing.version_range, existing.confidence)
+              IS DISTINCT FROM ROW(EXCLUDED.version_range, EXCLUDED.confidence)
+        """,
+        (_TENANT_ID,),
+    )
+
+
 def _match_and_upsert() -> int:
     third_token_vendors, ignore_patterns = _load_hints()
 
@@ -344,15 +391,6 @@ def _match_and_upsert() -> int:
         )
         vendor_product = [(v, p) for v, p in cur.fetchall() if v and p]
 
-    if not titles or not vendor_product:
-        with db.transaction() as cur:
-            cur.execute(
-                "DELETE FROM operations.cve_match WHERE tenant_id = %s",
-                (_TENANT_ID,),
-            )
-            changed = (cur.rowcount or 0) > 0
-        return MaterialCount(0, material_changed=changed)
-
     products_by_vendor: dict[str, set[str]] = {}
     all_products: set[str] = set()
     for vendor, product in vendor_product:
@@ -381,8 +419,20 @@ def _match_and_upsert() -> int:
             (_TENANT_ID,),
         )
         cur.execute(
-            "DELETE FROM operations.cve_match WHERE tenant_id = %s",
-            (_TENANT_ID,),
+            """
+            CREATE TEMP TABLE cve_match_desired ON COMMIT DROP AS
+            SELECT tenant_id, canonical_name, software_version_id, cve_id,
+                   match_kind, version_range, confidence
+            FROM operations.cve_match WITH NO DATA
+            """
+        )
+        cur.execute(
+            """
+            CREATE UNIQUE INDEX cve_match_desired_scope_idx
+            ON pg_temp.cve_match_desired (
+                tenant_id, canonical_name, software_version_id, cve_id, match_kind
+            ) NULLS NOT DISTINCT
+            """
         )
         for canonical in titles:
             # Sub-component skip.
@@ -494,6 +544,7 @@ def _match_and_upsert() -> int:
             if title_matched:
                 matched_titles += 1
 
+        _persist_match_differences(cur)
         cur.execute(
             """
             SELECT EXISTS (
@@ -519,7 +570,7 @@ def _match_and_upsert() -> int:
         material_changed = bool(cur.fetchone()[0])
         if material_changed:
             # Change history (ADR-0033): record the matches that were added or
-            # removed, not the delete-and-reinsert of the whole set.
+            # removed, including payload changes represented as a before/after pair.
             cur.execute(
                 "SELECT to_regclass('operations.cve_match_change_history') IS NOT NULL"
             )
