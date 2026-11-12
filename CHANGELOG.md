@@ -2,6 +2,22 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.144.16] — 2026-11-12 — Keep valid Software results during refresh
+
+### Fixed
+
+- Continue serving a valid completed Software overview while an automatic
+  refresh runs. A refresh request alone no longer hides the previous result.
+- Preserve actual input-change, explicit operator-demand, access, expiry,
+  certification and publication-failure checks.
+
+### Operational notes
+
+- Migration 0416 persists the approved emergency reader correction.
+- A production authenticated request showed the completed populated summary
+  in 2.577 seconds. This restores the page but exceeds the existing two-second
+  hard performance target; full contract acceptance remains open.
+
 ## [0.144.15] — 2026-11-12 — Repair Software publication readiness
 
 ### Fixed

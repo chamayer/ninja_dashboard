@@ -98,3 +98,33 @@ completed-summary marker. Runtime-role protected read returned pending/input_cha
 with no data, so this is NOT full-page acceptance. The running old scheduler still
 requests ownership work for deleted rows; release includes its matching fix.
 After automatic rollout, request one governed refresh and recheck read/HTTP state.
+
+## Release 0.144.15 and reader recovery
+
+Committed cf3945ed, pushed origin then a-m-rose; both verified at
+cf3945ed3158ae89799c805badcd56076591a616. Automatic deployment completed;
+ingest VERSION 0.144.15 and dispatcher SHA-256
+b307c8a81b8546bb8764a9794ceac8750798a991955e7a5a224ac70338bc8804 match.
+All three application services were healthy; 0414/0415 were marked applied.
+No standalone redeploy. Prior unrelated staged candidates remain excluded.
+
+All owner watermarks matched the publication, with no pending classification
+or ownership demand. The reader nevertheless withheld data while an automatic
+overview refresh ran. This was its unconditional active-refresh invalidation,
+not an actual input change. The user asked why the old summary was withheld.
+Under the existing emergency authorization, corrected the reader so an automatic
+refresh alone does not invalidate a still-valid completed generation. Explicit
+operator requests and every real input/security/expiry/failure guard remain.
+Migration 0416 preserves this exact correction; no stored data or Job status edits.
+
+Live runtime-role read became current/completed with data. One authenticated
+full HTTP request at 20:05 UTC returned 200, 47,556 bytes, Completed summary,
+in 2.577 seconds; logout confirmed. The visible empty-page failure is repaired.
+This misses the <=1.5 s ordinary / <2 s hard target, so performance/contract
+acceptance is still OPEN. Earlier 1.37 s pending pages were not successful
+populated-page measurements. No additional test suite or test-file edits.
+
+0.144.16 contains only 0416, VERSION/CHANGELOG and this evidence. The ongoing
+emergency approval covers its commit, both pushes, automatic deployment and
+reviewed migration. Existing local Sources 0413 now depends on 0416 but stays
+excluded. Syntax/whitespace and packaging/migration-order review passed.
