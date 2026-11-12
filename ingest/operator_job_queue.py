@@ -677,9 +677,11 @@ def produce_due_schedules() -> int:
                         log.exception(
                             "durable Jobs schedule %s was deferred", schedule_id
                         )
-                admitted += _admit_expired_software_overview()
             finally:
                 cur.execute("SELECT operations.jobs_release_schedule_leader()")
+        # Expiry admission opens another connection. Commit scheduled requests
+        # first so that connection cannot wait on locks held by this one.
+        admitted += _admit_expired_software_overview()
     except PoolTimeout:
         log.warning("durable Jobs schedules waiting for database capacity")
         return 0

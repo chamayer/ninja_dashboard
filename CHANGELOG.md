@@ -2,6 +2,26 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.144.13] — 2026-11-12 — Restore Software Jobs startup and admission
+
+### Fixed
+
+- Register the two reviewed Software recovery authorities required by worker
+  startup. Release 0.144.12 registered the new Job definitions and code evidence
+  but omitted their matching database authorities, causing worker restart loops.
+
+- Admit Software expiry work after the scheduler transaction commits. Opening
+  its separate connection inside that transaction could wait on its own Jobs
+  admission lock and block worker startup recovery.
+
+### Operational notes
+
+- Migration 0411 idempotently seeds only software-catalog and software-overview
+  authorities. It changes no role, grant, source data, scheduler or reader.
+- The user-approved two-row correction was applied directly in production to
+  restore startup. Migration 0411 retains that correction for future deployments.
+  Publication certification and live-reader activation remain unchanged.
+
 ## [0.144.12] — 2026-11-12 — Prepare Software overview publication
 
 ### Added

@@ -94,3 +94,76 @@ this single logical Software preparation release. After commit, separately
 request push approval explicitly covering automatic deployment and 0407–0410.
 Then perform only the separately approved production publication/acceptance
 steps; certification and live route cutover remain open.
+
+## Commit checkpoint
+
+User separately approved commit. Created a289e80a, Prepare Software overview
+publication as 0.144.12. All 37 committed blobs match the reviewed saved manifest;
+the index is empty and unrelated working changes remain uncommitted. The commit
+governance hook passed with one existing current-state status-date warning.
+Origin/master remains ae45b463 at the read-only pre-push check.
+Push approval is still required and must explicitly include automatic deployment
+and 0407–0410. No push, migration, producer or deployment was performed.
+
+## Approved push checkpoint
+
+User separately approved push, explicitly including automatic production
+deployment and migrations 0407–0410. Pushed a289e80a to origin/master first,
+then a-m-rose/master. Both remote tips independently verified at
+a289e80a89caac0b2df06635acb8b76612678cdd. Initial read-only service metadata
+still showed the previous healthy containers; rollout verification is pending.
+No manual redeploy, migration command or initial publication Job was invoked.
+
+## Deployment verification failure
+
+Automatic rollout applied 0407–0410. Operations and ingest replacement
+containers are running/healthy. The Jobs worker restarts before readiness:
+register_recovery_policies calls jobs_register_recovery_policy_v1 for
+software-catalog, which rejects missing matching database authority.
+Read-only metadata confirms both new Jobs have snapshots but neither has a
+job_recovery_policy_authorities row. Fixed startup messages identify the same
+failure. The earlier synthetic flow did not exercise this startup boundary;
+its structural fixture preparation masked the missing migration requirement.
+
+Deployment is not successful. Prepare a minimal 0411 two-authority seed
+correction, validate real registration, and obtain new commit/push approval
+explicitly covering that migration. Do not weaken or skip the registration
+guard. No manual migration, redeploy, forced Job or rollback was invoked.
+
+## Approved immediate correction and durable 0411
+
+After the missing-authority failure was explained, user approved the correction
+and directed immediate action. Applied only the two authority UPSERTs from the
+reviewed 0411 SQL using the approved helper and direct psql in a bounded
+transaction; INSERT 0 2 and COMMIT succeeded. No migration ledger row was inserted,
+no guard bypassed and no redeploy/forced Job was triggered. Worker recovery uses
+its existing restart policy. 0411 remains pending for normal Django application.
+
+Before production application, a tiny synthetic PostgreSQL fixture used the
+actual jobs_register_recovery_policy_v1 function: missing authority rejected;
+0411 enabled both exact current definition/evidence registrations; repeating
+migration/registration was idempotent and an unrelated authority was unchanged.
+The temporary fixture was removed. No test files changed.
+
+0.144.13 / 0411 is the durable source correction. It needs its own commit and
+push approvals; push would automatically deploy and apply idempotent 0411.
+Existing 0.144.12 live-reader/uncertified-publication boundaries remain.
+
+## Remaining scheduler lock and minimal correction
+
+After the approved authority correction, both startup policies registered and
+worker restarts stopped at count 14. Readiness remains unhealthy: jobs_request
+waits on an advisory lock held by an ingest connection idle in transaction
+after RELEASE SAVEPOINT. Source confirms produce_due_schedules called the new
+expiry helper before closing its outer transaction. Scheduled admission held
+locks while the helper opened another connection and waited on them.
+
+0.144.13 moves only the expiry helper call after outer connection closure.
+A focused check executed the actual scheduler function and verified connection
+closure/leader release before expiry admission, preserving admission counts.
+Ruff passes. No test files changed; no lock holder terminated or manual restart.
+The corrected code must deploy before readiness can be claimed.
+
+Runtime hashes for Operations reader/0410, ingest publisher/shared registry and
+worker dispatcher/shared registry match a289e80a. Ingest/worker VERSION is
+0.144.12; the 0.144.13 correction is prepared, not deployed.

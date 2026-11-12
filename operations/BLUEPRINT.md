@@ -36,11 +36,18 @@ SQL through 119 applied. Observed ingest pools use superuser access. Restricted
 ninja_ingest lacks necessary rights. This existing security limitation remains
 recorded; no role/config/grant change or security waiver. No production write.
 
-**Next action:** Exact candidate is staged; patch/manifest retained locally and
-temporary worktree removed. Obtain commit approval, then push approval including automatic
-deployment and 0407–0410. Origin first, mirror second; no manual redeploy.
-Governed initial publication, representative freshness/full-HTTP proof,
-certification and sustained reader activation remain separately gated.
+**Deployment checkpoint:** a289e80a pushed to both remotes after approvals.
+0407–0410 applied; Operations/ingest healthy. Worker failed because two recovery
+authorities were omitted. User approved direct two-row correction; it committed.
+Both startup policies now register; restarts stopped, but readiness waits on an
+advisory lock held by the scheduler's outer transaction.
+
+**Next action:** Commit and push the reviewed 0.144.13 correction after separate
+approvals: 0411 retains the two authorities; move expiry admission after the
+scheduler transaction closes. Real registration/idempotency and focused actual
+scheduler-boundary checks pass; temporary fixture removed. No test edits.
+No lock holder terminated, manual restart or guard bypass. Push approval must
+include automatic deployment/0411. Reader stays live; publication uncertified.
 
 ## PLAN-015 — Identity reconciliation
 
