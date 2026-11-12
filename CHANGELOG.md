@@ -2,6 +2,25 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.144.14] — 2026-11-12 — Activate the published Software overview
+
+### Fixed
+
+- Read the default Software overview from its protected published result,
+  preserving Products/search/CSV and honest pending/stale states.
+- Track completed local Software inputs and existing dirty targets instead of
+  blocking all publication on collection attempts or future dependency queues.
+- Request overview work after owner completion, so it cannot inherit an
+  expanding graph of unrelated future collection dependencies.
+
+### Operational notes
+
+- Migration 0412 updates existing functions and enables certification for
+  successfully fenced generations. No new tables, grants, services or cadence.
+- Same-snapshot production comparison matched every returned context field.
+  Full-page timing and first publication are verified after deployment.
+- Existing ingest superuser limitation remains recorded; no role redesign.
+
 ## [0.144.13] — 2026-11-12 — Restore Software Jobs startup and admission
 
 ### Fixed

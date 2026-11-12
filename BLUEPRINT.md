@@ -19,7 +19,7 @@ validation results, or completed-plan summaries here.
 
 ## Next action — active plan routing
 
-- **PLAN-056 — active, fixed 15-item navigation worklist.** Next: verify worker recovery and review the minimal 0.144.13/0411 source correction for separate commit and push approvals. Resume using the [handoff](docs/plans/PLAN-056-platform-performance-assessment.md) and [Operations checkpoint](operations/BLUEPRINT.md).
+- **PLAN-056 — active, fixed 15-item navigation worklist.** Next: deploy the bounded 0.144.14 Software activation candidate after separate commit/push approvals, then verify the completed page. Resume using the [handoff](docs/plans/PLAN-056-platform-performance-assessment.md) and [Operations checkpoint](operations/BLUEPRINT.md).
 
 - **PLAN-026 — active, approval-gated.** PLAN-025 is complete; next obtain
   explicit approval to implement the source configuration UI using its

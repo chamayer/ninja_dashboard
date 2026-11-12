@@ -6821,7 +6821,7 @@ def software_page(request: HttpRequest) -> HttpResponse:
             ],
             filename_stem="software",
         )
-    ctx = _software_overview_data(request)
+    ctx = _software_published_overview_data(request)
     ctx["software_tab"] = "overview"
     return render(request, "software_page.html", ctx)
 

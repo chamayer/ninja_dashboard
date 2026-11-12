@@ -334,3 +334,20 @@ certification gates; local evidence does not activate the prepared reader.
 Extends the publication pattern in accepted ADR-0003/0028/0029/0030; changes none
 of their decision precedence or action-eligibility rules. ADR-0039 remains
 Proposed. No prior decision or other navigation item is closed by this contract.
+
+Activation decision, 2026-11-12: collection attempts are not publication
+generations. Retained inventory survives individual fetch failures. Use local
+publication-owner checkpoints with the existing unconsumed reclassification
+targets, ownership dirtiness and explicit operator requests. Future dependency
+queues alone do not invalidate committed results. Long-running platform/matcher
+work uses its completed output checkpoint; the existing findings-write guard
+and dirty targets retain committed-change protection.
+
+Overview is requested through the existing conditional workflow mechanism only
+after a successful owner handler, avoiding future dependency accumulation.
+Migration 0412 promotes the reviewed calculation for every successfully fenced
+generation; all input/claim checks still apply. It replaces existing functions,
+preserving their owners/grants. The default HTML reader selects that result;
+Products/search/CSV remain unchanged. Production snapshot parity passed before
+activation; full HTTP/freshness evidence must still be recorded after rollout.
+No new service, store, role or cadence, and no security limitation is waived.

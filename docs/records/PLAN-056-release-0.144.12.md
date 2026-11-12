@@ -167,3 +167,80 @@ The corrected code must deploy before readiness can be claimed.
 Runtime hashes for Operations reader/0410, ingest publisher/shared registry and
 worker dispatcher/shared registry match a289e80a. Ingest/worker VERSION is
 0.144.12; the 0.144.13 correction is prepared, not deployed.
+
+## Approved 0.144.13 commit and push
+
+User answered yes to the separately queued commit and push approvals, the
+latter explicitly including automatic deployment and idempotent 0411.
+Committed ff63104a, Restore Software Jobs startup and expiry admission;
+pushed origin first, then a-m-rose. Both remote master tips verified as
+ff63104a042dd46dd466a264692ec6ba67e740a3. The exact corrective commit has
+eight scoped files; unrelated work remains uncommitted. Governance passed with
+the existing stale current-state status-date warning.
+
+Portainer's automatic rollout has begun. Final health, current runtime files
+and applied 0411 are being verified. No separate redeploy or forced Job.
+
+## Verified corrected deployment — 2026-11-12
+
+Automatic rollout of ff63104a / 0.144.13 completed. Postgres, Operations, ingest
+and Jobs worker are running/healthy. Replacement application containers report
+zero restarts. Both producer containers report VERSION 0.144.13. SHA-256 values
+for operator_job_queue.py in ingest/worker, Operations views.py and migration
+0411 match the committed blobs. Both remote master tips were verified at
+ff63104a042dd46dd466a264692ec6ba67e740a3.
+
+Read-only database verification confirms 0407–0411 applied and both Software
+recovery authorities/policies present. Worker startup readiness now passes,
+confirming the prior registration/transaction startup blockers are cleared.
+No manual redeploy, lock-holder termination, guard bypass or forced initial
+publication was performed. The earlier specifically approved authority
+insertion is recorded above; 0411 now makes it durable.
+
+Deployment stage complete, contract acceptance open: default Software retains
+live reads and prepared publication remains uncertified. Production publication,
+compatibility, freshness/full-HTTP acceptance and sustained activation remain
+separate work. Existing superuser access and prior coverage limits are not waived.
+Unrelated working changes remain uncommitted; no follow-up commit was made solely
+to record this commit's hash.
+
+## End-to-end Software activation — in progress
+
+User explicitly directed fixing the slow page end to end in production without
+added scope. Governed overview 3ba0107f-0c66-44db-9220-ec46f3ee0ce7 failed safely
+under the broad collector-status gate. The queue failure is the existing
+retained-inventory per-computer refresh error, not failed local publication.
+Current checkpoints must distinguish attempted collection from published inputs.
+
+Minimum correction: publication-owner checkpoints, existing reclassification/
+ownership dirty signals and completion-only overview admission through existing
+conditional workflows. Future dependency-only queues do not imply committed
+operator changes; actor requests remain invalidating. v4 avoids the old future
+dependency backlog. No new collector, service, table, role, receipt or cadence.
+
+A production REPEATABLE READ snapshot compared private aggregate calculation
+against the compatibility reader running as operations_app: all 15 context
+fields matched, including nested risk/workflow/week data. Values were discarded;
+aggregate write rolled back. Reviewed script:
+scripts/diagnostics/plan056_software_parity.py.
+0412 bodies and all Job snapshots passed actual DB validation in a transaction
+then rolled back. No activation SQL applied.
+
+Local 0412 promotes reviewed fenced generations, and HTML selects the prepared
+reader. Checks, exact candidate assembly, approvals, deployment and completed
+publication/HTTP acceptance remain. Clean the two remote temporary scripts
+after verification. No role redesign or unrelated troubleshooting is added.
+
+## 0.144.14 activation candidate
+
+User directed no extra testing and finishing the page fix. Existing production
+snapshot parity and rollback-only SQL/definition registration checks passed.
+The bounded candidate selects the protected HTML reader, updates existing
+functions through 0412, and admits overview on the existing completion signal.
+No collector behavior, table, grant, role, service or cadence change.
+
+Pending push approval must include automatic deployment and 0412. Existing
+function owners/grants are retained by CREATE OR REPLACE; reverse restores
+previous bodies and clears certification. Unrelated Home/test work is excluded.
+Remaining work is real governed publication and full-page verification, not
+another local test campaign.

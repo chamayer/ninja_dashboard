@@ -273,7 +273,7 @@ _RAW_DEFINITIONS = (
         "operator_job_runs",
         "ingest.inventory.software.refresh_overview_read_model",
         run_all=False,
-        handler_version="software-overview-v3",
+        handler_version="software-overview-v4",
     ),
     JobDefinition(
         "software-catalog", "Apply Software catalog policy",
@@ -1099,22 +1099,22 @@ _WORKFLOW_SUCCESSORS = MappingProxyType(
             DependencyDefinition("software-classify-full", "software.catalog-policy"),
         ),
         "software-classify": (
-            DependencyDefinition("software-overview", "software.classified-overview"),
+            DependencyDefinition("software-overview", "software.classified-overview", "software_inputs_ready"),
         ),
         "software-classify-only": (
-            DependencyDefinition("software-overview", "software.classified-overview"),
+            DependencyDefinition("software-overview", "software.classified-overview", "software_inputs_ready"),
         ),
         "software-classify-full": (
-            DependencyDefinition("software-overview", "software.classified-overview"),
+            DependencyDefinition("software-overview", "software.classified-overview", "software_inputs_ready"),
         ),
         "platform-evaluate": (
-            DependencyDefinition("software-overview", "software.computer-population"),
+            DependencyDefinition("software-overview", "software.computer-population", "software_inputs_ready"),
         ),
         "computer-client-ownership": (
-            DependencyDefinition("software-overview", "software.computer-ownership"),
+            DependencyDefinition("software-overview", "software.computer-ownership", "software_inputs_ready"),
         ),
         "computer-client-ownership-sweep": (
-            DependencyDefinition("software-overview", "software.computer-ownership"),
+            DependencyDefinition("software-overview", "software.computer-ownership", "software_inputs_ready"),
         ),
         "source-refresh": (
             DependencyDefinition(
@@ -1207,7 +1207,7 @@ _WORKFLOW_SUCCESSORS = MappingProxyType(
                 "software-classify-only", "software.cve-match", "material_change"
             ),
             # Score/KEV changes can refresh safety without changing match membership.
-            DependencyDefinition("software-overview", "software.safety-overview"),
+            DependencyDefinition("software-overview", "software.safety-overview", "software_inputs_ready"),
         ),
         "intel-winget": (
             DependencyDefinition(
@@ -1633,6 +1633,7 @@ def _validate_dependency_contracts() -> None:
         "reference_match_data",
         "reference_software_data",
         "material_change",
+        "software_inputs_ready",
     }
     revision_pattern = re.compile(r"[a-z0-9][a-z0-9._-]{2,119}")
     errors: list[str] = []

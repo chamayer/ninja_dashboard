@@ -1048,13 +1048,19 @@ def _execute(job_key: str, progress: V1JobProgress) -> int | JobExecutionResult 
         ),
         "intel-category": ("Refreshing software categories", category_match.run_once),
     }
-    if job_key == "software-classify":
-        return _software_classify_with_intel(
-            progress, matcher, winget, chocolatey, main
-        )
-    if job_key in ("software-classify-only", "software-classify-full"):
-        return _software_reconcile(
-            progress, whole_fleet=job_key == "software-classify-full"
+    if job_key in ("software-classify", "software-classify-only", "software-classify-full"):
+        if job_key == "software-classify":
+            result = _software_classify_with_intel(
+                progress, matcher, winget, chocolatey, main
+            )
+        else:
+            result = _software_reconcile(
+                progress, whole_fleet=job_key == "software-classify-full"
+            )
+        return JobExecutionResult(
+            rows=result.rows,
+            signals=(*result.signals, "software_inputs_ready"),
+            result=result.result,
         )
     if job_key not in jobs:
         raise ValueError(f"Unknown registered job: {job_key}")
@@ -1072,6 +1078,17 @@ def _execute(job_key: str, progress: V1JobProgress) -> int | JobExecutionResult 
         _request_whole_fleet_findings(job_key)
     if job_key in ("patches", "ninja-enrichment") and result is False:
         raise RuntimeError(f"{job_key} could not acquire its database execution lock")
+    if any(edge.successor == "software-overview" for edge in definition(job_key).successors):
+        if isinstance(result, JobExecutionResult):
+            return JobExecutionResult(
+                rows=result.rows,
+                signals=(*result.signals, "software_inputs_ready"),
+                result=result.result,
+            )
+        signals = ("software_inputs_ready",)
+        if bool(getattr(result, "material_changed", False)):
+            signals += ("material_change",)
+        return JobExecutionResult(rows=result, signals=signals)
     if isinstance(result, JobExecutionResult):
         return result
     if bool(getattr(result, "material_changed", False)) and any(
