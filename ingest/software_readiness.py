@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Iterable, Mapping
+from contextlib import nullcontext
 from datetime import datetime, timezone
 from typing import Any
 
@@ -151,10 +152,10 @@ def _offline_days(cur: Any, tenant_id: int) -> int:
     return device_status_settings.load(cur, tenant_id)[0]
 
 
-def refresh(tenant_id: int = 1, *, now: datetime | None = None) -> int:
+def refresh(tenant_id: int = 1, *, now: datetime | None = None, cursor=None) -> int:
     """Rebuild every readiness row for the tenant in one transaction."""
     now = now or datetime.now(timezone.utc)
-    with db.transaction() as cur:
+    with nullcontext(cursor) if cursor is not None else db.transaction() as cur:
         cur.execute(f"SET LOCAL operations.tenant_id = {int(tenant_id)}")
         profile = load_active_profile(cur)
         cur.execute(TYPES_SQL)
@@ -164,21 +165,38 @@ def refresh(tenant_id: int = 1, *, now: datetime | None = None) -> int:
         cur.execute(CONTACT_SQL, {"tenant_id": tenant_id})
         contacts = {str(device_id): contact for device_id, contact in cur.fetchall()}
         rows = compute(
-            tenant_id=tenant_id, devices=devices, contacts=contacts,
-            finding_types=finding_types, profile=profile, now=now,
+            tenant_id=tenant_id,
+            devices=devices,
+            contacts=contacts,
+            finding_types=finding_types,
+            profile=profile,
+            now=now,
             offline_days=_offline_days(cur, tenant_id),
-            offline_days_by_device=device_status_settings.device_overrides(cur, tenant_id),
+            offline_days_by_device=device_status_settings.device_overrides(
+                cur, tenant_id
+            ),
         )
         columns = READINESS_COLUMNS
         cur.execute(
             "CREATE TEMP TABLE software_device_readiness_next "
             "(LIKE operations.software_device_readiness INCLUDING DEFAULTS) ON COMMIT DROP"
         )
-        with cur.copy(f"COPY software_device_readiness_next ({columns}) FROM STDIN") as copy:
+        with cur.copy(
+            f"COPY software_device_readiness_next ({columns}) FROM STDIN"
+        ) as copy:
             copy.set_types(
                 [
-                    "bigint", "uuid", "smallint", "text", "text", "text", "bool", "bool",
-                    "text[]", "text[]", "timestamptz",
+                    "bigint",
+                    "uuid",
+                    "smallint",
+                    "text",
+                    "text",
+                    "text",
+                    "bool",
+                    "bool",
+                    "text[]",
+                    "text[]",
+                    "timestamptz",
                 ]
             )
             for row in rows:
@@ -211,5 +229,10 @@ def refresh(tenant_id: int = 1, *, now: datetime | None = None) -> int:
             (tenant_id,),
         )
         removed = cur.rowcount
-    log.info("software_readiness: tenant=%d rows=%d removed=%d", tenant_id, len(rows), removed)
+    log.info(
+        "software_readiness: tenant=%d rows=%d removed=%d",
+        tenant_id,
+        len(rows),
+        removed,
+    )
     return len(rows)

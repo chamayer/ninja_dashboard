@@ -80,6 +80,7 @@ def decide_capability(request: HttpRequest, ids: list[str], action: FindingActio
     now = timezone.now()
     username = request.user.get_username()
     resolved = 0
+    overview_queued = False
     for product, capability in sorted(wanted, key=str):
         try:
             # Nested, so one rejected input does not poison the audit trail.
@@ -88,6 +89,11 @@ def decide_capability(request: HttpRequest, ids: list[str], action: FindingActio
         except (capability_evidence.CapabilitySchemaUnavailable, IntegrityError, ValueError) as exc:
             messages.error(request, str(exc))
             return redirect(back)
+        if not overview_queued:
+            from .views import _queue_software_rebuild
+
+            _queue_software_rebuild(request.user.id)
+            overview_queued = True
         AuditLog.objects.create(
             tenant_id=1,
             actor=request.user,

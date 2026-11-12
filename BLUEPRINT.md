@@ -19,15 +19,7 @@ validation results, or completed-plan summaries here.
 
 ## Next action — active plan routing
 
-- PLAN-044 owns migration 0406; PLAN-049 must rebase its unmerged migration to
-  0407 or later.
-
-- **PLAN-054 — active.** Verify production stability after the 0.144.3 deadlock
-  repair; see the [handoff](docs/plans/PLAN-054-source-collection-deadlock.md).
-
-- **PLAN-041 — active.** Release bounded matcher lookups and measure a complete
-  optimized run. DMARC fixes are verified. See the
-  [handoff](docs/plans/PLAN-041-host-cpu-and-runtime-profiling.md).
+- **PLAN-056 — active, fixed 15-item navigation worklist.** Next: review the isolated Software 0.144.12 candidate for separate commit and production-push approvals. Resume using the [handoff](docs/plans/PLAN-056-platform-performance-assessment.md) and [Operations checkpoint](operations/BLUEPRINT.md).
 
 - **PLAN-026 — active, approval-gated.** PLAN-025 is complete; next obtain
   explicit approval to implement the source configuration UI using its
@@ -48,8 +40,6 @@ validation results, or completed-plan summaries here.
 - **PLAN-016 — active.** Next: implement the bounded, tenant-scoped,
   read-only explorer and focused tests. See the [plan](operations/docs/plans/PLAN-016-admin-sql-explorer.md)
   and [Operations checkpoint](operations/BLUEPRINT.md).
-- **PLAN-044 — active.** Review the implemented Home changes and release gates;
-  see the [Operations checkpoint](operations/BLUEPRINT.md).
 
 Completed and ready plans remain in the registry; their details stay in their
 registered source documents. Update this index only when active status,

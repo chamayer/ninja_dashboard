@@ -263,6 +263,26 @@ _RAW_DEFINITIONS = (
         schedule_ids=("software_classify_full_rebuild_cycle",),
     ),
     JobDefinition(
+        "software-overview",
+        "Publish Software overview",
+        "Refresh the Software overview from current local inputs.",
+        "evaluators",
+        "software",
+        "",
+        "software_overview",
+        "operator_job_runs",
+        "ingest.inventory.software.refresh_overview_read_model",
+        run_all=False,
+        handler_version="software-overview-v3",
+    ),
+    JobDefinition(
+        "software-catalog", "Apply Software catalog policy",
+        "Project local catalog and matching policy before Software reconciliation.",
+        "evaluators", "software", "", "software_catalog", "operator_job_runs",
+        "ingest.operator_job_queue._refresh_software_catalog_policy",
+        run_all=False, handler_version="software-catalog-v1",
+    ),
+    JobDefinition(
         "patch-classify",
         "Patch classifier",
         "Update patch findings from current Ninja patch data.",
@@ -637,6 +657,15 @@ _RAW_DEFINITIONS = (
 # change the historical definition that admitted that run.
 REPLAY_SAFE_RECOVERY_EVIDENCE = MappingProxyType(
     {
+        "software-catalog": (
+            "Replays existing local catalog/lifecycle projectors and matching before "
+            "classification; no source API or external mutation is invoked."
+        ),
+        "software-overview": (
+            "Overview publication reads local inputs and atomically replaces "
+            "one derived aggregate row. A failed SQL statement retains the prior row; "
+            "replay rebuilds current results and has no external mutation."
+        ),
         "source-refresh": (
             "A source refresh only reads the configured source API and reconciles local "
             "evidence. Replaying it converges to current source data and performs no "
@@ -959,6 +988,8 @@ _RESOURCE_KEYS_BY_DEFINITION: dict[str, tuple[str, ...]] = {
     "software-classify": ("tenant:{tenant_id}:software-state",),
     "software-classify-only": ("tenant:{tenant_id}:software-state",),
     "software-classify-full": ("tenant:{tenant_id}:software-state",),
+    "software-overview": ("tenant:{tenant_id}:software-state",),
+    "software-catalog": ("global:software-catalog", "tenant:{tenant_id}:software-cve-match"),
     "patch-classify": ("tenant:{tenant_id}:patch-state",),
     "platform-evaluate": ("tenant:{tenant_id}:platform-findings",),
     "cmdb-evaluate": ("tenant:{tenant_id}:cmdb-findings",),
@@ -1020,6 +1051,8 @@ _CAPACITY_KEYS_BY_DEFINITION: dict[str, tuple[str, ...]] = {
     "software-classify": ("capacity:processing",),
     "software-classify-only": ("capacity:processing",),
     "software-classify-full": ("capacity:processing",),
+    "software-overview": ("capacity:processing",),
+    "software-catalog": ("capacity:processing",),
     "patch-classify": ("capacity:processing",),
     "platform-evaluate": ("capacity:processing",),
     "cmdb-evaluate": ("capacity:processing",),
@@ -1062,6 +1095,27 @@ _SUPERSESSION_FAMILIES = MappingProxyType(
 )
 _WORKFLOW_SUCCESSORS = MappingProxyType(
     {
+        "software-catalog": (
+            DependencyDefinition("software-classify-full", "software.catalog-policy"),
+        ),
+        "software-classify": (
+            DependencyDefinition("software-overview", "software.classified-overview"),
+        ),
+        "software-classify-only": (
+            DependencyDefinition("software-overview", "software.classified-overview"),
+        ),
+        "software-classify-full": (
+            DependencyDefinition("software-overview", "software.classified-overview"),
+        ),
+        "platform-evaluate": (
+            DependencyDefinition("software-overview", "software.computer-population"),
+        ),
+        "computer-client-ownership": (
+            DependencyDefinition("software-overview", "software.computer-ownership"),
+        ),
+        "computer-client-ownership-sweep": (
+            DependencyDefinition("software-overview", "software.computer-ownership"),
+        ),
         "source-refresh": (
             DependencyDefinition(
                 "computer-client-ownership",
@@ -1152,6 +1206,8 @@ _WORKFLOW_SUCCESSORS = MappingProxyType(
             DependencyDefinition(
                 "software-classify-only", "software.cve-match", "material_change"
             ),
+            # Score/KEV changes can refresh safety without changing match membership.
+            DependencyDefinition("software-overview", "software.safety-overview"),
         ),
         "intel-winget": (
             DependencyDefinition(
@@ -1265,6 +1321,8 @@ def schedule_definitions() -> tuple[ScheduleDefinition, ...]:
 
 _SYSTEM_SERVICE_KEYS = frozenset(
     {
+        "software-overview",
+        "software-catalog",
         "source-refresh",
         "patches",
         "agent-observations",

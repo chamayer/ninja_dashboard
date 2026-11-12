@@ -1,0 +1,17 @@
+<div class="card" role="status" aria-live="polite">
+    <p><strong>{% if overview_publication.state == 'current' %}Completed summary{% elif overview_publication.state == 'pending' %}Summary pending{% elif overview_publication.state == 'stale' %}Summary stale{% else %}Summary unavailable{% endif %}</strong></p>
+    <p>{{ overview_publication.message }}</p>
+    {% if overview_publication.computed_at %}
+    <p class="muted">Retained result calculated {{ overview_publication.computed_at|date:"Y-m-d H:i:s T" }};
+       published {{ overview_publication.published_at|date:"Y-m-d H:i:s T" }}.</p>
+    {% endif %}
+    {% if overview_publication.inventory_observed_at %}
+    <p class="muted">Oldest inventory observation: {{ overview_publication.inventory_observed_at|date:"Y-m-d H:i:s T" }}.</p>
+    {% endif %}
+    {% if overview_publication.oldest_input_completed_at %}
+    <p class="muted">Oldest recorded input completion: {{ overview_publication.oldest_input_completed_at|date:"Y-m-d H:i:s T" }}.</p>
+    {% endif %}
+    {% if overview_publication.state != 'current' %}
+    <p><a href="{% url 'software_products' %}">Browse products</a> · <a href="{% url 'software_decision_log' %}">View decision activity</a></p>
+    {% endif %}
+</div>

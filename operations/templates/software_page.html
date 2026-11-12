@@ -160,12 +160,14 @@
     <div class="sw-hero">
         <div>
             <h1>Software</h1>
-            <div class="sub">{{ installations }} installations across {{ unique_titles }} products</div>
+            <div class="sub">{% if overview_publication and overview_publication.state != 'current' %}Summary values unavailable{% else %}{{ installations }} installations across {{ unique_titles }} products{% endif %}</div>
         </div>
         {% include "_csv_download.html" %}
     </div>
 </div>
 
+{% if overview_publication %}{% include "_software_overview_state.html" %}{% endif %}
+{% if not overview_publication or overview_publication.state == 'current' %}
 {# ── Overview KPIs ─────────────────────────────────────── #}
 <div class="sw-section-label">Overview</div>
 <div class="sw-numbers">
@@ -231,9 +233,9 @@
 
         <div>
             <div style="display:flex; justify-content:space-between; align-items:baseline;">
-                <strong style="font-size:0.88rem;">Products by decision</strong>
+                <strong style="font-size:0.88rem;">Title review status</strong>
                 <span class="muted" style="font-size:0.75rem;">
-                    {{ approved_titles }} approved · {{ pending_decisions }} awaiting
+                    {{ approved_titles }} without an open decision issue · {{ pending_decisions }} awaiting
                 </span>
             </div>
             {% with total_dec=unique_titles %}
@@ -247,7 +249,7 @@
             </div>
             {% endwith %}
             <div class="dist-legend">
-                <span><span class="swatch" style="background:#16a34a;"></span>Approved ({{ approved_titles }})</span>
+                <span><span class="swatch" style="background:#16a34a;"></span>No open decision issue ({{ approved_titles }})</span>
                 <span><span class="swatch" style="background:#dc2626;"></span>Rejected ({{ rejected_titles }})</span>
                 <span><span class="swatch" style="background:#f59e0b;"></span>Investigate ({{ investigate_titles }})</span>
                 <span><span class="swatch" style="background:#9ca3af;"></span>No decision yet ({{ pending_decisions }})</span>
@@ -397,7 +399,7 @@
     <div class="card">
         <h2>Where you stand</h2>
         <p class="muted" style="font-size:0.85rem;">
-            {{ approved_titles }} approved · {{ rejected_titles }} rejected ·
+            {{ approved_titles }} without an open decision issue · {{ rejected_titles }} rejected ·
             {{ investigate_titles }} investigating · {{ pending_decisions }} still waiting
         </p>
         <a href="{% url 'software_products' %}?flagged=1" style="font-size:0.85rem;">Review flagged products →</a>
@@ -406,4 +408,5 @@
     </div>
 </div>
 
+{% endif %}
 {% endblock %}

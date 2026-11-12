@@ -1,5 +1,19 @@
 # Plan registry
 
+## PLAN-056 — Platform performance recovery
+
+- Scope: Single platform performance recovery plan: inventory, diagnosis, requirement review, approved remediation, release and platform-wide verification across Operations, ingest, Jobs, Postgres and host resources.
+- Status: active
+- Defined: 2026-11-09
+- Started: 2026-11-09
+- Completed: —
+- Blueprint: docs/plans/PLAN-056-platform-performance-assessment.md
+- Source: docs/plans/PLAN-056-platform-performance-assessment.md
+- Section: PLAN-056 — Platform performance recovery
+- Related plans: Supersedes PLAN-041, PLAN-044, PLAN-047, PLAN-048, PLAN-049, PLAN-050, PLAN-053 and PLAN-054. All unfinished work and evidence are routed through the consolidation record; no independent execution remains in those plans.
+- Resume gate: Fixed 15-item navigation worklist remains active, all items open. ADR-0058, Software worklist and writer map remain authoritative. Local implementation and bounded synthetic Jobs checks exist with recorded limits; deployed metadata confirms 0406 applied and 0407–0410 pending. User chose production: Software-only 0.144.12 candidate is prepared from ae45b463; isolated Django/22 focused checks, migration graph, templates, compilation, helper lint and registries pass. Known Jobs expectation failures remain. Next: separate commit approval, then push approval explicitly covering automatic deployment and 0407–0410. Existing superuser limitation stays recorded; no role redesign. Commit and push need separate approvals; origin push would automatically deploy/apply pending migrations before mirror push. Live reader/uncertified results remain for the candidate; production acceptance/certification/cutover remain open. Handoff: operations/BLUEPRINT.md; candidate record: docs/records/PLAN-056-release-0.144.12.md; evidence: docs/records/PLAN-056-release-acceptance.md.
+- Last checked: 2026-11-12 (local Software wiring and bounded synthetic Jobs checks complete with acceptance limitations; prior release verification on 2026-11-11: 0.144.11 / ae45b463: five logical commits, 68 isolated targeted checks and Django check pass, zero pending/new migrations. User-authorized chamayer authentication restored push access. Both remotes verified at release tip; automatic 1m polling deployed it. All four services running/healthy; ingest/worker VERSION and changed runtime hashes in Operations/ingest/worker match release. No manual redeploy. Repository-local Git helper uses active CLI login; normal dry-run push succeeds. Temporary worktree removed; excluded work preserved. Full performance acceptance remains open. Evidence: docs/records/PLAN-056-release-0.144.11.md; handoff: docs/plans/PLAN-056-platform-performance-assessment.md).
+
 ## PLAN-055 — Jobs execution-scope claim race
 
 - Scope: Prevent a queued Jobs successor from being claimed while the same tenant/job/scope has an active run; preserve workflow dependencies, request coalescing, and resource capacity.
@@ -17,30 +31,32 @@
 ## PLAN-054 — Source collection deadlock repair
 
 - Scope: Coordinate source/software writes with ownership and findings work to prevent the PLAN-045 deadlocks.
-- Status: active
+- Status: superseded
+- Superseded: 2026-11-09 by PLAN-056
 - Defined: 2026-11-04
 - Started: 2026-11-04
 - Completed: —
-- Blueprint: docs/plans/PLAN-054-source-collection-deadlock.md
+- Blueprint: docs/plans/PLAN-056-platform-performance-assessment.md
 - Source: docs/plans/PLAN-054-source-collection-deadlock.md
 - Section: PLAN-054 — Source collection deadlock repair
 - Related plans: PLAN-045 introduced invalidation; PLAN-019 closed after collection recovered. Earlier local notes called this PLAN-052, which the remote registry assigned to unrelated Ninja VM analysis.
-- Resume gate: Release 0.144.2 committed and pushed with approval; next observe scheduled source runs. Manual collection, further production mutations, commits and pushes require their own authorization.
-- Last checked: 2026-11-04 (0.144.2 `fb823658` pushed to both remotes and deployed by Portainer; 49 focused tests pass. Ingest/Jobs version and health verified; readiness and Operations health pass. No new deadlocks observed; source collection recovery and workload waits remain unverified. Earlier local PLAN-052 ID conflicted with an unrelated remote plan; release uses PLAN-054).
+- Resume gate: Superseded by PLAN-056 on 2026-11-09. Scope, unfinished work, evidence and gates are consolidated there; do not execute this historical plan independently.
+- Last checked: 2026-11-09 (superseded, not completed; prior checkpoint retained in docs/records/PLAN-056-consolidation.md).
 
 ## PLAN-053 — Ninja activity retention
 
 - Scope: Bound how long ninja_activities.activities keeps Ninja activity events (774k rows, 7.0 GB, no deletion today), keeping the device timeline, patch activity search and the activity rollup views working; measure first, then decide a period, implement a batched delete and clean up once.
-- Status: ready
+- Status: superseded
+- Superseded: 2026-11-09 by PLAN-056
 - Defined: 2026-11-04
 - Started: —
 - Completed: —
-- Blueprint: docs/plans/PLAN-053-ninja-activity-retention.md
+- Blueprint: docs/plans/PLAN-056-platform-performance-assessment.md
 - Source: docs/plans/PLAN-053-ninja-activity-retention.md
 - Section: PLAN-053 — Ninja activity retention
 - Related plans: Moved from PLAN-019 (received from PLAN-022's backlog). PLAN-050 (database memory) and PLAN-041 (host CPU) benefit; PLAN-047 owns write churn.
-- Resume gate: Step 1 (read-only production measurement) needs read-only production approval; the retention decision, implementation, the one-time delete and any table rewrite are each separately approved.
-- Last checked: 2026-11-04 (readers: device timeline, patch activity search, three materialized views refreshed after each activities run).
+- Resume gate: Superseded by PLAN-056 on 2026-11-09. Scope, unfinished work, evidence and gates are consolidated there; do not execute this historical plan independently.
+- Last checked: 2026-11-09 (superseded, not completed; prior checkpoint retained in docs/records/PLAN-056-consolidation.md).
 
 
 ## PLAN-052 — Ninja VM guest records: withdrawn volume and unmatched health rows
@@ -76,61 +92,65 @@
 ## PLAN-050 — Database memory and host capacity
 
 - Scope: Size PostgreSQL memory to the Ninja Dashboard working set on a host with enough headroom not to swap; configuration managed in the repository; any change applied only in an approved maintenance window.
-- Status: ready
+- Status: superseded
+- Superseded: 2026-11-09 by PLAN-056
 - Defined: 2026-11-03
 - Started: —
 - Completed: —
-- Blueprint: docs/plans/PLAN-050-database-memory-and-host-capacity.md
+- Blueprint: docs/plans/PLAN-056-platform-performance-assessment.md
 - Source: docs/plans/PLAN-050-database-memory-and-host-capacity.md
 - Section: PLAN-050 — Database memory and host capacity
 - Related plans: Found by PLAN-049. PLAN-047 and PLAN-048 shrink the working set first; PLAN-042/PLAN-044 timings were taken under the current settings; PLAN-041 owns host CPU.
-- Resume gate: Step 1 (read-only host and database measurements) needs read-only production approval; every configuration or host change and any restart is separately approved.
-- Last checked: 2026-11-03 (shared_buffers 128 MB for a 31 GB database; host 35 GB with about 4.7 GB available and swap fully used; host shared with Zabbix and Graylog).
+- Resume gate: Superseded by PLAN-056 on 2026-11-09. Scope, unfinished work, evidence and gates are consolidated there; do not execute this historical plan independently.
+- Last checked: 2026-11-09 (superseded, not completed; prior checkpoint retained in docs/records/PLAN-056-consolidation.md).
 
 
 ## PLAN-049 — Index active findings by subject
 
 - Scope: Partial index on active findings by subject (migration 0404) and a page-id probe in the /devices/ Computers page so severe-Issue counts read only active findings.
-- Status: active
+- Status: superseded
+- Superseded: 2026-11-09 by PLAN-056
 - Defined: 2026-11-03
 - Started: 2026-11-03
 - Completed: —
-- Blueprint: docs/plans/PLAN-049-active-findings-index.md
+- Blueprint: docs/plans/PLAN-056-platform-performance-assessment.md
 - Source: docs/plans/PLAN-049-active-findings-index.md
 - Section: PLAN-049 — Index active findings by subject
 - Related plans: Found by PLAN-012's follow-up review. PLAN-042/PLAN-044 own the Coverage-view (/inventory/computers/) performance, not /devices/. PLAN-055 claims migration 0405; PLAN-044 now owns 0406 for its authorized bulk attribution function, so PLAN-049 must rebase and use 0407 or later. PLAN-019 F05 owns closed-finding retention.
-- Resume gate: Implemented, validated locally and committed on branch plan049-active-findings-index (4cb502e0); worktree is absent. Rebase after PLAN-044's migration 0406, renumber this migration to 0407 or later, then release with approval of the pending migrations and a read-only post-deploy plan check.
-- Last checked: 2026-11-09 (branch still contains migration 0404 at 4cb502e0; 0405 is now on master; PLAN-044 has assigned migration 0406. Its rebase and renumber remain pending).
+- Resume gate: Superseded by PLAN-056 on 2026-11-09. Scope, unfinished work, evidence and gates are consolidated there; do not execute this historical plan independently.
+- Last checked: 2026-11-09 (superseded, not completed; prior checkpoint retained in docs/records/PLAN-056-consolidation.md).
 
 
 ## PLAN-048 — Source records report typed facts, not JSON parsed on read
 
 - Scope: Derive a source record's reported facts as typed columns when it is written (ADR-0055) so that v_entity_observation_admin_metadata and its six readers never parse the record JSON on read.
-- Status: ready
+- Status: superseded
+- Superseded: 2026-11-09 by PLAN-056
 - Defined: 2026-11-03
 - Started: —
 - Completed: —
-- Blueprint: docs/plans/PLAN-048-record-reported-facts.md
+- Blueprint: docs/plans/PLAN-056-platform-performance-assessment.md
 - Source: docs/plans/PLAN-048-record-reported-facts.md
 - Section: PLAN-048 — Source records report typed facts, not JSON parsed on read
 - Related plans: Found by PLAN-012's follow-up review (Source Records about 8 s). PLAN-047 owns write volume and observation storage; PLAN-004 owns reported contact semantics. Work in a separate worktree while PLAN-045 is in progress in the main checkout.
-- Resume gate: Step 1 (measure the migration lock on a production-size copy and the expressions read-only on production) needs rehearsal approval; ADR-0055 must be accepted before the migration.
-- Last checked: 2026-11-03 (JSON read costs 3 to 4 s per full view scan regardless of extraction style; claims cover 9 of 15 fields and no withdrawn records).
+- Resume gate: Superseded by PLAN-056 on 2026-11-09. Scope, unfinished work, evidence and gates are consolidated there; do not execute this historical plan independently.
+- Last checked: 2026-11-09 (superseded, not completed; prior checkpoint retained in docs/records/PLAN-056-consolidation.md).
 
 
 ## PLAN-047 — Write only what changed
 
 - Scope: Make projectors, evaluators and refreshes write only changed rows; move per-run timestamps off content rows; replace always-changing materialized views; compact tables only after re-measurement.
-- Status: ready
+- Status: superseded
+- Superseded: 2026-11-09 by PLAN-056
 - Defined: 2026-11-03
 - Started: —
 - Completed: —
-- Blueprint: docs/plans/PLAN-047-write-only-what-changed.md
+- Blueprint: docs/plans/PLAN-056-platform-performance-assessment.md
 - Source: docs/plans/PLAN-047-write-only-what-changed.md
 - Section: PLAN-047 — Write only what changed
 - Related plans: Found by PLAN-012's follow-up review. PLAN-041 owns prior matcher CPU fixes; PLAN-014 owns requirement verdict policy; PLAN-019 owns pipeline correctness and retention. Work in a separate worktree while PLAN-045 is in progress in the main checkout.
-- Resume gate: Step 1, a local code inventory of each writer, needs no external access; migrations, rehearsal, release and any compaction are separately gated.
-- Last checked: 2026-11-03 (read-only counters over about 13 days: cve_match 74 M inserts and deletes for 649 k rows; relationship evidence 27 M updates for 118 k rows; device_requirement_state fully deleted and re-inserted per evaluation).
+- Resume gate: Superseded by PLAN-056 on 2026-11-09. Scope, unfinished work, evidence and gates are consolidated there; do not execute this historical plan independently.
+- Last checked: 2026-11-09 (superseded, not completed; prior checkpoint retained in docs/records/PLAN-056-consolidation.md).
 
 
 ## PLAN-046 — Authority belongs to the record type
@@ -163,17 +183,18 @@
 
 ## PLAN-044 — Navigation and Computers performance
 
-- Scope: Achieve ordinary Home response time ≤1.5 seconds (2.0-second hard maximum), preserving the agreed domain-owned Operations overview, supported trends of 30 days or less, current Coverage totals without a separate Home trend, and detailed client portfolio on Clients. User authorized the Patching outcome summary and migration 0406 for tenant-checked bulk source attribution.
-- Status: active
+- Scope: Achieve ordinary Home response time ≤1.5 seconds (2.0-second hard maximum), preserving the agreed domain-owned Operations overview, supported trends of 30 days or less, current Coverage totals without a separate Home trend, and detailed client portfolio on Clients. The user accepted Home summary values up to 60 seconds old and revised the Software card to installed titles plus open Software & Security actions.
+- Status: superseded
+- Superseded: 2026-11-09 by PLAN-056
 - Defined: 2026-11-02
 - Started: 2026-11-02
 - Completed: —
-- Blueprint: operations/BLUEPRINT.md
+- Blueprint: docs/plans/PLAN-056-platform-performance-assessment.md
 - Source: operations/docs/plans/PLAN-044-page-performance.md
 - Section: PLAN-044 — Navigation and Computers performance
 - Related plans: PLAN-042 supplies prior performance evidence; PLAN-012 retains Computer semantics and verification; PLAN-043 independently owns issue review in views.py. PLAN-019 source-record history is complete. PLAN-003/004 contracts remain unchanged. PLAN-049 follows this plan's migration 0406 and must use 0407 or later.
-- Resume gate: User authorized the Patching summary implementation; preserve exact KPI and rolling-window semantics. Commit and push require separate approvals; an origin push approval must include automatic deployment and reviewed pending migrations.
-- Last checked: 2026-11-09 (`60ba6e45` is on both remotes; production Home returned 200 in 14.440 seconds. Patching outcome summary is implemented locally with SQL migration 119; synthetic parity passed. Production migration cost and speedup remain unmeasured. PLAN-049 remains separate at 0407+).
+- Resume gate: Superseded by PLAN-056 on 2026-11-09. Scope, unfinished work, evidence and gates are consolidated there; do not execute this historical plan independently.
+- Last checked: 2026-11-09 (superseded, not completed; prior checkpoint retained in docs/records/PLAN-056-consolidation.md).
 
 ## PLAN-043 — Useful issue review
 
@@ -192,16 +213,17 @@
 ## PLAN-041 — Host CPU and runtime profiling
 
 - Scope: Attribute live host CPU, replace expensive DMARC health checks in its sibling repository, and reduce Ninja matcher work through bounded candidate reuse and indexed CVE lookup batches.
-- Status: active
+- Status: superseded
+- Superseded: 2026-11-09 by PLAN-056
 - Defined: 2026-11-02
 - Started: 2026-11-02
 - Completed: —
-- Blueprint: docs/plans/PLAN-041-host-cpu-and-runtime-profiling.md
+- Blueprint: docs/plans/PLAN-056-platform-performance-assessment.md
 - Source: docs/plans/PLAN-041-host-cpu-and-runtime-profiling.md
 - Section: PLAN-041 — Host CPU and runtime profiling
 - Related plans: PLAN-003/004 own findings guards and identity semantics; this plan adds diagnostics only and does not alter their contracts. DMARC health/monitoring retirement is prepared in the sibling repository.
-- Resume gate: Existing CPU-task implementation/commit/push authorization continues after the user's request to finish the fix. Release 0.142.2 has no migrations or dependencies; preserve matching scope and withdrawals. No host tuning, systemd parser units, or Zabbix parser monitor.
-- Last checked: 2026-11-02 (0.142.1 and DMARC `03ddf01` deployed and healthy. Actual matcher fixes prepared: bounded CPE reuse and 500-CPE CVE batches; live read-only equivalence/performance probes passed; whole matcher-run validation follows deployment).
+- Resume gate: Superseded by PLAN-056 on 2026-11-09. Scope, unfinished work, evidence and gates are consolidated there; do not execute this historical plan independently.
+- Last checked: 2026-11-09 (superseded, not completed; prior checkpoint retained in docs/records/PLAN-056-consolidation.md).
 
 ## PLAN-040 — Source-record notifications
 

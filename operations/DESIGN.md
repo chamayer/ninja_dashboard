@@ -276,6 +276,12 @@ config tables). A refresh manifest lists dependency order. Ingest calls
 resolves order and refreshes CONCURRENTLY per matview. Each matview
 has a unique index so concurrent refresh is possible.
 
+The Software overview extension is defined as an **accepted** contract in
+[ADR-0058](docs/decisions/0058-software-summary-publication-contract.md), under
+PLAN-056 item 1. It specifies metric populations, publication dependencies,
+freshness, live decision boundaries, failure/rebuild behavior and required
+enforcement. Contract approval does not authorize implementation.
+
 **Tenant scoping on matviews:**
 
 Postgres does NOT support RLS on materialized views (only on tables,

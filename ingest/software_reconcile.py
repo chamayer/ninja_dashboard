@@ -1066,19 +1066,27 @@ def assessment_rows(
 
 
 def write_assessments(
-    cur: Any, ctx: Context, type_ids: list[int], profile: Any, titles: list[str] | None = None
+    cur: Any, tenant_id: int, now: datetime, type_ids: list[int], profile: Any,
+    titles: list[str] | None = None, *, existing_only: bool = False,
 ) -> int:
     """Rewrite participants and assessments of the run's findings (``titles`` scopes it)."""
-    params = {"tid": ctx.tenant_id, "type_ids": type_ids, "active": list(ACTIVE_STATUSES),
+    params = {"tid": tenant_id, "type_ids": type_ids, "active": list(ACTIVE_STATUSES),
               "titles": titles}
-    cur.execute(ACTIVE_FINDINGS_SQL, params)
+    owned_filter = """
+       AND EXISTS (
+           SELECT 1 FROM operations.condition_assessments owned
+            WHERE owned.tenant_id = finding.tenant_id AND owned.finding_id = finding.id
+              AND owned.row_kind = 'entity' AND owned.participant_kind = 'condition'
+              AND owned.reevaluation_key LIKE 'software:%%')
+    """ if existing_only else ""
+    cur.execute(ACTIVE_FINDINGS_SQL + owned_filter, params)
     findings = cur.fetchall()
     cur.execute(READY_EXPOSURE_SQL, params)
     ready = {r[0]: (r[1], r[2], int(r[3]), int(r[4])) for r in cur.fetchall()}
     cur.execute(READINESS_SQL, params)
     readiness = {(r[0], r[1]): (r[2], r[3], r[4], r[5], r[6]) for r in cur.fetchall()}
     participants, assessments = assessment_rows(
-        tenant_id=ctx.tenant_id, now=ctx.now, profile=profile, findings=findings,
+        tenant_id=tenant_id, now=now, profile=profile, findings=findings,
         ready_exposure=ready, readiness=readiness,
     )
     cur.execute(
@@ -1099,7 +1107,7 @@ def write_assessments(
           ["bigint", "text", "uuid", "text", "uuid", "text", "text", "text", "text",
            "jsonb", "jsonb", "text", "jsonb", "timestamptz"], assessments)
     finding_ids = sorted({f[0] for f in findings})
-    scope = {"tid": ctx.tenant_id, "ids": finding_ids}
+    scope = {"tid": tenant_id, "ids": finding_ids}
     # Remove members and assessments the derived model no longer has, including
     # the per-device rows title findings carried before (design D1).
     cur.execute(
@@ -1204,6 +1212,29 @@ VALUES (%(tid)s, 'all', '*', %(source)s)
 ON CONFLICT (tenant_id, target_key, source) WHERE consumed_at IS NULL
 DO UPDATE SET generation = target.generation + 1
 """
+
+
+def refresh_existing_assessments(cur: Any, tenant_id: int) -> None:
+    """Refresh eligibility without emitting, reopening or resolving findings.
+
+    Reuse only assessments already owned by this Software evaluator. The caller
+    holds the overview publication transaction and fence.
+    """
+    now = datetime.now(timezone.utc)
+    software_readiness.refresh(tenant_id, now=now, cursor=cur)
+    profile = load_active_profile(cur)
+    cur.execute(
+        """SELECT DISTINCT f.finding_type_id
+             FROM operations.findings f
+             JOIN operations.condition_assessments a
+               ON a.tenant_id = f.tenant_id AND a.finding_id = f.id
+              AND a.row_kind = 'entity' AND a.reevaluation_key LIKE 'software:%%'
+            WHERE f.tenant_id = %s""",
+        (tenant_id,),
+    )
+    type_ids = [row[0] for row in cur.fetchall()]
+    if type_ids:
+        write_assessments(cur, tenant_id, now, type_ids, profile, existing_only=True)
 
 
 def scope_from_targets(
@@ -1367,6 +1398,6 @@ def _run(
 
     stage("Recording condition assessments", f"{len(reconciled)} finding types.")
     with db.findings_transaction(int(tenant_id)) as cur:
-        written = write_assessments(cur, ctx, reconciled, profile, titles)
+        written = write_assessments(cur, ctx.tenant_id, ctx.now, reconciled, profile, titles)
     log.info("software_reconcile: %s assessments=%d", report.as_result(), written)
     return report

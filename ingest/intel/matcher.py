@@ -107,6 +107,7 @@ def run_once() -> int:
             log.info("Refreshed operations.v_software_safety matview")
         except Exception:
             log.exception("Failed to refresh v_software_safety matview")
+            raise
         return rows
 
 

@@ -677,6 +677,7 @@ def produce_due_schedules() -> int:
                         log.exception(
                             "durable Jobs schedule %s was deferred", schedule_id
                         )
+                admitted += _admit_expired_software_overview()
             finally:
                 cur.execute("SELECT operations.jobs_release_schedule_leader()")
     except PoolTimeout:
@@ -688,6 +689,38 @@ def produce_due_schedules() -> int:
     if admitted:
         log.info("durable Jobs schedule producer admitted %d run(s)", admitted)
     return admitted
+
+
+def _admit_expired_software_overview() -> int:
+    """Use the existing scheduler to request a due overview, not a fleet run.
+
+    The current scheduler poll interval is unchanged. This connects expiry;
+    the 60-second end-to-end budget remains a cutover acceptance requirement.
+    """
+    try:
+        with db.transaction() as cur:
+            cur.execute("SET LOCAL operations.tenant_id = 1")
+            cur.execute("SELECT operations.software_overview_refresh_due(%s)", (1,))
+            due = cur.fetchone()[0]
+            cur.execute(
+                "SELECT EXISTS (SELECT 1 FROM operations.computer_client_ownership "
+                "WHERE tenant_id = 1 AND state = 'dirty')"
+            )
+            ownership_pending = cur.fetchone()[0]
+        if ownership_pending:
+            request_system_job(
+                "computer-client-ownership", "software-overview-ownership"
+            )
+            return 1
+        if due:
+            request_system_job("software-overview", "software-overview-expiry")
+            return 1
+    except UndefinedFunction:
+        # Operations migrations may still be starting; the next poll retries.
+        return 0
+    except Exception:
+        log.exception("Software overview expiry admission failed")
+    return 0
 
 
 def lane_for(job_key: str) -> str:
@@ -922,6 +955,13 @@ def _execute(job_key: str, progress: V1JobProgress) -> int | JobExecutionResult 
             "Reconciling software findings",
             lambda: _software_reconcile(progress),
         ),
+        "software-overview": (
+            "Publishing Software overview",
+            lambda: _refresh_software_overview(progress),
+        ),
+        "software-catalog": (
+            "Applying local Software catalog policy", _refresh_software_catalog_policy,
+        ),
         "resolver": (
             "Resolving computer identity",
             lambda: main.run_identity_resolver_once(),
@@ -1038,6 +1078,23 @@ def _execute(job_key: str, progress: V1JobProgress) -> int | JobExecutionResult 
     ):
         return JobExecutionResult(rows=result, signals=("material_change",))
     return int(result) if isinstance(result, int) else None
+
+
+def _refresh_software_catalog_policy() -> int:
+    from ingest.software_catalog import project_software_catalog
+    from ingest.intel import eol_match, matcher
+
+    result = project_software_catalog()
+    eol_match.run_once()
+    matcher.run_once()
+    return sum(value for value in result.values() if isinstance(value, int))
+
+
+def _refresh_software_overview(progress: V1JobProgress) -> JobExecutionResult:
+    from ingest.inventory.software import refresh_overview_read_model
+
+    generation = refresh_overview_read_model(progress.job_id, progress.claim_token)
+    return JobExecutionResult(rows=1, result={"overview_generation": str(generation)})
 
 
 def _software_title_scoped_producers() -> frozenset[str]:

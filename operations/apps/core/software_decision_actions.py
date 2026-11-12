@@ -129,10 +129,10 @@ def decide_software(request: HttpRequest, ids: list[str], action: FindingAction)
         )
 
     # Imported here: views imports this module.
-    from .views import _queue_software_rebuild_after_commit, _refresh_software_risk_matview
+    from .views import _queue_software_rebuild, _refresh_software_risk_matview
 
     transaction.on_commit(_refresh_software_risk_matview)
-    _queue_software_rebuild_after_commit(request.user.id)
+    _queue_software_rebuild(request.user.id)
     message = (
         f"{decision.label} recorded for {len(keys)} "
         f"{'publisher' if by_publisher else 'title'}{'s' if len(keys) != 1 else ''}."

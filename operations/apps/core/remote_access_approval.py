@@ -122,9 +122,9 @@ def approve_remote_access(request: HttpRequest, ids: list[str], action: FindingA
         )
 
     # Imported here: views imports this module.
-    from .views import _queue_software_rebuild_after_commit
+    from .views import _queue_software_rebuild
 
-    _queue_software_rebuild_after_commit(request.user.id)
+    _queue_software_rebuild(request.user.id)
     scope = "all clients" if all_clients else "the selected clients"
     messages.success(
         request,

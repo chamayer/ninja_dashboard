@@ -2876,6 +2876,7 @@ def device_lifecycle_set(
     entity.updated_at = now
     entity.updated_reason = f"operator.lifecycle_{target}"
     entity.save(update_fields=["retired_at", "retired_reason", "updated_at", "updated_reason"])
+    _queue_software_overview(request.user.id)
     _audit(
         request,
         f"device.lifecycle.{target}",
@@ -5392,6 +5393,8 @@ def finding_resolve(request: HttpRequest, finding_id: str) -> HttpResponse:
         finding.closed_at = finding.closed_at or timezone.now()
         finding.finding_details = details
         finding.save(update_fields=["status", "closed_at", "finding_details"])
+        if finding_registry.affects_software_overview(finding.finding_type):
+            _queue_software_overview(request.user.id)
     return redirect(request.POST.get("next") or "findings_queue")
 
 
@@ -5461,6 +5464,8 @@ def finding_suppress(request: HttpRequest, finding_id: str) -> HttpResponse:
     finding.status = Finding.Status.SUPPRESSED
     finding.closed_at = finding.closed_at or now
     finding.save(update_fields=["status", "closed_at"])
+    if finding_registry.affects_software_overview(finding.finding_type):
+        _queue_software_overview(request.user.id)
     messages.info(request, "Issue excluded.")
     return redirect(request.POST.get("next") or "findings_queue")
 
@@ -5635,6 +5640,11 @@ def findings_bulk_action(request: HttpRequest) -> HttpResponse:
                 created_by=request.user,
             )
         touched = qs.update(status=Finding.Status.SUPPRESSED, closed_at=now)
+        if touched and any(
+            finding_registry.affects_software_overview(finding.finding_type)
+            for finding in findings
+        ):
+            _queue_software_overview(request.user.id)
         message = f"Excluded {touched} issue{'s' if touched != 1 else ''}."
     if policy_count:
         message += (
@@ -5754,6 +5764,7 @@ def _retire_selected_computers(request: HttpRequest, ids: list[str], action) -> 
         details = dict(finding.finding_details or {})
         details["resolution"] = {"reason": "retired", "detail": reason}
         Finding.objects.filter(id=finding.id, tenant_id=1).update(finding_details=details)
+    _queue_software_overview(request.user.id)
     messages.success(
         request,
         f"Retired {len(devices)} Computer{'s' if len(devices) != 1 else ''}. "
@@ -5887,11 +5898,353 @@ def _queue_selected_hudu_archives(request: HttpRequest, ids: list[str], action) 
 # ─────────────────────────────────────────────────────────────────────
 
 
-def _software_page_data(request: HttpRequest) -> dict:
-    """Compute the full data set shared by the Software Overview and
-    Products list views. Returns a context dict ready for render().
-    Both views render different templates from the same data.
+def _software_summary_data(*, is_overview: bool, intel_available: bool) -> dict:
+    """Read the existing status, findings, window, and workflow metrics."""
+    # Risk distribution + this-week highlights + workflow aggregates.
+    this_week: dict = {"new_products": 0, "new_high_risk": 0, "top_new_product": None}
+    workflow_state: dict = {
+        "publishers_undecided": 0,
+        "tech_checklist_devices": 0,
+        "user_risk_users": 0,
+    }
+    try:
+        with transaction.atomic(), connection.cursor() as sc:
+            sc.execute("SET LOCAL operations.tenant_id = 1")
+            sc.execute(
+                f"""
+                SELECT COUNT(DISTINCT sic.canonical_name)::int
+                FROM operations.software_installations_current sic
+                JOIN operations.devices d
+                  ON d.tenant_id = sic.tenant_id AND d.id = sic.device_id
+                WHERE sic.tenant_id = 1
+                  AND sic.deleted_at IS NULL
+                  AND sic.stale_since IS NULL
+                  AND d.deleted_at IS NULL
+                  AND {current_computer_sql("d")}
+                  AND sic.first_observed_at >= NOW() - INTERVAL '7 days'
+                """
+            )
+            (this_week["new_products"],) = sc.fetchone()
+            sc.execute(
+                f"""
+                SELECT sic.canonical_name,
+                       COUNT(DISTINCT sic.device_id)::int AS devices
+                FROM operations.software_installations_current sic
+                JOIN operations.devices d
+                  ON d.tenant_id = sic.tenant_id AND d.id = sic.device_id
+                WHERE sic.tenant_id = 1
+                  AND sic.deleted_at IS NULL
+                  AND sic.stale_since IS NULL
+                  AND d.deleted_at IS NULL
+                  AND {current_computer_sql("d")}
+                  AND sic.first_observed_at >= NOW() - INTERVAL '7 days'
+                GROUP BY sic.canonical_name
+                ORDER BY devices DESC, sic.canonical_name
+                LIMIT 1
+                """
+            )
+            row = sc.fetchone()
+            if row:
+                this_week["top_new_product"] = {"name": row[0], "devices": row[1]}
+        if is_overview and intel_available:
+            with transaction.atomic(), connection.cursor() as sc:
+                sc.execute("SET LOCAL operations.tenant_id = 1")
+                sc.execute(
+                    f"""
+                    SELECT COUNT(*)::int
+                    FROM operations.v_software_safety safety
+                    WHERE safety.tenant_id = 1
+                      AND safety.safety_band = 'high'
+                      AND EXISTS (
+                          SELECT 1
+                          FROM operations.software_installations_current sic
+                          JOIN operations.devices d
+                            ON d.tenant_id = sic.tenant_id AND d.id = sic.device_id
+                          WHERE sic.tenant_id = safety.tenant_id
+                            AND sic.canonical_name = safety.canonical_name
+                            AND sic.deleted_at IS NULL
+                            AND sic.stale_since IS NULL
+                            AND d.deleted_at IS NULL
+                            AND {current_computer_sql("d")}
+                            AND sic.first_observed_at >= NOW() - INTERVAL '7 days'
+                      )
+                    """
+                )
+                (this_week["new_high_risk"],) = sc.fetchone()
+    except Exception:
+        pass
+
+    try:
+        with transaction.atomic(), connection.cursor() as sc:
+            sc.execute("SET LOCAL operations.tenant_id = 1")
+            # Publishers whose installations an open prompt is about: the
+            # publisher those uncovered installations report (ADR-0039).
+            sc.execute(software_review.AWAITING_PUBLISHERS_SQL, [1])
+            (workflow_state["publishers_undecided"],) = sc.fetchone()
+    except Exception:
+        pass
+
+    try:
+        with transaction.atomic(), connection.cursor() as sc:
+            sc.execute("SET LOCAL operations.tenant_id = 1")
+            sc.execute(
+                """
+                -- Software findings are subjects on the title or release now,
+                -- so the affected devices come from the exposure view rather
+                -- than from subject_id.
+                SELECT COUNT(DISTINCT e.device_id)::int
+                FROM operations.v_device_software_exposure e
+                WHERE e.tenant_id = 1
+                  AND e.status IN ('open','acknowledged')
+                  AND e.finding_type <> 'whitelist_suggestion'
+                """
+            )
+            (workflow_state["tech_checklist_devices"],) = sc.fetchone()
+    except Exception:
+        pass
+
+    # Software issues count (Finding table). Split whitelist_suggestion
+    # out of "issues" — it's a review candidate, not a problem.
+    software_open_qs = Finding.objects.filter(
+        tenant_id=1,
+        status__in=_FINDING_ACTIVE_STATUSES,
+        finding_type__issue_category=finding_registry.SOFTWARE,
+    )
+    software_issues = software_open_qs.exclude(finding_type__name="whitelist_suggestion").count()
+    # Resolve the registry id before the distinct JSON aggregate.  Filtering
+    # through the category/type joins made PostgreSQL abandon the existing
+    # partial expression index on `finding_details -> 'canonical_name'`; on
+    # production that aggregate then exceeded Gunicorn's 30-second timeout and
+    # made the Products page return 500.  The direct predicate is equivalent
+    # (the type is itself a software finding) and uses
+    # idx_findings_type_canonical.
+    prompt_type_ids = list(
+        FindingType.objects.filter(name__in=_SOFTWARE_DECISION_PROMPT_TYPES).values_list(
+            "id", flat=True
+        )
+    )
+    whitelist_suggestions = (
+        Finding.objects.filter(
+            tenant_id=1,
+            status__in=_FINDING_ACTIVE_STATUSES,
+            finding_type_id__in=prompt_type_ids,
+        )
+        .values("finding_details__canonical_name")
+        .distinct()
+        .count()
+        if prompt_type_ids
+        else 0
+    )
+
+    # Title status counts from the records the software reconcile keeps per
+    # title (ADR-0039), so they agree with Issues and Software review.
+    status_counts: dict[str, int] = {}
+    with transaction.atomic(), connection.cursor() as sc:
+        sc.execute("SET LOCAL operations.tenant_id = 1")
+        sc.execute(software_review.title_status_counts_sql(current_computer_sql("d")))
+        status_counts = dict(sc.fetchall())
+    approved_titles = status_counts.get("approve", 0)
+    rejected_titles = status_counts.get("reject", 0)
+    investigate_titles = status_counts.get("investigate", 0)
+    pending_decisions = status_counts.get("pending", 0)
+    classifier = EvaluatorConfig.objects.filter(
+        tenant_id=1, evaluator_name="software_classifier"
+    ).first()
+    prompts_switched_off = software_review.prompt_types_switched_off(
+        classifier.config if classifier else {}
+    )
+
+    return {
+        "approved_titles": approved_titles,
+        "rejected_titles": rejected_titles,
+        "investigate_titles": investigate_titles,
+        "pending_decisions": pending_decisions,
+        "prompts_switched_off": prompts_switched_off,
+        "software_issues": software_issues,
+        "whitelist_suggestions": whitelist_suggestions,
+        "this_week": this_week,
+        "workflow_state": workflow_state,
+    }
+
+
+def _software_recent_installations(cur) -> list[tuple]:
+    """Read the existing ten-row recent-installation detail under tenant context."""
+    # Recent installations — last 24h, first-seen
+    cur.execute(
+        f"""
+        SELECT sic.canonical_name, sic.publisher, c.display_name AS client,
+               sic.first_observed_at
+        FROM operations.software_installations_current sic
+        JOIN operations.clients c ON c.id = sic.client_id AND c.tenant_id = sic.tenant_id
+        JOIN operations.devices d ON d.id = sic.device_id AND d.tenant_id = sic.tenant_id
+        WHERE sic.tenant_id = 1 AND sic.deleted_at IS NULL
+          AND sic.stale_since IS NULL
+          AND d.deleted_at IS NULL AND {current_computer_sql("d")}
+          AND sic.first_observed_at >= NOW() - INTERVAL '24 hours'
+        ORDER BY sic.first_observed_at DESC
+        LIMIT 10
+        """
+    )
+    return cur.fetchall()
+
+
+def _software_overview_risk_distribution(*, intel_available: bool) -> dict[str, int]:
+    """Read the existing fleet risk distribution for current Computers."""
+    risk_distribution = {"high": 0, "medium": 0, "low": 0, "clean": 0, "unknown": 0}
+    if intel_available:
+        with transaction.atomic(), connection.cursor() as sc:
+            sc.execute("SET LOCAL operations.tenant_id = 1")
+            sc.execute(
+                f"""
+                SELECT safety.safety_band, COUNT(*)::int
+                FROM operations.v_software_safety safety
+                WHERE safety.tenant_id = 1
+                  AND EXISTS (
+                      SELECT 1
+                      FROM operations.software_installations_current sic
+                      JOIN operations.devices d
+                        ON d.tenant_id = sic.tenant_id AND d.id = sic.device_id
+                      WHERE sic.tenant_id = safety.tenant_id
+                        AND sic.canonical_name = safety.canonical_name
+                        AND sic.deleted_at IS NULL
+                        AND sic.stale_since IS NULL
+                        AND d.deleted_at IS NULL
+                        AND {current_computer_sql("d")}
+                  )
+                GROUP BY safety.safety_band
+                """
+            )
+            for band, count in sc.fetchall():
+                if band in risk_distribution:
+                    risk_distribution[band] = count
+    return risk_distribution
+
+
+def _software_categorized_title_count(cur) -> int:
+    """Count titles with the existing effective-capability definition."""
+    cur.execute(
+        f"""
+        SELECT COUNT(DISTINCT sic.canonical_name)
+        FROM operations.software_installations_current sic
+        JOIN operations.devices d ON d.id = sic.device_id AND d.tenant_id = sic.tenant_id
+        JOIN catalog.software_versions sv ON sv.id = sic.software_version_id
+        JOIN catalog.products p ON p.id = sv.product_id
+        JOIN catalog.v_product_capability_effective cap ON cap.product_uuid = p.product_uuid
+        WHERE sic.tenant_id = 1 AND sic.deleted_at IS NULL AND sic.stale_since IS NULL
+          AND d.deleted_at IS NULL AND {current_computer_sql("d")}
+        """
+    )
+    (categorized_titles,) = cur.fetchone()
+    return categorized_titles
+
+
+def _software_published_overview_data(request: HttpRequest) -> dict:
+    """Prepared compact reader; live-route cutover requires separate certification."""
+    from .software_overview import read_overview
+
+    context = read_overview(request)
+    if context["overview_publication"]["state"] != "current":
+        return context
+    try:
+        with transaction.atomic(), connection.cursor() as cur:
+            recent = _software_recent_installations(cur)
+            names = preferred_software_display_names([row[0] for row in recent])
+            context["recent_installs"] = [
+                (name, names.get(name.lower(), name), publisher, client, first_seen)
+                for name, publisher, client, first_seen in recent
+            ]
+            classifier = EvaluatorConfig.objects.filter(
+                tenant_id=1, evaluator_name="software_classifier"
+            ).first()
+            context["prompts_switched_off"] = software_review.prompt_types_switched_off(
+                classifier.config if classifier else {}
+            )
+    except DatabaseError:
+        log.exception("Software overview bounded detail read failed")
+        return {"overview_publication": {
+            **context["overview_publication"], "state": "unavailable", "reason": "read_failed",
+            "message": "The Software summary is temporarily unavailable.",
+        }}
+    return context
+
+
+def _software_overview_data(request: HttpRequest) -> dict:
+    """Read overview HTML without running the Products filter/pagination path.
+
+    These are the existing live aggregates. Published-result cutover follows
+    when the Software publication and its safeguards are implemented.
     """
+    available: dict[str, bool] = {}
+    for relation in (
+        "operations.v_software_safety",
+        "catalog.v_product_capability_effective",
+    ):
+        try:
+            with connection.cursor() as cur:
+                cur.execute("SELECT to_regclass(%s)", [relation])
+                available[relation] = cur.fetchone()[0] is not None
+        except Exception:
+            available[relation] = False
+
+    intel_available = available["operations.v_software_safety"]
+    risk_distribution = _software_overview_risk_distribution(
+        intel_available=intel_available
+    )
+    with transaction.atomic(), connection.cursor() as cur:
+        cur.execute("SET LOCAL operations.tenant_id = 1")
+        cur.execute(
+            f"""
+            SELECT COUNT(*)::bigint, COUNT(DISTINCT sic.canonical_name)::bigint
+            FROM operations.software_installations_current sic
+            JOIN operations.devices d
+              ON d.tenant_id = sic.tenant_id AND d.id = sic.device_id
+            WHERE sic.tenant_id = 1
+              AND sic.deleted_at IS NULL
+              AND sic.stale_since IS NULL
+              AND d.deleted_at IS NULL
+              AND {current_computer_sql("d")}
+            """
+        )
+        installations, unique_titles = cur.fetchone()
+        categorized_titles = (
+            _software_categorized_title_count(cur)
+            if available["catalog.v_product_capability_effective"]
+            else 0
+        )
+        recent_installs = _software_recent_installations(cur)
+
+    summary = _software_summary_data(
+        is_overview=True, intel_available=intel_available
+    )
+    this_week = summary["this_week"]
+    top_new_product = this_week["top_new_product"]
+    display_names = preferred_software_display_names(
+        [row[0] for row in recent_installs]
+        + ([top_new_product["name"]] if top_new_product else [])
+    )
+    recent_installs = [
+        (name, display_names.get(name.lower(), name), publisher, client, first_seen)
+        for name, publisher, client, first_seen in recent_installs
+    ]
+    if top_new_product:
+        top_new_product["display_name"] = display_names.get(
+            top_new_product["name"].lower(), top_new_product["name"]
+        )
+
+    return {
+        **summary,
+        "installations": installations,
+        "unique_titles": unique_titles,
+        "categorized_titles": categorized_titles,
+        "uncategorized_titles": max(unique_titles - categorized_titles, 0),
+        "high_risk_titles": risk_distribution["high"],
+        "risk_distribution": risk_distribution,
+        "recent_installs": recent_installs,
+    }
+
+
+def _software_page_data(request: HttpRequest) -> dict:
+    """Read Products and CSV context; overview HTML has a separate reader."""
     q_filter = (request.GET.get("q") or "").strip()
     is_overview = getattr(getattr(request, "resolver_match", None), "url_name", "") == "software_page"
     is_csv = wants_csv(request)
@@ -6013,33 +6366,11 @@ def _software_page_data(request: HttpRequest) -> dict:
             # zero title rows without scanning the whole fleet.
             safety_filter_names = ["\x00__no_match__\x00"]
 
-    risk_distribution = {"high": 0, "medium": 0, "low": 0, "clean": 0, "unknown": 0}
-    if intel_available and is_overview:
-        with transaction.atomic(), connection.cursor() as sc:
-            sc.execute("SET LOCAL operations.tenant_id = 1")
-            sc.execute(
-                f"""
-                SELECT safety.safety_band, COUNT(*)::int
-                FROM operations.v_software_safety safety
-                WHERE safety.tenant_id = 1
-                  AND EXISTS (
-                      SELECT 1
-                      FROM operations.software_installations_current sic
-                      JOIN operations.devices d
-                        ON d.tenant_id = sic.tenant_id AND d.id = sic.device_id
-                      WHERE sic.tenant_id = safety.tenant_id
-                        AND sic.canonical_name = safety.canonical_name
-                        AND sic.deleted_at IS NULL
-                        AND sic.stale_since IS NULL
-                        AND d.deleted_at IS NULL
-                        AND {current_computer_sql("d")}
-                  )
-                GROUP BY safety.safety_band
-                """
-            )
-            for band, count in sc.fetchall():
-                if band in risk_distribution:
-                    risk_distribution[band] = count
+    risk_distribution = (
+        _software_overview_risk_distribution(intel_available=intel_available)
+        if is_overview
+        else {"high": 0, "medium": 0, "low": 0, "clean": 0, "unknown": 0}
+    )
     high_risk_titles = risk_distribution["high"]
 
     with transaction.atomic(), connection.cursor() as cur:
@@ -6061,19 +6392,7 @@ def _software_page_data(request: HttpRequest) -> dict:
         categorized_titles = 0
         category_rows: list = []
         if capability_available:
-            cur.execute(
-                f"""
-                SELECT COUNT(DISTINCT sic.canonical_name)
-                FROM operations.software_installations_current sic
-                JOIN operations.devices d ON d.id = sic.device_id AND d.tenant_id = sic.tenant_id
-                JOIN catalog.software_versions sv ON sv.id = sic.software_version_id
-                JOIN catalog.products p ON p.id = sv.product_id
-                JOIN catalog.v_product_capability_effective cap ON cap.product_uuid = p.product_uuid
-                WHERE sic.tenant_id = 1 AND sic.deleted_at IS NULL AND sic.stale_since IS NULL
-                  AND d.deleted_at IS NULL AND {current_computer_sql("d")}
-                """
-            )
-            (categorized_titles,) = cur.fetchone()
+            categorized_titles = _software_categorized_title_count(cur)
 
             if not is_overview:
                 # Capability breakdown, replacing the software_catalog category
@@ -6358,23 +6677,7 @@ def _software_page_data(request: HttpRequest) -> dict:
             )
             all_safety_rows = list(cur.fetchall())
 
-        # Recent installations — last 24h, first-seen
-        cur.execute(
-            f"""
-            SELECT sic.canonical_name, sic.publisher, c.display_name AS client,
-                   sic.first_observed_at
-            FROM operations.software_installations_current sic
-            JOIN operations.clients c ON c.id = sic.client_id AND c.tenant_id = sic.tenant_id
-            JOIN operations.devices d ON d.id = sic.device_id AND d.tenant_id = sic.tenant_id
-            WHERE sic.tenant_id = 1 AND sic.deleted_at IS NULL
-              AND sic.stale_since IS NULL
-              AND d.deleted_at IS NULL AND {current_computer_sql("d")}
-              AND sic.first_observed_at >= NOW() - INTERVAL '24 hours'
-            ORDER BY sic.first_observed_at DESC
-            LIMIT 10
-            """
-        )
-        recent_installs = cur.fetchall()
+        recent_installs = _software_recent_installations(cur)
 
     # The complete safety snapshot is used only for filtering/export. Both
     # ordinary HTML surfaces now enrich their bounded title page instead.
@@ -6394,159 +6697,10 @@ def _software_page_data(request: HttpRequest) -> dict:
                 "osint_hits": osint_hits,
             }
 
-    # Risk distribution + this-week highlights + workflow aggregates.
-    this_week: dict = {"new_products": 0, "new_high_risk": 0, "top_new_product": None}
-    workflow_state: dict = {
-        "publishers_undecided": 0,
-        "tech_checklist_devices": 0,
-        "user_risk_users": 0,
-    }
-    try:
-        with transaction.atomic(), connection.cursor() as sc:
-            sc.execute("SET LOCAL operations.tenant_id = 1")
-            sc.execute(
-                f"""
-                SELECT COUNT(DISTINCT sic.canonical_name)::int
-                FROM operations.software_installations_current sic
-                JOIN operations.devices d
-                  ON d.tenant_id = sic.tenant_id AND d.id = sic.device_id
-                WHERE sic.tenant_id = 1
-                  AND sic.deleted_at IS NULL
-                  AND sic.stale_since IS NULL
-                  AND d.deleted_at IS NULL
-                  AND {current_computer_sql("d")}
-                  AND sic.first_observed_at >= NOW() - INTERVAL '7 days'
-                """
-            )
-            (this_week["new_products"],) = sc.fetchone()
-            sc.execute(
-                f"""
-                SELECT sic.canonical_name,
-                       COUNT(DISTINCT sic.device_id)::int AS devices
-                FROM operations.software_installations_current sic
-                JOIN operations.devices d
-                  ON d.tenant_id = sic.tenant_id AND d.id = sic.device_id
-                WHERE sic.tenant_id = 1
-                  AND sic.deleted_at IS NULL
-                  AND sic.stale_since IS NULL
-                  AND d.deleted_at IS NULL
-                  AND {current_computer_sql("d")}
-                  AND sic.first_observed_at >= NOW() - INTERVAL '7 days'
-                GROUP BY sic.canonical_name
-                ORDER BY devices DESC, sic.canonical_name
-                LIMIT 1
-                """
-            )
-            row = sc.fetchone()
-            if row:
-                this_week["top_new_product"] = {"name": row[0], "devices": row[1]}
-        if is_overview and intel_available:
-            with transaction.atomic(), connection.cursor() as sc:
-                sc.execute("SET LOCAL operations.tenant_id = 1")
-                sc.execute(
-                    f"""
-                    SELECT COUNT(*)::int
-                    FROM operations.v_software_safety safety
-                    WHERE safety.tenant_id = 1
-                      AND safety.safety_band = 'high'
-                      AND EXISTS (
-                          SELECT 1
-                          FROM operations.software_installations_current sic
-                          JOIN operations.devices d
-                            ON d.tenant_id = sic.tenant_id AND d.id = sic.device_id
-                          WHERE sic.tenant_id = safety.tenant_id
-                            AND sic.canonical_name = safety.canonical_name
-                            AND sic.deleted_at IS NULL
-                            AND sic.stale_since IS NULL
-                            AND d.deleted_at IS NULL
-                            AND {current_computer_sql("d")}
-                            AND sic.first_observed_at >= NOW() - INTERVAL '7 days'
-                      )
-                    """
-                )
-                (this_week["new_high_risk"],) = sc.fetchone()
-    except Exception:
-        pass
-
-    try:
-        with transaction.atomic(), connection.cursor() as sc:
-            sc.execute("SET LOCAL operations.tenant_id = 1")
-            # Publishers whose installations an open prompt is about: the
-            # publisher those uncovered installations report (ADR-0039).
-            sc.execute(software_review.AWAITING_PUBLISHERS_SQL, [1])
-            (workflow_state["publishers_undecided"],) = sc.fetchone()
-    except Exception:
-        pass
-
-    try:
-        with transaction.atomic(), connection.cursor() as sc:
-            sc.execute("SET LOCAL operations.tenant_id = 1")
-            sc.execute(
-                """
-                -- Software findings are subjects on the title or release now,
-                -- so the affected devices come from the exposure view rather
-                -- than from subject_id.
-                SELECT COUNT(DISTINCT e.device_id)::int
-                FROM operations.v_device_software_exposure e
-                WHERE e.tenant_id = 1
-                  AND e.status IN ('open','acknowledged')
-                  AND e.finding_type <> 'whitelist_suggestion'
-                """
-            )
-            (workflow_state["tech_checklist_devices"],) = sc.fetchone()
-    except Exception:
-        pass
-
-    # Software issues count (Finding table). Split whitelist_suggestion
-    # out of "issues" — it's a review candidate, not a problem.
-    software_open_qs = Finding.objects.filter(
-        tenant_id=1,
-        status__in=_FINDING_ACTIVE_STATUSES,
-        finding_type__issue_category=finding_registry.SOFTWARE,
+    summary = _software_summary_data(
+        is_overview=is_overview, intel_available=intel_available
     )
-    software_issues = software_open_qs.exclude(finding_type__name="whitelist_suggestion").count()
-    # Resolve the registry id before the distinct JSON aggregate.  Filtering
-    # through the category/type joins made PostgreSQL abandon the existing
-    # partial expression index on `finding_details -> 'canonical_name'`; on
-    # production that aggregate then exceeded Gunicorn's 30-second timeout and
-    # made the Products page return 500.  The direct predicate is equivalent
-    # (the type is itself a software finding) and uses
-    # idx_findings_type_canonical.
-    prompt_type_ids = list(
-        FindingType.objects.filter(name__in=_SOFTWARE_DECISION_PROMPT_TYPES).values_list(
-            "id", flat=True
-        )
-    )
-    whitelist_suggestions = (
-        Finding.objects.filter(
-            tenant_id=1,
-            status__in=_FINDING_ACTIVE_STATUSES,
-            finding_type_id__in=prompt_type_ids,
-        )
-        .values("finding_details__canonical_name")
-        .distinct()
-        .count()
-        if prompt_type_ids
-        else 0
-    )
-
-    # Title status counts from the records the software reconcile keeps per
-    # title (ADR-0039), so they agree with Issues and Software review.
-    status_counts: dict[str, int] = {}
-    with transaction.atomic(), connection.cursor() as sc:
-        sc.execute("SET LOCAL operations.tenant_id = 1")
-        sc.execute(software_review.title_status_counts_sql(current_computer_sql("d")))
-        status_counts = dict(sc.fetchall())
-    approved_titles = status_counts.get("approve", 0)
-    rejected_titles = status_counts.get("reject", 0)
-    investigate_titles = status_counts.get("investigate", 0)
-    pending_decisions = status_counts.get("pending", 0)
-    classifier = EvaluatorConfig.objects.filter(
-        tenant_id=1, evaluator_name="software_classifier"
-    ).first()
-    prompts_switched_off = software_review.prompt_types_switched_off(
-        classifier.config if classifier else {}
-    )
+    this_week = summary["this_week"]
 
     titles = []
     for row in title_rows:
@@ -6589,6 +6743,7 @@ def _software_page_data(request: HttpRequest) -> dict:
         product["display_name"] = display_names.get(product["name"].lower(), product["name"])
 
     return {
+        **summary,
         "installations": installations,
         "unique_titles": unique_titles,
         "categorized_titles": categorized_titles,
@@ -6628,13 +6783,6 @@ def _software_page_data(request: HttpRequest) -> dict:
         "page_end_display": min(page_offset + page_size, total_filtered),
         "active_sort": sort_key,
         "active_dir": sort_dir,
-        "approved_titles": approved_titles,
-        "rejected_titles": rejected_titles,
-        "investigate_titles": investigate_titles,
-        "pending_decisions": pending_decisions,
-        "prompts_switched_off": prompts_switched_off,
-        "software_issues": software_issues,
-        "whitelist_suggestions": whitelist_suggestions,
         "high_risk_titles": high_risk_titles,
         "category_rows": category_rows,
         "titles": titles,
@@ -6648,8 +6796,6 @@ def _software_page_data(request: HttpRequest) -> dict:
         "active_flagged": flagged_filter,
         "decision_choices": SoftwareDecision.Decision.choices,
         "risk_distribution": risk_distribution,
-        "this_week": this_week,
-        "workflow_state": workflow_state,
     }
 
 
@@ -6658,8 +6804,8 @@ def software_page(request: HttpRequest) -> HttpResponse:
     """Software Overview — dashboard tiles + workflows + distribution
     + recent installs. The full products list lives under Products
     (see software_products)."""
-    ctx = _software_page_data(request)
     if wants_csv(request):
+        ctx = _software_page_data(request)
         # CSV export on Overview yields the top products the dashboard
         # dashboards summarize; keep parity with the previous behavior.
         return csv_response(
@@ -6675,6 +6821,7 @@ def software_page(request: HttpRequest) -> HttpResponse:
             ],
             filename_stem="software",
         )
+    ctx = _software_overview_data(request)
     ctx["software_tab"] = "overview"
     return render(request, "software_page.html", ctx)
 
@@ -7452,6 +7599,7 @@ def software_capability_decide(request: HttpRequest) -> HttpResponse:
         ip_address=request.META.get("REMOTE_ADDR") or None,
         user_agent=(request.META.get("HTTP_USER_AGENT") or "")[:2000],
     )
+    _queue_software_rebuild(request.user.id)
     messages.success(
         request,
         f"Capability {'confirmed' if polarity else 'rejected'} for the selected product identity.",
@@ -7611,6 +7759,7 @@ def software_product_authorize(request: HttpRequest) -> HttpResponse:
         user_agent=(request.META.get("HTTP_USER_AGENT") or "")[:2000],
     )
     scope = "this client" if client_key else "all clients"
+    _queue_software_rebuild(request.user.id)
     messages.success(
         request,
         f"Software {'permitted' if polarity else 'denied'} for {scope}.",
@@ -9614,18 +9763,25 @@ def _admit_operator_workflow(cur, root_key: str, root_run_id: uuid.UUID) -> None
         )
 
 
-def _queue_software_rebuild_after_commit(user_id: int) -> None:
-    """Queue one full rebuild after a software decision is durable."""
+def _queue_software_overview(user_id: int) -> None:
+    """Commit the source change and its coalesced overview request together."""
+    _queue_software_change("software-overview", user_id)
 
-    def enqueue() -> None:
-        try:
-            _enqueue_operator_job("software-classify-full", user_id)
-        except Exception:
-            # A decision remains authoritative if the queue is transiently
-            # unavailable; the scheduled full rebuild will reconcile it.
-            log.exception("Could not queue software full rebuild after decision")
 
-    transaction.on_commit(enqueue)
+def _queue_software_rebuild(user_id: int) -> None:
+    """Commit a decision/policy change and its classifier request together."""
+    _queue_software_change("software-classify-full", user_id)
+
+
+def _queue_software_change(job_key: str, user_id: int) -> None:
+    if not connection.in_atomic_block:
+        raise RuntimeError("Software change admission requires its source transaction")
+    try:
+        _enqueue_operator_job(job_key, user_id)
+    except Exception:
+        # Even a caller that catches the error cannot commit a lost change.
+        transaction.set_rollback(True)
+        raise
 
 
 def _operator_job_name(execution_key: str) -> str:
@@ -14226,7 +14382,7 @@ def org_software_decide(request: HttpRequest, org_slug: str) -> HttpResponse:
             "decided_at": timezone.now(),
         },
     )
-    _queue_software_rebuild_after_commit(request.user.id)
+    _queue_software_rebuild(request.user.id)
     # Follow only a relative ``next``; an unvalidated one (and HTTP_REFERER,
     # which is attacker-settable) is an open redirect.
     nxt = request.POST.get("next") or ""
@@ -17794,7 +17950,7 @@ def software_decision_bulk(request: HttpRequest) -> HttpResponse:
     # the database exception.  The decision remains the authority; the view
     # refresh is only a post-commit convenience for the next page render.
     transaction.on_commit(_refresh_software_risk_matview)
-    _queue_software_rebuild_after_commit(request.user.id)
+    _queue_software_rebuild(request.user.id)
     return redirect(_safe_next(request, "software_decisions_queue"))
 
 
@@ -17969,7 +18125,7 @@ def software_decision_create(request: HttpRequest) -> HttpResponse:
     # See software_decision_bulk: a failed courtesy refresh must never turn a
     # durable operator decision into a 500 response.
     transaction.on_commit(_refresh_software_risk_matview)
-    _queue_software_rebuild_after_commit(request.user.id)
+    _queue_software_rebuild(request.user.id)
     next_url = request.POST.get("next") or ""
     # Only follow relative URLs to avoid open-redirects.
     if next_url.startswith("/") and not next_url.startswith("//"):
@@ -18064,6 +18220,7 @@ def computer_merge_split(request: HttpRequest, merge_id: str) -> HttpResponse:
             )
             # Both Computers are named again from their records (ADR-0034 section 6).
             computer_naming.name_now(cur, list(row))
+            _queue_software_overview(request.user.id)
     except DatabaseError as exc:
         messages.error(request, f"Nothing was changed: {str(exc).splitlines()[0]}")
         return redirect(back)
@@ -18317,6 +18474,8 @@ def _merge_devices(cur, survivor_id, loser_id, reason: str, *, actor_id: int | N
         (merge_id,),
     )
     observations_moved, findings_moved = cur.fetchone()
+    if actor_id is not None:
+        _queue_software_overview(actor_id)
     return {
         "merge_id": str(merge_id),
         "observations_moved": observations_moved,
@@ -19676,6 +19835,7 @@ def client_requirements_config(request: HttpRequest, org_slug: str) -> HttpRespo
             if days != before:
                 client.offline_after_days = days
                 client.save(update_fields=["offline_after_days"])
+                _queue_software_overview(request.user.id)
                 _audit(
                     request,
                     "client.offline_after_days.update",
@@ -19782,7 +19942,7 @@ def classifier_config(request: HttpRequest) -> HttpResponse:
                 entity_type="evaluator_config",
             )
             # Settings change what every title's findings should be.
-            _queue_software_rebuild_after_commit(request.user.id)
+            _queue_software_rebuild(request.user.id)
             messages.info(request, "Classifier configuration saved.")
         else:
             messages.info(request, "No classifier settings changed.")
@@ -19854,6 +20014,8 @@ def device_status_config(request: HttpRequest) -> HttpResponse:
         row.updated_by = request.user
         row.save(update_fields=["config", "updated_by", "updated_at"])
         _audit(request, "device_status.policy.update", row.id, before, new_config)
+        if effective["active_device_days"] != new_config["active_device_days"]:
+            _queue_software_overview(request.user.id)
         messages.success(request, "Device status and patching policy saved.")
         return redirect("device_status_config")
 

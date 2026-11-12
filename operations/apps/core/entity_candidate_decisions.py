@@ -158,6 +158,10 @@ def _link_candidate_to_entity(
                     json.dumps({"candidate_id": str(candidate.id)}),
                 ),
             )
+    if entity.entity_class_id == "device":
+        from .views import _queue_software_change
+
+        _queue_software_change("computer-client-ownership", actor.id)
     return now
 
 

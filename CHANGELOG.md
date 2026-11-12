@@ -2,6 +2,35 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.144.12] — 2026-11-12 — Prepare Software overview publication
+
+### Added
+
+- Prepare a Software-owned overview aggregate, guarded publisher and protected
+  reader states, with Jobs completion/claim fencing and retained failure state.
+- Connect relevant Software decisions, findings, catalog policy, Computer
+  ownership and readiness changes through existing owners and Jobs.
+
+### Fixed
+
+- Admit dependent Jobs in the source-write transaction so failed admission
+  cannot silently leave a changed input without refresh work.
+- Prepare readiness, Software-owned assessments and exposure in the overview
+  publication transaction while preserving manual finding resolution.
+- Label titles without an open decision issue accurately; preserve safety
+  approval and capability/coverage semantics.
+
+### Operational notes
+
+- Startup applies Django migrations 0407–0410: one empty aggregate table,
+  protected functions/view and an owner-checkpoint index on existing Jobs runs.
+  No ingest SQL migration, bootstrap build or new service/schedule is added.
+- This is a production acceptance candidate. Publications remain uncertified
+  and the default Software page retains live reads. No page-speed improvement
+  or 60-second completion guarantee is claimed before representative acceptance.
+- Existing ingest superuser access remains a recorded platform limitation.
+  Unrelated Home candidates and local test changes are excluded.
+
 ## [0.144.11] — 2026-11-11 — Platform performance recovery corrections
 
 ### Fixed

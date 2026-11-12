@@ -35,6 +35,7 @@ received it, how many programs it held, and any hold.
 
 from __future__ import annotations
 
+import json
 import logging
 import uuid
 from collections.abc import Callable, Iterable, Iterator, Mapping
@@ -1132,23 +1133,15 @@ def device_refresh(
 
 
 def refresh_read_models() -> None:
-    """Publish compact Software read models, then project the catalog.
+    """Publish titles, project catalog/lifecycle, then publish safety.
 
-    Both inventory entry points call this once per run, and only when the run
-    changed something.
-
-    The catalog projection runs *after* the matview refresh deliberately: it
-    is newer, and a fault in it must not stop the established read models from
-    publishing. Its own failure is raised rather than swallowed, and
-    `run_log('software.catalog')` records the outcome either way.
+    Both inventory entry points call this once per changed run. Publish safety
+    after catalog and lifecycle projection so successful owner completion cannot
+    certify safety built from older catalog inputs. Failures propagate to Jobs.
     """
-    for relation in (
-        "operations.software_title_current",
-        "operations.v_software_safety",
-    ):
-        with db.pool.connection() as conn, conn.cursor() as cur:
-            cur.execute(f"REFRESH MATERIALIZED VIEW CONCURRENTLY {relation}")
-        log.info("Refreshed materialized view %s", relation)
+    with db.pool.connection() as conn, conn.cursor() as cur:
+        cur.execute("REFRESH MATERIALIZED VIEW CONCURRENTLY operations.software_title_current")
+    log.info("Refreshed materialized view operations.software_title_current")
 
     # Imported here rather than at module scope: `software_catalog` reads this
     # table, and a top-level import would make the dependency circular.
@@ -1159,24 +1152,55 @@ def refresh_read_models() -> None:
     # local catalog. The scheduled corpus job covers the former; run the
     # same non-fetching projector here so newly observed versions are not left
     # waiting for the next corpus interval.
-    try:
-        from ingest.intel import eol_match
+    from ingest.intel import eol_match
 
-        eol_match.run_once()
-    except Exception:
-        log.exception("End-of-life projection after software catalog refresh failed")
+    eol_match.run_once()
+    with db.pool.connection() as conn, conn.cursor() as cur:
+        cur.execute("REFRESH MATERIALIZED VIEW CONCURRENTLY operations.v_software_safety")
+    log.info("Refreshed materialized view operations.v_software_safety")
 
 
-def refresh_exposure_read_model() -> None:
+def refresh_exposure_read_model(cursor=None) -> None:
     """Publish classified device/software exposure eligibility.
 
     Findings, source evidence, and condition assessments are the inputs.  This
-    must run only after a successful classifier pass; approvals deliberately
-    remain a live filter in ``v_device_software_exposure`` and need no refresh.
+    runs after classification or the overview's assessment/readiness preparation;
+    approvals remain a live filter in ``v_device_software_exposure``.
     """
-    with db.pool.connection() as conn, conn.cursor() as cur:
+    from contextlib import nullcontext
+
+    with nullcontext(cursor) if cursor is not None else db.transaction() as cur:
         cur.execute(
             "REFRESH MATERIALIZED VIEW CONCURRENTLY "
             "operations.device_software_exposure_current"
         )
     log.info("Refreshed operations.device_software_exposure_current")
+
+
+def refresh_overview_read_model(
+    job_run_id: uuid.UUID, claim_token: uuid.UUID
+) -> uuid.UUID:
+    """Build the overview aggregate through its single Software-owned writer.
+
+    Only the claimed overview Job may publish. The database validates completed
+    inputs and fences again after calculation; uncertified results stay hidden.
+    """
+    with db.transaction() as cur:
+        cur.execute(_GUC)
+        guard_findings_writes(cur, TENANT_ID)
+        cur.execute(
+            "SELECT operations.begin_software_overview(%s, %s, %s)",
+            (TENANT_ID, job_run_id, claim_token),
+        )
+        checkpoint = cur.fetchone()[0]
+        from ingest import software_reconcile
+
+        software_reconcile.refresh_existing_assessments(cur, TENANT_ID)
+        refresh_exposure_read_model(cursor=cur)
+        cur.execute(
+            "SELECT operations.publish_software_overview(%s, %s, %s, %s::jsonb)",
+            (TENANT_ID, job_run_id, claim_token, json.dumps(checkpoint)),
+        )
+        generation = cur.fetchone()[0]
+    log.info("Built Software overview aggregate generation %s", generation)
+    return uuid.UUID(str(generation))

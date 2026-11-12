@@ -13,6 +13,7 @@ from django.utils import timezone
 
 from shared.conditions.policy import parse_profile
 
+from . import finding_registry
 from .models import (
     AttributeAuthorityPolicy,
     AttributeDefinition,
@@ -133,8 +134,62 @@ class UserPermissionAdmin(admin.ModelAdmin):
     search_fields = ("user__username", "user__email", "permission__codename")
 
 
+class SoftwareRebuildAdminMixin:
+    """Commit relevant Software input changes and their existing Jobs request together."""
+
+    software_job_key = "software-classify-full"
+    software_change_fields = None
+
+    def software_relevant(self, obj):
+        return True
+
+    def prepare_software_write(self):
+        pass
+
+    @transaction.atomic
+    def save_model(self, request, obj, form, change):
+        from .views import _queue_software_change
+
+        self.prepare_software_write()
+        changed = not change or (
+            form.has_changed()
+            and (
+                self.software_change_fields is None
+                or bool(set(form.changed_data) & self.software_change_fields)
+            )
+        )
+        relevant = changed and self.software_relevant(obj)
+        if changed and change and not relevant:
+            relevant = self.software_relevant(self.model.objects.select_for_update().get(pk=obj.pk))
+        super().save_model(request, obj, form, change)
+        if relevant:
+            _queue_software_change(self.software_job_key, request.user.id)
+
+    @transaction.atomic
+    def delete_model(self, request, obj):
+        from .views import _queue_software_change
+
+        self.prepare_software_write()
+        relevant = self.software_relevant(self.model.objects.select_for_update().get(pk=obj.pk))
+        super().delete_model(request, obj)
+        if relevant:
+            _queue_software_change(self.software_job_key, request.user.id)
+
+    @transaction.atomic
+    def delete_queryset(self, request, queryset):
+        from .views import _queue_software_change
+
+        self.prepare_software_write()
+        relevant = any(self.software_relevant(obj) for obj in queryset.select_for_update())
+        super().delete_queryset(request, queryset)
+        if relevant:
+            _queue_software_change(self.software_job_key, request.user.id)
+
+
 @admin.register(Source)
-class SourceAdmin(admin.ModelAdmin):
+class SourceAdmin(SoftwareRebuildAdminMixin, admin.ModelAdmin):
+    software_job_key = "computer-client-ownership"
+    software_change_fields = frozenset({"name", "kind"})
     list_display = ("name", "kind")
     search_fields = ("name", "kind")
 
@@ -248,7 +303,8 @@ class SourceFieldMappingAdmin(ReadOnlyEvidenceAdmin):
 
 
 @admin.register(SourceRecordLifecycleMapping)
-class SourceRecordLifecycleMappingAdmin(admin.ModelAdmin):
+class SourceRecordLifecycleMappingAdmin(SoftwareRebuildAdminMixin, admin.ModelAdmin):
+    software_job_key = "computer-client-ownership"
     """Editable policy registry for source-record lifecycle interpretation."""
 
     list_display = (
@@ -433,6 +489,54 @@ class FindingTypeAdmin(admin.ModelAdmin):
     list_filter = ("default_severity", "concern_signal", "suppressed_by_approval")
     search_fields = ("name", "description", "runbook_path")
 
+    @staticmethod
+    def _affects_software(obj):
+        return finding_registry.affects_software_overview(obj)
+
+    @transaction.atomic
+    def save_model(self, request, obj, form, change):
+        from .views import _queue_software_rebuild
+
+        changed = not change or bool(
+            set(form.changed_data)
+            - {
+                "display_name",
+                "description",
+                "issue_group",
+                "sort_order",
+                "cover_note",
+                "alertable",
+                "drilldown_evidence_key",
+                "runbook_path",
+            }
+        )
+        previous = (
+            self.model.objects.select_for_update().get(pk=obj.pk) if change and changed else None
+        )
+        relevant = changed and (self._affects_software(obj) or self._affects_software(previous))
+        super().save_model(request, obj, form, change)
+        if relevant:
+            _queue_software_rebuild(request.user.id)
+
+    @transaction.atomic
+    def delete_model(self, request, obj):
+        from .views import _queue_software_rebuild
+
+        previous = self.model.objects.select_for_update().get(pk=obj.pk)
+        relevant = self._affects_software(previous)
+        super().delete_model(request, obj)
+        if relevant:
+            _queue_software_rebuild(request.user.id)
+
+    @transaction.atomic
+    def delete_queryset(self, request, queryset):
+        from .views import _queue_software_rebuild
+
+        relevant = any(self._affects_software(obj) for obj in queryset.select_for_update())
+        super().delete_queryset(request, queryset)
+        if relevant:
+            _queue_software_rebuild(request.user.id)
+
 
 @admin.register(ConditionPolicyVersion)
 class ConditionPolicyVersionAdmin(admin.ModelAdmin):
@@ -541,6 +645,9 @@ class ConditionPolicyVersionAdmin(admin.ModelAdmin):
                 before_state=None,
                 after_state={"version": obj.version, "digest": digest, "active": True},
             )
+            from .views import _queue_software_overview
+
+            _queue_software_overview(request.user.id)
 
 
 # Read-only: v_client_source_link is a view (migration 0123).
@@ -565,7 +672,9 @@ class ClientPolicyInline(admin.TabularInline):
 
 
 @admin.register(Client)
-class ClientAdmin(admin.ModelAdmin):
+class ClientAdmin(SoftwareRebuildAdminMixin, admin.ModelAdmin):
+    software_job_key = "computer-client-ownership"
+    software_change_fields = frozenset({"offline_after_days", "deleted_at"})
     list_display = ("display_name", "slug", "tenant", "timezone", "deleted_at", "version")
     list_filter = ("tenant", "timezone", "deleted_at")
     search_fields = ("display_name", "slug")
@@ -619,7 +728,9 @@ class DeviceSourceLinkInline(admin.TabularInline):
 
 
 @admin.register(Device)
-class DeviceAdmin(admin.ModelAdmin):
+class DeviceAdmin(SoftwareRebuildAdminMixin, admin.ModelAdmin):
+    software_job_key = "computer-client-ownership"
+    software_change_fields = frozenset({"client", "entity", "deleted_at", "lifecycle_status", "canonical_hostname", "canonical_serial", "canonical_vm_uuid", "device_type"})
     list_display = (
         "canonical_hostname",
         "client",
@@ -685,11 +796,26 @@ class SourceBindingInline(admin.TabularInline):
 
 
 @admin.register(SourceInstance)
-class SourceInstanceAdmin(admin.ModelAdmin):
+class SourceInstanceAdmin(SoftwareRebuildAdminMixin, admin.ModelAdmin):
+    software_job_key = "computer-client-ownership"
+    software_change_fields = frozenset({"source", "client", "enabled"})
     list_display = ("source", "client", "tenant", "enabled")
     list_filter = ("tenant", "source", "enabled")
     search_fields = ("client__display_name", "source__name")
     inlines = (SourceBindingInline,)
+
+    @transaction.atomic
+    def save_formset(self, request, form, formset, change):
+        from .views import _queue_software_change
+
+        affected = any(
+            set(item.changed_data) & {"source_instance", "collector_instance", "enabled", "DELETE"}
+            or (item.instance.pk is None and item.has_changed())
+            for item in formset.forms
+        )
+        super().save_formset(request, form, formset, change)
+        if affected:
+            _queue_software_change("computer-client-ownership", request.user.id)
 
 
 @admin.register(CollectorInstance)
@@ -700,7 +826,9 @@ class CollectorInstanceAdmin(admin.ModelAdmin):
 
 
 @admin.register(SourceBinding)
-class SourceBindingAdmin(admin.ModelAdmin):
+class SourceBindingAdmin(SoftwareRebuildAdminMixin, admin.ModelAdmin):
+    software_job_key = "computer-client-ownership"
+    software_change_fields = frozenset({"source_instance", "collector_instance", "enabled"})
     list_display = (
         "source_instance",
         "collector_instance",
@@ -761,28 +889,30 @@ class SoftwareCatalogAdmin(SoftwareDisplayAdminMixin, admin.ModelAdmin):
 
 
 @admin.register(PublisherAlias)
-class PublisherAliasAdmin(admin.ModelAdmin):
+class PublisherAliasAdmin(SoftwareRebuildAdminMixin, admin.ModelAdmin):
+    software_job_key = "software-catalog"
     list_display = ("raw_pattern", "canonical_publisher", "enabled", "is_regex", "created_at")
     list_filter = ("enabled", "is_regex")
     search_fields = ("raw_pattern", "canonical_publisher", "note")
 
 
 @admin.register(SoftwareClassifierRule)
-class SoftwareClassifierRuleAdmin(admin.ModelAdmin):
+class SoftwareClassifierRuleAdmin(SoftwareRebuildAdminMixin, admin.ModelAdmin):
     list_display = ("rule_type", "pattern", "is_regex", "enabled", "note")
     list_filter = ("rule_type", "enabled", "is_regex")
     search_fields = ("pattern", "note")
 
 
 @admin.register(SoftwareSuggestionRule)
-class SoftwareSuggestionRuleAdmin(admin.ModelAdmin):
+class SoftwareSuggestionRuleAdmin(SoftwareRebuildAdminMixin, admin.ModelAdmin):
     list_display = ("priority", "signal", "adverse", "suggestion", "enabled", "note")
     list_filter = ("adverse", "enabled", "suggestion")
     ordering = ("priority", "id")
 
 
 @admin.register(IntelMatcherHint)
-class IntelMatcherHintAdmin(admin.ModelAdmin):
+class IntelMatcherHintAdmin(SoftwareRebuildAdminMixin, admin.ModelAdmin):
+    software_job_key = "software-catalog"
     list_display = ("kind", "pattern", "enabled", "created_at")
     list_filter = ("kind", "enabled")
     search_fields = ("pattern", "note")
@@ -813,7 +943,7 @@ class EolProductMapAdmin(admin.ModelAdmin):
 
 
 @admin.register(PlatformProductMap)
-class PlatformProductMapAdmin(admin.ModelAdmin):
+class PlatformProductMapAdmin(SoftwareRebuildAdminMixin, admin.ModelAdmin):
     list_display = ("agent", "capability", "component_role", "product_uuid", "enabled")
     list_filter = ("agent", "capability", "component_role", "enabled")
     search_fields = ("product_uuid", "provenance")
@@ -835,6 +965,21 @@ class ProductAuthorizationAdmin(admin.ModelAdmin):
     search_fields = ("product_uuid", "rationale", "withdrawn_reason")
     ordering = ("client", "capability", "product_uuid")
     readonly_fields = ("authorized_at",)
+
+    @transaction.atomic
+    def save_model(self, request, obj, form, change):
+        from .views import _queue_software_rebuild
+
+        super().save_model(request, obj, form, change)
+        if not change or set(form.changed_data) & {
+            "tenant",
+            "client",
+            "product_uuid",
+            "capability",
+            "polarity",
+            "withdrawn_at",
+        }:
+            _queue_software_rebuild(request.user.id)
 
     @admin.display(description="Scope", ordering="client")
     def scope(self, obj):
@@ -862,7 +1007,7 @@ class IdentityValueRejectionAdmin(admin.ModelAdmin):
 
 
 @admin.register(SoftwareDecision)
-class SoftwareDecisionAdmin(SoftwareDisplayAdminMixin, admin.ModelAdmin):
+class SoftwareDecisionAdmin(SoftwareRebuildAdminMixin, SoftwareDisplayAdminMixin, admin.ModelAdmin):
     list_display = (
         "client",
         "software_display_name",
@@ -892,7 +1037,21 @@ class MergeCandidateAdmin(admin.ModelAdmin):
 
 
 @admin.register(Finding)
-class FindingAdmin(admin.ModelAdmin):
+class FindingAdmin(SoftwareRebuildAdminMixin, admin.ModelAdmin):
+    software_job_key = "software-overview"
+    software_change_fields = frozenset({"finding_type", "status", "finding_details", "subject_type", "subject_id", "client", "snoozed_until"})
+
+    def get_queryset(self, request):
+        return super().get_queryset(request).select_related("finding_type")
+
+    def software_relevant(self, obj):
+        return finding_registry.affects_software_overview(obj.finding_type)
+
+    def prepare_software_write(self):
+        from .views import guard_findings
+
+        guard_findings()
+
     list_display = (
         "finding_type",
         "subject_type",

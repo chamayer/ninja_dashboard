@@ -24,6 +24,26 @@ _names: dict[str, str] = {}
 _loaded_at = 0.0
 
 
+def affects_software_overview(finding_type: Any) -> bool:
+    """The reviewed Software metric inputs, independent of display taxonomy."""
+    return finding_type is not None and (
+        finding_type.issue_category == SOFTWARE
+        or finding_type.source_module in ("platform.software_findings", "platform.capability_match")
+        or finding_type.subject_scope
+        in (
+            "software_product",
+            "software_version",
+            "software_installation",
+        )
+        or finding_type.name
+        in (
+            "rejected_software_installed",
+            "whitelist_suggestion",
+            "rare_recent",
+        )
+    )
+
+
 def slug(label: str) -> str:
     """URL key for a category or group label: 'Agents & reporting' -> 'agents_reporting'."""
     return re.sub(r"[^a-z0-9]+", "_", label.lower()).strip("_")

@@ -242,5 +242,9 @@ def run_identity_action(request: HttpRequest, ids: list[str], action: FindingAct
         transaction.set_rollback(True)
         messages.error(request, f"Nothing was changed: {str(exc).splitlines()[0]}")
         return redirect(back)
+    if done:
+        from .views import _queue_software_overview
+
+        _queue_software_overview(request.user.id)
     messages.success(request, f"{action.label}: {done} issue{'s' if done != 1 else ''} done.")
     return redirect(back)

@@ -232,9 +232,9 @@ def software_policy_config(request: HttpRequest) -> HttpResponse:
             else:
                 if handler is not _release_hold:
                     # Policy changes what every title's findings should be.
-                    from .views import _queue_software_rebuild_after_commit
+                    from .views import _queue_software_rebuild
 
-                    _queue_software_rebuild_after_commit(request.user.id)
+                    _queue_software_rebuild(request.user.id)
                 messages.info(request, "Software policy saved. Software findings are being rechecked.")
         return redirect("software_policy_config")
 
