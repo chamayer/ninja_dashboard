@@ -705,8 +705,10 @@ def _admit_expired_software_overview() -> int:
             cur.execute("SELECT operations.software_overview_refresh_due(%s)", (1,))
             due = cur.fetchone()[0]
             cur.execute(
-                "SELECT EXISTS (SELECT 1 FROM operations.computer_client_ownership "
-                "WHERE tenant_id = 1 AND state = 'dirty')"
+                "SELECT EXISTS (SELECT 1 FROM operations.computer_client_ownership owner "
+                "JOIN operations.devices device ON device.tenant_id = owner.tenant_id "
+                "AND device.id = owner.device_id AND device.deleted_at IS NULL "
+                "WHERE owner.tenant_id = 1 AND owner.state = 'dirty')"
             )
             ownership_pending = cur.fetchone()[0]
         if ownership_pending:

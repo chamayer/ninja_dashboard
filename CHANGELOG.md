@@ -2,6 +2,23 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.144.15] — 2026-11-12 — Repair Software publication readiness
+
+### Fixed
+
+- Exclude deleted Computers from Software ownership readiness and expiry
+  admission, matching the existing ownership reconciler's population.
+- Ignore never-started workflow attempts when selecting completed input
+  checkpoints. Such attempts cannot hide a successful producer; failures from
+  executed runs continue to block publication.
+
+### Operational notes
+
+- Migrations 0414 and 0415 persist the approved production function corrections.
+  No Job status, ownership data, tenant boundary, owner or grant is changed.
+- Production recovery uses existing Jobs and publication fences. Readiness
+  success alone does not certify Software's full-page latency or freshness.
+
 ## [0.144.14] — 2026-11-12 — Activate the published Software overview
 
 ### Fixed
