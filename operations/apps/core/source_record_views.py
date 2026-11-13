@@ -39,6 +39,35 @@ RULE_LABELS = {
 }
 
 
+INVENTORY_RECORD_PREDICATE = (
+    "EXISTS (SELECT 1 FROM operations.source_record_subjects record_subject "
+    "WHERE record_subject.tenant_id = observation.tenant_id "
+    "AND record_subject.observation_id = observation.observation_id "
+    "AND record_subject.subject_kind = 'record')"
+)
+
+
+def inventory_facets(tenant_id: int) -> tuple[int, list[str], list[str]]:
+    """One managed-record population supplies global total and filter choices."""
+    with transaction.atomic(), connection.cursor() as cur:
+        cur.execute("SELECT set_config('operations.tenant_id', %s, true)", [str(tenant_id)])
+        cur.execute(
+            f"""
+            SELECT count(*)::int,
+                   coalesce(array_agg(DISTINCT observation.entity_type::text
+                       ORDER BY observation.entity_type::text), ARRAY[]::text[]),
+                   coalesce(array_agg(DISTINCT observation.source_layout
+                       ORDER BY observation.source_layout)
+                       FILTER (WHERE observation.source_layout IS NOT NULL), ARRAY[]::text[])
+              FROM operations.v_entity_observation_admin_metadata observation
+             WHERE observation.tenant_id = %s AND {INVENTORY_RECORD_PREDICATE}
+            """,
+            [tenant_id],
+        )
+        total, entity_types, layouts = cur.fetchone()
+    return total, entity_types, layouts
+
+
 def _rows(cur) -> list[dict]:
     columns = [c.name for c in cur.description]
     return [dict(zip(columns, row, strict=True)) for row in cur.fetchall()]

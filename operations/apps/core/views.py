@@ -16207,10 +16207,7 @@ def source_records(
 
     clauses = [
         "observation.tenant_id = %s",
-        "EXISTS (SELECT 1 FROM operations.source_record_subjects record_subject "
-        "WHERE record_subject.tenant_id = observation.tenant_id "
-        "AND record_subject.observation_id = observation.observation_id "
-        "AND record_subject.subject_kind = 'record')",
+        source_record_summary.INVENTORY_RECORD_PREDICATE,
     ]
     params: list[object] = [tenant_id]
     if source_filter is not None:
@@ -16286,46 +16283,19 @@ def source_records(
         if source_filter is not None and source_row is None:
             raise Http404("Source instance not found")
 
-        cur.execute(
-            f"SELECT COUNT(*)::int FROM operations.v_entity_observation_admin_metadata observation WHERE {where_sql}",
-            params,
-        )
-        total = cur.fetchone()[0]
-        cur.execute(
-            """
-            SELECT DISTINCT observation.entity_type
-              FROM operations.v_entity_observation_admin_metadata observation
-             WHERE observation.tenant_id = %s
-               AND EXISTS (
-                   SELECT 1 FROM operations.source_record_subjects record_subject
-                    WHERE record_subject.tenant_id = observation.tenant_id
-                      AND record_subject.observation_id = observation.observation_id
-                      AND record_subject.subject_kind = 'record'
-               )
-             ORDER BY observation.entity_type
-            """,
-            (tenant_id,),
-        )
+        global_total, type_names, layouts = source_record_summary.inventory_facets(tenant_id)
+        if len(clauses) == 2:
+            total = global_total
+        else:
+            cur.execute(
+                f"SELECT COUNT(*)::int FROM operations.v_entity_observation_admin_metadata observation WHERE {where_sql}",
+                params,
+            )
+            total = cur.fetchone()[0]
         entity_types = [
-            {"value": row[0], "label": _source_record_type_label(row[0])}
-            for row in cur.fetchall()
+            {"value": name, "label": _source_record_type_label(name)}
+            for name in type_names
         ]
-        cur.execute(
-            """
-            SELECT DISTINCT observation.source_layout
-              FROM operations.v_entity_observation_admin_metadata observation
-             WHERE observation.tenant_id = %s AND observation.source_layout IS NOT NULL
-               AND EXISTS (
-                   SELECT 1 FROM operations.source_record_subjects record_subject
-                    WHERE record_subject.tenant_id = observation.tenant_id
-                      AND record_subject.observation_id = observation.observation_id
-                      AND record_subject.subject_kind = 'record'
-               )
-             ORDER BY observation.source_layout
-            """,
-            (tenant_id,),
-        )
-        layouts = [row[0] for row in cur.fetchall()]
         cur.execute(
             """
             SELECT id, slug, display_name
@@ -16345,17 +16315,44 @@ def source_records(
         # recompute the mapping view per row (14 s first page on production,
         # 2026-11-02; PLAN-012 item 6).
         records_sql = f"""
-            WITH page AS MATERIALIZED (
-                SELECT observation.*
+            WITH page_keys AS MATERIALIZED (
+                SELECT observation.tenant_id, observation.observation_id
                   FROM operations.v_entity_observation_admin_metadata observation
                  WHERE {where_sql}
                  ORDER BY observation.last_seen_at DESC NULLS LAST, observation.observation_id
                  {{limit}}
             ),
+            page AS MATERIALIZED (
+                SELECT observation.tenant_id, observation.observation_id,
+                       observation.source_instance_id, observation.entity_type,
+                       observation.external_id, observation.parent_external_id,
+                       observation.active, observation.observed_at,
+                       observation.last_seen_at, observation.withdrawn_at,
+                       observation.device_id, observation.reported_name,
+                       observation.platform_group_id, observation.link_verdict,
+                       observation.archived, observation.source_layout,
+                       observation.source_url, observation.restricted,
+                       observation.reported_online
+                  FROM operations.v_entity_observation_admin_metadata observation
+                 WHERE observation.tenant_id = operations.current_tenant_id()
+                   AND observation.observation_id = ANY(ARRAY(
+                       SELECT observation_id FROM page_keys))
+            ),
+            page_clients AS MATERIALIZED (
+                SELECT * FROM operations.computer_client_independent_evidence_batch(
+                    operations.current_tenant_id(), ARRAY(SELECT observation_id FROM page))
+            ),
             group_mapping AS MATERIALIZED (
-                SELECT tenant_id, source_id, external_id, observed_name
-                  FROM operations.v_client_source_mapping_effective
-                 WHERE tenant_id = %s
+                SELECT mapping.tenant_id, mapping.source_id, mapping.external_id,
+                       mapping.observed_name
+                  FROM operations.v_client_source_mapping_effective mapping
+                 WHERE mapping.tenant_id = %s
+                   AND (mapping.source_id, mapping.external_id) IN (
+                       SELECT instance.source_id, selected.platform_group_id
+                         FROM page selected
+                         JOIN operations.source_instances instance
+                           ON instance.tenant_id = selected.tenant_id
+                          AND instance.id = selected.source_instance_id)
             )
             SELECT observation.observation_id, source.name, observation.entity_type,
                    observation.external_id, observation.parent_external_id,
@@ -16364,7 +16361,7 @@ def source_records(
                    observation.device_id, device.canonical_hostname,
                    client.slug, client.display_name,
                    CASE WHEN observation.device_id IS NOT NULL THEN TRUE ELSE FALSE END,
-                   CASE WHEN {_SOURCE_RECORD_CLIENT_SQL} IS NOT NULL THEN TRUE ELSE FALSE END,
+                   CASE WHEN page_client.client_id IS NOT NULL THEN TRUE ELSE FALSE END,
                    CASE WHEN NULLIF(observation.parent_external_id, '') IS NOT NULL THEN TRUE ELSE FALSE END,
                    observation.reported_name, observation.platform_group_id,
                    observation.link_verdict, observation.archived,
@@ -16375,6 +16372,8 @@ def source_records(
                    observation.restricted, observation.reported_online,
                    computer_client.slug, source_subject.id
               FROM page observation
+              LEFT JOIN page_clients page_client
+                ON page_client.observation_id = observation.observation_id
               JOIN operations.source_instances instance
                 ON instance.tenant_id = observation.tenant_id AND instance.id = observation.source_instance_id
               JOIN operations.sources source ON source.id = instance.source_id
@@ -16390,7 +16389,7 @@ def source_records(
                AND computer_client.id = owner.effective_client_id
                AND computer_client.deleted_at IS NULL
               LEFT JOIN operations.clients client
-                ON client.tenant_id = observation.tenant_id AND client.id = {_SOURCE_RECORD_CLIENT_SQL}
+                ON client.tenant_id = observation.tenant_id AND client.id = page_client.client_id
                AND client.deleted_at IS NULL
               JOIN operations.source_record_subjects source_subject
                 ON source_subject.tenant_id = observation.tenant_id

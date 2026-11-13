@@ -2,6 +2,16 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.144.17] — 2026-11-13 — Reduce Source Records and navigation read cost
+
+### Fixed
+
+- Source Records shares its managed-record selection and filter facets, selects
+  page IDs before detail enrichment, and batches page client attribution.
+- The global Issues badge uses a narrow count selection and reads covered
+  finding state once. Patching retains its existing domain reader.
+- No migrations, database tuning, or Software publication changes.
+
 ## [0.144.16] — 2026-11-12 — Keep valid Software results during refresh
 
 ### Fixed

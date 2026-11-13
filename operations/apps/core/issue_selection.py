@@ -112,7 +112,8 @@ def _client_id(slug: str) -> str | None:
 
 
 def _items_sql(
-    scope: Scope, *, covered_only: bool = False, home_compact: bool = False
+    scope: Scope, *, covered_only: bool = False, home_compact: bool = False,
+    count_only: bool = False,
 ) -> tuple[str, dict[str, Any]]:
     """The filtered item relation, before ranking. Columns are documented in ``_ITEM_COLUMNS``."""
     params: dict[str, Any] = {"tenant": TENANT_ID}
@@ -136,6 +137,7 @@ def _items_sql(
     # the rest of its state. Filtering here uses the existing attention index
     # and avoids hashing all state rows against wide finding JSON values.
     state_filter = " AND s.attention = 'covered'" if covered_only else ""
+    state_relation = "count_covered_state" if count_only else "operations.finding_state"
     label_column = "" if home_compact else ", t.display_name::text AS issue_label"
     detail_columns = (
         "" if home_compact else
@@ -197,10 +199,11 @@ def _items_sql(
                {detail_columns}
           FROM operations.findings f
           JOIN operations.finding_types t ON t.id = f.finding_type_id
-          LEFT JOIN operations.finding_state s ON s.finding_id = f.id{state_filter}
+          LEFT JOIN {state_relation} s ON s.finding_id = f.id{state_filter}
           LEFT JOIN operations.source_bindings b
             ON t.name = 'client_unattached_group' AND b.tenant_id = f.tenant_id
-           AND b.id::text = f.subject_ref->>'source_binding_id'
+           AND b.id::text = CASE WHEN t.name = 'client_unattached_group'
+                                THEN f.subject_ref->>'source_binding_id' END
           LEFT JOIN operations.source_instances si ON si.id = b.source_instance_id
          WHERE f.tenant_id = %(tenant)s AND {" AND ".join(finding_where)}
     """
@@ -235,7 +238,8 @@ _SUBJECT_LABEL_SQL = """
 
 
 def _filtered_sql(
-    scope: Scope, *, labels: bool = False, summary: bool = False, home_compact: bool = False
+    scope: Scope, *, labels: bool = False, summary: bool = False, home_compact: bool = False,
+    count_only: bool = False,
 ) -> tuple[str, dict[str, Any]]:
     """Items after every scope filter, ranked into corrective actions.
 
@@ -249,6 +253,7 @@ def _filtered_sql(
         scope,
         covered_only=summary and not scope.related_to,
         home_compact=home_compact,
+        count_only=count_only,
     )
     where = ["true"]
     if scope.invalid:
@@ -376,11 +381,26 @@ def _filtered_sql(
             " AND owner.effective_client_id = i.client_id"
             " AND owner.state IN ('resolved', 'decision_protected')))"
         )
-    filtered_cte = "filtered AS MATERIALIZED" if home_compact else "filtered AS"
+    # Scalar totals can push their branch predicates/projections into items.
+    # Home's wider, repeatedly consumed selection still materializes once.
+    items_cte = "items AS NOT MATERIALIZED" if count_only else "items AS"
+    covered_cte = (
+        "count_covered_state AS MATERIALIZED ("
+        "SELECT finding_id, attention FROM operations.finding_state "
+        "WHERE attention = 'covered'), " if count_only else ""
+    )
+    filtered_cte = (
+        "filtered AS NOT MATERIALIZED" if count_only else
+        "filtered AS MATERIALIZED" if home_compact else "filtered AS"
+    )
+    selected_columns = (
+        "i.id, i.namespace, i.type_name, i.status, i.covered, i.action_key"
+        if count_only else "i.*"
+    )
     sql = f"""
-        WITH items AS ({items}),
+        WITH {covered_cte}{items_cte} ({items}),
         {filtered_cte} (
-            SELECT i.*, {_SEVERITY_RANK_SQL} AS severity_rank{label_columns}
+            SELECT {selected_columns}, {_SEVERITY_RANK_SQL} AS severity_rank{label_columns}
               FROM items i{label_joins}
              WHERE {" AND ".join(where)}
         )
@@ -450,7 +470,12 @@ def counts(scope: Scope) -> dict[tuple[str, str, str], int]:
 
 
 def count(scope: Scope) -> int:
-    sql, params = _filtered_sql(scope, summary=True)
+    # The global navigation total needs no per-row client attribution or
+    # ranking of already-independent actions. Reuse Home's governed selector.
+    global_count = scope == Scope(status="open")
+    sql, params = _filtered_sql(
+        scope, summary=True, home_compact=global_count, count_only=global_count
+    )
     with connection.cursor() as cursor:
         cursor.execute(sql + " SELECT count(*) FROM selected", params)
         return cursor.fetchone()[0]
