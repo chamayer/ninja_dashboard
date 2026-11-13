@@ -2,6 +2,16 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.144.19] — 2026-11-13 — Group Sources record counts before classification
+
+### Fixed
+
+- Admin Sources classifies each grouped source stream once when counting
+  records, preserving totals, companion exclusions and last-observed times.
+- Migration 0413 replaces the existing protected count view after 0416;
+  column types, ownership, tenant boundaries and read permissions are retained.
+  Runtime write privileges remain revoked. No data rebuild is required.
+
 ## [0.144.18] — 2026-11-13 — Stop Software refresh self-invalidation
 
 ### Fixed
