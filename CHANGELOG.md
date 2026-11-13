@@ -2,6 +2,17 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.144.21] — 2026-11-13 — Reuse completed Software preparation
+
+### Fixed
+
+- Software publication reuses already completed readiness, assessments and
+  exposure when owner checkpoints and exposure deadlines prove them current.
+- Newer non-classifier inputs or expired exposure retain full preparation and
+  its tenant writer lock. Reused preparation uses the existing Software-owned
+  publication lock and claim/input/expiry fences without rewriting findings.
+- No migrations, new storage or services.
+
 ## [0.144.20] — 2026-11-13 — Protect Software publication capacity and input fencing
 
 ### Fixed

@@ -273,7 +273,7 @@ _RAW_DEFINITIONS = (
         "operator_job_runs",
         "ingest.inventory.software.refresh_overview_read_model",
         run_all=False,
-        handler_version="software-overview-v4",
+        handler_version="software-overview-v5",
         priority=90,
     ),
     JobDefinition(

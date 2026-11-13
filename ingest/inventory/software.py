@@ -1187,16 +1187,68 @@ def refresh_overview_read_model(
     """
     with db.transaction() as cur:
         cur.execute(_GUC)
-        guard_findings_writes(cur, TENANT_ID)
+        cur.execute("SELECT operations.software_overview_inputs(%s)", (TENANT_ID,))
+        checkpoint = cur.fetchone()[0]
+        from ingest import software_reconcile
+
+        # Classification already publishes readiness, assessments and exposure.
+        # Reuse that work only when it covers every completed input, or the
+        # previous overview has the exact same owners and valid exposure.
+        cur.execute(
+            """
+            SELECT EXISTS (
+                SELECT 1 FROM operations.software_overview_current previous
+                 WHERE previous.tenant_id = %s AND previous.contract_ready
+                   AND (previous.exposure_expires_at IS NULL
+                        OR previous.exposure_expires_at > clock_timestamp())
+                   AND (
+                       previous.input_watermarks->'owners' = %s::jsonb->'owners'
+                       OR (
+                           (previous.input_watermarks->'owners')
+                               - ARRAY['software-classify', 'software-classify-only',
+                                       'software-classify-full']
+                           = (%s::jsonb->'owners')
+                               - ARRAY['software-classify', 'software-classify-only',
+                                       'software-classify-full']
+                           AND
+                           %s::jsonb->'owners'->'software-classify-only'
+                               ->>'handler_completed_at' IS NOT NULL
+                           AND NOT EXISTS (
+                               SELECT 1 FROM jsonb_each(%s::jsonb->'owners') owner
+                                WHERE (owner.value->>'handler_completed_at')::timestamptz
+                                    > (%s::jsonb->'owners'->'software-classify-only'
+                                       ->>'handler_completed_at')::timestamptz
+                           )
+                           AND NOT EXISTS (
+                               SELECT 1 FROM operations.device_software_exposure_current
+                                WHERE tenant_id = %s
+                                  AND least(evidence_fresh_until, condition_fresh_until)
+                                      <= clock_timestamp()
+                           )
+                       )
+                   )
+            )
+            """,
+            (TENANT_ID, *(json.dumps(checkpoint),) * 5, TENANT_ID),
+        )
+        reuse_preparation = cur.fetchone()[0]
+        # Only preparation writes findings/assessments and needs their tenant
+        # writer guard. A reusable publication is one atomic SQL aggregate,
+        # serialized and fenced by the Software-owned publication functions.
+        if not reuse_preparation:
+            guard_findings_writes(cur, TENANT_ID)
         cur.execute(
             "SELECT operations.begin_software_overview(%s, %s, %s)",
             (TENANT_ID, job_run_id, claim_token),
         )
-        checkpoint = cur.fetchone()[0]
-        from ingest import software_reconcile
-
-        software_reconcile.refresh_existing_assessments(cur, TENANT_ID)
-        refresh_exposure_read_model(cursor=cur)
+        prepared_checkpoint = cur.fetchone()[0]
+        if reuse_preparation and prepared_checkpoint != checkpoint:
+            raise RuntimeError("Software inputs changed before reusable publication; retry")
+        checkpoint = prepared_checkpoint
+        if not reuse_preparation:
+            software_reconcile.refresh_existing_assessments(cur, TENANT_ID)
+            refresh_exposure_read_model(cursor=cur)
+        log.info("Software overview preparation reused=%s", reuse_preparation)
         cur.execute(
             "SELECT operations.publish_software_overview(%s, %s, %s, %s::jsonb)",
             (TENANT_ID, job_run_id, claim_token, json.dumps(checkpoint)),
