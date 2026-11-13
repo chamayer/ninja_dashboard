@@ -2,6 +2,17 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.144.22] — 2026-11-13 — Avoid unchanged Software preparation writes
+
+### Fixed
+
+- Full Software preparation persists changed readiness and assessment facts;
+  unchanged facts retain their timestamps until renewal is needed halfway
+  through the existing policy validity window. Expiry limits are unchanged.
+- Existing participants are filtered before insertion, avoiding redundant
+  validation work. Missing and changed records still reconcile normally.
+- No migrations, new storage, permission changes or policy expansion.
+
 ## [0.144.21] — 2026-11-13 — Reuse completed Software preparation
 
 ### Fixed

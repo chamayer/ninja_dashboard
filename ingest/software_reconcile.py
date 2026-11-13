@@ -1139,7 +1139,15 @@ def write_assessments(
     cur.execute(
         """
         INSERT INTO operations.condition_participants
-        SELECT * FROM software_participants_next
+        SELECT next.* FROM software_participants_next next
+         WHERE NOT EXISTS (
+             SELECT 1 FROM operations.condition_participants previous
+              WHERE previous.tenant_id = next.tenant_id
+                AND previous.row_kind = next.row_kind
+                AND previous.finding_id = next.finding_id
+                AND previous.participant_kind = next.participant_kind
+                AND previous.participant_id = next.participant_id
+                AND previous.participant_role = next.participant_role)
         ON CONFLICT DO NOTHING
         """
     )
@@ -1149,10 +1157,27 @@ def write_assessments(
             tenant_id, row_kind, finding_id, participant_kind, participant_id,
             participant_role, condition_identity, policy_version, policy_digest, coverage,
             response, reevaluation_key, currentness, assessed_at)
-        SELECT tenant_id, row_kind, finding_id, participant_kind, participant_id,
-               participant_role, condition_identity, policy_version, policy_digest, coverage,
-               response, reevaluation_key, currentness, assessed_at
-          FROM software_assessments_next
+        SELECT next.tenant_id, next.row_kind, next.finding_id,
+               next.participant_kind, next.participant_id, next.participant_role,
+               next.condition_identity, next.policy_version, next.policy_digest,
+               next.coverage, next.response, next.reevaluation_key,
+               next.currentness, next.assessed_at
+          FROM software_assessments_next next
+          LEFT JOIN operations.condition_assessments previous
+            ON previous.tenant_id = next.tenant_id AND previous.row_kind = next.row_kind
+           AND previous.finding_id = next.finding_id
+           AND previous.participant_kind = next.participant_kind
+           AND previous.participant_id = next.participant_id
+           AND previous.participant_role = next.participant_role
+         WHERE previous.finding_id IS NULL
+            OR ROW(previous.condition_identity, previous.policy_version,
+                   previous.policy_digest, previous.coverage, previous.response,
+                   previous.reevaluation_key, previous.currentness)
+               IS DISTINCT FROM
+               ROW(next.condition_identity, next.policy_version,
+                   next.policy_digest, next.coverage, next.response,
+                   next.reevaluation_key, next.currentness)
+            OR previous.assessed_at <= %s
         ON CONFLICT (tenant_id, row_kind, finding_id, participant_kind, participant_id,
                      participant_role) DO UPDATE SET
             condition_identity = EXCLUDED.condition_identity,
@@ -1161,7 +1186,10 @@ def write_assessments(
             coverage = EXCLUDED.coverage, response = EXCLUDED.response,
             reevaluation_key = EXCLUDED.reevaluation_key,
             currentness = EXCLUDED.currentness, assessed_at = EXCLUDED.assessed_at
-        """
+        """,
+        # An unchanged assessment keeps its original, conservative timestamp;
+        # renew it halfway through the existing policy validity window.
+        (now - timedelta(hours=profile.freshness_hours / 2),),
     )
     return len(assessments)
 

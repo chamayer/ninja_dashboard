@@ -18,7 +18,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Iterable, Mapping
 from contextlib import nullcontext
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from ingest import db, device_status_settings
@@ -204,7 +204,21 @@ def refresh(tenant_id: int = 1, *, now: datetime | None = None, cursor=None) -> 
         cur.execute(
             f"""
             INSERT INTO operations.software_device_readiness ({columns})
-            SELECT {columns} FROM software_device_readiness_next
+            SELECT {', '.join('next.' + name.strip() for name in columns.split(','))}
+              FROM software_device_readiness_next next
+              LEFT JOIN operations.software_device_readiness previous
+                ON previous.tenant_id = next.tenant_id
+               AND previous.device_id = next.device_id
+               AND previous.finding_type_id = next.finding_type_id
+             WHERE previous.device_id IS NULL
+                OR ROW(previous.policy_version, previous.policy_digest,
+                       previous.disposition, previous.may_notify, previous.may_execute,
+                       previous.reasons, previous.blockers)
+                   IS DISTINCT FROM
+                   ROW(next.policy_version, next.policy_digest,
+                       next.disposition, next.may_notify, next.may_execute,
+                       next.reasons, next.blockers)
+                OR previous.assessed_at <= %s
             ON CONFLICT (tenant_id, device_id, finding_type_id) DO UPDATE SET
                 policy_version = EXCLUDED.policy_version,
                 policy_digest = EXCLUDED.policy_digest,
@@ -214,7 +228,10 @@ def refresh(tenant_id: int = 1, *, now: datetime | None = None, cursor=None) -> 
                 reasons = EXCLUDED.reasons,
                 blockers = EXCLUDED.blockers,
                 assessed_at = EXCLUDED.assessed_at
-            """
+            """,
+            # Keep unchanged, still-valid facts at their original timestamp.
+            # Renew before half of the existing validity window is consumed.
+            (now - timedelta(hours=profile.freshness_hours / 2),),
         )
         cur.execute(
             """
