@@ -274,6 +274,7 @@ _RAW_DEFINITIONS = (
         "ingest.inventory.software.refresh_overview_read_model",
         run_all=False,
         handler_version="software-overview-v4",
+        priority=90,
     ),
     JobDefinition(
         "software-catalog", "Apply Software catalog policy",
@@ -1051,7 +1052,9 @@ _CAPACITY_KEYS_BY_DEFINITION: dict[str, tuple[str, ...]] = {
     "software-classify": ("capacity:processing",),
     "software-classify-only": ("capacity:processing",),
     "software-classify-full": ("capacity:processing",),
-    "software-overview": ("capacity:processing",),
+    # Publication must not queue behind fleet evaluators. Its software-state
+    # resource and database writer guard still serialize conflicting work.
+    "software-overview": ("capacity:control",),
     "software-catalog": ("capacity:processing",),
     "patch-classify": ("capacity:processing",),
     "platform-evaluate": ("capacity:processing",),

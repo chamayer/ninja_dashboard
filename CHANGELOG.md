@@ -2,6 +2,17 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.144.20] — 2026-11-13 — Protect Software publication capacity and input fencing
+
+### Fixed
+
+- Software overview publication uses the existing control-work pool at priority
+  90, retaining its software-state resource and database writer guards.
+- Migration 0417 excludes automatic refresh delivery from the input revision
+  token. Explicit operator requests and actual input changes still fence builds.
+- Existing permission, certification and expiry checks remain enforced.
+  No new queues, workers, pools or publication storage are introduced.
+
 ## [0.144.19] — 2026-11-13 — Group Sources record counts before classification
 
 ### Fixed
