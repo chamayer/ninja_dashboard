@@ -2,6 +2,17 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.144.18] — 2026-11-13 — Stop Software refresh self-invalidation
+
+### Fixed
+
+- Expiry admission leaves an existing queued or running Software overview alone,
+  so a duplicate automatic request cannot invalidate its captured inputs.
+- Pending classification is admitted before an expired overview, reusing the
+  existing classifier and avoiding duplicate requests while it runs.
+- Publication, input-change, permission and expiry checks remain enforced.
+  No migrations are included.
+
 ## [0.144.17] — 2026-11-13 — Reduce Source Records and navigation read cost
 
 ### Fixed
