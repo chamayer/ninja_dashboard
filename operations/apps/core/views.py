@@ -14484,6 +14484,18 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
                            BOOL_OR(presence.reported_online) AS online
                     FROM operations.device_agent_presence_current presence
                     WHERE presence.tenant_id = 1
+                      -- Only satisfied verdicts read presence.online below.
+                      -- Retain every matching presence row for named and any
+                      -- platform requirements; EXISTS cannot multiply rows.
+                      AND EXISTS (
+                          SELECT 1 FROM operations.device_requirement_state required
+                          WHERE required.tenant_id = presence.tenant_id
+                            AND required.device_id = presence.device_id
+                            AND required.entity_type = presence.entity_type
+                            AND required.verdict = 'satisfied'
+                            AND (required.platform = 'any'
+                                 OR required.platform = presence.platform)
+                      )
                     GROUP BY GROUPING SETS (
                         (presence.device_id, presence.entity_type, presence.platform),
                         (presence.device_id, presence.entity_type)

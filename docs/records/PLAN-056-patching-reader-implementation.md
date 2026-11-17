@@ -76,3 +76,19 @@ User asked to reduce work, then authorized commit/push. Diff reviewed; prepare
 evidence. Next push origin then mirror and observe automatic rollout; no separate
 redeploy or additional timing campaign. Existing unrelated recovery scripts stay
 untracked. Broader PLAN-056 acceptance remains open.
+
+## Approved release and remeasurement
+
+Release 0.144.27 / 5185e142 committed and pushed origin then mirror. On the
+user's remeasurement request, production reports .27 with healthy ingest,
+worker and Operations. All three changed runtime hashes match the release.
+One configured-admin internal HTTP GET at 18:53:42 UTC completed in 1.069 s
+(headers also 1.069 s), HTTP 200, 125,155 bytes. Prior .26 sample: 5.481 s.
+Observed reduction: 4.412 s (80.5%); uncontrolled workload/cache conditions,
+one sample each, not a percentile or cold-response certification.
+Exact server completion marker e143db79cba4143fb961b46bb40244d5_1 returned 200.
+Normal logout confirmed; exact host/container diagnostic staging removed.
+Collector reused the reviewed navigation implementation restricted to Patching;
+20-second deadline, no retries, response values discarded. No tests or other
+pages requested. Default PostgreSQL page execution is now observed to succeed;
+filter/export parity and full contract acceptance remain unverified.

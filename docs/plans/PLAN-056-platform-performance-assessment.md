@@ -50,10 +50,10 @@ Home: <=1.5 s ordinary / <2 s hard maximum including cold navigation.
 
 ## Next action
 
-Push approved [Patching .27](../records/PLAN-056-patching-reader-implementation.md)
-origin then mirror; observe rollout. PostgreSQL behavior unverified.
-[15-page results](../records/PLAN-056-page-remeasurement-2026-11-17.md): Home misses
-its hard maximum. Original baseline retained; broader acceptance stays open.
+Push approved [Coverage .28](../records/PLAN-056-coverage-presence-selection.md)
+origin then mirror; observe rollout. [Full pass](../records/PLAN-056-page-remeasurement-2026-11-17.md):
+Coverage 4.214 s, Home 1.378 s; Software pending without data.
+Original baseline retained; broader acceptance stays open.
 
 ## Follow-up — reassess Home information after domain readers
 

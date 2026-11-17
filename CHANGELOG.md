@@ -2,6 +2,16 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.144.28] — 2026-11-17 — Limit Coverage presence aggregation
+
+### Fixed
+
+- Coverage aggregates presence only for satisfied requirements that consume its
+  online status, retaining named and any-platform matching without row fan-out.
+  Requirement population, ownership checks, filters, fields and exports remain.
+- Exact query parity confirmed for all 19,089 live rows and synthetic edge cases.
+  No migrations or new dependencies. Full-page speed improvement remains unverified.
+
 ## [0.144.27] — 2026-11-17 — Bound Patching finding reads
 
 ### Fixed

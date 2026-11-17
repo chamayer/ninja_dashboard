@@ -11,8 +11,8 @@
 - Source: docs/plans/PLAN-056-platform-performance-assessment.md
 - Section: PLAN-056 — Platform performance recovery
 - Related plans: Supersedes PLAN-041, PLAN-044, PLAN-047, PLAN-048, PLAN-049, PLAN-050, PLAN-053 and PLAN-054. All unfinished work and evidence are routed through the consolidation record; no independent execution remains in those plans.
-- Resume gate: PLAN-056 active. User approves Patching .27 commit/push and automatic deployment; no new migrations. Next push origin then mirror and observe rollout. PostgreSQL correctness/latency unverified; keep checks light. Handoff: operations/BLUEPRINT.md; implementation: docs/records/PLAN-056-patching-reader-implementation.md.
-- Last checked: 2026-11-17 (0891738b / 0.144.26 on both remotes and deployed; four services healthy; 0420/0421 applied; protected Software current/completed with data. At 18:29 UTC all 15 pages returned 200 with completion markers; logout/cleanup confirmed. Home 3.411 s, Patching 5.481 s, Software 1.230 s. No tests).
+- Resume gate: PLAN-056 active. User approves Coverage .28 commit/push and automatic deployment; no new migrations. Exact query parity verified for 19,089 live rows and named/any-platform edge fixtures. Next push origin then mirror and observe rollout. Speedup/full HTML acceptance unverified. Handoff: operations/BLUEPRINT.md; implementation: docs/records/PLAN-056-coverage-presence-selection.md.
+- Last checked: 2026-11-17 (5185e142 / .27 deployed; four services healthy. Full 18:57 pass: all 15 returned 200 with completion/logout/cleanup confirmed. Coverage 4.214 s, Patching 1.423 s, Home 1.378 s; Software pending/input_changed with no summary data. Coverage read-only trace closed/cleaned; no tests).
 
 ## PLAN-055 — Jobs execution-scope claim race
 

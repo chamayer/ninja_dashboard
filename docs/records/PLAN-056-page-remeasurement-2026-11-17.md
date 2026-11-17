@@ -67,3 +67,36 @@ remains open. Existing uncommitted documentation and untracked recovery scripts
 are preserved. No runtime edits, tests, commit or push. Registry validation and
 git diff --check passed. Next review these results and select the next scoped
 diagnosis, prioritizing Home's explicit target miss and Patching's observed cost.
+
+## Full pass after Patching .27
+
+User requested the full list again. At 18:57:15–18:57:43 UTC, release
+5185e142 / 0.144.27, all four services healthy. Same unchanged navigation
+collector, normal configured-admin login/logout, one GET/page, 20-second
+deadline and no retries. All 15 requests returned 200 with exact completion
+markers under prefix 66290ba042cb07b551162f91010d760b. Transfer hashes matched;
+logout and exact host/container staging cleanup confirmed.
+
+| Page | Prior full pass s | Current s | Headers s | Bytes |
+| --- | ---: | ---: | ---: | ---: |
+| Software | 1.230 | 0.260 | 0.260 | 33,423 |
+| Inventory: Source records | 1.939 | 2.145 | 2.145 | 137,850 |
+| Admin: Sources | 1.013 | 1.109 | 1.109 | 81,190 |
+| Inventory: Clients | 2.091 | 2.141 | 2.141 | 207,320 |
+| Home | 3.411 | 1.378 | 1.378 | 27,986 |
+| Inventory: Computers / Coverage | 3.875 | 4.214 | 4.214 | 427,637 |
+| Patching | 5.481 | 1.423 | 1.422 | 125,155 |
+| Clients | 3.621 | 3.764 | 3.764 | 160,078 |
+| Issues | 2.113 | 2.172 | 2.172 | 91,006 |
+| Admin: Health | 2.531 | 2.423 | 2.423 | 482,382 |
+| Admin: Overview | 1.319 | 1.670 | 1.670 | 30,906 |
+| Admin: Data | 1.388 | 1.114 | 1.114 | 32,716 |
+| Computers | 1.390 | 1.906 | 1.905 | 130,259 |
+| Admin: Jobs | 1.066 | 1.068 | 1.068 | 59,960 |
+| Admin: Settings | 0.155 | 0.180 | 0.180 | 27,790 |
+
+Software's shorter response prompted one protected runtime-reader state check:
+pending/input_changed, has_data=false. Its fast HTML response is not a populated
+Software performance result. No recovery or job manipulation was performed.
+All earlier cache/network/content-parity limits still apply. Full pass complete;
+user next requested a two-minute Coverage bottleneck diagnosis.

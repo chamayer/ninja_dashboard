@@ -5,11 +5,17 @@ History: [checkpoint](docs/records/OPERATIONS-CHECKPOINT-2026-11-02.md); verify 
 
 ## PLAN-056 — Platform performance recovery
 
+**Current work:** Coverage presence semijoin query parity verified: all 19,089
+rows/columns match; any-platform/edge fixture passes. Speedup/full HTML unverified.
+User approves .28 commit/push, automatic deployment, no new migrations.
+Next push origin then mirror and observe rollout; no separate redeploy.
+[Scope/checkpoint](../docs/records/PLAN-056-coverage-presence-selection.md).
+
 **Goal:** Recover Home responsiveness and Software freshness; preserve access,
 population, input/claim fences and expiry contracts.
 
-**Deployed:** 0891738b / 0.144.26 on both remotes and production; services healthy;
-0420/0421 applied. .26 latency is unmeasured. [Prior measurement](../docs/records/PLAN-056-release-0.144.24.md).
+**Deployed:** 5185e142 / 0.144.27 on both remotes and production; services healthy;
+no new migrations. 0420/0421 previously applied. [Prior measurement](../docs/records/PLAN-056-release-0.144.24.md).
 Recorded full preparation 47.93 s; reuse 14.95 s; details in linked evidence.
 Full 15-page acceptance is not claimed.
 
@@ -20,22 +26,16 @@ timestamps/expiry; detailed evidence is linked below.
 Earlier readiness memoization candidate withdrawn; later Home .23 now deployed.
 Detailed history and limitations remain in linked records.
 
-**Checkpoint/next:** Patching candidate implemented locally: correlated ownership,
-ordered page IDs before details, consistent counts and complete batched CSV.
-Django check passes; PostgreSQL execution/speedup unverified. User now approves
-commit/push: prepare .27 (no new migrations), push origin then mirror and observe
-automatic rollout. Keep validation light; no separate redeploy/timing campaign.
+**Checkpoint/next:** .27 full pass: all 15 returned 200; completion/logout/cleanup
+confirmed. Coverage 4.214 s, Patching 1.423 s, Home 1.378 s. Software returned
+pending/input_changed without summary data; 0.260 s is not populated latency.
+Coverage trace: distributed SQL and fleet preparation; no single dominant query.
+Remaining [attribution](../docs/records/PLAN-056-coverage-bottleneck-attribution.md)
+stays open beyond the approved presence semijoin; acceptance remains open.
 [Implementation/evidence](../docs/records/PLAN-056-patching-reader-implementation.md).
 [Page results](../docs/records/PLAN-056-page-remeasurement-2026-11-17.md).
-Resume reconciled Git and live state at 18:25 UTC Nov 17:
-.26 is on both remotes; changed runtime hashes match; four services healthy;
-0420/0421 applied. Actual Operations reader current/completed with data.
-Audited ownership replay and shared scheduler/claim readiness gate are deployed.
-Freshness/claim/access fences unchanged. Diagnostic staging removed; no tests
-or timing pass during that earlier resume. Sustained freshness and full-page
-acceptance remain open.
-[Scope/security/evidence](../docs/records/PLAN-056-software-emergency-2026-11-17.md).
-Coverage .25 remains unmeasured; its evidence stays in linked records.
+Prior Software recovery/security evidence remains in the
+[incident record](../docs/records/PLAN-056-software-emergency-2026-11-17.md).
 
 **Release safety:** Origin then mirror; push automatically deploys. Protect real
 input handlers during rollout. Do not cancel workflow children just to change
