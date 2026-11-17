@@ -2,6 +2,26 @@
 
 ## Active resume checkpoint — 2026-11-17
 
+727df0e5 / 0.144.30 pushed origin then a-m-rose after approval; automatic rollout
+applied 0423. Policy row is 1/domain_lock, and dispatch now reaches the producer.
+All services healthy in subsequent checks; worker restart count remained one
+(startup raced the migration), other application counts zero. Three Coverage
+runs reached failed state; no publication. Failure is now permission denied for
+computer_client_ownership, not a dispatch crash.
+
+Complete direct-input privilege audit found five missing SELECT grants for
+operations_view_owner: agents, computer_client_ownership, device_operator_decisions,
+device_requirement_state and device_session_current. Remaining direct source
+relations were readable. Role is neither superuser nor BYPASSRLS. Applicable
+policies admit this role via PUBLIC with existing tenant predicates (agents is
+global read metadata); session current is already explicitly tenant-filtered by
+the producer. Prepared reversible migration 0424 and release 0.144.31 granting
+only those SELECT privileges. No RLS, runtime-role, writer or reader-flag change.
+Next explicit commit/push/0424 approval and verify actual publication, not just
+health. No permission hotpatch or manual migration attempted.
+
+### Prior resource-policy repair preparation
+
 Urgent repair requested. Prepared 0423_coverage_jobs_resource_policy and release
 0.144.30: preserve the complete 0372 resource-template allow-list, add only
 Coverage's declared template, register domain_lock capacity 1 with existing

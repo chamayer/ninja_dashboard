@@ -5,11 +5,10 @@ History: [checkpoint](docs/records/OPERATIONS-CHECKPOINT-2026-11-02.md); verify 
 
 ## PLAN-056 — Platform performance recovery
 
-**Current work:** .29 live Coverage 4.369 s, 200/full HTML, normal logout.
-Jobs restart-loops: missing Coverage resource policy. 0423/.30 prepared to admit
-and register the existing lock at capacity 1; exact SQL passed on a temporary
-clone, rolled back. Next explicit commit/push/migration approval, then rollout.
-Reader disabled; 1.624 s was candidate-only. No persistent repair attempted.
+**Current work:** 727df0e5/.30 live; 0423 applied, worker stable after one rollout
+restart; all services healthy. Coverage producer fails on five missing publisher
+SELECT grants. Audited all inputs/policies; 0424/.31 prepared, needs explicit
+commit/push/migration approval. Reader disabled; live 4.369 s, candidate 1.624 s.
 Contract: docs/decisions/0059-coverage-maintained-selection.md.
 [Scope/checkpoint](../docs/records/PLAN-056-coverage-reader-remediation.md).
 

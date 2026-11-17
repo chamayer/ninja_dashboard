@@ -2,6 +2,15 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.144.31] — 2026-11-17 — Allow protected Coverage publication inputs
+
+### Fixed
+
+- Migration 0424 grants the existing protected publisher role SELECT on its
+  five missing inputs: agents, Computer ownership, operator decisions, stored
+  requirement verdicts and current sessions. Tenant policies and runtime-role
+  permissions remain unchanged. The maintained reader remains disabled.
+
 ## [0.144.30] — 2026-11-17 — Restore Jobs dispatch
 
 ### Fixed

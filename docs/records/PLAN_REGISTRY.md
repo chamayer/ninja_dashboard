@@ -11,8 +11,8 @@
 - Source: docs/plans/PLAN-056-platform-performance-assessment.md
 - Section: PLAN-056 — Platform performance recovery
 - Related plans: Supersedes PLAN-041, PLAN-044, PLAN-047, PLAN-048, PLAN-049, PLAN-050, PLAN-053 and PLAN-054. All unfinished work and evidence are routed through the consolidation record; no independent execution remains in those plans.
-- Resume gate: PLAN-056 active. 2edf638a / 0.144.29 deployed to both remotes; evaluation-lane fix restored startup. 0422 applied; maintained reader disabled. Next persistent access/concurrency/maintenance and remaining filter edges before cutover; no Coverage publication observed at the early post-deployment check. Handoff: operations/BLUEPRINT.md; evidence: docs/records/PLAN-056-coverage-reader-remediation.md.
-- Last checked: 2026-11-17 (automatic rollout of 2edf638a; all four services healthy, zero new application-container restarts. Ingest VERSION and both shared registry hashes match commit; Coverage definition stored in evaluation lane, 0422 applied. No Coverage run/publication yet; reader remains disabled. Local lane-contract, compilation, registry and whitespace checks passed).
+- Resume gate: PLAN-056 active. 727df0e5 / 0.144.30 on both remotes and deployed; 0423 applied, worker stable. Coverage producer now reaches five missing publisher SELECT privileges; audited inputs/policies and prepared reversible 0424 / 0.144.31. Next explicit commit/push/0424 approval, then verify publication. Reader disabled; full cutover gates remain. Handoff: operations/BLUEPRINT.md; evidence: docs/records/PLAN-056-coverage-reader-remediation.md.
+- Last checked: 2026-11-17 (all services healthy after .30; worker restart count stable at one from rollout, other application counts zero. Coverage resource policy present at 1/domain_lock; three failed producer runs, no publication. Five missing SELECT grants confirmed; owner is neither superuser nor BYPASSRLS, existing policies preserved. Local 0424 checks pass).
 
 ## PLAN-055 — Jobs execution-scope claim race
 
