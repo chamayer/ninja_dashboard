@@ -1038,6 +1038,15 @@ def main() -> None:
     )
 
     scheduler = BackgroundScheduler()
+    from ingest.coverage_read_model import admit_due as admit_coverage_refresh
+
+    scheduler.add_job(
+        admit_coverage_refresh,
+        "interval",
+        seconds=15,
+        id="coverage_publication_admission",
+        max_instances=1,
+    )
     # Durable schedules retain their cadence and due tick in Postgres.  This
     # poller only admits due work; the dedicated Jobs worker performs it.
     scheduler.add_job(

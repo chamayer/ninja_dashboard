@@ -682,9 +682,6 @@ def produce_due_schedules() -> int:
         # Expiry admission opens another connection. Commit scheduled requests
         # first so that connection cannot wait on locks held by this one.
         admitted += _admit_expired_software_overview()
-        from ingest.coverage_read_model import admit_due
-
-        admitted += admit_due()
     except PoolTimeout:
         log.warning("durable Jobs schedules waiting for database capacity")
         return 0

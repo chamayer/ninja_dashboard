@@ -2,6 +2,14 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.144.32] — 2026-11-17 — Enable maintained Coverage HTML
+
+- Coverage HTML uses the maintained reader when a current publication is
+  available and falls back to the existing reader during refresh gaps. CSV
+  uses the existing reader.
+- Coverage refresh admission checks every 15 seconds and queues work up to
+  25 seconds before expiry. No migrations.
+
 ## [0.144.31] — 2026-11-17 — Allow protected Coverage publication inputs
 
 ### Fixed

@@ -1,6 +1,7 @@
 """Jobs-owned Coverage publication; never invoked by an interactive GET."""
 
 from ingest import db
+from ingest.config import settings
 from ingest.device_status_settings import thresholds
 
 
@@ -20,8 +21,11 @@ def refresh() -> int:
 
 
 def admit_due() -> int:
-    """Initial population, invalidation, expiry and failed-refresh retry admission."""
+    """Admit refreshes ahead of expiry without relaxing reader freshness."""
     from ingest.operator_job_queue import request_system_job
+
+    if not settings.SCHEDULED_JOBS_ENABLED:
+        return 0
 
     with db.transaction() as cursor:
         cursor.execute("SET LOCAL operations.tenant_id = 1")
@@ -34,7 +38,7 @@ def admit_due() -> int:
             "SELECT NOT EXISTS (SELECT 1 FROM operations.coverage_read_publication p "
             "JOIN operations.coverage_read_revision r USING (tenant_id) "
             "WHERE p.tenant_id = 1 AND p.revision = r.revision "
-            "AND p.expires_at > statement_timestamp()) "
+            "AND p.expires_at > statement_timestamp() + interval '25 seconds') "
             "AND NOT EXISTS (SELECT 1 FROM operations.operator_job_runs "
             "WHERE tenant_id = 1 AND job_key = 'coverage-read-model' "
             "AND status IN ('queued', 'running'))"

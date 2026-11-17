@@ -11,8 +11,8 @@
 - Source: docs/plans/PLAN-056-platform-performance-assessment.md
 - Section: PLAN-056 — Platform performance recovery
 - Related plans: Supersedes PLAN-041, PLAN-044, PLAN-047, PLAN-048, PLAN-049, PLAN-050, PLAN-053 and PLAN-054. All unfinished work and evidence are routed through the consolidation record; no independent execution remains in those plans.
-- Resume gate: PLAN-056 active. 727df0e5 / 0.144.30 on both remotes and deployed; 0423 applied, worker stable. Coverage producer now reaches five missing publisher SELECT privileges; audited inputs/policies and prepared reversible 0424 / 0.144.31. Next explicit commit/push/0424 approval, then verify publication. Reader disabled; full cutover gates remain. Handoff: operations/BLUEPRINT.md; evidence: docs/records/PLAN-056-coverage-reader-remediation.md.
-- Last checked: 2026-11-17 (all services healthy after .30; worker restart count stable at one from rollout, other application counts zero. Coverage resource policy present at 1/domain_lock; three failed producer runs, no publication. Five missing SELECT grants confirmed; owner is neither superuser nor BYPASSRLS, existing policies preserved. Local 0424 checks pass).
+- Resume gate: PLAN-056 active. ce1fa07a / 0.144.31 deployed to both remotes; 0424 applied. Automatic Coverage publication succeeded and was current once; later input-changed/expired, another run active. Reader disabled. Next maintenance availability/concurrency and remaining filter gates before cutover. Handoff: operations/BLUEPRINT.md; evidence: docs/records/PLAN-056-coverage-reader-remediation.md.
+- Last checked: 2026-11-17 (all four services healthy, zero new application-container restarts, .31 VERSION and five publisher grants confirmed. Live Coverage 200/full HTML 4.960 s, logout/server completion/cleanup confirmed. Isolated persistent-publication measurement stopped unavailable before page requests; no new candidate timing. Prior 1.624 s remains isolated sample).
 
 ## PLAN-055 — Jobs execution-scope claim race
 

@@ -2,6 +2,37 @@
 
 ## Active resume checkpoint — 2026-11-17
 
+Prepared a production HTML cutover with a compatibility fallback for missing,
+invalidated or expired publications. CSV retains the existing reader because
+withdrawal-age search parity is open. The fallback preserves availability but
+does not meet the latency contract, so approving this release would authorize
+that temporary exception. Refresh admission polls every 15 seconds and starts
+up to 25 seconds before expiry. No migration. Next verify routing and live
+latency on both ready and unavailable publications after an approved release.
+
+ce1fa07a / 0.144.31 approved, committed and pushed origin then a-m-rose;
+automatic rollout applied 0424. All four services healthy, new application
+containers zero restarts, deployed VERSION .31. All five publisher SELECT
+privileges verified. Automatic Coverage run completed and one publication was
+current in a post-deployment check; six failed runs predated this success.
+
+User-requested live measurement at 22:24 UTC: one normal configured-admin
+internal HTTP GET, 200, complete 427,709-byte HTML, headers 4.959 s / full 4.960 s.
+Exact server marker 13f17a0c38bece5f996520ff0c8fa074_coverage_live confirmed 200;
+normal logout and exact staging cleanup verified. Twenty-second bound, no retry
+or cold/browser/network certification. This is the existing serving reader.
+
+One additional standalone runtime-role, read-only repeatable-read comparison
+using the actual persistent publication stopped before any page request because
+the publication was unavailable. Subsequent catalog check: both input revision
+changed and expired, age 117 s; another automatic Coverage run active. No new
+maintained-reader time or parity claim. Connection closed and both diagnostic
+host/container paths removed. Maintained reader remains disabled. Next assess
+publication availability/concurrency and remaining filter gates before cutover;
+do not treat a completed generation as continuously current.
+
+### Prior .30 rollout and privilege repair preparation
+
 727df0e5 / 0.144.30 pushed origin then a-m-rose after approval; automatic rollout
 applied 0423. Policy row is 1/domain_lock, and dispatch now reaches the producer.
 All services healthy in subsequent checks; worker restart count remained one

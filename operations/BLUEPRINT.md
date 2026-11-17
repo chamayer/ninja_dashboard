@@ -5,10 +5,10 @@ History: [checkpoint](docs/records/OPERATIONS-CHECKPOINT-2026-11-02.md); verify 
 
 ## PLAN-056 — Platform performance recovery
 
-**Current work:** 727df0e5/.30 live; 0423 applied, worker stable after one rollout
-restart; all services healthy. Coverage producer fails on five missing publisher
-SELECT grants. Audited all inputs/policies; 0424/.31 prepared, needs explicit
-commit/push/migration approval. Reader disabled; live 4.369 s, candidate 1.624 s.
+**Current work:** .31 live Coverage 4.960 s. Publication expired at age 94 s
+with inputs current. Local fix polls every 15 s and queues 25 s before expiry.
+Candidate uses maintained HTML when ready and the existing reader otherwise.
+Validate routing, parity and live latency before declaring cutover complete.
 Contract: docs/decisions/0059-coverage-maintained-selection.md.
 [Scope/checkpoint](../docs/records/PLAN-056-coverage-reader-remediation.md).
 

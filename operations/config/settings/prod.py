@@ -8,6 +8,7 @@ import sys
 from .base import *
 
 DEBUG = False
+COVERAGE_MAINTAINED_READER = os.environ.get("COVERAGE_MAINTAINED_READER", "1") == "1"
 
 # ---------------------------------------------------------------------------
 # Postgres

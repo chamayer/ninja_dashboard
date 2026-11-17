@@ -14370,6 +14370,10 @@ def _computer_reporting_scope(row: dict, active_since: datetime) -> str:
 
 @login_required
 def fleet_coverage(request: HttpRequest) -> HttpResponse:
+    return _fleet_coverage(request, allow_prepared=not wants_csv(request))
+
+
+def _fleet_coverage(request: HttpRequest, *, allow_prepared: bool) -> HttpResponse:
     """Show every known Computer with its product records and required state."""
     compact_source_observations = not wants_csv(request)
     active_device_days = get_device_status_policy()["active_device_days"]
@@ -14618,7 +14622,7 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
 
     from . import coverage_page_reads, coverage_selection
 
-    prepared = getattr(settings, "COVERAGE_MAINTAINED_READER", False)
+    prepared = allow_prepared and getattr(settings, "COVERAGE_MAINTAINED_READER", False)
     prepared_metadata = None
     selected = None
     if prepared:
@@ -14626,9 +14630,7 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
             request, "_coverage_metadata", None
         ) or coverage_page_reads.metadata(days=active_device_days)
         if prepared_metadata is None:
-            return render(
-                request, "coverage_unavailable.html", {"active_section": "inventory"}, status=503
-            )
+            return _fleet_coverage(request, allow_prepared=False)
         platforms = sorted(
             prepared_metadata["platforms"],
             key=lambda name: _computer_card_order({"platform": name}),
@@ -14679,9 +14681,7 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
             )
         )
         if selection["availability"] != "ready":
-            return render(
-                request, "coverage_unavailable.html", {"active_section": "inventory"}, status=503
-            )
+            return _fleet_coverage(request, allow_prepared=False)
         selected = selection["selection"]
         export_ids = list(selected[5]) if wants_csv(request) else []
         if wants_csv(request):
