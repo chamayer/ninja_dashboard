@@ -2,6 +2,20 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.144.25] — 2026-11-17 — Reduce Coverage fleet preparation
+
+### Fixed
+
+- Coverage source-record totals use a protected metadata-only reader, preserving
+  attached/unattached and current/withdrawn populations while skipping unused
+  per-record lifecycle-policy resolution. Migration 0419 adds the count reader.
+- Requirement presence computes platform and any-platform groups in one pass.
+- Fleet filtering/card preparation uses compact platform facts; full display
+  fields and cleanup-review URLs are built only for selected page rows.
+- Offline cutoffs are calculated once per Computer and reused by status/filter
+  decisions. Existing filters, totals, lifecycle policy and CSV selection remain.
+- No cache, new store, role, service or runtime dependency; latency unverified.
+
 ## [0.144.24] — 2026-11-17 — Bound Coverage detail and omit shared count queries
 
 ### Changed

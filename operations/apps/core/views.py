@@ -14480,18 +14480,17 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
             # exemptions are shown through s1_exempt).
             cur.execute(
                 """
-                WITH presence AS MATERIALIZED (
-                    SELECT presence.device_id, presence.entity_type, presence.platform,
+                WITH presence_by_requirement AS MATERIALIZED (
+                    SELECT presence.device_id, presence.entity_type,
+                           CASE WHEN GROUPING(presence.platform) = 1 THEN 'any'
+                                ELSE presence.platform END AS platform,
                            BOOL_OR(presence.reported_online) AS online
                     FROM operations.device_agent_presence_current presence
                     WHERE presence.tenant_id = 1
-                    GROUP BY presence.device_id, presence.entity_type, presence.platform
-                ), presence_by_requirement AS MATERIALIZED (
-                    SELECT device_id, entity_type, platform, online FROM presence
-                    UNION ALL
-                    SELECT device_id, entity_type, 'any' AS platform, BOOL_OR(online)
-                    FROM presence
-                    GROUP BY device_id, entity_type
+                    GROUP BY GROUPING SETS (
+                        (presence.device_id, presence.entity_type, presence.platform),
+                        (presence.device_id, presence.entity_type)
+                    )
                 )
                 SELECT c.slug AS client_slug,
                        c.display_name AS client_name,
@@ -14685,16 +14684,10 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
             # the same identities without the rich metadata JSON projection.
             cur.execute(
                 """
-                SELECT observation.source_name, COUNT(*)::int
-                  FROM operations.v_device_source_record_lifecycle_current observation
-                 WHERE observation.tenant_id = 1
-                   AND (
-                       observation.entity_type LIKE 'agent.%%'
-                       OR observation.entity_type = 'vm.guest'
-                       OR observation.entity_type = 'cmdb.asset'
-                   )
-                 GROUP BY observation.source_name
-                """
+                SELECT source_name, record_count
+                FROM operations.read_coverage_source_record_counts(%s)
+                """,
+                [1],
             )
             source_record_counts = {name: count for name, count in cur.fetchall()}
 
@@ -15006,13 +14999,7 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
 
     for row in inventory_rows:
         row.update(aggregate_hudu(row.pop("hudu_records")))
-        if row["device_id"] and row["lifecycle_status"] == "pending_cleanup":
-            row["review_url"] = (
-                f"{reverse('findings_queue')}?"
-                f"{urlencode({'type': 'device_missing_from_source', 'status': 'all', 'subject_id': row['device_id']})}"
-            )
-        else:
-            row["review_url"] = ""
+        row["active_since"] = active_since(row)
 
     def observation_age_label(at: datetime | None) -> str:
         if at is None:
@@ -15051,7 +15038,7 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
         observation = row["source_observations"].get(platform)
 
         record_status = _inventory_record_status(
-            platform, row, source_status, observation, source_contact_at, active_since(row)
+            platform, row, source_status, observation, source_contact_at, row["active_since"]
         )
 
         record_age = ""
@@ -15073,6 +15060,18 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
         else:
             rule_status = "N/A"
             rule_label = "N/A"
+
+        if not presentation:
+            # Filters/cards need compact facts; display-only fields belong to
+            # the selected page (or the explicitly requested CSV batch).
+            return {
+                "platform": platform,
+                "record_status": record_status,
+                "record_age": record_age,
+                "rule_status": rule_status,
+                "rule_label": rule_label,
+                "possible_match": possible_match,
+            }
 
         record_tooltip = {
             "Online": f"{platform} currently reports this Computer online.",
@@ -15188,7 +15187,7 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
                     cell["record_status"] == "Offline" for cell in named_products.values()
                 ),
                 **{
-                    scope: _computer_reporting_scope(row, active_since(row)) == scope
+                    scope: _computer_reporting_scope(row, row["active_since"]) == scope
                     for scope in ("online_anywhere", "offline_recent", "not_reporting")
                 },
                 "no_product_records": not has_named_record,
@@ -15262,7 +15261,7 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
     )
     operations_counts = dict.fromkeys((scope for _, scope in operations_statuses), 0)
     for inventory_row in inventory_rows:
-        operations_counts[_computer_reporting_scope(inventory_row, active_since(inventory_row))] += 1
+        operations_counts[_computer_reporting_scope(inventory_row, inventory_row["active_since"])] += 1
     operations_card = {
         "computer_total": len(inventory_rows),
         "total_url": _coverage_filter_url(),
@@ -15304,7 +15303,7 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
                     else "Offline"
                     if (
                         inventory_row["last_contact_at"] is not None
-                        and inventory_row["last_contact_at"] >= active_since(inventory_row)
+                        and inventory_row["last_contact_at"] >= inventory_row["active_since"]
                     )
                     else "Stale"
                 ] += 1
@@ -15719,6 +15718,12 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
 
     for row in device_rows:
         row["source_observations"] = source_observations_by_device.get(row["device_id"], {})
+        row["review_url"] = (
+            f"{reverse('findings_queue')}?"
+            f"{urlencode({'type': 'device_missing_from_source', 'status': 'all', 'subject_id': row['device_id']})}"
+            if row["device_id"] and row["lifecycle_status"] == "pending_cleanup"
+            else ""
+        )
         row["platform_cells_by_name"] = {
             platform: inventory_platform_cell(row, platform, presentation=True)
             for platform in platforms
