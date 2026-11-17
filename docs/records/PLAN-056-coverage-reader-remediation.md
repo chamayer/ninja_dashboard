@@ -2,6 +2,19 @@
 
 ## Active resume checkpoint — 2026-11-17
 
+Deployment continuation: user explicitly approved migration 0422 and automatic
+deployment. e6264e3d pushed origin then a-m-rose; both remote hashes confirmed.
+Automatic rollout applied 0422; Operations healthy and deployed views.py matches
+the committed blob hash. Ingest/Jobs restart during jobs_register_definition:
+`Invalid Jobs definition snapshot`. The new job's `coverage` lane is not among
+the database API's five admitted lanes (migration 0184); Python registry checks
+did not enforce that contract. Prepared one-line change to existing `evaluation`
+lane and patch release 0.144.29. No additional migration or reader enablement.
+Next approve this recovery commit/push, then verify all services and maintenance.
+No serving-file hotpatch, manual migration, rollback or separate redeploy.
+
+### Prior commit preparation and validation
+
 Commit authorized by the user's `commit + push` instruction. This is an
 incomplete, disabled candidate, so VERSION/CHANGELOG remain at 0.144.28 under
 the no-version-bump-for-incomplete-work rule. Push remains gated on explicit

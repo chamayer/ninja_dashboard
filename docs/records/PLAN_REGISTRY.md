@@ -11,8 +11,8 @@
 - Source: docs/plans/PLAN-056-platform-performance-assessment.md
 - Section: PLAN-056 — Platform performance recovery
 - Related plans: Supersedes PLAN-041, PLAN-044, PLAN-047, PLAN-048, PLAN-049, PLAN-050, PLAN-053 and PLAN-054. All unfinished work and evidence are routed through the consolidation record; no independent execution remains in those plans.
-- Resume gate: PLAN-056 active. Maintained reader disabled; 0422 would enable schema/hooks/Jobs maintenance on deployment. Representative full HTML/context and multi-batch CSV parity passed. Optimized default sample 1.624 s vs 5.455 s; cold/production target not certified. Next persistent schema/access/concurrency/maintenance and remaining filter edges before cutover. Local Docker unresponsive; no local DB run. Commit approved; push requires explicit migration 0422 and automatic deployment inclusion. Handoff: operations/BLUEPRINT.md; evidence: docs/records/PLAN-056-coverage-reader-remediation.md.
-- Last checked: 2026-11-17 (resumed local candidate against HEAD 7e8e44e5; standalone runtime-role temporary-table comparison, no persistent migration or serving cutover. Prior deployed state/freshness not reverified; prior page pass remains in docs/records/PLAN-056-page-remeasurement-2026-11-17.md).
+- Resume gate: PLAN-056 active. e6264e3d pushed to both remotes after explicit migration/deployment approval; 0422 applied. Ingest/Jobs startup rejects the new unsupported coverage lane. Existing evaluation-lane fix and 0.144.29 prepared; needs recovery commit/push approval. Reader remains disabled. After recovery, persistent access/concurrency/maintenance and remaining filter edges precede cutover. Handoff: operations/BLUEPRINT.md; evidence: docs/records/PLAN-056-coverage-reader-remediation.md.
+- Last checked: 2026-11-17 (both remotes e6264e3d; automatic rollout observed, 0422 recorded applied, Operations healthy and committed file hash matched. Ingest and Jobs worker restart-loop during definition registration; Postgres healthy. Prepared registry lane fix passes local lane-contract, compilation, registry and whitespace checks).
 
 ## PLAN-055 — Jobs execution-scope claim race
 

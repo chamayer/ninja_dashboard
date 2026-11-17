@@ -265,7 +265,7 @@ _RAW_DEFINITIONS = (
     JobDefinition(
         "coverage-read-model", "Publish Coverage facts",
         "Maintain compact Coverage selection facts from protected current inputs.",
-        "evaluators", "coverage", "", "coverage_read_model", "operator_job_runs",
+        "evaluators", "evaluation", "", "coverage_read_model", "operator_job_runs",
         "ingest.coverage_read_model.refresh", run_all=False,
         handler_version="coverage-read-model-v1", timeout_minutes=2,
         resource_keys=("tenant:{tenant_id}:coverage-read-model",),

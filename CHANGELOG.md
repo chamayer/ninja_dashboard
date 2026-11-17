@@ -2,6 +2,16 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.144.29] — 2026-11-17 — Repair Coverage Jobs registration
+
+### Fixed
+
+- Register the new Coverage maintenance job in the existing evaluation lane.
+  The unsupported coverage lane caused database definition registration to
+  reject startup of ingest and the Jobs worker after e6264e3d deployed.
+- No additional migration. Migration 0422 is already applied; the maintained
+  Coverage reader remains disabled pending its lifecycle/access validation.
+
 ## [0.144.28] — 2026-11-17 — Limit Coverage presence aggregation
 
 ### Fixed

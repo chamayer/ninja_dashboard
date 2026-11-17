@@ -5,11 +5,11 @@ History: [checkpoint](docs/records/OPERATIONS-CHECKPOINT-2026-11-02.md); verify 
 
 ## PLAN-056 — Platform performance recovery
 
-**Current work:** Disabled Coverage candidate passes sampled HTML/context/CSV
-parity. Withdrawal-only link lookups cut detail SQL from .462 to .036 s;
-default sample 1.624 s vs 5.455 s. Next schema/access/concurrency/maintenance
-validation; local Docker unresponsive. Commit approved; reader disabled. Push
-awaits explicit 0422/automatic-deployment inclusion; cold target unproven.
+**Current work:** e6264e3d pushed to both remotes with explicit 0422 approval;
+migration applied and Operations healthy. Ingest/Jobs restart at definition
+registration: unsupported coverage lane. One-line evaluation-lane fix and .29
+release prepared; next obtain commit/push approval and verify startup. Reader
+disabled; parity sample 1.624 s. Lifecycle/access/cold validation remains open.
 Contract: docs/decisions/0059-coverage-maintained-selection.md.
 [Scope/checkpoint](../docs/records/PLAN-056-coverage-reader-remediation.md).
 
