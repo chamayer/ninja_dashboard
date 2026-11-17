@@ -11091,10 +11091,7 @@ def patching_queue(request: HttpRequest) -> HttpResponse:
     # Base Finding queryset for tiles and main table — everything
     # inherits status + client filters. Type filter applied only to
     # the main table (tiles remain per-type navigators).
-    base_qs = Finding.objects.filter(
-        tenant_id=1,
-        finding_type__issue_category=finding_registry.PATCHING,
-    ).filter(~Q(subject_type=Finding.SubjectType.DEVICE) | Q(id__in=client_owned_finding_ids(1)))
+    base_qs = patching_reads.findings_queryset(1)
     if status_filter == "active":
         base_qs = base_qs.filter(status__in=_FINDING_ACTIVE_STATUSES)
     elif status_filter and status_filter != "all":
@@ -11135,10 +11132,9 @@ def patching_queue(request: HttpRequest) -> HttpResponse:
         )
 
     # Per-type tile counts respect every current filter.
-    tile_counts = {
-        row["finding_type__name"]: row["cnt"]
-        for row in (base_qs.values("finding_type__name").annotate(cnt=Count("id")))
-    }
+    tile_counts, finding_total, finding_ids = patching_reads.finding_page(
+        base_qs, type_filter, request.GET.get("page")
+    )
 
     def _type_tile_href(ftname: str) -> str:
         params: list[tuple[str, str]] = [("type", ftname)]
@@ -11601,14 +11597,14 @@ def patching_queue(request: HttpRequest) -> HttpResponse:
     if type_filter:
         qs = qs.filter(finding_type__name__in=type_filter)
 
-    _SEV_ORDER = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
-    findings = sorted(
-        qs,
-        key=lambda f: (
-            _SEV_ORDER.get(f.severity, 9),
-            -(f.last_detected_at or f.last_seen_at).timestamp(),
-        ),
-    )
+    qs = patching_reads.ordered_findings(qs)
+    is_csv = wants_csv(request)
+    if is_csv:
+        findings = qs.iterator(chunk_size=500)
+    else:
+        # Reapply the protected selector when hydrating only the chosen IDs.
+        # Concurrent ownership changes may remove a row, never widen access.
+        findings = qs.filter(id__in=finding_ids) if finding_ids else []
 
     def _detail(finding: Finding) -> str:
         d = finding.finding_details or {}
@@ -11628,7 +11624,7 @@ def patching_queue(request: HttpRequest) -> HttpResponse:
             return f"{d.get('backlog_count', '?')} approved updates not installed"
         return ""
 
-    rows = [
+    rows = (
         {
             "f": f,
             "detail": _detail(f),
@@ -11639,9 +11635,9 @@ def patching_queue(request: HttpRequest) -> HttpResponse:
             ),
         }
         for f in findings
-    ]
+    )
 
-    if wants_csv(request):
+    if is_csv:
         return csv_response(
             rows,
             columns=[
@@ -11658,8 +11654,9 @@ def patching_queue(request: HttpRequest) -> HttpResponse:
             filename_stem="patching",
         )
 
-    paginator = Paginator(rows, 50)
+    paginator = Paginator(range(finding_total), 50)
     page = paginator.get_page(request.GET.get("page"))
+    page.object_list = list(rows)
 
     clients = Client.objects.filter(tenant_id=1, deleted_at__isnull=True).order_by("display_name")
 

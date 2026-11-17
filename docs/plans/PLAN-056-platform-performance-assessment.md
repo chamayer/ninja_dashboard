@@ -17,7 +17,8 @@ the [release checkpoint](../records/PLAN-056-worktree-reconciliation.md). No loc
 
 ## Current checkpoint and evidence
 
-Deployed: `0e04294a` / 0.144.25, 0419 applied. Resume via the
+Deployed: `0891738b` / 0.144.26, 0420/0421 applied; healthy services and protected
+Software current/completed with data observed on resume. Resume via the
 [Operations checkpoint](../../operations/BLUEPRINT.md).
 [Triage](../records/PLAN-056-emergency-triage-2026-11-17.md) retains live evidence;
 [Source Records comparison](../records/PLAN-056-source-records-contract-check.md)
@@ -49,9 +50,10 @@ Home: <=1.5 s ordinary / <2 s hard maximum including cold navigation.
 
 ## Next action
 
-Push approved permanent Software recovery/readiness .26 including 0420/0421;
-observe rollout and protected availability, no tests/timing pass. [Scope](../records/PLAN-056-software-emergency-2026-11-17.md).
-Coverage .25 latency and broader acceptance remain open.
+Push approved [Patching .27](../records/PLAN-056-patching-reader-implementation.md)
+origin then mirror; observe rollout. PostgreSQL behavior unverified.
+[15-page results](../records/PLAN-056-page-remeasurement-2026-11-17.md): Home misses
+its hard maximum. Original baseline retained; broader acceptance stays open.
 
 ## Follow-up — reassess Home information after domain readers
 

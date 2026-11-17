@@ -1,14 +1,105 @@
-"""Domain-owned Home totals from the Patching Computer population."""
+"""Domain-owned Patching population and finding readers."""
 
 from __future__ import annotations
 
+import json
 from datetime import datetime, timedelta
 
+from django.core.exceptions import EmptyResultSet
 from django.db import connection, transaction
+from django.db.models import Case, F, IntegerField, Q, Value, When
+from django.db.models.functions import Coalesce
 from django.utils import timezone
 
-from .computer_reads import current_computer_sql
+from . import finding_registry
+from .computer_reads import current_computer_sql, finding_has_current_owner
 from .device_status import get_device_status_policy, recent_contact_sql
+from .models import Finding
+
+
+def findings_queryset(tenant_id: int):
+    """Root Patching selector; device findings must retain their effective owner.
+
+    The correlated predicate avoids enumerating every device finding ID in the
+    tenant. Keep this as a root query (the raw correlation names its table);
+    page hydration uses concrete IDs rather than nesting this queryset.
+    """
+    return Finding.objects.filter(
+        tenant_id=tenant_id,
+        finding_type__issue_category=finding_registry.PATCHING,
+    ).filter(~Q(subject_type=Finding.SubjectType.DEVICE) | Q(finding_has_current_owner()))
+
+
+def ordered_findings(queryset):
+    """Keep severity/detection priority, with a stable tie-breaker for paging."""
+    return queryset.alias(
+        _patching_severity=Case(
+            *(
+                When(severity=value, then=Value(rank))
+                for rank, value in enumerate(("critical", "high", "medium", "low", "info"))
+            ),
+            default=Value(9),
+            output_field=IntegerField(),
+        ),
+        _patching_detected=Coalesce("last_detected_at", "last_seen_at"),
+    ).order_by("_patching_severity", "-_patching_detected", "id")
+
+
+def finding_page(queryset, type_filter: list[str], page_number):
+    """Count tiles and select at most 50 ordered IDs in one statement snapshot.
+
+    The materialized selection carries scalar keys only, never finding details
+    or related-object payloads. Type filtering affects the list, not its tiles.
+    Match Paginator.get_page: invalid input selects first, out-of-range last.
+    """
+    try:
+        number = int(page_number)
+    except (TypeError, ValueError):
+        number = 1
+    selected = (
+        ordered_findings(queryset)
+        .annotate(
+            _patching_type=F("finding_type__name"),
+            _patching_severity=F("_patching_severity"),
+            _patching_detected=F("_patching_detected"),
+        )
+        .order_by()
+        .values("id", "_patching_type", "_patching_severity", "_patching_detected")
+    )
+    try:
+        sql, params = selected.query.sql_with_params()
+    except EmptyResultSet:
+        return {}, 0, []
+    # Compiled SQL/parameters come only from the normalized ORM selector.
+    with connection.cursor() as cursor:
+        cursor.execute(
+            f"""
+            WITH selected AS MATERIALIZED ({sql}),
+            tiles AS (
+                SELECT _patching_type, count(*) AS total FROM selected
+                GROUP BY _patching_type
+            ), filtered AS MATERIALIZED (
+                SELECT * FROM selected
+                WHERE cardinality(%s::text[]) = 0 OR _patching_type = ANY(%s::text[])
+            ), totals AS (
+                SELECT count(*) AS total FROM filtered
+            ), bounds AS (
+                SELECT total, CASE WHEN %s::numeric < 1 OR %s::numeric >
+                    greatest(1, (total + 49) / 50)
+                    THEN greatest(1, (total + 49) / 50) ELSE %s::numeric END AS number
+                FROM totals
+            )
+            SELECT (SELECT coalesce(jsonb_object_agg(_patching_type, total), '{{}}'::jsonb)
+                    FROM tiles), bounds.total,
+                   ARRAY(SELECT id FROM filtered
+                         ORDER BY _patching_severity, _patching_detected DESC, id
+                         LIMIT 50 OFFSET (SELECT ((number - 1) * 50)::bigint FROM bounds))
+            FROM bounds
+            """,
+            (*params, type_filter, type_filter, number, number, number),
+        )
+        tiles, total, ids = cursor.fetchone()
+    return json.loads(tiles) if isinstance(tiles, str) else tiles, total, ids
 
 
 def safe_ninja_device_id_sql(alias: str) -> str:
@@ -37,7 +128,8 @@ def home_summary(*, now: datetime | None = None, policy: dict[str, int] | None =
         cursor.execute("SELECT to_regclass('ninja_patches.patch_outcome_counts') IS NOT NULL")
         has_outcome_counts = cursor.fetchone()[0]
         outcome_source = (
-            "ninja_patches.patch_outcome_counts" if has_outcome_counts
+            "ninja_patches.patch_outcome_counts"
+            if has_outcome_counts
             else "ninja_patches.patch_facts"
         )
         outcome_count = "fact.outcome_count" if has_outcome_counts else "1"

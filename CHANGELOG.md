@@ -2,6 +2,18 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.144.27] — 2026-11-17 — Bound Patching finding reads
+
+### Fixed
+
+- Patching uses correlated effective-ownership checks instead of enumerating
+  tenant-wide device finding IDs. Existing tenant, namespace and filter rules remain.
+- Tile counts, filtered total and ordered page IDs share one compact statement;
+  HTML loads finding details only for the selected 50 rows. Severity/detection
+  ordering gains a stable ID tie-breaker. Complete CSV fetches findings in batches.
+- No migrations, new cache or publication lifecycle. PostgreSQL execution and
+  deployed latency remain unverified; local system checks pass.
+
 ## [0.144.26] — 2026-11-17 — Recover Software inputs and gate publication readiness
 
 ### Fixed

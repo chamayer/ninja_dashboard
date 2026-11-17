@@ -92,3 +92,30 @@ is source-reviewed only; user now approves commit/push including 0420/0421 and
 automatic deployment. Prepare .26, push origin then mirror, observe rollout and
 read actual protected Software availability. No tests or timing pass.
 Temporary diagnostic/recovery files were removed from host/container staging.
+
+## Resume verification — 2026-11-17
+
+Git reconciliation found release commit `0891738b` / 0.144.26 already present
+on both origin/master and a-m-rose/master. The previous push-next checkpoint
+was stale; no additional push or deployment trigger was issued on resume.
+
+At 18:25 UTC, all four production services were running/healthy. Ingest reports
+0.144.26. Deployed 0420/0421, shared Jobs registry and ingest queue SHA-256
+hashes match the clean local release files after LF normalization. Django's
+migration listing confirms 0420/0421 applied. One bounded read-only call to
+read_software_overview through the actual Operations runtime connection,
+with tenant context, reports current/completed and has_data=true. Summary
+values were discarded. The reviewed reader diagnostic was removed from both
+host and container staging; absence confirmed.
+
+No tests, HTTP request/timing pass, queue manipulation, recovery run or service
+restart occurred on resume. This confirms deployed availability at one instant;
+it does not certify sustained freshness, all failure scenarios or page acceptance.
+Three pre-existing untracked recovery scripts were preserved without execution.
+
+Deployment guidance conflict: docs/operations.md requests an immediate separate
+redeploy after push; root AGENTS.md explicitly prohibits that trigger. The root
+instruction governs this task. No deployment action was needed on resume.
+
+Next: review Software acceptance and define a bounded verification scope before
+any further performance or sustained-freshness campaign. PLAN-056 remains active.

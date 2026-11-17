@@ -8,8 +8,8 @@ History: [checkpoint](docs/records/OPERATIONS-CHECKPOINT-2026-11-02.md); verify 
 **Goal:** Recover Home responsiveness and Software freshness; preserve access,
 population, input/claim fences and expiry contracts.
 
-**Deployed:** 0e04294a / 0.144.25 on both remotes and production; services healthy;
-0419 applied. .25 latency is unmeasured. [Measurement](../docs/records/PLAN-056-release-0.144.24.md).
+**Deployed:** 0891738b / 0.144.26 on both remotes and production; services healthy;
+0420/0421 applied. .26 latency is unmeasured. [Prior measurement](../docs/records/PLAN-056-release-0.144.24.md).
 Recorded full preparation 47.93 s; reuse 14.95 s; details in linked evidence.
 Full 15-page acceptance is not claimed.
 
@@ -20,13 +20,21 @@ timestamps/expiry; detailed evidence is linked below.
 Earlier readiness memoization candidate withdrawn; later Home .23 now deployed.
 Detailed history and limitations remain in linked records.
 
-**Checkpoint/next:** Software recovered on .25: actual app reader current/completed
-with data; normal populated HTML 0.820 s, logout confirmed. No tests. User now
-approves permanent .26 commit/push including 0420/0421: audited bounded replay
-for both ownership handlers; scheduler + central claim readiness gate across
-all Software publication triggers. Freshness/claim/access fences unchanged.
-Next push origin then mirror, observe automatic rollout and protected availability;
-no tests or timing pass. [Scope/security/evidence](../docs/records/PLAN-056-software-emergency-2026-11-17.md).
+**Checkpoint/next:** Patching candidate implemented locally: correlated ownership,
+ordered page IDs before details, consistent counts and complete batched CSV.
+Django check passes; PostgreSQL execution/speedup unverified. User now approves
+commit/push: prepare .27 (no new migrations), push origin then mirror and observe
+automatic rollout. Keep validation light; no separate redeploy/timing campaign.
+[Implementation/evidence](../docs/records/PLAN-056-patching-reader-implementation.md).
+[Page results](../docs/records/PLAN-056-page-remeasurement-2026-11-17.md).
+Resume reconciled Git and live state at 18:25 UTC Nov 17:
+.26 is on both remotes; changed runtime hashes match; four services healthy;
+0420/0421 applied. Actual Operations reader current/completed with data.
+Audited ownership replay and shared scheduler/claim readiness gate are deployed.
+Freshness/claim/access fences unchanged. Diagnostic staging removed; no tests
+or timing pass during that earlier resume. Sustained freshness and full-page
+acceptance remain open.
+[Scope/security/evidence](../docs/records/PLAN-056-software-emergency-2026-11-17.md).
 Coverage .25 remains unmeasured; its evidence stays in linked records.
 
 **Release safety:** Origin then mirror; push automatically deploys. Protect real

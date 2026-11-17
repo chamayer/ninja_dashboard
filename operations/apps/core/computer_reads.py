@@ -11,7 +11,7 @@ from __future__ import annotations
 from uuid import UUID
 
 from django.db import connection, transaction
-from django.db.models import Count, Q, QuerySet
+from django.db.models import BooleanField, Count, Q, QuerySet
 from django.db.models.expressions import RawSQL
 from django.http import Http404
 
@@ -64,6 +64,25 @@ def client_owned_finding_ids(tenant_id: int) -> RawSQL:
         "AND owner.state IN ('resolved', 'decision_protected') "
         "WHERE f.tenant_id = %s AND f.subject_type = 'device'",
         [tenant_id],
+    )
+
+
+def finding_has_current_owner() -> RawSQL:
+    """Ownership predicate for a root Finding query, without an all-finding ID scan.
+
+    Tenant/client/state rules match client_owned_finding_ids. This correlation
+    names the root findings table; callers must not nest or alias that queryset.
+    """
+    return RawSQL(
+        """EXISTS (
+            SELECT 1 FROM operations.computer_client_ownership owner
+             WHERE owner.tenant_id = findings.tenant_id
+               AND owner.device_id = findings.subject_id
+               AND owner.effective_client_id = findings.client_id
+               AND owner.state IN ('resolved', 'decision_protected')
+        )""",
+        [],
+        output_field=BooleanField(),
     )
 
 
