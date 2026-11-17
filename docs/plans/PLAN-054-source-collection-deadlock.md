@@ -1,5 +1,9 @@
 # PLAN-054 — Source collection deadlock repair
 
+> Superseded by [PLAN-056](PLAN-056-platform-performance-assessment.md) on 2026-11-09.
+> Historical scope, decisions and evidence follow; status, next actions and
+> approval claims below are historical. Execute only the consolidated plan.
+
 ## Goal and scope
 
 Release the source/software write coordination repair as 0.144.2 on current

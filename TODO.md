@@ -7,6 +7,15 @@ Read Inbox at the start of every session.
 
 ## Inbox
 
+- [ ] **PLAN-056 resource interaction — deferred by user (2026-11-10):**
+      Revisit after the larger demonstrated performance defects are fixed and
+      remeasured, if residual latency or a capacity/scheduling decision warrants
+      it. Not a prerequisite to sequencing those fixes. Retained evidence:
+      [resource review](docs/records/PLAN-056-resource-interaction.md);
+      [bounded protocol and gated attempt](docs/records/PLAN-056-resource-correlation-execution.md).
+      No retry or new monitoring is authorized; revise the question/protocol to
+      fit the remaining problem and obtain scoped external approval if needed.
+
 - [ ] **Host resource tuning after CPU attribution (2026-11-02):** review
       Zabbix SNMP polling cadence, SentinelOne agent CPU, and Graylog/UniFi
       memory budgets with their owners. Measurements and limits are in

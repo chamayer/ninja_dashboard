@@ -3,6 +3,10 @@
 Status: Proposed
 Date: 2026-10-21
 
+Platform baseline: [root ADR-0006](../../../docs/decisions/0006-platform-read-contract.md).
+This extension retains Computer-specific population/evidence rules. Its Proposed
+status is unchanged; referencing the baseline does not claim implementation.
+
 ## Context
 
 PLAN-012 originally assumed another prepared inventory read model to improve

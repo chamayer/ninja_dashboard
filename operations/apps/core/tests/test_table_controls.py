@@ -51,7 +51,7 @@ def test_every_template_with_pagination_is_accounted_for():
 def test_pages_with_their_own_table_scripts_opt_out():
     home = (TEMPLATES / "home.html").read_text(encoding="utf-8")
     org_index = (TEMPLATES / "org_index.html").read_text(encoding="utf-8")
-    assert 'id="client-table" data-no-sort' in home
+    assert "<table" not in home
     assert 'id="attention-table" data-no-sort' in org_index
     assert 'id="directory-table" data-no-sort' in org_index
 

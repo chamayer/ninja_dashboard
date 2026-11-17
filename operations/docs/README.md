@@ -5,6 +5,7 @@
 - `operations.md` — module operations, deployment validation, and recovery.
 - `glossary.md` — required terminology for entity, identity, and scope work.
 - `decisions/` — durable Operations architectural decisions.
+- [Platform read contract, root ADR-0006](../../docs/decisions/0006-platform-read-contract.md) — common read obligations; domain contracts extend these without duplication.
 - [Software summary contract, ADR-0058](decisions/0058-software-summary-publication-contract.md) — accepted PLAN-056 item 1 publication and consumer contract.
 - `runbooks/` — condition-specific operator procedures.
 - `archive/` — historical plans and research; never automatic context.

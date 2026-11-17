@@ -9,6 +9,7 @@
 - `operations.md` — deployment, maintenance, and recovery procedures.
 - `current-state.md` — verified state only; check its status date first.
 - `decisions/` — durable root architectural decisions.
+- [Platform read contract, ADR-0006](decisions/0006-platform-read-contract.md) — common obligations for interactive reads and domain extensions.
 
 ## Module documentation
 

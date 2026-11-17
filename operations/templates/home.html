@@ -1,127 +1,80 @@
 {% extends "base.html" %}
 
-{% block title %}Dashboard{% endblock %}
+{% block title %}Operations{% endblock %}
 
 {% block content %}
 <style>
-  .dashboard-heading { display:flex; justify-content:space-between; gap:1rem; align-items:flex-start; margin-bottom:1rem; }
-  .dashboard-heading h1 { margin-bottom:.2rem; }
-  .dashboard-heading p { margin:0; color:var(--muted); }
-  .dashboard-scope { text-align:right; font-size:.82rem; }
-  .dashboard-scope strong { display:block; }
-  .operations-areas { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:.7rem; margin-bottom:1rem; }
-  .area-card { display:block; padding:.9rem 1rem; color:inherit; text-decoration:none; }
-  .area-head h2 { margin:0; font-size:.9rem; }
-  .area-value { display:block; margin-top:.55rem; color:#1e40af; font-size:1.55rem; font-weight:750; }
-  .area-value-pair { display:flex; align-items:baseline; gap:.35rem; margin-top:.55rem; font-size:1.55rem; font-weight:750; }
-  .area-value-pair .area-value { display:inline; margin:0; font-size:inherit; }
-  .area-value-good { color:#166534; }
-  .area-value-bad { color:#b91c1c; }
-  .area-value-separator { color:var(--muted); font-size:.9em; }
-  .area-label { display:block; min-height:1.8em; color:var(--muted); font-size:.68rem; line-height:1.3; }
-  .area-detail { margin:.65rem 0 0; padding-top:.55rem; border-top:1px solid var(--border); color:#374151; font-size:.72rem; }
-  .area-trend { margin:.4rem 0 0; color:#374151; font-size:.72rem; }
-  .area-updated { margin:.35rem 0 0; color:var(--muted); font-size:.65rem; }
-  .dashboard-briefing { margin-bottom:1rem; }
-  .briefing-card { padding:0; overflow:hidden; }
-  .briefing-head { display:flex; justify-content:space-between; align-items:baseline; gap:1rem; padding:.8rem 1rem .6rem; border-bottom:1px solid var(--border); }
-  .briefing-head h2 { margin:0; font-size:.95rem; }
-  .briefing-head a { font-size:.75rem; font-weight:700; white-space:nowrap; }
-  .briefing-list { list-style:none; margin:0; padding:0; }
-  .briefing-list li { display:grid; grid-template-columns:minmax(220px,1fr) minmax(150px,.55fr) auto; gap:.75rem; align-items:center; padding:.62rem 1rem; border-bottom:1px solid var(--border); font-size:.78rem; }
-  .briefing-list li:last-child { border-bottom:0; }
-  .briefing-list a { color:inherit; text-decoration:none; font-weight:650; }
-  .briefing-list a:hover { color:var(--accent); }
-  .briefing-list .muted { color:var(--muted); font-size:.7rem; }
-  .briefing-label { display:flex; gap:.55rem; align-items:center; min-width:0; }
-  .briefing-open { text-align:right; font-weight:700; white-space:nowrap; }
-  .briefing-severity { width:.5rem; height:.5rem; flex:0 0 auto; border-radius:999px; }
-  .briefing-severity-critical { background:#dc2626; }
-  .briefing-severity-high { background:#ea580c; }
-  .briefing-severity-medium { background:#d99a00; }
-  .briefing-severity-low,.briefing-severity-info { background:#2563eb; }
-  .client-mapping-alert { margin:0 0 .8rem; padding:.85rem 1rem; color:#7f1d1d; background:#fff1f2; border:1px solid #fecdd3; border-left:4px solid #dc2626; border-radius:7px; }
-  .client-mapping-alert h2 { margin:0; font-size:.95rem; }
-  .client-mapping-alert p { margin:.3rem 0 0; font-size:.78rem; }
-  .client-mapping-alert a { color:#991b1b; font-weight:750; }
-  .system-line { display:flex; align-items:center; gap:.9rem; margin-top:.8rem; padding:.7rem .85rem; background:#fafbfc; border:1px solid var(--border); border-radius:7px; font-size:.72rem; }
-  .system-line strong { white-space:nowrap; }
-  .system-line a { font-weight:700; white-space:nowrap; }
-  .system-line .system-links { margin-left:auto; display:flex; gap:.8rem; }
-  .client-portfolio-link { margin:.1rem 0 .85rem; text-align:right; font-size:.76rem; font-weight:700; }
-  @media (max-width:1000px) {
-    .operations-areas { grid-template-columns:repeat(2,minmax(0,1fr)); }
-    .briefing-list li { grid-template-columns:minmax(180px,1fr) minmax(130px,.6fr) auto; }
-  }
-  @media (max-width:720px) {
-    .dashboard-heading { display:block; }
-    .dashboard-scope { margin-top:.5rem; text-align:left; }
-    .operations-areas { grid-template-columns:1fr; }
-    .briefing-list li { grid-template-columns:1fr auto; }
-    .briefing-list .briefing-affected { grid-column:1 / -1; }
-    .system-line { align-items:flex-start; flex-wrap:wrap; }
-    .system-line .system-links { width:100%; margin-left:0; }
-  }
+  .start-heading { margin-bottom:1.5rem; }
+  .start-heading h1 { margin-bottom:.35rem; }
+  .start-heading p, .start-card p { color:var(--muted); }
+  .start-priority { padding:1rem 1.2rem; margin-bottom:1.2rem; border-left:4px solid var(--accent); }
+  .start-priority h2 { margin:0 0 .4rem; font-size:1rem; }
+  .start-priority p { margin:.4rem 0; }
+  .start-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:1rem; }
+  .start-card { display:block; padding:1.2rem; color:inherit; text-decoration:none; }
+  .start-card:hover, .start-card:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+  .start-card h2 { margin:0 0 .6rem; font-size:1.05rem; }
+  .start-card p { margin:0 0 1rem; line-height:1.5; }
+  .start-card span { color:var(--accent); font-weight:650; }
+  .start-card .start-count { display:block; margin-bottom:.5rem; font-size:1.4rem; font-weight:750; }
+  .start-card .start-count small { font-size:.8rem; font-weight:400; }
+  .start-admin { display:flex; flex-wrap:wrap; gap:1rem; margin-top:1.5rem; padding:1rem 1.2rem; }
+  @media(max-width:950px) { .start-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } }
+  @media(max-width:600px) { .start-grid { grid-template-columns:1fr; } }
 </style>
 
-<div class="dashboard-heading">
-  <div>
-    <h1>Operations overview</h1>
-    <p>Current totals and supported 30-day trends across Operations.</p>
-  </div>
-  <div class="dashboard-scope"><strong>Across all {{ total_clients }} clients</strong></div>
-</div>
+<header class="start-heading">
+  <h1>Operations</h1>
+  <p>Choose a work area to review its current results and take action.</p>
+</header>
 
-<section class="operations-areas" aria-label="Operational areas">
-  {% for area in domain_summaries %}
-  <a class="card area-card" href="{{ area.href }}">
-    <span class="area-head"><h2>{{ area.name }}</h2></span>
-    {% if area.value_pair %}
-    <span class="area-value-pair" aria-label="{{ area.value_label }}">
-      <span class="area-value area-value-good">{{ area.green_value }}</span>
-      <span class="area-value-separator" aria-hidden="true">/</span>
-      <span class="area-value area-value-bad">{{ area.red_value }}</span>
-    </span>
-    {% else %}<span class="area-value">{{ area.value }}</span>{% endif %}
-    <span class="area-label">{{ area.value_label }}</span>
-    <p class="area-detail">{{ area.detail }}</p>
-    {% if area.trend %}<p class="area-trend">{{ area.trend }}</p>{% endif %}
-    {% if area.updated_at %}<p class="area-updated">{{ area.updated_label|default:"Updated" }} {{ area.updated_at|timesince }} ago</p>{% endif %}
+<section class="card start-priority" aria-labelledby="start-review">
+  <h2 id="start-review">Start with Issues</h2>
+  <p>Review open actions, prioritize critical issues, and check unresolved client mapping before making changes.</p>
+  <a href="{% url 'findings_queue' %}">Review Issues →</a>
+  {% if mapping_review_url %}· <a href="{{ mapping_review_url }}">Review critical mapping issues →</a>{% endif %}
+  · <a href="{% url 'inventory_clients' %}#new-clients">Review new / discovered clients →</a>
+</section>
+
+<section class="start-grid" aria-label="Operational work areas">
+  <a class="card start-card" href="{% url 'org_index' org_slug='all' %}">
+    <h2>Clients</h2>
+    {% if clients_summary %}<span class="start-count">{{ clients_summary.total }} <small>active clients</small></span>{% else %}<p>Client count unavailable.</p>{% endif %}
+    <p>Open the client portfolio and review a client's computers, coverage and outstanding work.</p><span>Open Clients →</span>
   </a>
-  {% endfor %}
+  <a class="card start-card" href="{% url 'devices_page' %}">
+    <h2>Computers</h2>
+    {% if computers_summary %}<span class="start-count">{{ computers_summary.total }} <small>current computers</small></span><p>{{ computers_summary.active }} active · {{ computers_summary.needs_review }} pending cleanup · {{ computers_summary.retired }} retired</p>{% else %}<p>Computer counts unavailable.</p>{% endif %}
+    <p>Find a computer and inspect its identity, ownership, source evidence and current state.</p><span>Find a Computer →</span>
+  </a>
+  <a class="card start-card" href="{% url 'inventory_source_records' %}">
+    <h2>Source records</h2><p>Explore reported inventory and investigate associations or conflicting source evidence.</p><span>Explore Inventory →</span>
+  </a>
+  <a class="card start-card" href="{% url 'patching_queue' %}">
+    <h2>Patching</h2>
+    {% if patching_summary %}<span class="start-count">{{ patching_summary.included }} <small>computers in patching scope</small></span><p>{{ patching_summary.excluded }} excluded · {{ patching_summary.unmanaged }} unmanaged · {{ patching_summary.unresolved }} ownership unresolved · {{ patching_summary.unspecified }} scope unspecified</p>{% else %}<p>Patching counts unavailable.</p>{% endif %}
+    <p>Review patching scope, activity and outcomes, then follow up on patching issues.</p><span>Review Patching →</span>
+  </a>
+  <a class="card start-card" href="{% url 'fleet_coverage' %}">
+    <h2>Security &amp; coverage</h2>
+    {% if coverage_summary %}<span class="start-count">{{ coverage_summary.meeting }} / {{ coverage_summary.not_meeting }} <small>meeting / not meeting requirements</small></span><p>{{ coverage_summary.stale }} stale · {{ coverage_summary.neutral }} no applicable or evaluated verdict · {{ coverage_summary.exempt }} exempt</p>{% if coverage_summary.evaluated_at %}<p>Latest evaluation {{ coverage_summary.evaluated_at|timesince }} ago</p>{% endif %}{% else %}<p>Coverage counts unavailable.</p>{% endif %}
+    <p>Check requirement verdicts and distinguish missing coverage from stale or unevaluated evidence.</p><span>Review Coverage →</span>
+  </a>
+  <a class="card start-card" href="{% url 'software_page' %}">
+    <h2>Software</h2>
+    {% if software_summary.overview_publication.state == 'current' %}<span class="start-count">{{ software_summary.unique_titles }} <small>installed titles</small></span><p>{{ software_summary.installations }} installations · {{ software_summary.pending_decisions }} titles awaiting decision</p><p>Computed {{ software_summary.overview_publication.computed_at|timesince }} ago</p>{% elif software_summary %}<p>{{ software_summary.overview_publication.message }}</p>{% else %}<p>Software summary unavailable in this context.</p>{% endif %}
+    <p>Review published software results, installed products, decision prompts and security findings.</p><span>Review Software →</span>
+  </a>
 </section>
 
-<section class="client-portfolio-link" aria-label="Client portfolio">
-  <a href="{% url 'org_index' org_slug='all' %}">View the detailed client portfolio →</a>
-</section>
-
-<section class="dashboard-briefing" aria-label="Current operations briefing">
-  {% if client_mapping_conflict_count %}
-  <section class="client-mapping-alert" aria-label="Critical client mapping issues">
-    <h2>Critical mapping issues ({{ client_mapping_conflict_count }})</h2>
-    <p>Source-client attribution is unresolved or contradictory{% if client_mapping_conflict_clients %} for {{ client_mapping_conflict_clients }} recorded clients{% endif %}. Client-scoped inventory and coverage can be misattributed. <a href="{{ client_mapping_conflict_url }}">Review these {{ client_mapping_conflict_count }} →</a> · <a href="{{ client_mapping_all_url }}">View all mapping issues</a></p>
-  </section>
-  {% endif %}
-  <article class="card briefing-card">
-    <div class="briefing-head"><h2>What needs attention</h2><a href="{% url 'findings_queue' %}">Open all Issues →</a></div>
-    <ul class="briefing-list">
-      {% for item in attention_items %}
-      <li>
-        <span class="briefing-label"><span class="briefing-severity briefing-severity-{{ item.severity }}"></span><a href="{{ item.href }}">{{ item.label }}</a></span>
-        <span class="muted briefing-affected">{{ item.affected }}</span>
-        <a class="briefing-open" href="{{ item.href }}">Open →</a>
-      </li>
-      {% empty %}<li class="muted">No current Issues need review.</li>{% endfor %}
-    </ul>
-  </article>
-</section>
-
-<section class="system-line" aria-label="Data and processing status">
+{% if request.user.is_staff %}
+<nav class="card start-admin" aria-label="Data and processing administration">
   <strong>Data and processing</strong>
-  {% if system_status.sources_available %}<span>{{ system_status.sources_current }} of {{ system_status.sources_total }} data sources current</span>{% else %}<span>Source status unavailable</span>{% endif %}
-  <span>{{ system_status.jobs_label }}{% if system_status.jobs_running %} · {{ system_status.jobs_running }} running{% endif %}{% if system_status.jobs_waiting %} · {{ system_status.jobs_waiting }} waiting{% endif %}</span>
-  {% if system_status.processed_at %}<span>Latest source update {{ system_status.processed_at|timesince }} ago</span>{% endif %}
-  {% if request.user.is_staff %}<span class="system-links"><a href="{% url 'admin_data' %}">Data →</a><a href="{% url 'admin_jobs' %}">Jobs →</a></span>{% endif %}
-</section>
-
+  <a href="{% url 'sources_status' %}">Sources →</a>
+  {% if sources_summary.available %}<span>{{ sources_summary.current }} of {{ sources_summary.total }} sources current</span>{% else %}<span>Source status unavailable</span>{% endif %}
+  <a href="{% url 'admin_jobs' %}">Jobs →</a>
+  {% if jobs_summary.available %}<span>{{ jobs_summary.running }} running · {{ jobs_summary.waiting }} waiting · {{ jobs_summary.contained }} held for recovery</span>{% else %}<span>Job status unavailable</span>{% endif %}
+  <a href="{% url 'admin_data' %}">Data →</a>
+</nav>
+{% endif %}
 {% endblock %}

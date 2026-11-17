@@ -8,7 +8,7 @@ from django.http import HttpResponse
 from django.template.loader import get_template
 from django.test import RequestFactory
 
-from apps.core import context_processors, finding_registry, views
+from apps.core import context_processors, views
 
 
 @pytest.mark.parametrize(
@@ -25,151 +25,103 @@ def test_raw_json_object_normalizes_only_json_objects(value, expected):
     assert views._raw_json_object(value) == expected
 
 
-def test_home_composes_domain_summaries_above_attention_and_keeps_client_detail_on_clients(  # noqa: PLR0915
-    monkeypatch,
+@pytest.mark.parametrize(
+    ("staff", "software_state", "client_error"),
+    [
+        (True, "current", False),
+        (False, "current", False),
+        (False, "pending", False),
+        (False, "denied", True),
+    ],
+)
+def test_home_keeps_cheap_counts_and_excludes_expensive_readers(
+    monkeypatch, staff, software_state, client_error
 ):
-    empty_actions = {"open_actions": 0, "paused_actions": 0, "critical_actions": 0}
-    categories = {
-        name: dict(empty_actions)
-        for name in (
-            finding_registry.INVENTORY,
-            finding_registry.COLLECTION,
-            finding_registry.PATCHING,
-        )
-    }
-    categories[finding_registry.COLLECTION]["open_actions"] = 4
-    categories[finding_registry.COLLECTION]["paused_actions"] = 1
-    issue_summary = {
-        "categories": categories,
-        "open_actions": 7,
-        "critical_actions": 2,
-        "paused_actions": 1,
-        "mapping_actions": 0,
-        "mapping_clients": 0,
-    }
+    from django.core.exceptions import PermissionDenied
+    from django.db import DatabaseError
+    from django.urls import resolve
+    from apps.core import software_overview
 
-    device_policy = {"active_device_days": 30, "patch_activity_days": 35}
-    monkeypatch.setattr(views, "get_device_status_policy", lambda: device_policy)
+    resolve("/")  # Load decorated URL handlers before stubbing transactions.
+    monkeypatch.setattr(views.issue_selection, "mapping_query", lambda: {"type": "client_mapping"})
+    policy = {"active_device_days": 30, "patch_activity_days": 35}
+    policy_read = Mock(return_value=policy)
+    monkeypatch.setattr(views, "get_device_status_policy", policy_read)
+    monkeypatch.setattr(views.transaction, "atomic", lambda: nullcontext())
     monkeypatch.setattr(
         views.client_workspace_reads,
         "home_summary",
-        lambda **_kwargs: {"total": 12, "trend_30d": "CLIENTS +1 NET"},
+        Mock(side_effect=DatabaseError) if client_error else Mock(return_value={"total": 0}),
     )
+    computer_read = Mock(return_value={"total": 42, "active": 30, "needs_review": 3, "retired": 2})
+    monkeypatch.setattr(views.computer_reads_summary, "home_summary", computer_read)
     monkeypatch.setattr(
-        views.computer_reads_summary,
+        views.coverage_reads,
         "home_summary",
-        lambda **_kwargs: {"total": 42, "active": 30, "needs_review": 3, "retired": 2},
+        Mock(return_value={"meeting": 38, "not_meeting": 2, "stale": 1, "neutral": 1, "exempt": 0}),
+    )
+    patch_read = Mock(
+        return_value={
+            "included": 30,
+            "excluded": 5,
+            "unmanaged": 7,
+            "unresolved": 0,
+            "unspecified": 0,
+        }
+    )
+    monkeypatch.setattr(views.patching_reads, "home_summary", patch_read)
+    payload = {
+        "overview_publication": {"state": software_state, "message": "Pending refresh"},
+        "unique_titles": 20,
+        "installations": 99,
+        "pending_decisions": 4,
+    }
+    software_read = (
+        Mock(side_effect=PermissionDenied)
+        if software_state == "denied"
+        else Mock(return_value=payload)
+    )
+    monkeypatch.setattr(software_overview, "read_overview", software_read)
+    sources = Mock(return_value={"available": True, "current": 3, "total": 4})
+    jobs = Mock(return_value={"available": True, "running": 1, "waiting": 2, "contained": 0})
+    monkeypatch.setattr(views, "_sources_home_summary", sources)
+    monkeypatch.setattr(views, "_jobs_home_summary", jobs)
+    monkeypatch.setattr(
+        views.issue_selection,
+        "home_data",
+        Mock(side_effect=AssertionError("Expensive Issues read")),
     )
     monkeypatch.setattr(
         views.source_record_summary,
         "home_summary",
-        lambda **_kwargs: {"current": 99, "trend_30d": "INVENTORY +3 NET", "latest": None},
-    )
-    monkeypatch.setattr(
-        views.issue_selection,
-        "home_data",
-        lambda: (
-            issue_summary,
-            [
-                {
-                    "severity": "high",
-                    "label": "Review finding",
-                    "affected": "2 affected",
-                    "href": "/issues",
-                }
-            ],
-        ),
-    )
-    monkeypatch.setattr(views.issue_selection, "mapping_query", lambda: {})
-    patching_call = {}
-
-    def patching_summary(**kwargs):
-        patching_call.update(kwargs)
-        return {
-            "current_total": 42,
-            "included": 30,
-            "excluded": 5,
-            "unmanaged": 7,
-            "actively_patching": 18,
-            "actively_patching_percent": 42.9,
-            "installed_30d": 70,
-            "failed_30d": 2,
-            "latest": None,
-        }
-
-    monkeypatch.setattr(views.patching_reads, "home_summary", patching_summary)
-    monkeypatch.setattr(
-        views.coverage_reads,
-        "home_summary",
-        lambda: {
-            "meeting": 38,
-            "not_meeting": 2,
-            "stale": 1,
-            "neutral": 1,
-            "exempt": 0,
-            "evaluated_at": None,
-        },
-    )
-    monkeypatch.setattr(
-        views.software_review,
-        "home_summary",
-        lambda: {
-            "installed_titles": 20,
-            "approval_counts": {"approve": 10, "pending": 4, "reject": 3, "investigate": 3},
-            "risk_titles": 5,
-        },
-    )
-    monkeypatch.setattr(
-        views,
-        "_sources_home_summary",
-        lambda _now: {"available": True, "total": 4, "current": 3, "attention": 1, "latest": None},
-    )
-    monkeypatch.setattr(
-        views,
-        "_jobs_home_summary",
-        lambda _now: {
-            "running": 1,
-            "waiting": 2,
-            "contained": 0,
-            "label": "Jobs processing normally",
-        },
+        Mock(side_effect=AssertionError("Expensive inventory read")),
     )
 
-    def render_without_database_context(request, template_name, context):
-        rendered_context = {**context, "request": request}
-        return HttpResponse(get_template(template_name).render(rendered_context))
+    def render_page(request, template_name, context):
+        return HttpResponse(get_template(template_name).render({**context, "request": request}))
 
-    monkeypatch.setattr(views, "render", render_without_database_context)
-
+    monkeypatch.setattr(views, "render", render_page)
     request = RequestFactory().get("/")
-    request.user = SimpleNamespace(is_authenticated=True, is_staff=True)
+    request.user = SimpleNamespace(is_authenticated=True, is_staff=staff)
     response = views.home(request)
-
-    assert response.status_code == 200
-    assert patching_call["policy"] is device_policy
     content = response.content.decode()
-    assert content.index('aria-label="Operational areas"') < content.index("What needs attention")
-    assert content.index(">Clients</h2>") < content.index(">Computers</h2>")
-    assert content.index(">Computers</h2>") < content.index(">Inventory</h2>")
-    assert content.index(">Inventory</h2>") < content.index(">Patching</h2>")
-    assert ">Data collection</h2>" in content
-    assert "Security &amp; coverage" in content
-    assert ">Software</h2>" in content
-    assert ">Issues</h2>" in content
-    assert "CLIENTS +1 NET" in content
-    assert "INVENTORY +3 NET" in content
-    assert 'class="area-value area-value-good">38</span>' in content
-    assert 'class="area-value area-value-bad">2</span>' in content
-    assert "18 of 42 current" in content
-    assert "5 titles with at least one active risk finding" in content
-    assert ">4</span>" in content
-    assert "open collection actions" in content
-    assert "2 critical" in content
-    assert ">Sources</h2>" in content
-    assert ">Jobs</h2>" in content
-    assert "View the detailed client portfolio" in content
-    assert "client-table" not in content
-    assert "Review finding" in content
+    assert response.status_code == 200
+    policy_read.assert_called_once_with()
+    computer_read.assert_called_once_with(active_device_days=30)
+    assert patch_read.call_args.kwargs["policy"] is policy
+    assert sources.called == staff and jobs.called == staff
+    assert "42 <small>current computers" in content
+    assert "38 / 2" in content and "30 <small>computers in patching scope" in content
+    assert ("0 <small>active clients" in content) != client_error
+    assert ("Client count unavailable" in content) == client_error
+    assert ("20 <small>installed titles" in content) == (software_state == "current")
+    if software_state == "pending":
+        assert "Pending refresh" in content
+    if software_state == "denied":
+        assert "Software summary unavailable in this context" in content
+    assert "Review critical mapping issues" in content
+    assert "No current Issues need review" not in content
+    assert ("Data and processing administration" in content) == staff
 
 
 def test_home_template_loads():

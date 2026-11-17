@@ -1,5 +1,9 @@
 # PLAN-041 — Host CPU and runtime profiling
 
+> Superseded by [PLAN-056](PLAN-056-platform-performance-assessment.md) on 2026-11-09.
+> Historical scope, decisions and evidence follow; status, next actions and
+> approval claims below are historical. Execute only the consolidated plan.
+
 ## Status and goal
 
 Active implementation. Finish the Ninja CPU fix, release it, and measure a

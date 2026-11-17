@@ -99,10 +99,16 @@ def brand(request: HttpRequest) -> dict:
                     deleted_at__isnull=True,
                 ).order_by("display_name")
             )
-        home_count = getattr(request, "home_issues_open_count", None)
-        ctx["nav_findings_count"] = (
-            home_count if home_count is not None else _nav_issues_count(tenant_id)
-        )
+        if ctx["active_section"] == "home":
+            # Home is a start page, not a fleet summary. Omit counts rather
+            # than calculate a costly badge or present an invented zero.
+            ctx["nav_findings_count"] = None
+            ctx["nav_patching_open"] = None
+        else:
+            home_count = getattr(request, "home_issues_open_count", None)
+            ctx["nav_findings_count"] = (
+                home_count if home_count is not None else _nav_issues_count(tenant_id)
+            )
         # These badges are rendered only in the application admin tabs, so
         # avoid even their small count queries on ordinary operator pages.
         if request.path_info.startswith("/admin/"):
@@ -121,7 +127,8 @@ def brand(request: HttpRequest) -> dict:
                 tenant_id=tenant_id,
                 status=EntityCandidate.Status.PENDING,
             ).count()
-        ctx["nav_patching_open"] = _nav_patching_count(tenant_id)
+        if ctx["active_section"] != "home":
+            ctx["nav_patching_open"] = _nav_patching_count(tenant_id)
     else:
         ctx["clients"] = []
 

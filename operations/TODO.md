@@ -6,6 +6,21 @@
 
 ## Current Operations backlog
 
+- [ ] **PLAN-056 Home information restoration** (2026-11-17, planning only).
+      Reassess removed Home information after suitable domain readers exist;
+      audit already-returned cheap fields before building anything new. The
+      [follow-up checklist](../docs/plans/PLAN-056-platform-performance-assessment.md#follow-up--reassess-home-information-after-domain-readers)
+      owns candidates and restore/omit/defer gates. This does not authorize
+      implementation, publications, schema changes or a new assessment campaign.
+
+- [ ] **Repair stale Coverage request tests** (confirmed during PLAN-056,
+      2026-11-11). Three failures also reproduce with HEAD `ca00938a`'s unchanged
+      `fleet_coverage`: the effective-requirements test expects an obsolete Hudu
+      evidence view/grouping, and the operations-card and missing-card fixtures
+      supply short Computer tuples. Update those contracts/fixtures under a
+      separate test scope; do not restore obsolete runtime SQL. See the
+      [validation record](../docs/records/PLAN-056-coverage-implementation.md).
+
 - [ ] **Update stale source-record SQL assertion** (found during PLAN-043,
       2026-11-02). `test_findings_queue.py:253` expects an old `LEFT JOIN LATERAL`
       source-presence fragment that is absent from HEAD. Replace the assertion

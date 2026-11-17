@@ -31,7 +31,42 @@ Django follows the dependency chain, so 0413 runs last. Reverse SQL restores the
 original view and retains the DML revocations. Unrelated Home/client/test work is
 excluded. Dockerfile includes all Operations migrations.
 
-Next: verify live owner privileges/column compatibility, focused syntax and
-whitespace checks, then commit/push origin followed by mirror, automatic migration
-and populated Sources/Software HTTP verification. Full latency acceptance is not
-claimed from the isolated rendering result.
+Live owner can read the safe metadata view; security_barrier=true and all eight
+columns/types match the replacement. Live migration ledger has 0414–0416 applied
+and 0413 absent. Python syntax, focused Ruff, whitespace and plan-registry checks
+passed; commit governance passed with the existing stale current-state warning.
+
+Release 4e9f2678 / 0.144.19 committed and pushed origin then mirror. Only the four
+reviewed release files shipped; unrelated staged client-view changes preserved.
+Next: verify automatic migration, services and populated Sources/Software HTTP.
+Full latency acceptance is not claimed from the isolated rendering result.
+
+Contract fit: global ADR-0006 R1/R2 retain the existing protected tenant-scoped
+count population, companion rules and exact output grain; R4 resolves stream
+classification once per grouped key. R5 retains a direct aggregate whose cost is
+verified at the existing production population. R8 is checked on complete HTML.
+No maintained result is introduced, so no new R6/R7 lifecycle is required. No
+pagination, detail enrichment or export path is changed by this view replacement.
+
+Rollout: ingest reports 0.144.19, all three services healthy, 0413 recorded applied.
+The count view retains all eight column names/types, owner metadata access and
+security_barrier=true. Authenticated Sources HTTP 200, 81,553 bytes in 3.304
+seconds; normal logout confirmed. This is a 52.6% reduction from the same-session
+6.971-second baseline, but remains above the intended interactive response budget.
+No broader query tuning is included in this correction.
+
+Software regression observation: protected reader stale/expired immediately after
+rollout, HTTP 200 without the completed-summary marker. Its last publisher did
+complete successfully at 16:38:03 UTC; the summary computed at 16:37:51 had a
+window expiry of 16:38:15. All owners are ready and no classification targets are
+pending. This is a freshness gap, not evidence of renewed self-invalidation.
+Await the existing automatic refresh before concluding the regression check;
+do not claim continuous Software availability. No Software changes are in this
+Sources release.
+
+Automatic Software refresh acddb5e4 was admitted at 16:40:27 UTC and is queued
+waiting for capacity while source assessment, health evaluation and source refresh
+are running. Owner readiness and classification are clear. This confirms the
+remaining maintenance/capacity gap; it is outside this Sources SQL change. No
+competing jobs were canceled during this release. Sustained Software availability
+and Sources full latency acceptance remain open.

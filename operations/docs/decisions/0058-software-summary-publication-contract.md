@@ -5,6 +5,10 @@ Date: 2026-11-11
 Accepted: 2026-11-11
 Plan: PLAN-056, navigation item 1 — Software
 
+Platform baseline: [root ADR-0006](../../../docs/decisions/0006-platform-read-contract.md).
+This extension retains Software-specific metrics, dependencies, freshness and
+acceptance requirements; the baseline does not certify their implementation.
+
 ## Context
 
 The Software overview returned its full HTML in 13.094 seconds in the approved

@@ -1,5 +1,9 @@
 # PLAN-047 — Write only what changed
 
+> Superseded by [PLAN-056](PLAN-056-platform-performance-assessment.md) on 2026-11-09.
+> Historical scope, decisions and evidence follow; status, next actions and
+> approval claims below are historical. Execute only the consolidated plan.
+
 **Status: ready.** Registered 2026-11-03 from the PLAN-012 follow-up review of
 table bloat. Defined, not started. Production writes, migrations, table
 compaction, commits, pushes and deployment keep their usual gates.

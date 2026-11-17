@@ -1,5 +1,9 @@
 # PLAN-048 — Source records report typed facts, not JSON parsed on read
 
+> Superseded by [PLAN-056](PLAN-056-platform-performance-assessment.md) on 2026-11-09.
+> Historical scope, decisions and evidence follow; status, next actions and
+> approval claims below are historical. Execute only the consolidated plan.
+
 **Status: ready.** Registered 2026-11-03 from the PLAN-012 follow-up on the
 Source Records page. Defined, not started. Migrations, rehearsal, commits,
 pushes and deployment keep their usual gates.

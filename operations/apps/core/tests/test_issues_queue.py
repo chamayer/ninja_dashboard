@@ -176,14 +176,13 @@ def test_bulk_pause_spans_kinds_and_remediation_skips_ineligible_kinds():
     assert "_ISSUES_SELECT_ALL_LIMIT" in bulk
 
 
-def test_home_mapping_count_and_link_share_one_selection():
-    assert "client_mapping_conflict_count = issue_selection.count(mapping_scope)" in _VIEWS
+def test_home_mapping_link_uses_the_shared_selection_without_counting():
     assert "issue_selection.mapping_query()" in _VIEWS
     query = issue_selection.mapping_query.__code__.co_consts
     assert "critical" in query and "open" in query
     home = Path("templates/home.html").read_text(encoding="utf-8")
-    assert "Critical mapping issues ({{ client_mapping_conflict_count }})" in home
-    assert "View all mapping issues" in home
+    assert "mapping_review_url" in home
+    assert "Review critical mapping issues" in home
 
 
 def test_csv_shares_the_selection_and_keeps_lifecycle_context():

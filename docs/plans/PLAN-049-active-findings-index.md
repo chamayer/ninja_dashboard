@@ -1,5 +1,9 @@
 # PLAN-049 — Index active findings by subject
 
+> Superseded by [PLAN-056](PLAN-056-platform-performance-assessment.md) on 2026-11-09.
+> Historical scope, decisions and evidence follow; status, next actions and
+> approval claims below are historical. Execute only the consolidated plan.
+
 **Status: active.** Registered 2026-11-03 from the PLAN-012 follow-up review.
 Implemented and committed on branch `plan049-active-findings-index`
 (`4cb502e0`, worktree `.work/plan049`); not merged or released. Push and

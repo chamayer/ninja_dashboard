@@ -1,43 +1,48 @@
 # Operations development checkpoint
 
 Plan lifecycle status belongs to the [registry](../docs/records/PLAN_REGISTRY.md).
-Earlier mixed implementation notes, evidence, limitations and recovery instructions
-are preserved verbatim in the [retained checkpoint](docs/records/OPERATIONS-CHECKPOINT-2026-11-02.md).
-That record is historical and must be verified against current files before reuse.
+History: [checkpoint](docs/records/OPERATIONS-CHECKPOINT-2026-11-02.md); verify first.
 
 ## PLAN-056 — Platform performance recovery
 
-**Goal:** Fix Software item 1 end to end in production under ADR-0058 and the
-[six-step worklist](../docs/records/PLAN-056-software-implementation-requirements.md).
-User forbids scope expansion. All 15 items remain open; navigation routing:
-[cross-service handoff](../docs/plans/PLAN-056-platform-performance-assessment.md).
+**Goal:** Recover Home responsiveness and Software freshness; preserve access,
+population, input/claim fences and expiry contracts.
 
-**Deployed checkpoint:** ff63104a / 0.144.13 on both remotes, all four services
-healthy, runtime files verified, 0407–0411 applied. Existing superuser limitation
-retained; no role redesign. Unrelated work is uncommitted. Details and prior
-corrections: [release evidence](../docs/records/PLAN-056-release-0.144.12.md).
+**Deployed:** eab79e1d / 0.144.22 on both remotes and production; 0413/0417 applied.
+Recorded full preparation 47.93 s; reuse 14.95 s; details in linked evidence.
+Full 15-page acceptance is not claimed.
 
-**Current activation:** Local 0412 plus prepared-reader switch, not deployed.
-Actual production snapshot comparison passed all 15 context fields including
-nested metrics, using runtime app reads and a rolled-back owner calculation;
-no values exposed. 0412 bodies and all snapshots passed actual DB validation
-in a rolled-back transaction. No activation SQL applied.
+**Mechanism:** Reuse certified prepared inputs when eligible. Full preparation
+recomputes facts but filters unchanged valid readiness/assessments/participants
+before persistence. Original timestamps remain; renew at half existing policy
+validity without relaxing expiry. No new stores, roles, services or migrations.
 
-**Bounded correction:** Use local publication owners and existing reclassification
-targets/ownership dirtiness, not raw collector attempt status. Preserve explicit
-actor invalidation while ignoring future dependency-only queues. Overview is
-admitted on successful owner completion using existing conditional workflows
-(software_inputs_ready). v4 separates it from the old dependency backlog.
-0412 promotes reviewed fenced generations; HTML selects protected reader.
-Products/CSV retained; no new store/service/role/cadence or collector changes.
+**Validation:** Syntax/Ruff/governance passed and real publication/HTML observed.
+No .23 release: memoization candidate withdrawn; source/release files restored to
+.22. Detailed history, validation and limitations remain in linked records.
 
-**Next:** User directed stopping additional tests and finishing activation.
-0.144.14 candidate: 0412, completion-only overview admission and protected HTML
-reader. Production parity and rollback-only DB registration/SQL checks passed.
-No more test expansion; package exact changes, obtain separate commit/push+0412
-approvals, deploy, request one incremental classification/overview and measure
-the completed page. Remote temporary publisher/parity scripts need cleanup.
-Preserve unrelated Home/test edits; no new service/store/role/cadence.
+**Checkpoint/next:** Emergency triage on 2026-11-17: services healthy, Software
+current/populated, latest publication 46.69 s; Home HTML 10.735 s, Software
+2.185 s. Home trace: 7.031 s SQL, chiefly Software 2.328 s, Source Records
+2.310 s and Issues 1.381 s. No active lock blocker or sampled swap thrashing.
+User authorized all-worktree reconciliation and deployment, then stopped testing.
+26 focused checks passed beforehand. Conflicting cache/legacy candidates retired;
+Home cheap/published counts, client evidence and records reconciled. No pending
+migrations. Release 0.144.23 ready to commit/push; next observe automatic deployment
+only. No further tests. [Release checkpoint](../docs/records/PLAN-056-worktree-reconciliation.md).
+
+**Release safety:** Origin then mirror; push automatically deploys. Protect real
+input handlers during rollout. Do not cancel workflow children just to change
+digests. Recovery allow-list derives from Software input owners; the earlier
+intel-matcher omission was corrected. Scheduler lease release confirmed. Preserve
+reconciled work; no serving-file hotpatch.
+
+**Evidence:** [Delta/validation](../docs/records/PLAN-056-software-preparation-delta.md),
+[reuse](../docs/records/PLAN-056-software-preparation-reuse.md),
+[capacity](../docs/records/PLAN-056-software-publication-capacity.md),
+[Sources](../docs/records/PLAN-056-sources-reader-release.md),
+[Source Records](../docs/records/PLAN-056-source-records-contract-check.md).
+Plan lifecycle belongs to the registry; other page baselines stay open.
 
 ## PLAN-015 — Identity reconciliation
 

@@ -1,5 +1,9 @@
 # PLAN-053 — Ninja activity retention
 
+> Superseded by [PLAN-056](PLAN-056-platform-performance-assessment.md) on 2026-11-09.
+> Historical scope, decisions and evidence follow; status, next actions and
+> approval claims below are historical. Execute only the consolidated plan.
+
 **Status: ready.** Registered 2026-11-04; moved from PLAN-019's registry entry,
 where it arrived from PLAN-022's backlog hand-off (2026-10-28) outside that
 plan's steps. Defined, not started. Production reads, deletes, schema changes,

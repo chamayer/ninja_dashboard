@@ -244,3 +244,71 @@ function owners/grants are retained by CREATE OR REPLACE; reverse restores
 previous bodies and clears certification. Unrelated Home/test work is excluded.
 Remaining work is real governed publication and full-page verification, not
 another local test campaign.
+
+## Approved activation push
+
+User separately approved the 0.144.14 commit and push/activation deployment
+including 0412. Created cb86836b, Activate the published Software overview;
+pushed origin first, then a-m-rose. Both master tips verified as
+cb86836b5ed5fc0dd509e5e9b8c6e87fe59f557a. Exact 11-file candidate matched
+the saved manifest; the only staged views change is the reader switch.
+All unrelated Home/test working changes remain outside the release.
+Automatic rollout is in progress; no manual redeploy or extra tests.
+
+## Whole-platform investigation checkpoint — 2026-11-12
+
+Subsequent external checks confirmed cb86836b / 0.144.14 and 0407–0412
+deployed with healthy services. Software remains empty: no publication exists.
+Do not treat deployment health as functional acceptance.
+
+The user redirected recovery to the whole platform and the top slow-page
+entries, then challenged incremental patches before identifying the root cause.
+Local Sources-count migration 0413 and compact global Issues count candidates
+are paused, uncommitted and unapplied. No further release is prepared.
+
+In one runtime-role, read-only repeatable-read snapshot, Sources counts took
+4.874 s versus 0.248 s when grouping streams before companion-policy lookup,
+with identical results. Global Issues count took 1.057 s versus 0.725 s using
+the existing compact selector, also equal. These prove bounded improvements,
+not a cause shared by every slow page. A separate real Home HTTP request took
+11.615 s, returned 200, and logged out normally.
+
+A bounded runtime-role EXPLAIN ANALYZE pass of existing SELECTs, in a read-only
+repeatable-read transaction with 20-second statement/1-second lock deadlines:
+
+| Existing read | Execution | JIT compilation |
+| --- | ---: | ---: |
+| Sources record counts | 4.166 s | 0.053 s |
+| Source Records default 100-row page query | 7.883 s | 0.359 s |
+| Inventory Clients source-coverage query | 0.453 s | absent |
+
+The largest reported nodes showed zero temporary blocks. Sources' observation
+scan included most execution time; its predicates contain per-record companion
+policy evaluation. Source Records' largest nodes include nested joins and the
+query still materializes a tenant-wide group-mapping relation after selecting
+the page. Node timings are inclusive and must not be summed. Inventory Clients'
+other readers and Source Records' detailed internal cost shares remain gaps.
+Shared observation data alone therefore does not establish a common bottleneck.
+This is not an entire-page timing comparison or proof all spills are absent.
+
+Host samples showed available CPU/memory, low I/O wait and low swap traffic;
+DB samples showed no blocking edges. These observations do not exclude every
+intermittent contention event. No server tuning, cancellation, restart, data
+rebuild, migration, application deployment or test-file edit occurred in this
+investigation. Diagnostic emitted only plan metadata/timings, no rows or SQL.
+Script: scripts/diagnostics/plan056_top_read_plans.py, SHA-256
+5a0692641cbc7abfef25ab46c316ae4804c81503d3220d870447749e6ad2493e.
+Connection closure confirmed; no retry. The platform-wide root cause remains
+unproven; do not present individual query corrections as platform acceptance.
+
+## Retained early component comparisons
+
+Before the Source Records final candidate, runtime-role read tracing measured
+Source Records 6.245/6.362 s SQL/wall and Inventory Clients 4.481/5.056 s.
+Limited same-snapshot query comparisons returned identical results: Sources
+stream counts 4.874 -> 0.248 s, Source Records bounded detail/batch attribution
+5.590 -> 1.124 s, Inventory Clients compact evidence 2.372 -> 0.273 s.
+A simple page-ID join alone did not improve performance and was rejected.
+These are earlier component observations, not full HTTP acceptance or a universal
+diagnosis. Later Source Records checks supersede them for its active candidate;
+other local candidates remain excluded from that release.

@@ -1,6 +1,10 @@
 # PLAN-044 — Navigation and Computers performance
 
-Status: active. The Patching outcome summary below supersedes the earlier no-schema restriction for that change. Home target: ≤1.5 seconds, with an ordinary response under 2 seconds required. Migration 0406 is already applied. Commit and push approvals remain separate; an origin push approval must include automatic deployment and reviewed pending migrations.
+> Superseded by [PLAN-056](../../../docs/plans/PLAN-056-platform-performance-assessment.md) on 2026-11-09.
+> Historical scope, decisions and evidence follow; status, next actions and
+> approval claims below are historical. Execute only the consolidated plan.
+
+Status: active. Home target: ≤1.5 seconds, with an ordinary response under 2 seconds required. The user accepted summary values up to 60 seconds old and authorized an Issues summary migration, though no such migration is implemented. The user subsequently revised the Software card to installed titles and open Software & Security actions; its earlier approval and risk breakdown requirement is superseded. Migration 0406 is recorded as applied. Commit and push approvals remain separate; an origin push approval must include automatic deployment and reviewed pending migrations.
 
 ## Patching outcome summary — 2026-11-09
 
@@ -25,10 +29,329 @@ groups. This establishes some reduction for the 30-day population, not query
 speed or total table size. The ingest ledger is current through 118 and Django
 reports no pending migrations; SQL 119 is the pending change in this release.
 
-Validation: a small throwaway PostgreSQL database applied the migration and
+Predeployment validation: a small throwaway PostgreSQL database applied the migration and
 confirmed summary parity after inserts, status/type/timestamp updates, and
 deletion. Python compilation, plan-registry validation, and diff whitespace
-checks passed. No production change or performance measurement was performed.
+checks passed.
+
+Post-deployment: `ca00938a` is on both remotes, the changed Patching reader is
+running, SQL 119 is applied, and Operations, ingest, and the Jobs worker report
+healthy. One authenticated staff/superuser Home GET returned 200 in 9.090 s
+versus the earlier 14.440 s sample; both used the internal service endpoint and
+had unknown navigation-cache state. A separate repeatable-read comparison at
+the same cutoff returned identical Patching summary fields: the new reader took
+0.450 s and the original query 5.744 s. These are individual live samples, not
+load tests; total Home remains above the target. Migration lock duration and
+ongoing write overhead have not been measured.
+
+## Issues summary proposal — 2026-11-09
+
+The next measured bottleneck is Home's Issues aggregation (2.675 s for its
+main query in one production sample). The existing `finding_state` stores
+per-finding coverage, but not independent actions, their affected-client and
+subject totals, or the pending identity candidates Home includes. Continue to
+use it as input; do not substitute raw finding counts for independent actions.
+
+Proposed scope: add a tenant-scoped, incrementally maintained Issues summary
+that preserves the current `home_data()` output, including action grouping,
+admin-first representative selection, covered representatives, type-filtered
+attention rows, severity-filtered critical counts, distinct recorded clients and
+subjects, and pending candidates. Finding state, finding edits, client attribution
+and candidate changes must invalidate the affected action groups. Snooze expiry
+must affect the displayed counts at its exact boundary without waiting for a
+periodic sweep. Home reads the summary rather than rebuilding the full selection.
+
+The user authorized the schema migration and focused test coverage. First
+determine an exact data representation for distinct clients,
+group representative transitions, and snooze expiry; audit all writers and the
+PLAN-054 lock order. Prove same-snapshot parity against the existing selection
+with synthetic shared-group, coverage, client, candidate, status and expiry
+cases, including tenant isolation and update/delete behavior. Avoid a full-fleet
+local run. Review initial population, migration locking, write contention and
+recovery before requesting any deployment approval. PLAN-049 owns migration
+0407 or later; reserve no migration number until ordering is settled. There is
+no approved design yet for a direct, instantly consistent summary or its lock
+behavior, so no speedup or correctness guarantee is claimed.
+
+Implementation analysis: shared source-group actions are selected independently
+for overall, type-filtered and critical scopes; excluding covered findings before
+representative selection changes their meaning. An exact-boundary snooze can
+change those selections without any row update. A potentially bounded design is
+to maintain contributions for actions with no snoozed member and evaluate the
+snoozed-action exceptions against their timestamps on read; however this must
+also handle distinct-client and distinct-subject reference counts, candidate
+changes, finding-state cascades, source-binding changes, tenant RLS and lock
+ordering. It has not been implemented or proven. Do not substitute a periodic
+refresh or raw per-finding counts for the authorized immediate, independent
+action totals. The existing selection PostgreSQL fixture was repaired and twelve
+focused checks pass, including the exact snooze boundary, a covered shared
+representative, mixed shared-action severity, pending candidate counts, and
+distinct Home client/subject counts. One bounded production
+sample found 55,030 active findings, including 68 shared findings and no stored
+snooze dates, plus 5,229 pending candidates. The data supports handling shared
+and snoozed cases separately, but does not remove their correctness requirements.
+Next resolve and validate the contribution/update design.
+
+Continuation audit: the existing finding-state writer can cascade coverage
+changes to other findings and writes state rows in finding-ID order. Its finding
+trigger covers status and severity, while the Home summary also depends on
+client, subject, snooze, action-group inputs and pending candidates. A summary
+cannot safely depend on that trigger alone. Source-record publication also
+takes the findings tenant guard before its generation lock; any summary writer
+must preserve that ordering and avoid taking shared summary locks in an order
+that conflicts with the state cascade. These are design constraints, not a
+validated invalidation or locking implementation.
+
+### Summary design exploration (set aside)
+
+The user questioned the complexity of the summary approach and accepted Home
+summary numbers up to 60 seconds old. Do not implement the event queue or
+contribution ledger below while evaluating a short-lived cache. The Home target
+still applies, including a cold request; a cache hit alone cannot prove it.
+
+The current worktree caches Inventory, Issues, Patching and Software Home
+summaries for no more than 60 seconds from request start, using tenant-keyed
+Django cache entries. A synthetic isolated check passed for hits, expiry,
+tenant and summary separation, and loads longer than the freshness window;
+Python syntax also passed. Gunicorn defaults to three workers and Django's
+default local-memory cache is process-local: each worker's initial request and
+the first request after expiry still execute all slow queries. The change is
+therefore a partial improvement, not evidence of the required cold latency.
+The user subsequently approved bounded production reader comparisons; results
+and their limits are recorded below.
+The existing Home rendering and template checks and temporary focused cache
+checks were invoked directly in the development container with its installed
+Django; pytest itself is not installed there. They passed, including zero,
+expiry, tenant/summary separation and slow loads. A temporary rendering check
+reused cached data for an ordinary user after a staff request, checked staff
+cards were absent, and verified the one-minute freshness notice. Django's
+system check passed against the copied current code. After explicit approval,
+three cache regression tests were added; the dashboard and navigation pytest
+files passed all 15 cases together in the Python 3.12 application container.
+The existing Issues PostgreSQL pytest file
+passed all 12 cases in that container using an isolated local scratch database;
+temporary pytest tooling and the database were removed. Workstation Ruff reports
+the same 99 lint findings in the four
+changed Python modules as at HEAD, with no new findings by code and message.
+Formatting checks pass for middleware and fail for the other three both at HEAD
+and in the worktree; existing unrelated formatting was not rewritten.
+A separate two-request synthetic Home check confirmed all four expensive
+summary loaders run once, source/job readers run on both requests, and staff
+cards follow each request's user. This confirms reuse, not response time.
+The existing navigation-count pytest file also passed both cases in the Python
+3.12 container. A focused synthetic request check confirmed Home reuses a zero
+Issues count without a second lookup and uses the standalone badge fallback
+when no Home count is present.
+The local development database reports Django migration 0391 and lacks the
+computer-client ownership table required by the current Home reader. A full
+request smoke check was therefore not run against it; it was not migrated or
+otherwise changed for this task.
+The tenant middleware records the Home request start before opening its
+transaction. The cache budget uses that time so authentication and other
+pre-view work cannot extend the stated freshness window. A focused local check
+covered that timing, including a simulated 12-second pre-view delay.
+The user approved a bounded production comparison using the reviewed
+`.plan044_issue_parity_probe.py` and proposed reader. Each ran once under one
+read-only repeatable-read snapshot, with a five-second per-statement limit.
+Complete Issues results matched: the deployed reader took 4.231 seconds and
+the proposed reader took 2.207 seconds. Their SHA-256 prefixes were
+`181d9a86c285` and `97ea6396657b`; the deployed prefix matches the local HEAD
+reader. Temporary host and container files were removed. This is one ordered
+sample, with the proposed reader second and potentially benefiting from warmed
+caches; it does not establish full authenticated Home latency or load capacity.
+The proposed Issues query alone exceeded the two-second Home maximum in this
+sample.
+After that sample, the local reader removed severity from category-total
+grouping because Home only adds those rows by type and status; critical counts
+still use their separate filtered selection. The 12 existing Issues cases, 20
+mixed parity fixtures and 64 shared-action parity fixtures passed again in a
+disposable PostgreSQL database. The 2.207-second sample applies to the earlier
+preview hash only.
+The current reader also reuses the selected critical actions for ordinary
+critical-mapping counts instead of scanning the full filtered relation again.
+Thirty PostgreSQL fixtures matched the committed reader across mapping type
+membership, shared-action pause/coverage/severity, and repeated clients. In a
+second explicitly approved same-snapshot production comparison, complete
+results matched and the deployed reader took 4.045 seconds versus 1.556 seconds
+for this revision. SHA-256 prefixes were `181d9a86c285` and `d1e8a6c23207`.
+The preview ran second; this single sample may benefit from warmed caches and
+does not establish full Home latency. Temporary files were removed.
+The revised reader also passed a small two-tenant PostgreSQL fixture with
+forced row-level security under a non-superuser role without RLS bypass. It
+returned tenant 1's synthetic findings and candidate only in tenant 1 context;
+tenant 2 context could not read those records. The scratch database was removed.
+
+An explored Software reader skipped modal-publisher grouping when the same
+SQL snapshot contained no global publisher-level investigate decisions, and
+retained the original grouping otherwise. Same-transaction
+PostgreSQL fixtures matched the committed reader for no publisher decision,
+global and client-scoped publisher decisions, empty installations, publisher
+ties/nulls, retired/deleted Computers, stale installations, title decisions,
+and title/installation risks. A separate small fixture proved the publisher
+branch is skipped when absent and executed when required. The scratch database
+was removed. Four further fixtures verified that tied modal publishers select
+the same investigate status for global decisions, while client-scoped decisions
+do not activate the global branch.
+Under forced RLS and a non-superuser role, a two-tenant fixture also confirmed
+that another tenant's publisher investigation neither changes tenant 1's
+Software result nor activates its publisher-grouping branch. The scratch
+database was removed.
+Two existing Software title-decision contract tests also passed under Python
+3.12 in the application container; they check the shared decision joins. The
+synthetic PostgreSQL checks above covered the subsequently removed branch.
+The user approved a read-only same-snapshot production comparison. Results
+matched, but a global publisher investigation existed, so the fast path did
+not apply: deployed and preview readers took 2.648 and 2.888 seconds in one
+ordered sample. SHA-256 prefixes were `d4d24dd70976` and `9c5e3ba5e65b`.
+The preview ran second; the samples do not establish a consistent regression
+or full Home latency. The unhelpful Software change was removed. Temporary
+host and container files were removed.
+A subsequent Software revision grouped publishers only for titles whose status
+was not already resolved by a title-level finding or investigate decision, and
+skipped publisher grouping when no global publisher investigation existed.
+Four user-approved persistent PostgreSQL regression cases pass for
+global, scoped and absent publisher decisions, modal ties, title precedence,
+current installation scope, other-tenant decisions/findings and risk counts. A
+separate small PostgreSQL check confirmed settled titles did not reach publisher
+grouping. Its authorized production comparison ended in `OperationalError`;
+the diagnostic did not identify the failing stage or SQLSTATE, so no timing,
+parity or cause is claimed. The preview was removed; temporary production
+files were removed. A subsequent Python 3.12 run passed all 19 focused cache,
+navigation and Software cases against the retained code, including the four
+PostgreSQL cases. The diagnostic now reports stage and SQLSTATE for any future
+separately authorized run. A subsequent bounded comparison of the identical
+preview identified the failure: the deployed reader completed, but the preview
+hit the five-second statement limit (`stage=preview`, SQLSTATE `57014`). No
+preview parity or completed timing was obtained. The preview was removed again
+and temporary host/container files were removed.
+Existing Software, dashboard and navigation tests passed in Python 3.12: 34
+passed and four integration cases skipped in the default run; those four passed
+separately against a disposable PostgreSQL database.
+The cold Issues query now omits covered-by arrays and does not construct
+per-finding or candidate action-key strings, since only shared actions use keys
+in the Home selection. All 12 existing PostgreSQL selector cases passed again
+against a disposable local database; the database was removed. This is a
+functional check, not evidence of latency reduction. The original committed
+Home Issues reader and the revised reader also returned identical complete
+summary and attention results on 20 small same-transaction PostgreSQL fixtures
+covering active/resolved and paused findings, shared representatives, covered
+state, repeated clients and subjects, and candidates. The database was removed.
+An additional same-transaction comparison matched all 64 combinations of
+paused/open, covered/uncovered, and critical/medium states across the two
+records of one shared action. This checked behavior, not performance.
+The revised Software card is implemented with a distinct title count over the
+same current-Computer and non-stale installation population, plus the existing
+open Software & Security independent-action count from Issues. The publisher,
+approval and risk grouping is no longer executed for Home; detailed Software
+pages are unchanged. Python 3.12 checks passed: 20 focused Software/Home/
+navigation cases, 13 Issues PostgreSQL cases and Django's system check. A
+read-only diagnostic was prepared and checked on a synthetic database with its
+timer disabled; it compares the old and new installed-title counts only.
+The user then approved a read-only same-snapshot production comparison. The
+installed-title counts matched; the deployed reader took 2.777 seconds and the
+revised title-count reader took 2.666 seconds. SHA-256 prefixes were
+`d4d24dd70976` and `3964f1aadafe`. The revised reader ran second, so cache
+warming may affect the single sample. Temporary files were removed. Simplifying
+the card removed unnecessary work but did not establish a material cold-reader
+speedup; the complete Home response has not been measured.
+
+### Proposed installed-title summary — approval required
+
+Maintain a rebuildable tenant-scoped table keyed by exact `canonical_name`,
+with a positive count of current, non-stale installations on non-deleted,
+non-retired Computers. Home would count its rows; it would continue to obtain
+open Software & Security actions from Issues. Installation insert, deletion,
+title/device changes and stale/deleted transitions, plus Computer retirement,
+restoration and deletion, must update the relevant title counts. Multiple
+installations of one title must remain one title, with the row removed only
+after its last qualifying installation disappears. Preserve case semantics,
+tenant RLS, and the existing Software page's behavior.
+
+This is a proposed schema change, not implemented or approved. Before release,
+the migration must establish the initial summary without losing concurrent
+writes, define consistent lock ordering between installation and Computer
+changes, provide a rebuild/recovery path, and prove parity and rollback on a
+small synthetic database. Its initial population, write overhead and locking
+need review; performance is not guaranteed. A production push and its pending
+migrations require separate approval.
+
+The current diff adds no migration: the latest local Django migration is 0406
+and the latest ingest migration is 119. Docker packaging already copies all
+changed runtime modules and the Home template. This local review does not
+establish the currently deployed migration state; review it again before an
+authorized push.
+Release metadata review: `VERSION` and the newest changelog heading both say
+0.144.10, but HEAD includes Home changes and SQL migration 119 after the last
+version/changelog update, with no corresponding release entry. The current
+work also changes user-visible Home behavior. Reconcile both in the next
+approved release; no version bump is made for this incomplete work.
+
+The current Home Issues reader limits distinct-count work to open attention
+rows. Python syntax and all 12 existing Issues PostgreSQL fixture cases passed
+against a disposable local database, which was removed. Its latency and full
+production parity remain unverified.
+
+Keep only ordinary active findings with a null snooze and uncovered state in
+incremental aggregates. Store counts by tenant, finding type and severity,
+plus reference counts for each `(type, client)`, `(type, subject type,
+subject ID)`, and critical `(type, client)`. Read mapping membership from the
+current type registry and union the critical clients of its current members;
+do not persist mapping membership in those reference counts. These references must count
+contributions, not merely remember presence, so deleting one of several
+findings cannot remove a still-referenced client or subject. Read finding type
+metadata and mapping membership live. Candidate rows, both shared-action types,
+and every finding with a non-null snooze remain live exceptions; a snooze that
+expires therefore changes status at the current transaction timestamp without
+an update or scheduled sweep. Merge the two populations by summing counts and
+unioning distinct client/subject keys before counting, including clients shared
+between ordinary rows, candidates, and exceptional actions. Select shared
+representatives separately for overall, type, critical and mapping scopes,
+before discarding covered representatives, as the existing reader does.
+
+A disposable, in-memory model compared that decomposition with direct selection
+for 3,000 small randomized populations including shared keys, mixed severity,
+coverage, duplicate clients/subjects, candidates and timed exceptions; all
+modeled fields matched. This is evidence for the decomposition only: it is not
+PostgreSQL implementation, transaction, tenant-isolation, or timing validation.
+The model does not simulate writes, cascades, simultaneous transactions, or
+finding-type metadata changes.
+
+Finding, assessment and participant writers are required by migration 0365 to
+hold the exclusive tenant guard before row locks; a finding summary maintained
+only by those guarded writes can use that existing serialization. Candidate
+decisions can lock candidates without that guard, so leave candidate data live
+and do not make candidate writes acquire the finding summary's locks. State
+changes may cascade to other findings; a contribution ledger keyed by finding
+ID can make finding and state refreshes idempotent, but delete/cascade ordering,
+all writers, migration-owner exceptions, reference-count updates, and the
+interaction with source-binding changes still need concrete PostgreSQL proof.
+Shared-action and timed exception reads also need supporting access paths and
+measurement; their small size in one sample is not an invariant.
+
+**Lock-order correction:** `ingest.operator_job_queue._platform_evaluate_and_check`
+calls `finding_attention.check_and_repair_state` in a plain transaction. That
+repair can call `refresh_finding_state` without the tenant guard, so the guard
+alone does not serialize every state update. Acquiring summary locks from a
+finding-state trigger could therefore deadlock against guarded writers; the
+direct-write design above is not safe as stated.
+
+**Alternative to validate:** Make finding and relevant finding-state triggers
+append only immutable changed-finding IDs, without foreign keys, shared
+aggregate locks, or coalescing on a common row. A single background compactor
+may maintain the ordinary contribution ledger and grouped reference counts in
+a repeatable-read transaction, processing and deleting only event IDs visible
+in that transaction's snapshot. Home combines that committed baseline with the
+net difference between current finding/state rows and baseline ledger rows for
+distinct IDs in the still-visible event queue, then merges the live shared,
+timed and candidate exceptions. PostgreSQL MVCC must make the baseline, events,
+and current rows a single statement snapshot for each Home read: it must see
+either the compactor's old baseline plus events, or its new baseline without
+those events. Concurrent writes commit their source change and event together.
+The event queue is an exact delta, not an eventually consistent substitute for
+the displayed counts. This avoids adding summary-row locks to writer paths, but
+requires a bounded compactor, queue growth and recovery behavior, tenant/RLS
+protection, migration initialization and write-amplification analysis. It is
+not implemented or yet proven against PostgreSQL concurrency.
 
 ## Home implementation plan — 2026-11-09 review
 
@@ -59,7 +382,7 @@ publication changes with PLAN-054's source/findings lock-order work.
 | Data collection | Open collection actions, with paused actions as secondary context. |
 | Patching | In-scope/excluded/unmanaged counts; actively patching count and percentage; 30-day installed/failed patch outcomes for in-scope machines. Percentage denominator is all current Computers; numerator uses the owner's active, in-scope, recent-activity rule. Outcomes count patches, not Computers. |
 | Coverage | Meeting/missing pair, stale separately, neutral separately, exemptions handled by the owner, evaluation freshness. No Coverage trend or new history. |
-| Software | Distinct installed titles, owner-defined approval breakdown, distinct installed titles with active title-linked risk findings. Verify that the "approved" label follows effective Software decisions/policy. |
+| Software | Distinct installed titles on current Computers and open independent Software & Security actions. Decision and risk detail remains on the Software page. |
 | Issues | Open independent actions, critical actions, paused secondary context; prioritized attention and critical mapping alert retain known-client impact counts. |
 | Sources and Jobs | Current source freshness and job processing status in the shared footer; staff cards reuse those results. |
 
@@ -143,13 +466,11 @@ was roughly 0.15 s. This does not justify another proof-function rewrite.
    Inspect the source-link/activity/outcome plan, restrict inputs to the required
    population and time windows, and reuse existing domain projections where
    their meaning matches. Preserve counts across multiple links and patch facts.
-4. **Narrow Software in its owner.** Confirm the title population and approval
-   meaning against the Software page and effective decisions, including publisher
-   decisions. Then remove unnecessary installation-level work from title-level
-   aggregation where equivalent. Preserve distinct title risk counting and
-   lifecycle/stale-installation exclusions. Do not replace live reads with the
-   existing lifecycle-insensitive rollup. Propose any genuinely missing domain
-   state separately instead of adding another Home-specific abstraction.
+4. **Simplify Software in its owner.** Count distinct installed titles on
+   current Computers, preserving lifecycle and stale-installation exclusions.
+   Reuse the Issues owner's open Software & Security action count on Home.
+   Detailed decisions and risk remain on Software; do not replace the title
+   population with the lifecycle-insensitive rollup.
 5. **Reduce Inventory read cost.** Keep the agreed admitted-record population,
    current presence, reporting freshness, and exact 30-day comparison. Inspect
    the metadata and historical joins for unnecessary work; reuse the existing
@@ -234,7 +555,7 @@ added. No application code was changed.
 | Stored issue clients and access | Synthetic PostgreSQL checks cover changed/null associations, status and snooze preservation, tenant RLS and current client-scoped source evidence. Mapping changes enqueue reassessment. | Associations can lag while reassessment is pending; existing regression coverage is incomplete; the user requested no further testing. |
 | Issues and navigation | Synthetic checks cover representative parity, type and severity drilldowns, recorded-client counts, zero reuse and cold fallback. | Existing Issues fixture and obsolete batch-query assertion remain outdated; no further testing was requested. |
 | Patching | Synthetic checks cover all-current denominator, unresolved ownership, duplicate links, activity window and outcomes. | Measure the owner reader in an authorized environment. |
-| Software | Synthetic parity covers modal-publisher ties/nulls, lifecycle, title decisions, publisher investigation and title-linked risk. | Measure the owner reader in an authorized environment; the owner's default bucket is not proof of explicit approval. |
+| Software | The revised card uses distinct installed titles and existing open Software & Security action counts. Focused PostgreSQL and rendered Home checks pass. | Compare title totals and measure the revised reader in an authorized environment; verify complete Home latency. |
 | Inventory | Synthetic history parity covers duplicate and expired history and tenant scope; current/freshness population remains unchanged. | Measure the owner reader in an authorized environment. |
 | Release and end-to-end latency | Runtime files are included in the Docker build; no new migration is proposed. Django check and 55 existing focused tests pass. | Review remaining pending migrations before separately approved commit and push; verify deployment and a bounded authenticated request in an authorized environment. The response-time target remains unproven. |
 

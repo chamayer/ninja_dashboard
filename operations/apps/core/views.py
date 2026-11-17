@@ -780,178 +780,55 @@ def healthz(request: HttpRequest) -> JsonResponse:
 
 @login_required
 def home(request: HttpRequest) -> HttpResponse:
-    """Compose domain-owned Home summaries and the governed attention queue."""
+    """Reuse cheap domain counts and protected Software publication on Home."""
+    from .software_overview import read_overview
+
     now = timezone.now()
-    device_policy = get_device_status_policy()
-    active_device_days = device_policy["active_device_days"]
-    client_summary = client_workspace_reads.home_summary(now=now)
-    computer_summary = computer_reads_summary.home_summary(
-        active_device_days=active_device_days
-    )
-    inventory_summary = source_record_summary.home_summary(now=now)
-    issue_summary, attention_items = issue_selection.home_data()
-    request.home_issues_open_count = issue_summary["open_actions"]
-    issue_categories = issue_summary["categories"]
-    inventory_issues = issue_categories[finding_registry.INVENTORY]
-    collection_issues = issue_categories[finding_registry.COLLECTION]
-    patch_issues = issue_categories[finding_registry.PATCHING]
-    patch_summary = patching_reads.home_summary(now=now, policy=device_policy)
-    coverage_summary = coverage_reads.home_summary()
-    software_summary = software_review.home_summary()
-    sources_summary = _sources_home_summary(now)
-    jobs_summary = _jobs_home_summary(now)
-
-    domain_summaries = [
-        {
-            "name": "Clients",
-            "value": f"{client_summary['total']:,}",
-            "value_label": "active clients",
-            "detail": "Detailed portfolio and client comparisons",
-            "trend": client_summary["trend_30d"],
-            "href": reverse("org_index", kwargs={"org_slug": "all"}),
-        },
-        {
-            "name": "Computers",
-            "value": f"{computer_summary['total']:,}",
-            "value_label": "current computers",
-            "detail": (
-                f"{computer_summary['active']:,} active · "
-                f"{computer_summary['needs_review']:,} need review · "
-                f"{computer_summary['retired']:,} retired"
-            ),
-            "href": reverse("devices_page"),
-        },
-        {
-            "name": "Inventory",
-            "value": f"{inventory_summary['current']:,}",
-            "value_label": "current source records",
-            "detail": f"{inventory_issues['open_actions']:,} open inventory actions",
-            "trend": inventory_summary["trend_30d"],
-            "href": reverse("inventory_source_records"),
-            "updated_at": inventory_summary["latest"],
-            "updated_label": "Latest report",
-        },
-        {
-            "name": "Data collection",
-            "value": f"{collection_issues['open_actions']:,}",
-            "value_label": "open collection actions",
-            "detail": f"{collection_issues['paused_actions']:,} paused",
-            "href": f"{reverse('findings_queue')}?category={finding_registry.slug(finding_registry.COLLECTION)}",
-        },
-        {
-            "name": "Patching",
-            "value": f"{patch_summary['included']:,}",
-            "value_label": "current computers in patching scope",
-            "detail": (
-                f"{patch_summary['excluded']:,} excluded · "
-                f"{patch_summary['unmanaged']:,} unmanaged · "
-                f"{patch_summary.get('unresolved', 0):,} ownership unresolved · "
-                f"{patch_summary.get('unspecified', 0):,} scope unspecified · "
-                f"{patch_summary['actively_patching_percent']:.1f}% actively patching "
-                f"({patch_summary['actively_patching']:,} of {patch_summary['current_total']:,} current) · "
-                f"{patch_issues['open_actions']:,} open actions · "
-                f"30-day in-scope outcomes: {patch_summary['installed_30d']:,} installed, "
-                f"{patch_summary['failed_30d']:,} failed"
-            ),
-            "href": reverse("patching_queue"),
-            "updated_at": patch_summary["latest"],
-        },
-        {
-            "name": "Security & coverage",
-            "value_pair": True,
-            "green_value": f"{coverage_summary['meeting']:,}",
-            "red_value": f"{coverage_summary['not_meeting']:,}",
-            "value_label": "Computers meeting / not meeting requirements",
-            "detail": (
-                f"{coverage_summary['stale']:,} stale · "
-                f"{coverage_summary['neutral']:,} no applicable requirements · "
-                f"{coverage_summary['exempt']:,} exempt (excluded)"
-            ),
-            "href": reverse("fleet_coverage"),
-            "updated_at": coverage_summary["evaluated_at"],
-        },
-        {
-            "name": "Software",
-            "value": f"{software_summary['installed_titles']:,}",
-            "value_label": "installed software titles",
-            "detail": (
-                f"{software_summary['approval_counts'].get('approve', 0):,} without an open decision issue · "
-                f"{software_summary['approval_counts'].get('pending', 0):,} awaiting decision · "
-                f"{software_summary['approval_counts'].get('reject', 0):,} rejected · "
-                f"{software_summary['approval_counts'].get('investigate', 0):,} investigating · "
-                f"{software_summary['risk_titles']:,} titles with at least one active risk finding"
-            ),
-            "href": reverse("software_page"),
-        },
-        {
-            "name": "Issues",
-            "value": f"{issue_summary['open_actions']:,}",
-            "value_label": "open independent actions",
-            "detail": (
-                f"{issue_summary['critical_actions']:,} critical · "
-                f"{issue_summary['paused_actions']:,} paused"
-            ),
-            "href": reverse("findings_queue"),
-        },
-    ]
+    context = {}
+    try:
+        with transaction.atomic():
+            policy = get_device_status_policy()
+    except DatabaseError:
+        log.exception("Home device policy unavailable")
+        policy = None
+    # Existing measured readers; no Issues selection or source-history scan.
+    # Savepoints let an unavailable count render without aborting tenant scope.
+    for key, load in (
+        (
+            "mapping_review_url",
+            lambda: f"{reverse('findings_queue')}?" + urlencode(issue_selection.mapping_query()),
+        ),
+        ("clients_summary", lambda: client_workspace_reads.home_summary(now=now)),
+        (
+            "computers_summary",
+            lambda: computer_reads_summary.home_summary(
+                active_device_days=policy["active_device_days"]
+            ) if policy is not None else None,
+        ),
+        ("coverage_summary", coverage_reads.home_summary),
+        (
+            "patching_summary",
+            lambda: patching_reads.home_summary(now=now, policy=policy)
+            if policy is not None else None,
+        ),
+    ):
+        try:
+            with transaction.atomic():
+                context[key] = load()
+        except DatabaseError:
+            log.exception("Home %s unavailable", key)
+            context[key] = None
+    try:
+        context["software_summary"] = read_overview(request)
+    except PermissionDenied:
+        # Keep navigation available without exposing protected summary values.
+        context["software_summary"] = None
     if request.user.is_staff:
-        domain_summaries.extend(
-            [
-                {
-                    "name": "Sources",
-                    "value": f"{sources_summary['total']:,}",
-                    "value_label": "configured source bindings",
-                    "detail": (
-                        f"{sources_summary['current']:,} current · "
-                        f"{sources_summary['attention']:,} need attention"
-                        if sources_summary["available"]
-                        else "Source status unavailable"
-                    ),
-                    "href": reverse("sources_status"),
-                    "updated_at": sources_summary["latest"],
-                },
-                {
-                    "name": "Jobs",
-                    "value": f"{jobs_summary['running']:,}",
-                    "value_label": "running jobs",
-                    "detail": (
-                        f"{jobs_summary['waiting']:,} waiting · "
-                        f"{jobs_summary['contained']:,} held for recovery · {jobs_summary['label']}"
-                    ),
-                    "href": reverse("admin_jobs"),
-                },
-            ]
-        )
+        context["sources_summary"] = _sources_home_summary(now)
+        context["jobs_summary"] = _jobs_home_summary(now)
+    return render(request, "home.html", context)
 
-    mapping_query = issue_selection.mapping_query()
-    client_mapping_conflict_url = f"{reverse('findings_queue')}?" + urlencode(mapping_query)
-    client_mapping_all_url = f"{reverse('findings_queue')}?" + urlencode(
-        {key: value for key, value in mapping_query.items() if key in ("category", "type")}
-    )
-    system_status = {
-        "sources_available": sources_summary["available"],
-        "sources_current": sources_summary["current"],
-        "sources_total": sources_summary["total"],
-        "source_problems": sources_summary["attention"],
-        "jobs_label": jobs_summary["label"],
-        "jobs_running": jobs_summary["running"],
-        "jobs_waiting": jobs_summary["waiting"],
-        "processed_at": sources_summary["latest"],
-    }
-    return render(
-        request,
-        "home.html",
-        {
-            "total_clients": client_summary["total"],
-            "domain_summaries": domain_summaries,
-            "attention_items": attention_items,
-            "client_mapping_conflict_count": issue_summary["mapping_actions"],
-            "client_mapping_conflict_clients": issue_summary["mapping_clients"],
-            "client_mapping_conflict_url": client_mapping_conflict_url,
-            "client_mapping_all_url": client_mapping_all_url,
-            "system_status": system_status,
-        },
-    )
+
 
 def _type_summary_from_counts(counts: dict[str, int]) -> list[tuple[str, str, int]]:
     """(type_value, type_label, count) for device types present in a count map."""
@@ -12159,9 +12036,16 @@ def _live_source_group_evidence(
         reported = {(source_id, key): attached for source_id, key, attached in cur.fetchall()}
         cur.execute(
             """
+            WITH compact_records AS MATERIALIZED (
+                SELECT source_instance_id, platform_group_id, entity_key, device_id,
+                       entity_type, active
+                  FROM operations.v_entity_observation_admin_metadata
+                 WHERE tenant_id = operations.current_tenant_id()
+                   AND entity_type <> 'org' AND active
+            )
             SELECT DISTINCT si.source_id, observation.platform_group_id, observation.entity_key,
                    observation.device_id, client.id, client.display_name
-              FROM operations.v_entity_observation_admin_metadata observation
+              FROM compact_records observation
               JOIN operations.source_instances si ON si.id = observation.source_instance_id
               LEFT JOIN operations.devices device
                      ON device.id = observation.device_id AND device.deleted_at IS NULL

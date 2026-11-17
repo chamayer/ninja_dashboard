@@ -128,3 +128,17 @@ populated-page measurements. No additional test suite or test-file edits.
 emergency approval covers its commit, both pushes, automatic deployment and
 reviewed migration. Existing local Sources 0413 now depends on 0416 but stays
 excluded. Syntax/whitespace and packaging/migration-order review passed.
+
+## Final deployment verification
+
+Committed 7cdf0767 and pushed origin then a-m-rose; both verified at
+7cdf0767877e9ab6b9f6848705acb60d347e6f01. Automatic deployment completed with
+ingest VERSION 0.144.16, 0414/0415/0416 applied and all application services
+healthy. No standalone redeploy. Operations runtime-role read returned
+current/completed with data. At 20:07 UTC a configured-admin full internal HTTP
+Software request returned 200, 47,556 bytes and Completed summary in 1.891 s;
+logout confirmed. This sample meets <2 s but not <=1.5 s ordinary. Cache state
+was first-observed/unknown; browser/external-network latency and sustained
+freshness were not certified. The page is restored, not blanket acceptance of
+Software or the platform. Scheduler holds released; emergency helper copies
+cleaned from active containers and host after checks. No extra suite ran.

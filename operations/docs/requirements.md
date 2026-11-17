@@ -55,6 +55,11 @@ workflows.
 
 ### User interface
 
+- Home is an authenticated operational start page with Issues guidance, domain
+  links, inexpensive domain counts and protected published Software totals.
+  Sources/Jobs counts are staff-only. Keep expensive Source Records history,
+  Issues ranking and aggregate navigation badges off Home; unavailable results
+  must not appear as zeros (PLAN-056, 2026-11-17).
 - Provide fleet/client/device navigation and search.
 - Provide Issues/findings, Patching, Software, Review, source health, client
   mapping, identity, notification, and policy workflows.

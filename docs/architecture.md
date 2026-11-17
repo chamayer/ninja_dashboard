@@ -99,6 +99,11 @@ The repository builds custom Postgres, ingest, and Operations images.
 
 ## Read and write surfaces
 
+The [platform read contract](decisions/0006-platform-read-contract.md) defines
+common selection, bounded execution, publication and responsiveness obligations.
+Domain contracts extend it with their own semantics; adoption is not implied
+by the existence of this contract.
+
 - Operations is the destination for operational reporting, administration,
   workflow, and operator decisions.
 - New reporting reads generic current evidence, canonical state, findings, and

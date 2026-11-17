@@ -1,5 +1,9 @@
 # PLAN-050 — Database memory and host capacity
 
+> Superseded by [PLAN-056](PLAN-056-platform-performance-assessment.md) on 2026-11-09.
+> Historical scope, decisions and evidence follow; status, next actions and
+> approval claims below are historical. Execute only the consolidated plan.
+
 **Status: ready.** Registered 2026-11-03 from the PLAN-049 diagnosis. Defined,
 not started. Any configuration change, restart or host change is a production
 operation with its own approval; nothing here is automatic.

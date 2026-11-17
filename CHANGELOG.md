@@ -2,6 +2,25 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.144.23] — 2026-11-17 — Reconcile performance recovery and simplify Home
+
+### Changed
+
+- Home retains inexpensive Client, Computer, Coverage and Patching counts and
+  protected published Software results. Sources and Jobs counts remain staff-only.
+- Expensive Source Records history, Issues ranking and aggregate navigation
+  badges no longer run on Home. Missing or denied counts are explicitly unavailable.
+- Keep direct links to Issues, critical mapping work and newly discovered clients.
+- Retire the conflicting Home cache/live-Software-summary candidates and reconcile
+  their tests. Preserve the platform read contract, recovery evidence and a Home
+  information-restoration follow-up list; archive earlier root diagnostic probes.
+
+### Fixed
+
+- Materialize compact active source-group evidence under the current tenant before
+  client-evidence expansion, retaining existing source/group selection semantics.
+- No new migrations, runtime dependencies, roles, services or stores.
+
 ## [0.144.22] — 2026-11-13 — Avoid unchanged Software preparation writes
 
 ### Fixed

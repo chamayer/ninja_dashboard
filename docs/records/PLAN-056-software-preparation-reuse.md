@@ -38,3 +38,32 @@ mutation. Existing Jobs recovery authority/evidence remains applicable.
 The five-minute deadline was missed. At 17:30:09 UTC another platform evaluation
 started. Deployment is held until that input finishes so the restart cannot
 interrupt it and reintroduce a failed-input gate. No new tests are running.
+
+Candidate 92cc6e70 / 0.144.21 committed after syntax/Ruff/whitespace and governance
+checks; only the existing current-state date warning remains. Not pushed yet.
+Under existing emergency authorization, reviewed bounded recovery helper requested
+cancellation of competing source collectors and Software queue drain, canceled
+queued competitors and held scheduler lease up to 170 seconds. Required platform
+evaluation and classifier remain allowed; classifier is processing pending inputs.
+No completion states, publication rows or input facts were manually altered.
+
+Recovery correction: the first hard-coded allow-list omitted intel-matcher, a
+required Software owner, and requested its cancellation. The allow-list now comes
+directly from software_overview_inputs owners plus the publisher. A duplicate
+matcher recovery request was queued, then canceled through Jobs while still
+queued to avoid redundant matching; the original matcher remains executing and
+its actual finish must be honored. No cancellation history was rewritten.
+
+The current bounded recovery window waits for actual input handlers to finish,
+with classification/ownership recovery through existing admission if needed.
+It holds the existing scheduler lease for up to 600 seconds, plus a 90-second
+deployment handoff after readiness, and releases in finally/connection closure.
+At 17:46 all readiness flags and pending classification are clear, but an input
+handler remains active; push still held. No test suite or serving-file hotpatch.
+
+At 17:57:44 UTC platform/classifier handlers were no longer running. Release
+92cc6e70 / 0.144.21 was then pushed origin followed by a-m-rose, starting automatic
+deployment with no pending migrations. An older queued publication must finish
+normally: canceling a workflow child merely to change its definition can poison
+its parent's input status. Current runtime can process that compatible older
+snapshot; verify a v5 admission after it clears. No manual redeploy was triggered.

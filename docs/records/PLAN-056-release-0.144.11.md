@@ -78,3 +78,24 @@ cache flush, production benchmark or resource campaign is part of this push.
 PLAN-056 remains active. This release is a correctness-tested recovery checkpoint,
 not evidence of platform-wide performance recovery. The local active handoff owns
 the subsequent release hash, push results and next acceptance action.
+
+## Confirmed push and deployment outcome — 2026-11-11
+
+User completed browser authentication as chamayer. The GitHub API confirmed push
+permission on both repositories. Origin/master was pushed first, then the mirror;
+both remote tips were verified as `ae45b46373bba66dd873b4479114e267df4fa2f4`.
+This repository now uses the active GitHub CLI account through a repository-local
+credential helper; a normal Git dry-run push succeeds. Global credential settings
+were not changed; the earlier amroseit CLI account remains available.
+
+Read-only Portainer metadata showed master polling every minute. Automatic
+deployment subsequently replaced Operations, ingest and Jobs worker containers.
+All four services, including Postgres, reported running/healthy. Ingest and worker
+VERSION are 0.144.11. SHA-256 checks of Operations views/issue_selection and ingest
+relationships/matcher in both producer containers matched the committed blobs.
+No manual Portainer action, migration, forced Job or data operation was invoked.
+
+The temporary validation worktree was removed; excluded original work remains
+preserved. Full page latency and background-work acceptance remain open. This
+post-deployment evidence is retained locally for the next documentation update;
+no documentation-only follow-up push was made.
