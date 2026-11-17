@@ -5,10 +5,10 @@ History: [checkpoint](docs/records/OPERATIONS-CHECKPOINT-2026-11-02.md); verify 
 
 ## PLAN-056 — Platform performance recovery
 
-**Current work:** .31 live Coverage 4.960 s. Publication expired at age 94 s
-with inputs current. Local fix polls every 15 s and queues 25 s before expiry.
-Candidate uses maintained HTML when ready and the existing reader otherwise.
-Validate routing, parity and live latency before declaring cutover complete.
+**Current work:** 93515fa3/.32 deployed to both remotes. All services healthy.
+Maintained HTML enabled with fallback; publication current after measurement.
+Live Coverage 2.778 s, HTTP 200. Per-request reader choice unverified. Next
+deploy the prepared .33 agent-filter pagination fix, then verify the exact URL.
 Contract: docs/decisions/0059-coverage-maintained-selection.md.
 [Scope/checkpoint](../docs/records/PLAN-056-coverage-reader-remediation.md).
 

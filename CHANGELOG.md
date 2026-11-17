@@ -2,6 +2,11 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.144.33] — 2026-11-17 — Fix filtered Coverage pagination
+
+- Keep agent filter display labels separate from maintained selection results
+  so requirement-only filters can render and paginate. No migrations.
+
 ## [0.144.32] — 2026-11-17 — Enable maintained Coverage HTML
 
 - Coverage HTML uses the maintained reader when a current publication is

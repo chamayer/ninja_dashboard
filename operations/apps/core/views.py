@@ -15642,15 +15642,15 @@ def _fleet_coverage(request: HttpRequest, *, allow_prepared: bool) -> HttpRespon
 
     for condition in all_agent_conditions:
         filter_logic_parts.append(condition_logic(condition))
-        selected = [*condition["states"]]
-        selected.extend(
+        selected_labels = [*condition["states"]]
+        selected_labels.extend(
             {
                 "Missing": "Required · Missing",
                 "Stale": "Required · Stale",
             }.get(requirement, requirement)
             for requirement in condition["requirements"]
         )
-        filter_summary_parts.append(f"{condition['agent']} — {', '.join(selected)}")
+        filter_summary_parts.append(f"{condition['agent']} — {', '.join(selected_labels)}")
     if hudu_filters:
         labels = {"in_hudu": "In Hudu", "not_in_hudu": "Not in Hudu"}
         filter_logic_parts.append(

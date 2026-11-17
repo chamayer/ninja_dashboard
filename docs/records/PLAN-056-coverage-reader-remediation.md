@@ -2,6 +2,19 @@
 
 ## Active resume checkpoint — 2026-11-17
 
+User reported a live 500 for Ninja Missing plus currently online Computers.
+Production traceback identified pagination indexing a list after the agent
+summary overwrote the maintained selection tuple. Local .33 keeps the label
+list separate. Django system, compilation and whitespace checks passed.
+Next approve commit and deployment, then verify the exact filtered URL.
+
+93515fa3 / 0.144.32 pushed origin then mirror and deployed automatically. All
+four services healthy, zero restarts. Operations setting verified enabled.
+One authenticated loopback Coverage GET completed in 2.778 s (HTTP 200), with
+logout and staging cleanup. Publication was current at the subsequent check.
+The diagnostic's reader label was hardcoded and does not establish the branch
+taken. Two-second target unmet in this sample. No migrations for this release.
+
 Prepared a production HTML cutover with a compatibility fallback for missing,
 invalidated or expired publications. CSV retains the existing reader because
 withdrawal-age search parity is open. The fallback preserves availability but
