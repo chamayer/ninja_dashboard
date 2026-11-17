@@ -11,7 +11,7 @@
 - Source: docs/plans/PLAN-056-platform-performance-assessment.md
 - Section: PLAN-056 — Platform performance recovery
 - Related plans: Supersedes PLAN-041, PLAN-044, PLAN-047, PLAN-048, PLAN-049, PLAN-050, PLAN-053 and PLAN-054. All unfinished work and evidence are routed through the consolidation record; no independent execution remains in those plans.
-- Resume gate: PLAN-056 active. All-worktree reconciliation and deployment authorized; conflicting candidates retired. Release 0.144.23 prepared, no pending migrations; next push both remotes and observe automatic deployment. User stopped further testing. Software freshness and all page dispositions remain open. Handoff: operations/BLUEPRINT.md; evidence: docs/records/PLAN-056-home-start-implementation.md.
+- Resume gate: PLAN-056 active. 751badfa / 0.144.23 deployed. Commit/push approved for .24 badge removal and Coverage reader including 0418, then one post-deployment measurement pass. No tests per user direction; latency/security execution unverified. All page dispositions open. Handoff: operations/BLUEPRINT.md; evidence: docs/records/PLAN-056-coverage-page-detail-reader.md.
 - Last checked: 2026-11-17 (Home retains cheap/published counts; composition smoke covers zeros, unavailable, pending and denied states; three focused tests and system checks pass. Full deployed latency unverified. Production remains eab79e1d / 0.144.22; no commit/push/deployment).
 
 ## PLAN-055 — Jobs execution-scope claim race

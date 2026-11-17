@@ -65,6 +65,12 @@ Expensive Issues ranking and Source Records history stay on domain pages.
 No new publication or summary cache is introduced. See the
 [implementation and remaining latency gate](../records/PLAN-056-home-start-implementation.md).
 
+Coverage detail adoption, 2026-11-17: the local 0418 candidate adds an ID-scoped
+protected Hudu reader. Filtering occurs inside its materialized input; the same
+view owner, tenant predicate and output semantics remain. No new publication or
+access expansion. Source review is not implementation certification; see
+[scope, security and remaining gates](../records/PLAN-056-coverage-page-detail-reader.md).
+
 ## Enforcement and consequences
 
 This record defines the required mechanisms; it is not a runtime guard and does

@@ -8,18 +8,16 @@ History: [checkpoint](docs/records/OPERATIONS-CHECKPOINT-2026-11-02.md); verify 
 **Goal:** Recover Home responsiveness and Software freshness; preserve access,
 population, input/claim fences and expiry contracts.
 
-**Deployed:** eab79e1d / 0.144.22 on both remotes and production; 0413/0417 applied.
+**Deployed:** 751badfa / 0.144.23 on both remotes and production; services healthy.
 Recorded full preparation 47.93 s; reuse 14.95 s; details in linked evidence.
 Full 15-page acceptance is not claimed.
 
-**Mechanism:** Reuse certified prepared inputs when eligible. Full preparation
-recomputes facts but filters unchanged valid readiness/assessments/participants
-before persistence. Original timestamps remain; renew at half existing policy
-validity without relaxing expiry. No new stores, roles, services or migrations.
+**Software mechanism:** Certified reuse and unchanged-write filtering preserve
+timestamps/expiry; detailed evidence is linked below.
 
 **Validation:** Syntax/Ruff/governance passed and real publication/HTML observed.
-No .23 release: memoization candidate withdrawn; source/release files restored to
-.22. Detailed history, validation and limitations remain in linked records.
+Earlier readiness memoization candidate withdrawn; later Home .23 now deployed.
+Detailed history and limitations remain in linked records.
 
 **Checkpoint/next:** Emergency triage on 2026-11-17: services healthy, Software
 current/populated, latest publication 46.69 s; Home HTML 10.735 s, Software
@@ -28,8 +26,17 @@ current/populated, latest publication 46.69 s; Home HTML 10.735 s, Software
 User authorized all-worktree reconciliation and deployment, then stopped testing.
 26 focused checks passed beforehand. Conflicting cache/legacy candidates retired;
 Home cheap/published counts, client evidence and records reconciled. No pending
-migrations. Release 0.144.23 ready to commit/push; next observe automatic deployment
-only. No further tests. [Release checkpoint](../docs/records/PLAN-056-worktree-reconciliation.md).
+migrations. Release .23 deployed. One-pass HTML: Home 3.647 s, Coverage 5.148 s;
+latency remains open. User approved removing shared Issues/Patching navigation
+badge queries across pages; implemented locally with return-to-consider follow-up.
+No tests run. User then authorized a three-minute Coverage fix. Local migration
+0418 adds a page-ID-aware protected Hudu reader: IDs filter inside the materialized
+input; same owner, tenant/population guards and explicit grants. Coverage calls
+it after pagination, with 100-ID batches also covering complete CSV selection.
+Compact fleet filtering/totals remain unchanged; latency is unverified. User now approves
+commit/push including 0418 and badge removal as .24, then one measurement pass.
+Next: push both remotes, observe deployment and measure; no tests.
+[Reader scope/security/rollback](../docs/records/PLAN-056-coverage-page-detail-reader.md).
 
 **Release safety:** Origin then mirror; push automatically deploys. Protect real
 input handlers during rollout. Do not cancel workflow children just to change

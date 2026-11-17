@@ -2,6 +2,23 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.144.24] — 2026-11-17 — Bound Coverage detail and omit shared count queries
+
+### Changed
+
+- Issues and Patching navigation badges no longer run aggregate queries on
+  shared page renders. Their possible return through suitable domain readers
+  remains on the PLAN-056 follow-up list; domain page counts remain available.
+
+### Fixed
+
+- Coverage Hudu detail uses selected observation IDs inside its materialized
+  input before relayed-card expansion, through the existing protected view owner.
+- HTML detail follows existing filtering/pagination; CSV selects every matching
+  record and loads Hudu detail in batches of at most 100 observation IDs.
+- Migration 0418 adds a read-only, tenant-guarded evidence function with explicit
+  execution grants. Existing populations, summaries and view permissions remain.
+
 ## [0.144.23] — 2026-11-17 — Reconcile performance recovery and simplify Home
 
 ### Changed

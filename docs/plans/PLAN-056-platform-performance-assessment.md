@@ -2,7 +2,7 @@
 
 ## Goal and authority
 
-Recover platform performance. The [registry](../records/PLAN_REGISTRY.md) owns
+The [registry](../records/PLAN_REGISTRY.md) owns
 status; [consolidation](../records/PLAN-056-consolidation.md) retains prior scope.
 
 ## Scope and gates
@@ -17,7 +17,7 @@ the [release checkpoint](../records/PLAN-056-worktree-reconciliation.md). No loc
 
 ## Current checkpoint and evidence
 
-HEAD/VERSION: `eab79e1d` / 0.144.22. Resume via the
+Deployed: `751badfa` / 0.144.23. Resume via the
 [Operations checkpoint](../../operations/BLUEPRINT.md).
 [Triage](../records/PLAN-056-emergency-triage-2026-11-17.md) retains live evidence;
 [Source Records comparison](../records/PLAN-056-source-records-contract-check.md)
@@ -49,15 +49,16 @@ Home: <=1.5 s ordinary / <2 s hard maximum including cold navigation.
 
 ## Next action
 
-Finish the approved release and observe automatic deployment; no further tests
-per user direction. The [Home implementation](../records/PLAN-056-home-start-implementation.md) retains content decisions.
+Release the approved [Coverage reader](../records/PLAN-056-coverage-page-detail-reader.md)
+and badge removal as .24 including 0418, then measure once; no tests.
+No tests per user direction. [Home decisions](../records/PLAN-056-home-start-implementation.md) remain.
 Platform-wide redirection supersedes page order. No speculative tuning or new
 test campaign/service/store/role design. Preserve excluded candidates.
 
 ## Follow-up — reassess Home information after domain readers
 
-Planning only; backlog: Operations TODO, "PLAN-056 Home information restoration."
-Review existing outputs first; create readers only for demonstrated gaps.
+Backlog: Operations TODO, "PLAN-056 Home information restoration."
+Reuse existing outputs first.
 
 - [ ] **Source Records:** Inventory-owned total, latest report and 30-day net
   change without request-time inventory/history scans.
@@ -67,8 +68,9 @@ Review existing outputs first; create readers only for demonstrated gaps.
   scoped links; no raw finding-count substitution.
 - [ ] **Attention queue:** Issues-owned ranked actions, bounded affected counts
   and links, consistent with Issues filters/ranking.
-- [ ] **Navigation badges:** Reuse the same owned Issues Open total; assess the
-  Patching badge independently against its existing predicate and page budget.
+- [ ] **Navigation badges, all pages:** Shared Issues/Patching queries removed
+  locally. Consider returning via domain readers with exact populations, access,
+  freshness metadata and a cheap cache-miss path.
 - [ ] **Software detail:** Assess published decision/risk/issue breakdowns;
   distinguish installed-title status, high-risk safety titles and Home's former
   active-risk-finding population. Reuse only matching definitions.

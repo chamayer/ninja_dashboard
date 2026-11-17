@@ -9,9 +9,8 @@ from django.http import HttpRequest
 from . import issue_selection
 from .models import Client, ClientCandidate, EntityCandidate, Finding, MergeCandidate
 
-# The Issues badge is the queue's Open count (independent corrective actions,
-# PLAN-003 R3). It is shared by every page render, so it is cached briefly
-# per process rather than recalculated on each request.
+# Retained badge readers are candidates for domain-owned publication follow-up.
+# Shared rendering deliberately does not call them, including on cache misses.
 _NAV_COUNTS_CACHE_SECONDS = 60
 
 
@@ -78,7 +77,7 @@ def brand(request: HttpRequest) -> dict:
         "org_mode": getattr(request, "org_mode", "none"),
         "current_client": getattr(request, "current_client", None),
         "active_section": _active_section(request),
-        "nav_findings_count": 0,
+        "nav_findings_count": None,
         "nav_pending_merges": 0,
         "nav_pending_client_candidates": 0,
         "nav_pending_entity_candidates": 0,
@@ -87,7 +86,7 @@ def brand(request: HttpRequest) -> dict:
         # data and ran for every authenticated page render. Reintroduce this
         # badge only from a derived, refreshable summary surface.
         "nav_pending_software_decisions": 0,
-        "nav_patching_open": 0,
+        "nav_patching_open": None,
     }
 
     if getattr(request, "user", None) and request.user.is_authenticated:
@@ -98,16 +97,6 @@ def brand(request: HttpRequest) -> dict:
                     tenant_id=tenant_id,
                     deleted_at__isnull=True,
                 ).order_by("display_name")
-            )
-        if ctx["active_section"] == "home":
-            # Home is a start page, not a fleet summary. Omit counts rather
-            # than calculate a costly badge or present an invented zero.
-            ctx["nav_findings_count"] = None
-            ctx["nav_patching_open"] = None
-        else:
-            home_count = getattr(request, "home_issues_open_count", None)
-            ctx["nav_findings_count"] = (
-                home_count if home_count is not None else _nav_issues_count(tenant_id)
             )
         # These badges are rendered only in the application admin tabs, so
         # avoid even their small count queries on ordinary operator pages.
@@ -127,8 +116,6 @@ def brand(request: HttpRequest) -> dict:
                 tenant_id=tenant_id,
                 status=EntityCandidate.Status.PENDING,
             ).count()
-        if ctx["active_section"] != "home":
-            ctx["nav_patching_open"] = _nav_patching_count(tenant_id)
     else:
         ctx["clients"] = []
 

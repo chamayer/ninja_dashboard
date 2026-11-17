@@ -15534,29 +15534,32 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
     )
 
     def populate_hudu_presentation(target_rows: list[dict]) -> None:
-        """Load display-only Hudu detail after the fleet-level filter pass."""
-        observation_ids = [
+        """Expand only selected Hudu records, including bounded CSV batches."""
+        observation_ids = list(dict.fromkeys(
             observation_id
             for row in target_rows
             for observation_id in row["hudu_observation_ids"]
-        ]
+        ))
         if not observation_ids:
             return
         with transaction.atomic(), connection.cursor() as cur:
             cur.execute("SET LOCAL operations.tenant_id = 1")
-            cur.execute(
-                """
-                SELECT hudu.observation_id, hudu.device_id, hudu.source_layout,
-                       hudu.source_url, hudu.card_source, hudu.card_id,
-                       hudu.card_resolved_device_id, alias.canonical
-                FROM operations.v_hudu_computer_inventory_evidence_current hudu
-                LEFT JOIN operations.platform_aliases alias
-                  ON alias.alias = LOWER(hudu.card_source)
-                WHERE hudu.observation_id = ANY(%s::uuid[])
-                """,
-                [observation_ids],
-            )
-            detail_rows = cur.fetchall()
+            detail_rows = []
+            for offset in range(0, len(observation_ids), 100):
+                cur.execute(
+                    """
+                    SELECT hudu.observation_id, hudu.device_id, hudu.source_layout,
+                           hudu.source_url, hudu.card_source, hudu.card_id,
+                           hudu.card_resolved_device_id, alias.canonical
+                    FROM operations.read_hudu_computer_inventory_evidence(
+                        %s, %s::uuid[]
+                    ) hudu
+                    LEFT JOIN operations.platform_aliases alias
+                      ON alias.alias = LOWER(hudu.card_source)
+                    """,
+                    [1, observation_ids[offset:offset + 100]],
+                )
+                detail_rows.extend(cur.fetchall())
         details: dict = {}
         for (
             observation_id,

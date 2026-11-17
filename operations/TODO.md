@@ -7,6 +7,8 @@
 ## Current Operations backlog
 
 - [ ] **PLAN-056 Home information restoration** (2026-11-17, planning only).
+      Includes considering the return of shared Issues/Patching navigation badges
+      on all pages via matching protected domain readers and cheap cache misses.
       Reassess removed Home information after suitable domain readers exist;
       audit already-returned cheap fields before building anything new. The
       [follow-up checklist](../docs/plans/PLAN-056-platform-performance-assessment.md#follow-up--reassess-home-information-after-domain-readers)
