@@ -2,6 +2,49 @@
 
 ## Active resume checkpoint — 2026-11-17
 
+Urgent repair requested. Prepared 0423_coverage_jobs_resource_policy and release
+0.144.30: preserve the complete 0372 resource-template allow-list, add only
+Coverage's declared template, register domain_lock capacity 1 with existing
+policy revision; retain policy on reversal like 0336/0372. Exact forward SQL ran
+against a session-local LIKE INCLUDING ALL clone of job_resource_limits with
+the existing policy rows, then rolled back: returned 1/domain_lock. Three-second
+statement/one-second lock bound; no persistent policy or queue change. Host SQL
+staging removed. Python compilation, focused Ruff, Django base system and
+whitespace checks pass. Commit/push/automatic-deployment/0423 approval requested
+under AGENTS.md; next approved rollout and sustained dispatch/maintenance check.
+
+Latest deployed measurement, 22:05 UTC: one configured-admin internal HTTP GET
+to /inventory/computers/ returned complete HTML, 200, 427,489 bytes, 4.369 s
+(headers 4.368 s). Normal logout confirmed; exact server completion marker
+c1a990917cea109fd709744d711056b0_coverage_live returned 200. Exact host/container
+staging cleanup verified. No retry/cold-state claim; twenty-second deadline.
+This measures the serving legacy route; the maintained candidate remains disabled.
+
+Subsequent health check supersedes the earlier all-healthy snapshot: Jobs worker
+restart-looping (11 restarts at check), Operations/ingest/Postgres healthy.
+Dispatch raises `Jobs resource policy is unavailable`. Read-only catalog check
+confirmed no job_resource_limits row for tenant:{tenant_id}:coverage-read-model;
+capacity:processing=2 and execution:emergency-child=5 exist. One Coverage run
+queued; zero publications. Earlier Python validation checked lane names but
+missed the database resource-registration contract. Next obtain authorization
+for a scoped resource-policy repair, then validate registration/dispatch and
+maintenance before reader cutover. Measurement request did not authorize a
+runtime fix, manual policy insertion, migration, commit or push; none attempted.
+
+### Earlier recovery rollout check
+
+Recovery release complete: user approved the prepared fix's commit and push.
+2edf638a / 0.144.29 pushed origin then a-m-rose; automatic rollout observed.
+Operations, ingest, Jobs worker and Postgres healthy; new application containers
+have zero restarts at the check. Ingest VERSION and Operations/ingest shared
+registry hashes match the committed blob. Database has the evaluation-lane
+Coverage definition and migration 0422 applied. No Coverage job run or publication
+was present at this early check, so maintenance success is not claimed. Reader
+remains disabled. Next maintenance/access/concurrency and remaining filter edges
+before cutover. No manual migration, hotpatch, rollback or separate redeploy.
+
+### Prior deployment incident and recovery preparation
+
 Deployment continuation: user explicitly approved migration 0422 and automatic
 deployment. e6264e3d pushed origin then a-m-rose; both remote hashes confirmed.
 Automatic rollout applied 0422; Operations healthy and deployed views.py matches

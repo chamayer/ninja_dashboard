@@ -2,6 +2,15 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.144.30] — 2026-11-17 — Restore Jobs dispatch
+
+### Fixed
+
+- Migration 0423 admits and registers Coverage's existing domain resource lock
+  with capacity one. Its missing policy caused queued Coverage work to abort
+  Jobs dispatch and restart the worker. Other resource limits are preserved.
+- The maintained Coverage reader remains disabled.
+
 ## [0.144.29] — 2026-11-17 — Repair Coverage Jobs registration
 
 ### Fixed

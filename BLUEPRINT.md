@@ -19,7 +19,7 @@ validation results, or completed-plan summaries here.
 
 ## Next action — active plan routing
 
-- **PLAN-056 — active, platform performance recovery.** Next: approve the prepared Jobs registration recovery release, then verify startup. See the [handoff](docs/plans/PLAN-056-platform-performance-assessment.md) and [Operations checkpoint](operations/BLUEPRINT.md).
+- **PLAN-056 — active, platform performance recovery.** Next: repair the missing Coverage Jobs resource policy with approval; worker restart-looping. See the [handoff](docs/plans/PLAN-056-platform-performance-assessment.md) and [Operations checkpoint](operations/BLUEPRINT.md).
 
 - **PLAN-026 — active, approval-gated.** PLAN-025 is complete; next obtain
   explicit approval to implement the source configuration UI using its

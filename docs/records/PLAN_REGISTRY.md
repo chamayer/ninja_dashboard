@@ -11,8 +11,8 @@
 - Source: docs/plans/PLAN-056-platform-performance-assessment.md
 - Section: PLAN-056 — Platform performance recovery
 - Related plans: Supersedes PLAN-041, PLAN-044, PLAN-047, PLAN-048, PLAN-049, PLAN-050, PLAN-053 and PLAN-054. All unfinished work and evidence are routed through the consolidation record; no independent execution remains in those plans.
-- Resume gate: PLAN-056 active. e6264e3d pushed to both remotes after explicit migration/deployment approval; 0422 applied. Ingest/Jobs startup rejects the new unsupported coverage lane. Existing evaluation-lane fix and 0.144.29 prepared; needs recovery commit/push approval. Reader remains disabled. After recovery, persistent access/concurrency/maintenance and remaining filter edges precede cutover. Handoff: operations/BLUEPRINT.md; evidence: docs/records/PLAN-056-coverage-reader-remediation.md.
-- Last checked: 2026-11-17 (both remotes e6264e3d; automatic rollout observed, 0422 recorded applied, Operations healthy and committed file hash matched. Ingest and Jobs worker restart-loop during definition registration; Postgres healthy. Prepared registry lane fix passes local lane-contract, compilation, registry and whitespace checks).
+- Resume gate: PLAN-056 active. 2edf638a / 0.144.29 deployed to both remotes; evaluation-lane fix restored startup. 0422 applied; maintained reader disabled. Next persistent access/concurrency/maintenance and remaining filter edges before cutover; no Coverage publication observed at the early post-deployment check. Handoff: operations/BLUEPRINT.md; evidence: docs/records/PLAN-056-coverage-reader-remediation.md.
+- Last checked: 2026-11-17 (automatic rollout of 2edf638a; all four services healthy, zero new application-container restarts. Ingest VERSION and both shared registry hashes match commit; Coverage definition stored in evaluation lane, 0422 applied. No Coverage run/publication yet; reader remains disabled. Local lane-contract, compilation, registry and whitespace checks passed).
 
 ## PLAN-055 — Jobs execution-scope claim race
 

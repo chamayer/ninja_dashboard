@@ -5,19 +5,19 @@ History: [checkpoint](docs/records/OPERATIONS-CHECKPOINT-2026-11-02.md); verify 
 
 ## PLAN-056 — Platform performance recovery
 
-**Current work:** e6264e3d pushed to both remotes with explicit 0422 approval;
-migration applied and Operations healthy. Ingest/Jobs restart at definition
-registration: unsupported coverage lane. One-line evaluation-lane fix and .29
-release prepared; next obtain commit/push approval and verify startup. Reader
-disabled; parity sample 1.624 s. Lifecycle/access/cold validation remains open.
+**Current work:** .29 live Coverage 4.369 s, 200/full HTML, normal logout.
+Jobs restart-loops: missing Coverage resource policy. 0423/.30 prepared to admit
+and register the existing lock at capacity 1; exact SQL passed on a temporary
+clone, rolled back. Next explicit commit/push/migration approval, then rollout.
+Reader disabled; 1.624 s was candidate-only. No persistent repair attempted.
 Contract: docs/decisions/0059-coverage-maintained-selection.md.
 [Scope/checkpoint](../docs/records/PLAN-056-coverage-reader-remediation.md).
 
 **Goal:** Recover Home responsiveness and Software freshness; preserve access,
 population, input/claim fences and expiry contracts.
 
-**Deployed:** 7e8e44e5 / 0.144.28 on both remotes and production; services healthy;
-no new migrations. 0420/0421 previously applied. [Prior measurement](../docs/records/PLAN-056-release-0.144.24.md).
+**Deployed:** 2edf638a / 0.144.29 on both remotes and production; registry hashes
+match committed blob. 0420–0422 applied. [Prior measurement](../docs/records/PLAN-056-release-0.144.24.md).
 Recorded full preparation 47.93 s; reuse 14.95 s; details in linked evidence.
 Full 15-page acceptance is not claimed.
 
