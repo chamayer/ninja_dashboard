@@ -17,7 +17,7 @@ the [release checkpoint](../records/PLAN-056-worktree-reconciliation.md). No loc
 
 ## Current checkpoint and evidence
 
-Deployed: `f8416839` / 0.144.24, 0418 applied. Resume via the
+Deployed: `0e04294a` / 0.144.25, 0419 applied. Resume via the
 [Operations checkpoint](../../operations/BLUEPRINT.md).
 [Triage](../records/PLAN-056-emergency-triage-2026-11-17.md) retains live evidence;
 [Source Records comparison](../records/PLAN-056-source-records-contract-check.md)
@@ -49,11 +49,9 @@ Home: <=1.5 s ordinary / <2 s hard maximum including cold navigation.
 
 ## Next action
 
-Push the approved [Coverage compact correction](../records/PLAN-056-coverage-compact-correction.md)
-as .25 including 0419; observe deployment. No tests/page measurements.
-No tests per user direction. [Home decisions](../records/PLAN-056-home-start-implementation.md) remain.
-Platform-wide redirection supersedes page order. No speculative tuning or new
-test campaign/service/store/role design. Preserve excluded candidates.
+Push approved permanent Software recovery/readiness .26 including 0420/0421;
+observe rollout and protected availability, no tests/timing pass. [Scope](../records/PLAN-056-software-emergency-2026-11-17.md).
+Coverage .25 latency and broader acceptance remain open.
 
 ## Follow-up — reassess Home information after domain readers
 

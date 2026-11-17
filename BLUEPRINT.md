@@ -19,7 +19,7 @@ validation results, or completed-plan summaries here.
 
 ## Next action — active plan routing
 
-- **PLAN-056 — active, emergency performance recovery.** Next: push approved .25 Coverage correction including 0419, then observe automatic deployment; no tests/measurements. See the [handoff](docs/plans/PLAN-056-platform-performance-assessment.md) and [Operations checkpoint](operations/BLUEPRINT.md).
+- **PLAN-056 — active, emergency performance recovery.** Next: push approved permanent Software .26 including 0420/0421, observe rollout and protected availability; no tests/timing pass. See the [handoff](docs/plans/PLAN-056-platform-performance-assessment.md) and [Operations checkpoint](operations/BLUEPRINT.md).
 
 - **PLAN-026 — active, approval-gated.** PLAN-025 is complete; next obtain
   explicit approval to implement the source configuration UI using its

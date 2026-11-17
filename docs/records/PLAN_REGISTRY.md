@@ -11,7 +11,7 @@
 - Source: docs/plans/PLAN-056-platform-performance-assessment.md
 - Section: PLAN-056 — Platform performance recovery
 - Related plans: Supersedes PLAN-041, PLAN-044, PLAN-047, PLAN-048, PLAN-049, PLAN-050, PLAN-053 and PLAN-054. All unfinished work and evidence are routed through the consolidation record; no independent execution remains in those plans.
-- Resume gate: PLAN-056 active. f8416839 / 0.144.24 deployed; 0418 applied. Local compact Coverage correction adds protected metadata-only record counts (pending 0419), single-pass requirement presence and compact fleet cells. User approves .25 commit/push including 0419; next observe automatic deployment. No tests/measurements for this candidate. Earlier .24 Coverage 4.830 s; Software stale/input_failed. All page dispositions open. Handoff: operations/BLUEPRINT.md; evidence: docs/records/PLAN-056-coverage-compact-correction.md.
+- Resume gate: PLAN-056 active. Software restored on .25. Permanent .26 commit/push approved including 0420/0421: ownership recovery authorities and shared scheduler/claim readiness gate. Next observe automatic deployment and protected availability; no tests/timing pass. All page acceptance remains open. Handoff: operations/BLUEPRINT.md; evidence: docs/records/PLAN-056-software-emergency-2026-11-17.md.
 - Last checked: 2026-11-17 (Home retains cheap/published counts; composition smoke covers zeros, unavailable, pending and denied states; three focused tests and system checks pass. Full deployed latency unverified. Production remains eab79e1d / 0.144.22; no commit/push/deployment).
 
 ## PLAN-055 — Jobs execution-scope claim race

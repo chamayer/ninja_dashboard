@@ -723,6 +723,10 @@ def _admit_expired_software_overview() -> int:
                 "AND status IN ('queued', 'running'))"
             )
             classification_pending, overview_active, classification_active = cur.fetchone()
+            publication_ready = False
+            if due and not ownership_pending and not classification_pending and not overview_active:
+                cur.execute("SELECT operations.software_overview_inputs_ready(%s)", (1,))
+                publication_ready = cur.fetchone()[0] is True
         if ownership_pending:
             request_system_job(
                 "computer-client-ownership", "software-overview-ownership"
@@ -736,7 +740,7 @@ def _admit_expired_software_overview() -> int:
                 return 1
             # A new automatic request changes the publisher's captured inputs.
             # Let the existing claimed/queued refresh finish before another one.
-            if overview_active:
+            if overview_active or not publication_ready:
                 return 0
             request_system_job("software-overview", "software-overview-expiry")
             return 1

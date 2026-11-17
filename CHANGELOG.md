@@ -2,6 +2,21 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.144.26] — 2026-11-17 — Recover Software inputs and gate publication readiness
+
+### Fixed
+
+- Ownership dirty/sweep Jobs now participate in the existing audited, bounded
+  replay-safe recovery path, preventing interrupted ownership inputs from
+  stranding Software publication until manual intervention. Migration 0420
+  registers the matching recovery authorities for the unchanged local handlers.
+- Software expiry admission waits for declared inputs to be ready. Migration 0421
+  applies the same readiness predicate at the central Jobs claim boundary for
+  automatic, workflow and manual publication requests; unready work stays queued.
+- Existing input/claim fences, role/tenant boundaries, live decisions, last
+  completed generation and freshness/expiry rules remain intact. No new store,
+  service, role or unbounded retry loop. No tests or timing pass for this release.
+
 ## [0.144.25] — 2026-11-17 — Reduce Coverage fleet preparation
 
 ### Fixed

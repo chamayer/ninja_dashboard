@@ -658,6 +658,16 @@ _RAW_DEFINITIONS = (
 # change the historical definition that admitted that run.
 REPLAY_SAFE_RECOVERY_EVIDENCE = MappingProxyType(
     {
+        "computer-client-ownership": (
+            "Changed Computer ownership reconciliation reads local evidence and "
+            "projects each Computer atomically. Dirty inputs are drained without "
+            "external mutation; replay converges to current ownership."
+        ),
+        "computer-client-ownership-sweep": (
+            "The ownership sweep pages local Computers and projects each atomically, "
+            "then drains dirty inputs. Replay converges to current ownership and "
+            "has no external mutation."
+        ),
         "software-catalog": (
             "Replays existing local catalog/lifecycle projectors and matching before "
             "classification; no source API or external mutation is invoked."

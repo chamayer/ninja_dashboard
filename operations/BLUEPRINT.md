@@ -8,8 +8,8 @@ History: [checkpoint](docs/records/OPERATIONS-CHECKPOINT-2026-11-02.md); verify 
 **Goal:** Recover Home responsiveness and Software freshness; preserve access,
 population, input/claim fences and expiry contracts.
 
-**Deployed:** f8416839 / 0.144.24 on both remotes and production; services healthy;
-0418 applied. [Measurement](../docs/records/PLAN-056-release-0.144.24.md).
+**Deployed:** 0e04294a / 0.144.25 on both remotes and production; services healthy;
+0419 applied. .25 latency is unmeasured. [Measurement](../docs/records/PLAN-056-release-0.144.24.md).
 Recorded full preparation 47.93 s; reuse 14.95 s; details in linked evidence.
 Full 15-page acceptance is not claimed.
 
@@ -20,16 +20,14 @@ timestamps/expiry; detailed evidence is linked below.
 Earlier readiness memoization candidate withdrawn; later Home .23 now deployed.
 Detailed history and limitations remain in linked records.
 
-**Checkpoint/next:** User authorizes a five-minute Coverage correction, no tests.
-Local 0419 adds a protected metadata-only source-record count reader, retaining
-unattached/withdrawn populations without unused lifecycle resolution. Requirement
-presence uses one GROUPING SETS pass; compact platform facts omit display fields;
-cutoffs computed once per Computer and review URLs only for the selected page.
-Filters/totals/CSV and Hudu lifecycle policy remain. User authorizes commit/push
-including 0419 as .25. Next push both remotes, observe automatic deployment and
-0419 application. No tests or page measurements; latency remains unverified.
-[Attribution](../docs/records/PLAN-056-coverage-bottleneck-attribution.md).
-[Correction/security](../docs/records/PLAN-056-coverage-compact-correction.md).
+**Checkpoint/next:** Software recovered on .25: actual app reader current/completed
+with data; normal populated HTML 0.820 s, logout confirmed. No tests. User now
+approves permanent .26 commit/push including 0420/0421: audited bounded replay
+for both ownership handlers; scheduler + central claim readiness gate across
+all Software publication triggers. Freshness/claim/access fences unchanged.
+Next push origin then mirror, observe automatic rollout and protected availability;
+no tests or timing pass. [Scope/security/evidence](../docs/records/PLAN-056-software-emergency-2026-11-17.md).
+Coverage .25 remains unmeasured; its evidence stays in linked records.
 
 **Release safety:** Origin then mirror; push automatically deploys. Protect real
 input handlers during rollout. Do not cancel workflow children just to change
