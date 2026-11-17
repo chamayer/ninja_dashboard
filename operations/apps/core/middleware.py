@@ -51,7 +51,15 @@ class TenantMiddleware:
         if connection.vendor != "postgresql" or self._is_exempt(request.path_info):
             return self.get_response(request)
 
+        already_atomic = connection.in_atomic_block
         with transaction.atomic():
+            if (
+                not already_atomic
+                and request.path_info == "/inventory/computers/"
+                and getattr(settings, "COVERAGE_MAINTAINED_READER", False)
+            ):
+                with connection.cursor() as cursor:
+                    cursor.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ")
             set_local_tenant(tenant_id)
             return self.get_response(request)
 

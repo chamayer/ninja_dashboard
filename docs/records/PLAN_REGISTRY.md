@@ -11,8 +11,8 @@
 - Source: docs/plans/PLAN-056-platform-performance-assessment.md
 - Section: PLAN-056 — Platform performance recovery
 - Related plans: Supersedes PLAN-041, PLAN-044, PLAN-047, PLAN-048, PLAN-049, PLAN-050, PLAN-053 and PLAN-054. All unfinished work and evidence are routed through the consolidation record; no independent execution remains in those plans.
-- Resume gate: PLAN-056 active. User approves Coverage .28 commit/push and automatic deployment; no new migrations. Exact query parity verified for 19,089 live rows and named/any-platform edge fixtures. Next push origin then mirror and observe rollout. Speedup/full HTML acceptance unverified. Handoff: operations/BLUEPRINT.md; implementation: docs/records/PLAN-056-coverage-presence-selection.md.
-- Last checked: 2026-11-17 (5185e142 / .27 deployed; four services healthy. Full 18:57 pass: all 15 returned 200 with completion/logout/cleanup confirmed. Coverage 4.214 s, Patching 1.423 s, Home 1.378 s; Software pending/input_changed with no summary data. Coverage read-only trace closed/cleaned; no tests).
+- Resume gate: PLAN-056 active. Maintained reader disabled; 0422 would enable schema/hooks/Jobs maintenance on deployment. Representative full HTML/context and multi-batch CSV parity passed. Optimized default sample 1.624 s vs 5.455 s; cold/production target not certified. Next persistent schema/access/concurrency/maintenance and remaining filter edges before cutover. Local Docker unresponsive; no local DB run. Commit approved; push requires explicit migration 0422 and automatic deployment inclusion. Handoff: operations/BLUEPRINT.md; evidence: docs/records/PLAN-056-coverage-reader-remediation.md.
+- Last checked: 2026-11-17 (resumed local candidate against HEAD 7e8e44e5; standalone runtime-role temporary-table comparison, no persistent migration or serving cutover. Prior deployed state/freshness not reverified; prior page pass remains in docs/records/PLAN-056-page-remeasurement-2026-11-17.md).
 
 ## PLAN-055 — Jobs execution-scope claim race
 

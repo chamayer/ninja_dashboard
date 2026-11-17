@@ -5,16 +5,18 @@ History: [checkpoint](docs/records/OPERATIONS-CHECKPOINT-2026-11-02.md); verify 
 
 ## PLAN-056 — Platform performance recovery
 
-**Current work:** Coverage presence semijoin query parity verified: all 19,089
-rows/columns match; any-platform/edge fixture passes. Speedup/full HTML unverified.
-User approves .28 commit/push, automatic deployment, no new migrations.
-Next push origin then mirror and observe rollout; no separate redeploy.
-[Scope/checkpoint](../docs/records/PLAN-056-coverage-presence-selection.md).
+**Current work:** Disabled Coverage candidate passes sampled HTML/context/CSV
+parity. Withdrawal-only link lookups cut detail SQL from .462 to .036 s;
+default sample 1.624 s vs 5.455 s. Next schema/access/concurrency/maintenance
+validation; local Docker unresponsive. Commit approved; reader disabled. Push
+awaits explicit 0422/automatic-deployment inclusion; cold target unproven.
+Contract: docs/decisions/0059-coverage-maintained-selection.md.
+[Scope/checkpoint](../docs/records/PLAN-056-coverage-reader-remediation.md).
 
 **Goal:** Recover Home responsiveness and Software freshness; preserve access,
 population, input/claim fences and expiry contracts.
 
-**Deployed:** 5185e142 / 0.144.27 on both remotes and production; services healthy;
+**Deployed:** 7e8e44e5 / 0.144.28 on both remotes and production; services healthy;
 no new migrations. 0420/0421 previously applied. [Prior measurement](../docs/records/PLAN-056-release-0.144.24.md).
 Recorded full preparation 47.93 s; reuse 14.95 s; details in linked evidence.
 Full 15-page acceptance is not claimed.

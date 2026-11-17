@@ -8,6 +8,7 @@ import os
 import re
 import uuid
 from collections import Counter
+from copy import copy
 from dataclasses import dataclass
 from dataclasses import field as dataclass_field
 from datetime import datetime, timedelta
@@ -14378,6 +14379,7 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
         """Start of the row's offline window; a client may set its own days."""
         days = row.get("offline_after_days") or active_device_days
         return coverage_now - timedelta(days=days)
+
     client_filters = list(dict.fromkeys(value for value in request.GET.getlist("client") if value))
     device_query = (request.GET.get("device") or "").strip().lower()
     agents_query = (request.GET.get("agents") or "").strip().lower()
@@ -14391,9 +14393,15 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
         dict.fromkeys(value for value in request.GET.getlist("online_in") if value)
     )
     requested_coverage_sources = request.GET.getlist("coverage_source")
-    requested_coverage_statuses = [_requirement_status_alias(value) for value in request.GET.getlist("coverage_status")]
+    requested_coverage_statuses = [
+        _requirement_status_alias(value) for value in request.GET.getlist("coverage_status")
+    ]
     any_platform_filters = [
-        value for value in [_requirement_status_alias(value) for value in request.GET.getlist("any_platform_status")] if value in _COVERAGE_STATES
+        value
+        for value in [
+            _requirement_status_alias(value) for value in request.GET.getlist("any_platform_status")
+        ]
+        if value in _COVERAGE_STATES
     ]
     any_platform_selected = request.GET.get("any_platform") == "1"
     no_platform_selected = request.GET.get("no_platform") == "1"
@@ -14417,7 +14425,9 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
         )
     )
     requested_record_status_filters = request.GET.getlist("record_status")
-    requested_rule_status_filters = [_requirement_status_alias(value) for value in request.GET.getlist("rule_status")]
+    requested_rule_status_filters = [
+        _requirement_status_alias(value) for value in request.GET.getlist("rule_status")
+    ]
     hudu_filters = list(
         dict.fromkeys(
             value for value in request.GET.getlist("hudu") if value in {"in_hudu", "not_in_hudu"}
@@ -14464,241 +14474,460 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
         dict.fromkeys(value for value in request.GET.getlist("device_role") if value)
     )
     state_filters = [value for value in request.GET.getlist("state") if value in _COVERAGE_STATES]
-    requested_platform_status_filters = [_requirement_status_alias(value) for value in request.GET.getlist("platform_status")]
+    requested_platform_status_filters = [
+        _requirement_status_alias(value) for value in request.GET.getlist("platform_status")
+    ]
 
-    with transaction.atomic():  # noqa: SIM117 -- tenant GUC must remain local
-        with connection.cursor() as cur:
-            cur.execute("SET LOCAL operations.tenant_id = 1")
+    def normalize_conditions(platforms):
+        record_status_filters: dict[str, list[str]] = {}
+        rule_status_filters: dict[str, list[str]] = {}
+        allowed_record_statuses = {
+            "Online",
+            "Offline",
+            "Stale",
+            "Withdrawn",
+            "No record",
+            "No status",
+            "Possible match",
+        }
+        allowed_rule_statuses = {
+            "Required",
+            "Missing",
+            "Stale",
+            *_NOT_APPLIED_STATES,
+            "N/A",
+            "Exempt",
+        }
+        for value in requested_record_status_filters:
+            product, separator, status = value.partition("|")
+            status = _LEGACY_RECORD_STATUSES.get(status, status)
+            if separator and product in platforms and status in allowed_record_statuses:
+                record_status_filters.setdefault(product, []).append(status)
+        for value in requested_rule_status_filters:
+            product, separator, status = value.partition("|")
+            if separator and product in platforms and status in allowed_rule_statuses:
+                rule_status_filters.setdefault(product, []).append(status)
 
-            # ADR-0035: the evaluator's coverage pass stores a verdict for every
-            # requirement; the page reads it and never re-derives the rule.
-            # Online/Offline is source evidence, read live from presence.
-            # Exempt requirements are not shown as requirements (SentinelOne
-            # exemptions are shown through s1_exempt).
-            cur.execute(
-                """
-                WITH presence_by_requirement AS MATERIALIZED (
-                    SELECT presence.device_id, presence.entity_type,
-                           CASE WHEN GROUPING(presence.platform) = 1 THEN 'any'
-                                ELSE presence.platform END AS platform,
-                           BOOL_OR(presence.reported_online) AS online
-                    FROM operations.device_agent_presence_current presence
-                    WHERE presence.tenant_id = 1
-                      -- Only satisfied verdicts read presence.online below.
-                      -- Retain every matching presence row for named and any
-                      -- platform requirements; EXISTS cannot multiply rows.
-                      AND EXISTS (
-                          SELECT 1 FROM operations.device_requirement_state required
-                          WHERE required.tenant_id = presence.tenant_id
-                            AND required.device_id = presence.device_id
-                            AND required.entity_type = presence.entity_type
-                            AND required.verdict = 'satisfied'
-                            AND (required.platform = 'any'
-                                 OR required.platform = presence.platform)
-                      )
-                    GROUP BY GROUPING SETS (
-                        (presence.device_id, presence.entity_type, presence.platform),
-                        (presence.device_id, presence.entity_type)
+        # Translate bookmarks made by the previous combined column filter.  The
+        # new controls keep the record fact separate from the authored rule.
+        platform_status_filters: dict[str, list[str]] = {}
+        allowed_platform_states = {*_COVERAGE_STATES, "Not applicable", "Possible match"}
+        for value in requested_platform_status_filters:
+            platform, separator, status = value.partition("|")
+            if separator and platform in platforms and status in allowed_platform_states:
+                platform_status_filters.setdefault(platform, []).append(status)
+                if status in {"Online", "Offline", "Stale", "Possible match"}:
+                    record_status_filters.setdefault(platform, []).append(status)
+                elif status in {"Missing", "Stale"}:
+                    rule_status_filters.setdefault(platform, []).append(status)
+                elif status == "Not applicable":
+                    rule_status_filters.setdefault(platform, []).append("N/A")
+        coverage_source_filters = {
+            platform for platform in requested_coverage_sources if platform in platforms
+        }
+        # Keep historical required-platform URLs useful during the transition.
+        coverage_source_filters.update(
+            platform for platform in platform_filters if platform in platforms
+        )
+        coverage_status_filters: dict[str, list[str]] = {
+            platform: [] for platform in coverage_source_filters
+        }
+        for value in requested_coverage_statuses:
+            platform, separator, status = value.partition("|")
+            if separator and platform in platforms and status in _COVERAGE_STATES:
+                coverage_source_filters.add(platform)
+                coverage_status_filters.setdefault(platform, []).append(status)
+        for platform in online_filters:
+            if platform in platforms:
+                coverage_source_filters.add(platform)
+                coverage_status_filters.setdefault(platform, []).append("Online")
+        for platform in coverage_source_filters:
+            coverage_status_filters.setdefault(platform, [])
+        for selections in (record_status_filters, rule_status_filters, coverage_status_filters):
+            for platform, statuses in selections.items():
+                selections[platform] = list(dict.fromkeys(statuses))
+        agent_filter_conditions = []
+        for index in range(12):
+            agent = request.GET.get(f"agent_{index}")
+            states = [
+                value
+                for value in (
+                    _LEGACY_RECORD_STATUSES.get(raw, raw)
+                    for raw in request.GET.getlist(f"agent_state_{index}")
+                )
+                if value in allowed_record_statuses
+            ]
+            requirements = [
+                value
+                for value in (
+                    _requirement_status_alias(raw)
+                    for raw in request.GET.getlist(f"agent_requirement_{index}")
+                )
+                if value in allowed_rule_statuses
+            ]
+            if agent not in platforms or not (states or requirements):
+                continue
+            agent_filter_conditions.append(
+                {
+                    "index": index,
+                    "agent": agent,
+                    "states": list(dict.fromkeys(states)),
+                    "requirements": list(dict.fromkeys(requirements)),
+                }
+            )
+        # Existing links remain valid.  Treat their former per-column selections
+        # as builder conditions so old bookmarks retain the same AND semantics.
+        legacy_agent_conditions = {
+            platform: {
+                "agent": platform,
+                "states": record_status_filters.get(platform, []),
+                "requirements": rule_status_filters.get(platform, []),
+            }
+            for platform in set(record_status_filters) | set(rule_status_filters)
+        }
+        all_agent_conditions = agent_filter_conditions + list(legacy_agent_conditions.values())
+        agent_filter_forms = agent_filter_conditions or [
+            {
+                "index": 0,
+                "agent": "",
+                "states": [],
+                "requirements": [],
+            }
+        ]
+        coverage_filter_sources = [
+            {
+                "name": platform,
+                "selected": platform in coverage_source_filters,
+                "statuses": coverage_status_filters.get(platform, []),
+            }
+            for platform in platforms
+        ]
+        return (
+            record_status_filters,
+            rule_status_filters,
+            platform_status_filters,
+            coverage_source_filters,
+            coverage_status_filters,
+            agent_filter_conditions,
+            all_agent_conditions,
+            agent_filter_forms,
+            coverage_filter_sources,
+        )
+
+    from django.conf import settings
+
+    from . import coverage_page_reads, coverage_selection
+
+    prepared = getattr(settings, "COVERAGE_MAINTAINED_READER", False)
+    prepared_metadata = None
+    selected = None
+    if prepared:
+        prepared_metadata = getattr(
+            request, "_coverage_metadata", None
+        ) or coverage_page_reads.metadata(days=active_device_days)
+        if prepared_metadata is None:
+            return render(
+                request, "coverage_unavailable.html", {"active_section": "inventory"}, status=503
+            )
+        platforms = sorted(
+            prepared_metadata["platforms"],
+            key=lambda name: _computer_card_order({"platform": name}),
+        )
+        (
+            record_status_filters,
+            rule_status_filters,
+            platform_status_filters,
+            coverage_source_filters,
+            coverage_status_filters,
+            agent_filter_conditions,
+            all_agent_conditions,
+            agent_filter_forms,
+            coverage_filter_sources,
+        ) = normalize_conditions(platforms)
+        selection_options = dict(
+            tenant_id=1,
+            active_device_days=active_device_days,
+            now=coverage_now,
+            client=client_filters,
+            device=device_query,
+            agents=agents_query,
+            os_family=os_family_filters,
+            device_type=device_type_filters,
+            device_role=device_role_filters,
+            page=request.GET.get("page", 1),
+            hudu=hudu_filters,
+            hudu_record_filter=hudu_record_filter,
+            hudu_links=hudu_link_filters,
+            agent_conditions=all_agent_conditions,
+            coverage_conditions=[
+                {"agent": name, "states": coverage_status_filters[name]}
+                for name in coverage_source_filters
+            ],
+            s1_exemption=s1_exemption_filters,
+            platform=platform_filters,
+            state=state_filters,
+            any_platform=any_platform_selected,
+            any_platform_status=any_platform_filters,
+            no_platform=no_platform_selected,
+            computer_scope=computer_scope_filters,
+        )
+        selection = (
+            {"availability": "ready", "selection": request._coverage_batch_selection}
+            if hasattr(request, "_coverage_batch_selection")
+            else coverage_selection.maintained_selection(
+                **selection_options, _all_ids=wants_csv(request)
+            )
+        )
+        if selection["availability"] != "ready":
+            return render(
+                request, "coverage_unavailable.html", {"active_section": "inventory"}, status=503
+            )
+        selected = selection["selection"]
+        export_ids = list(selected[5]) if wants_csv(request) else []
+        if wants_csv(request):
+            selected = (*selected[:5], export_ids[:100], *selected[6:])
+        page_inputs = coverage_page_reads.page_inputs(selected[5])
+        rows, hudu_rows, computer_rows = (
+            page_inputs[name] for name in ("requirements", "hudu", "computers")
+        )
+        source_presence_rows, source_observation_rows = (
+            page_inputs[name] for name in ("presence", "observations")
+        )
+        client_rows = prepared_metadata["clients"]
+        agent_platforms = set(prepared_metadata["agents"])
+        source_record_counts = prepared_metadata["source_record_counts"]
+    else:
+        with transaction.atomic():  # noqa: SIM117 -- tenant GUC must remain local
+            with connection.cursor() as cur:
+                cur.execute("SET LOCAL operations.tenant_id = 1")
+
+                # ADR-0035: the evaluator's coverage pass stores a verdict for every
+                # requirement; the page reads it and never re-derives the rule.
+                # Online/Offline is source evidence, read live from presence.
+                # Exempt requirements are not shown as requirements (SentinelOne
+                # exemptions are shown through s1_exempt).
+                cur.execute(
+                    """
+                    WITH presence_by_requirement AS MATERIALIZED (
+                        SELECT presence.device_id, presence.entity_type,
+                               CASE WHEN GROUPING(presence.platform) = 1 THEN 'any'
+                                    ELSE presence.platform END AS platform,
+                               BOOL_OR(presence.reported_online) AS online
+                        FROM operations.device_agent_presence_current presence
+                        WHERE presence.tenant_id = 1
+                          -- Only satisfied verdicts read presence.online below.
+                          -- Retain every matching presence row for named and any
+                          -- platform requirements; EXISTS cannot multiply rows.
+                          AND EXISTS (
+                              SELECT 1 FROM operations.device_requirement_state required
+                              WHERE required.tenant_id = presence.tenant_id
+                                AND required.device_id = presence.device_id
+                                AND required.entity_type = presence.entity_type
+                                AND required.verdict = 'satisfied'
+                                AND (required.platform = 'any'
+                                     OR required.platform = presence.platform)
+                          )
+                        GROUP BY GROUPING SETS (
+                            (presence.device_id, presence.entity_type, presence.platform),
+                            (presence.device_id, presence.entity_type)
+                        )
                     )
+                    SELECT c.slug AS client_slug,
+                           c.display_name AS client_name,
+                           d.id AS device_id,
+                           COALESCE(d.canonical_hostname, '') AS hostname,
+                           COALESCE(d.os_family, '') AS os_family,
+                           d.device_type,
+                           state.platform,
+                           COALESCE(decision.value, '{}'::jsonb) ? 'agent.edr' AS s1_exempt,
+                           CASE state.verdict
+                               WHEN 'missing' THEN 'Missing'
+                               WHEN 'stale' THEN 'Stale'
+                               WHEN 'satisfied' THEN
+                                   CASE WHEN COALESCE(presence.online, FALSE) THEN 'Online'
+                                        ELSE 'Offline' END
+                               WHEN 'os_unknown' THEN 'N/A — OS unknown'
+                               WHEN 'pending_cleanup' THEN 'N/A — Cleanup'
+                               ELSE 'No agents'
+                           END AS status,
+                           FALSE AS hudu_present,
+                           state.evaluated_at
+                    FROM operations.device_requirement_state state
+                    JOIN operations.devices d
+                      ON d.tenant_id = state.tenant_id
+                     AND d.id = state.device_id
+                     AND d.deleted_at IS NULL
+                     AND d.lifecycle_status <> 'retired'
+                    JOIN operations.computer_client_ownership owner
+                      ON owner.tenant_id = d.tenant_id AND owner.device_id = d.id
+                     AND owner.effective_client_id = d.client_id
+                     AND owner.state IN ('resolved', 'decision_protected')
+                    JOIN operations.clients c ON c.id = d.client_id
+                    LEFT JOIN operations.device_operator_decisions decision
+                      ON decision.tenant_id = d.tenant_id
+                     AND decision.device_id = d.id
+                     AND decision.dimension = 'exemptions'
+                    LEFT JOIN presence_by_requirement presence
+                      ON presence.device_id = state.device_id
+                     AND presence.entity_type = state.entity_type
+                     AND presence.platform = state.platform
+                    WHERE state.tenant_id = 1
+                      AND state.verdict <> 'exempt'
+                    ORDER BY c.display_name, hostname, state.platform
+                """,
                 )
-                SELECT c.slug AS client_slug,
-                       c.display_name AS client_name,
-                       d.id AS device_id,
-                       COALESCE(d.canonical_hostname, '') AS hostname,
-                       COALESCE(d.os_family, '') AS os_family,
-                       d.device_type,
-                       state.platform,
-                       COALESCE(decision.value, '{}'::jsonb) ? 'agent.edr' AS s1_exempt,
-                       CASE state.verdict
-                           WHEN 'missing' THEN 'Missing'
-                           WHEN 'stale' THEN 'Stale'
-                           WHEN 'satisfied' THEN
-                               CASE WHEN COALESCE(presence.online, FALSE) THEN 'Online'
-                                    ELSE 'Offline' END
-                           WHEN 'os_unknown' THEN 'N/A — OS unknown'
-                           WHEN 'pending_cleanup' THEN 'N/A — Cleanup'
-                           ELSE 'No agents'
-                       END AS status,
-                       FALSE AS hudu_present,
-                       state.evaluated_at
-                FROM operations.device_requirement_state state
-                JOIN operations.devices d
-                  ON d.tenant_id = state.tenant_id
-                 AND d.id = state.device_id
-                 AND d.deleted_at IS NULL
-                 AND d.lifecycle_status <> 'retired'
-                JOIN operations.computer_client_ownership owner
-                  ON owner.tenant_id = d.tenant_id AND owner.device_id = d.id
-                 AND owner.effective_client_id = d.client_id
-                 AND owner.state IN ('resolved', 'decision_protected')
-                JOIN operations.clients c ON c.id = d.client_id
-                LEFT JOIN operations.device_operator_decisions decision
-                  ON decision.tenant_id = d.tenant_id
-                 AND decision.device_id = d.id
-                 AND decision.dimension = 'exemptions'
-                LEFT JOIN presence_by_requirement presence
-                  ON presence.device_id = state.device_id
-                 AND presence.entity_type = state.entity_type
-                 AND presence.platform = state.platform
-                WHERE state.tenant_id = 1
-                  AND state.verdict <> 'exempt'
-                ORDER BY c.display_name, hostname, state.platform
-            """,
-            )
-            rows = cur.fetchall()
-            cur.execute(
-                f"""
-                SELECT hudu.observation_id, hudu.device_id, hudu.client_id,
-                       hudu.hostname,
-                       lifecycle.record_lifecycle = 'archived' AS is_archived,
-                       hudu.has_relayed_cards AS has_links
-                FROM operations.v_hudu_computer_inventory_observation_current hudu
-                JOIN operations.devices device
-                  ON device.tenant_id = hudu.tenant_id
-                 AND device.id = hudu.device_id
-                 AND device.deleted_at IS NULL
-                 AND {current_computer_sql("device")}
-                JOIN operations.computer_client_ownership owner
-                  ON owner.tenant_id = device.tenant_id AND owner.device_id = device.id
-                 AND owner.effective_client_id = device.client_id
-                 AND owner.effective_client_id = hudu.client_id
-                 AND owner.state IN ('resolved', 'decision_protected')
-                LEFT JOIN LATERAL (
-                    SELECT lifecycle.record_lifecycle
-                    FROM operations.v_device_source_record_lifecycle_current lifecycle
-                    WHERE lifecycle.tenant_id = hudu.tenant_id
-                      AND lifecycle.observation_id = hudu.observation_id
-                    OFFSET 0
-                ) lifecycle ON TRUE
-                """,
-            )
-            hudu_rows = cur.fetchall()
-            cur.execute(
-                """
-                SELECT d.id, d.client_id, c.slug, c.display_name,
-                       COALESCE(d.canonical_hostname, ''),
-                       COALESCE(d.os_family, ''), d.device_type, d.device_role,
-                       d.lifecycle_status,
-                       COALESCE(decision.value, '{}'::jsonb) ? 'agent.edr'
-                           AS s1_exempt,
-                       COALESCE(session.is_online_any, FALSE) AS is_online_any,
-                       session.last_contact_at,
-                       c.offline_after_days
-                FROM operations.devices d
-                JOIN operations.computer_client_ownership owner
-                  ON owner.tenant_id = d.tenant_id AND owner.device_id = d.id
-                 AND owner.effective_client_id = d.client_id
-                 AND owner.state IN ('resolved', 'decision_protected')
-                JOIN operations.clients c ON c.id = d.client_id
-                LEFT JOIN operations.device_operator_decisions decision
-                  ON decision.tenant_id = d.tenant_id
-                 AND decision.device_id = d.id
-                 AND decision.dimension = 'exemptions'
-                LEFT JOIN operations.device_session_current session
-                  ON session.tenant_id = d.tenant_id
-                 AND session.device_id = d.id
-                WHERE d.tenant_id = 1
-                  AND d.deleted_at IS NULL
-                  AND d.lifecycle_status <> 'retired'
-                ORDER BY c.display_name, d.canonical_hostname
-                """,
-            )
-            computer_rows = cur.fetchall()
-            cur.execute(
-                """
-                SELECT id, slug, display_name
-                FROM operations.clients
-                WHERE tenant_id = 1
-                  AND deleted_at IS NULL
-                """,
-            )
-            client_rows = cur.fetchall()
-            cur.execute(
-                f"""
-                SELECT presence.device_id, presence.platform,
-                       BOOL_OR(presence.reported_online) AS online,
-                       MAX(COALESCE(presence.last_contact_at, presence.last_observed_at))
-                           AS last_contact_at
-                FROM operations.device_agent_presence_current presence
-                JOIN operations.devices device
-                  ON device.tenant_id = presence.tenant_id
-                 AND device.id = presence.device_id
-                 AND device.deleted_at IS NULL
-                 AND {current_computer_sql("device")}
-                WHERE presence.tenant_id = 1
-                  AND (presence.entity_type LIKE 'agent.%%' OR presence.entity_type = 'vm.guest')
-                GROUP BY presence.device_id, presence.platform
-                """,
-            )
-            source_presence_rows = cur.fetchall()
-            # Use the same source-observation state shown on a Computer's
-            # Observations tab.  Presence supplies availability; observation
-            # state tells the inventory reader whether a record is current or
-            # withdrawn.  The source-link timestamp is the actual withdrawal
-            # time rather than the older last-seen timestamp.
-            if compact_source_observations:
+                rows = cur.fetchall()
                 cur.execute(
                     f"""
-                    SELECT evidence.device_id, evidence.source_name,
-                           BOOL_OR(evidence.observation_active) AS has_current_record,
-                           NULL::timestamptz AS current_seen_at,
-                           NULL::timestamptz AS withdrawn_at
-                      FROM operations.v_device_observation_current evidence
-                          JOIN operations.devices device
-                            ON device.tenant_id = evidence.tenant_id
-                           AND device.id = evidence.device_id
-                           AND device.deleted_at IS NULL
-                           AND {current_computer_sql("device")}
-                     WHERE evidence.tenant_id = 1
-                       AND (evidence.entity_type LIKE 'agent.%%'
-                            OR evidence.entity_type = 'vm.guest')
-                     GROUP BY evidence.device_id, evidence.source_name
-                    """
+                    SELECT hudu.observation_id, hudu.device_id, hudu.client_id,
+                           hudu.hostname,
+                           lifecycle.record_lifecycle = 'archived' AS is_archived,
+                           hudu.has_relayed_cards AS has_links
+                    FROM operations.v_hudu_computer_inventory_observation_current hudu
+                    JOIN operations.devices device
+                      ON device.tenant_id = hudu.tenant_id
+                     AND device.id = hudu.device_id
+                     AND device.deleted_at IS NULL
+                     AND {current_computer_sql("device")}
+                    JOIN operations.computer_client_ownership owner
+                      ON owner.tenant_id = device.tenant_id AND owner.device_id = device.id
+                     AND owner.effective_client_id = device.client_id
+                     AND owner.effective_client_id = hudu.client_id
+                     AND owner.state IN ('resolved', 'decision_protected')
+                    LEFT JOIN LATERAL (
+                        SELECT lifecycle.record_lifecycle
+                        FROM operations.v_device_source_record_lifecycle_current lifecycle
+                        WHERE lifecycle.tenant_id = hudu.tenant_id
+                          AND lifecycle.observation_id = hudu.observation_id
+                        OFFSET 0
+                    ) lifecycle ON TRUE
+                    """,
                 )
-            else:
+                hudu_rows = cur.fetchall()
+                cur.execute(
+                    """
+                    SELECT d.id, d.client_id, c.slug, c.display_name,
+                           COALESCE(d.canonical_hostname, ''),
+                           COALESCE(d.os_family, ''), d.device_type, d.device_role,
+                           d.lifecycle_status,
+                           COALESCE(decision.value, '{}'::jsonb) ? 'agent.edr'
+                               AS s1_exempt,
+                           COALESCE(session.is_online_any, FALSE) AS is_online_any,
+                           session.last_contact_at,
+                           c.offline_after_days
+                    FROM operations.devices d
+                    JOIN operations.computer_client_ownership owner
+                      ON owner.tenant_id = d.tenant_id AND owner.device_id = d.id
+                     AND owner.effective_client_id = d.client_id
+                     AND owner.state IN ('resolved', 'decision_protected')
+                    JOIN operations.clients c ON c.id = d.client_id
+                    LEFT JOIN operations.device_operator_decisions decision
+                      ON decision.tenant_id = d.tenant_id
+                     AND decision.device_id = d.id
+                     AND decision.dimension = 'exemptions'
+                    LEFT JOIN operations.device_session_current session
+                      ON session.tenant_id = d.tenant_id
+                     AND session.device_id = d.id
+                    WHERE d.tenant_id = 1
+                      AND d.deleted_at IS NULL
+                      AND d.lifecycle_status <> 'retired'
+                    ORDER BY c.display_name, d.canonical_hostname
+                    """,
+                )
+                computer_rows = cur.fetchall()
+                cur.execute(
+                    """
+                    SELECT id, slug, display_name
+                    FROM operations.clients
+                    WHERE tenant_id = 1
+                      AND deleted_at IS NULL
+                    """,
+                )
+                client_rows = cur.fetchall()
                 cur.execute(
                     f"""
-                    SELECT evidence.device_id, evidence.source_name,
-                           BOOL_OR(evidence.observation_active) AS has_current_record,
-                           MAX(evidence.observation_last_seen_at)
-                               FILTER (WHERE evidence.observation_active) AS current_seen_at,
-                           MAX(COALESCE(link.missing_since, evidence.observation_last_seen_at))
-                               FILTER (WHERE NOT evidence.observation_active) AS withdrawn_at
-                      FROM operations.v_device_observation_current evidence
-                          JOIN operations.devices device
-                            ON device.tenant_id = evidence.tenant_id
-                           AND device.id = evidence.device_id
-                           AND device.deleted_at IS NULL
-                           AND {current_computer_sql("device")}
-                      JOIN operations.source_instances source_instance
-                        ON source_instance.tenant_id = evidence.tenant_id
-                       AND source_instance.id = evidence.source_instance_id
-                      LEFT JOIN operations.v_device_source_link link
-                        ON link.tenant_id = evidence.tenant_id
-                       AND link.device_id = evidence.device_id
-                       AND link.source_id = source_instance.source_id
-                       AND link.external_id = evidence.external_id
-                     WHERE evidence.tenant_id = 1
-                       AND (evidence.entity_type LIKE 'agent.%%'
-                            OR evidence.entity_type = 'vm.guest')
-                     GROUP BY evidence.device_id, evidence.source_name
-                    """
+                    SELECT presence.device_id, presence.platform,
+                           BOOL_OR(presence.reported_online) AS online,
+                           MAX(COALESCE(presence.last_contact_at, presence.last_observed_at))
+                               AS last_contact_at
+                    FROM operations.device_agent_presence_current presence
+                    JOIN operations.devices device
+                      ON device.tenant_id = presence.tenant_id
+                     AND device.id = presence.device_id
+                     AND device.deleted_at IS NULL
+                     AND {current_computer_sql("device")}
+                    WHERE presence.tenant_id = 1
+                      AND (presence.entity_type LIKE 'agent.%%' OR presence.entity_type = 'vm.guest')
+                    GROUP BY presence.device_id, presence.platform
+                    """,
                 )
-            source_observation_rows = cur.fetchall()
-            cur.execute(
-                "SELECT name FROM operations.agents WHERE entity_type LIKE 'agent.%%'"
-            )
-            agent_platforms = {row[0] for row in cur.fetchall()}
-            # Include unattached and withdrawn records. This safe reader has
-            # the same identities without the rich metadata JSON projection.
-            cur.execute(
-                """
-                SELECT source_name, record_count
-                FROM operations.read_coverage_source_record_counts(%s)
-                """,
-                [1],
-            )
-            source_record_counts = {name: count for name, count in cur.fetchall()}
+                source_presence_rows = cur.fetchall()
+                # Use the same source-observation state shown on a Computer's
+                # Observations tab.  Presence supplies availability; observation
+                # state tells the inventory reader whether a record is current or
+                # withdrawn.  The source-link timestamp is the actual withdrawal
+                # time rather than the older last-seen timestamp.
+                if compact_source_observations:
+                    cur.execute(
+                        f"""
+                        SELECT evidence.device_id, evidence.source_name,
+                               BOOL_OR(evidence.observation_active) AS has_current_record,
+                               NULL::timestamptz AS current_seen_at,
+                               NULL::timestamptz AS withdrawn_at
+                          FROM operations.v_device_observation_current evidence
+                              JOIN operations.devices device
+                                ON device.tenant_id = evidence.tenant_id
+                               AND device.id = evidence.device_id
+                               AND device.deleted_at IS NULL
+                               AND {current_computer_sql("device")}
+                         WHERE evidence.tenant_id = 1
+                           AND (evidence.entity_type LIKE 'agent.%%'
+                                OR evidence.entity_type = 'vm.guest')
+                         GROUP BY evidence.device_id, evidence.source_name
+                        """
+                    )
+                else:
+                    cur.execute(
+                        f"""
+                        SELECT evidence.device_id, evidence.source_name,
+                               BOOL_OR(evidence.observation_active) AS has_current_record,
+                               MAX(evidence.observation_last_seen_at)
+                                   FILTER (WHERE evidence.observation_active) AS current_seen_at,
+                               MAX(COALESCE(link.missing_since, evidence.observation_last_seen_at))
+                                   FILTER (WHERE NOT evidence.observation_active) AS withdrawn_at
+                          FROM operations.v_device_observation_current evidence
+                              JOIN operations.devices device
+                                ON device.tenant_id = evidence.tenant_id
+                               AND device.id = evidence.device_id
+                               AND device.deleted_at IS NULL
+                               AND {current_computer_sql("device")}
+                          JOIN operations.source_instances source_instance
+                            ON source_instance.tenant_id = evidence.tenant_id
+                           AND source_instance.id = evidence.source_instance_id
+                          LEFT JOIN operations.v_device_source_link link
+                            ON link.tenant_id = evidence.tenant_id
+                           AND link.device_id = evidence.device_id
+                           AND link.source_id = source_instance.source_id
+                           AND link.external_id = evidence.external_id
+                         WHERE evidence.tenant_id = 1
+                           AND (evidence.entity_type LIKE 'agent.%%'
+                                OR evidence.entity_type = 'vm.guest')
+                         GROUP BY evidence.device_id, evidence.source_name
+                        """
+                    )
+                source_observation_rows = cur.fetchall()
+                cur.execute("SELECT name FROM operations.agents WHERE entity_type LIKE 'agent.%%'")
+                agent_platforms = {row[0] for row in cur.fetchall()}
+                # Include unattached and withdrawn records. This safe reader has
+                # the same identities without the rich metadata JSON projection.
+                cur.execute(
+                    """
+                    SELECT source_name, record_count
+                    FROM operations.read_coverage_source_record_counts(%s)
+                    """,
+                    [1],
+                )
+                source_record_counts = {name: count for name, count in cur.fetchall()}
 
     devices_by_id = {
         row[0]: {
@@ -14813,119 +15042,23 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
         | ({"Hudu"} if hudu_rows else set()),
         key=lambda platform: _computer_card_order({"platform": platform}),
     )
-    record_status_filters: dict[str, list[str]] = {}
-    rule_status_filters: dict[str, list[str]] = {}
-    allowed_record_statuses = {
-        "Online",
-        "Offline",
-        "Stale",
-        "Withdrawn",
-        "No record",
-        "No status",
-        "Possible match",
-    }
-    allowed_rule_statuses = {"Required", "Missing", "Stale", *_NOT_APPLIED_STATES, "N/A", "Exempt"}
-    for value in requested_record_status_filters:
-        product, separator, status = value.partition("|")
-        status = _LEGACY_RECORD_STATUSES.get(status, status)
-        if separator and product in platforms and status in allowed_record_statuses:
-            record_status_filters.setdefault(product, []).append(status)
-    for value in requested_rule_status_filters:
-        product, separator, status = value.partition("|")
-        if separator and product in platforms and status in allowed_rule_statuses:
-            rule_status_filters.setdefault(product, []).append(status)
-
-    # Translate bookmarks made by the previous combined column filter.  The
-    # new controls keep the record fact separate from the authored rule.
-    platform_status_filters: dict[str, list[str]] = {}
-    allowed_platform_states = {*_COVERAGE_STATES, "Not applicable", "Possible match"}
-    for value in requested_platform_status_filters:
-        platform, separator, status = value.partition("|")
-        if separator and platform in platforms and status in allowed_platform_states:
-            platform_status_filters.setdefault(platform, []).append(status)
-            if status in {"Online", "Offline", "Stale", "Possible match"}:
-                record_status_filters.setdefault(platform, []).append(status)
-            elif status in {"Missing", "Stale"}:
-                rule_status_filters.setdefault(platform, []).append(status)
-            elif status == "Not applicable":
-                rule_status_filters.setdefault(platform, []).append("N/A")
-    coverage_source_filters = {
-        platform for platform in requested_coverage_sources if platform in platforms
-    }
-    # Keep historical required-platform URLs useful during the transition.
-    coverage_source_filters.update(
-        platform for platform in platform_filters if platform in platforms
-    )
-    coverage_status_filters: dict[str, list[str]] = {
-        platform: [] for platform in coverage_source_filters
-    }
-    for value in requested_coverage_statuses:
-        platform, separator, status = value.partition("|")
-        if separator and platform in platforms and status in _COVERAGE_STATES:
-            coverage_source_filters.add(platform)
-            coverage_status_filters.setdefault(platform, []).append(status)
-    for platform in online_filters:
-        if platform in platforms:
-            coverage_source_filters.add(platform)
-            coverage_status_filters.setdefault(platform, []).append("Online")
-    for platform in coverage_source_filters:
-        coverage_status_filters.setdefault(platform, [])
-    for selections in (record_status_filters, rule_status_filters, coverage_status_filters):
-        for platform, statuses in selections.items():
-            selections[platform] = list(dict.fromkeys(statuses))
-    agent_filter_conditions = []
-    for index in range(12):
-        agent = request.GET.get(f"agent_{index}")
-        states = [
-            value
-            for value in (
-                _LEGACY_RECORD_STATUSES.get(raw, raw)
-                for raw in request.GET.getlist(f"agent_state_{index}")
-            )
-            if value in allowed_record_statuses
-        ]
-        requirements = [
-            value
-            for value in (_requirement_status_alias(raw) for raw in request.GET.getlist(f"agent_requirement_{index}"))
-            if value in allowed_rule_statuses
-        ]
-        if agent not in platforms or not (states or requirements):
-            continue
-        agent_filter_conditions.append(
-            {
-                "index": index,
-                "agent": agent,
-                "states": list(dict.fromkeys(states)),
-                "requirements": list(dict.fromkeys(requirements)),
-            }
+    if prepared:
+        platforms = sorted(
+            prepared_metadata["platforms"],
+            key=lambda name: _computer_card_order({"platform": name}),
         )
-    # Existing links remain valid.  Treat their former per-column selections
-    # as builder conditions so old bookmarks retain the same AND semantics.
-    legacy_agent_conditions = {
-        platform: {
-            "agent": platform,
-            "states": record_status_filters.get(platform, []),
-            "requirements": rule_status_filters.get(platform, []),
-        }
-        for platform in set(record_status_filters) | set(rule_status_filters)
-    }
-    all_agent_conditions = agent_filter_conditions + list(legacy_agent_conditions.values())
-    agent_filter_forms = agent_filter_conditions or [
-        {
-            "index": 0,
-            "agent": "",
-            "states": [],
-            "requirements": [],
-        }
-    ]
-    coverage_filter_sources = [
-        {
-            "name": platform,
-            "selected": platform in coverage_source_filters,
-            "statuses": coverage_status_filters.get(platform, []),
-        }
-        for platform in platforms
-    ]
+        requirements_evaluated_at = prepared_metadata["requirements_evaluated_at"]
+    (
+        record_status_filters,
+        rule_status_filters,
+        platform_status_filters,
+        coverage_source_filters,
+        coverage_status_filters,
+        agent_filter_conditions,
+        all_agent_conditions,
+        agent_filter_forms,
+        coverage_filter_sources,
+    ) = normalize_conditions(platforms)
     os_families = sorted({row["os_family"] for row in devices_by_id.values() if row["os_family"]})
     device_types = sorted(
         {row["device_type"] for row in devices_by_id.values() if row["device_type"]}
@@ -14937,6 +15070,11 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
         clients_by_id.values(),
         key=lambda row: row["name"],
     )
+
+    if prepared:
+        os_families = prepared_metadata["os_families"]
+        device_types = prepared_metadata["device_types"]
+        device_roles = prepared_metadata["device_roles"]
 
     def aggregate_hudu(records: list[dict]) -> dict:
         has_current = any(not record["is_archived"] for record in records)
@@ -15036,9 +15174,7 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
             params.append(("computer_scope", computer_scope))
         return "?" + urlencode(params) + "#filtered-results"
 
-    def inventory_platform_cell(
-        row: dict, platform: str, *, presentation: bool = False
-    ) -> dict:
+    def inventory_platform_cell(row: dict, platform: str, *, presentation: bool = False) -> dict:
         """Return status facts, adding URLs and tooltips only for rendered rows."""
         possible_match = row["possible_match"] if platform == "Ninja" else None
         coverage = row["platform_states"].get(platform)
@@ -15051,7 +15187,13 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
         )
 
         record_age = ""
-        if (presentation or agents_query) and record_status == "Withdrawn" and observation:
+        # The compact HTML selector has never searched withdrawal ages; those
+        # timestamps are added only when rendering the selected page.
+        if (
+            (presentation or (agents_query and not compact_source_observations))
+            and record_status == "Withdrawn"
+            and observation
+        ):
             record_age = observation_age_label(observation["withdrawn_at"])
         elif (presentation or agents_query) and record_status in {"Offline", "Stale"}:
             record_age = observation_age_label(source_contact_at)
@@ -15082,36 +15224,44 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
                 "possible_match": possible_match,
             }
 
-        record_tooltip = {
-            "Online": f"{platform} currently reports this Computer online.",
-            "Offline": f"{platform} has a current record but reports it offline.",
-            "Stale": (
-                f"{platform} has a current record but has not contacted it within "
-                f"{active_device_days} days."
-            ),
-            "Withdrawn": f"{platform} previously reported this Computer but no longer does.",
-            "No record": f"No current {platform} record is linked to this Computer.",
-            "No status": f"{platform} still lists this Computer but does not say whether it is online.",
-        }[record_status] if presentation else ""
-        rule_tooltip = {
-            "Required": f"{platform} is required for this Computer.",
-            "Missing": f"{platform} is required, but no qualifying current record was found.",
-            "Stale": f"{platform} is required, but its qualifying record is stale.",
-            "N/A — OS unknown": (
-                f"{platform} is not applied: no source reports this Computer's operating "
-                "system, and the requirement is limited to particular operating systems."
-            ),
-            "N/A — Cleanup": (
-                f"{platform} is not applied: this Computer is awaiting cleanup in Lifecycle. "
-                "An explicit still-in-use confirmation restores eligible requirement checks."
-            ),
-            "No agents": (
-                f"{platform} is not applied: this Computer has no agent records; it is "
-                "tracked only by other sources (see the unenrolled finding)."
-            ),
-            "N/A": f"{platform} is not required for this Computer.",
-            "Exempt": "This Computer has a saved SentinelOne exemption.",
-        }[rule_status] if presentation else ""
+        record_tooltip = (
+            {
+                "Online": f"{platform} currently reports this Computer online.",
+                "Offline": f"{platform} has a current record but reports it offline.",
+                "Stale": (
+                    f"{platform} has a current record but has not contacted it within "
+                    f"{active_device_days} days."
+                ),
+                "Withdrawn": f"{platform} previously reported this Computer but no longer does.",
+                "No record": f"No current {platform} record is linked to this Computer.",
+                "No status": f"{platform} still lists this Computer but does not say whether it is online.",
+            }[record_status]
+            if presentation
+            else ""
+        )
+        rule_tooltip = (
+            {
+                "Required": f"{platform} is required for this Computer.",
+                "Missing": f"{platform} is required, but no qualifying current record was found.",
+                "Stale": f"{platform} is required, but its qualifying record is stale.",
+                "N/A — OS unknown": (
+                    f"{platform} is not applied: no source reports this Computer's operating "
+                    "system, and the requirement is limited to particular operating systems."
+                ),
+                "N/A — Cleanup": (
+                    f"{platform} is not applied: this Computer is awaiting cleanup in Lifecycle. "
+                    "An explicit still-in-use confirmation restores eligible requirement checks."
+                ),
+                "No agents": (
+                    f"{platform} is not applied: this Computer has no agent records; it is "
+                    "tracked only by other sources (see the unenrolled finding)."
+                ),
+                "N/A": f"{platform} is not required for this Computer.",
+                "Exempt": "This Computer has a saved SentinelOne exemption.",
+            }[rule_status]
+            if presentation
+            else ""
+        )
         return {
             "platform": platform,
             "record_status": record_status,
@@ -15120,9 +15270,7 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
             "record_tooltip": record_tooltip,
             "rule_status": rule_status,
             "rule_label": rule_label,
-            "rule_url": agent_filter_url(platform, requirement=rule_status)
-            if presentation
-            else "",
+            "rule_url": agent_filter_url(platform, requirement=rule_status) if presentation else "",
             "rule_tooltip": rule_tooltip,
             "possible_match": possible_match,
             "attention": rule_status in {"Missing", "Stale"},
@@ -15132,21 +15280,29 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
         row["platform_cells_by_name"] = {
             platform: inventory_platform_cell(row, platform) for platform in platforms
         }
-        row["agents_filter_text"] = " ".join(
+        row["agents_filter_text"] = (
             " ".join(
-                value
-                for value in (
-                    cell["platform"],
-                    cell["record_status"],
-                    cell["record_age"],
-                    cell["rule_label"],
-                    "Possible match" if cell["possible_match"] else "",
-                    (cell["possible_match"].get("hostname", "") if cell["possible_match"] else ""),
+                " ".join(
+                    value
+                    for value in (
+                        cell["platform"],
+                        cell["record_status"],
+                        cell["record_age"],
+                        cell["rule_label"],
+                        "Possible match" if cell["possible_match"] else "",
+                        (
+                            cell["possible_match"].get("hostname", "")
+                            if cell["possible_match"]
+                            else ""
+                        ),
+                    )
+                    if value
                 )
-                if value
-            )
-            for cell in row["platform_cells_by_name"].values()
-        ).lower() if agents_query else ""
+                for cell in row["platform_cells_by_name"].values()
+            ).lower()
+            if agents_query
+            else ""
+        )
 
     def agent_condition_matches(row: dict, condition: dict) -> bool:
         cell = row["platform_cells_by_name"][condition["agent"]]
@@ -15160,8 +15316,7 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
         if not requirements:
             return True
         return cell["rule_status"] in requirements or (
-            "Required" in requirements
-            and cell["rule_status"] in {"Required", "Missing", "Stale"}
+            "Required" in requirements and cell["rule_status"] in {"Required", "Missing", "Stale"}
         )
 
     def matches(row: dict) -> bool:
@@ -15262,17 +15417,26 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
             return False
         return all(agent_condition_matches(row, condition) for condition in all_agent_conditions)
 
-    device_rows = [row for row in inventory_rows if matches(row)]
+    if prepared:
+        by_id = {row["device_id"]: row for row in inventory_rows}
+        device_rows = [by_id[device_id] for device_id in selected[5]]
+    else:
+        device_rows = [row for row in inventory_rows if matches(row)]
     operations_statuses = (
         ("Online", "online_anywhere"),
         ("Offline", "offline_recent"),
         ("Stale", "not_reporting"),
     )
     operations_counts = dict.fromkeys((scope for _, scope in operations_statuses), 0)
-    for inventory_row in inventory_rows:
-        operations_counts[_computer_reporting_scope(inventory_row, inventory_row["active_since"])] += 1
+    if prepared:
+        operations_counts = selected[10]
+    else:
+        for inventory_row in inventory_rows:
+            operations_counts[
+                _computer_reporting_scope(inventory_row, inventory_row["active_since"])
+            ] += 1
     operations_card = {
-        "computer_total": len(inventory_rows),
+        "computer_total": selected[0] if prepared else len(inventory_rows),
         "total_url": _coverage_filter_url(),
         "counts": [
             {
@@ -15299,11 +15463,12 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
         record_counts = {status: 0 for status in record_status_order}
         missing_counts = {status: 0 for status in ("Online", "Offline", "Stale")}
         has_requirements = False
-        for inventory_row in inventory_rows:
+        for inventory_row in [] if prepared else inventory_rows:
             cell = inventory_row["platform_cells_by_name"][platform]
             record_counts[cell["record_status"]] += 1
             has_requirements = has_requirements or cell["rule_status"] not in {
-                "N/A", *_NOT_APPLIED_STATES
+                "N/A",
+                *_NOT_APPLIED_STATES,
             }
             if cell["rule_status"] == "Missing":
                 missing_counts[
@@ -15316,6 +15481,16 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
                     )
                     else "Stale"
                 ] += 1
+        if prepared:
+            for name, status, count in selected[6] or []:
+                if name == platform:
+                    record_counts[status] = count
+            for name, applicable, online, offline, stale in selected[8] or []:
+                if name == platform:
+                    has_requirements = applicable
+                    missing_counts = dict(
+                        zip(("Online", "Offline", "Stale"), (online, offline, stale), strict=True)
+                    )
         platform_cards.append(
             {
                 "platform": platform,
@@ -15366,6 +15541,8 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
         ),
         "No record": sum(not row["hudu_present"] for row in inventory_rows),
     }
+    if prepared:
+        hudu_counts = {name: selected[7][name] for name in hudu_counts}
     hudu_urls = {
         "Current only": _coverage_filter_url(
             hudu="in_hudu",
@@ -15391,7 +15568,9 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
             {"name": name, "count": count, "url": hudu_urls[name]}
             for name, count in hudu_counts.items()
         ],
-        "computer_total": sum(row["hudu_present"] for row in inventory_rows),
+        "computer_total": selected[0] - hudu_counts["No record"]
+        if prepared
+        else sum(row["hudu_present"] for row in inventory_rows),
         "has_requirements": False,
         "missing_counts": [],
         "missing_total": 0,
@@ -15410,6 +15589,14 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
         "in_hudu": sum(row["hudu_present"] for row in device_rows),
         "not_in_hudu": sum(not row["hudu_present"] for row in device_rows),
     }
+
+    if prepared:
+        filtered_summary = {
+            "clients": selected[2],
+            "devices": selected[1],
+            "in_hudu": selected[3],
+            "not_in_hudu": selected[1] - selected[3],
+        }
 
     filter_logic_parts = []
     filter_summary_parts = []
@@ -15543,11 +15730,13 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
 
     def populate_hudu_presentation(target_rows: list[dict]) -> None:
         """Expand only selected Hudu records, including bounded CSV batches."""
-        observation_ids = list(dict.fromkeys(
-            observation_id
-            for row in target_rows
-            for observation_id in row["hudu_observation_ids"]
-        ))
+        observation_ids = list(
+            dict.fromkeys(
+                observation_id
+                for row in target_rows
+                for observation_id in row["hudu_observation_ids"]
+            )
+        )
         if not observation_ids:
             return
         with transaction.atomic(), connection.cursor() as cur:
@@ -15565,7 +15754,7 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
                     LEFT JOIN operations.platform_aliases alias
                       ON alias.alias = LOWER(hudu.card_source)
                     """,
-                    [1, observation_ids[offset:offset + 100]],
+                    [1, observation_ids[offset : offset + 100]],
                 )
                 detail_rows.extend(cur.fetchall())
         details: dict = {}
@@ -15642,8 +15831,8 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
                 record += f"; possible match: {cell['possible_match']['hostname']}"
             return f"{platform}: {record}; {cell['rule_label']}"
 
-        return csv_response(
-            [
+        def export_values(batch_rows):
+            return [
                 {
                     "client_name": row["client_name"],
                     "hostname": row["hostname"],
@@ -15655,8 +15844,27 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
                     "hudu_links": ", ".join(row["hudu_links"]),
                     "inventory_row": row,
                 }
-                for row in device_rows
-            ],
+                for row in batch_rows
+            ]
+
+        if prepared and getattr(request, "_coverage_csv_batch", False):
+            return export_values(device_rows)
+
+        def export_batches():
+            yield from export_values(device_rows)
+            for offset in range(100, len(export_ids), 100):
+                batch_request = copy(request)
+                batch_request._coverage_csv_batch = True
+                batch_request._coverage_metadata = prepared_metadata
+                batch_request._coverage_batch_selection = (
+                    *selected[:5],
+                    export_ids[offset : offset + 100],
+                    *selected[6:],
+                )
+                yield from fleet_coverage(batch_request)
+
+        return csv_response(
+            export_batches() if prepared else export_values(device_rows),
             columns=[
                 ("Client", "client_name"),
                 ("Device", "hostname"),
@@ -15677,12 +15885,15 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
             filename_stem="inventory_computers",
         )
 
-    paginator = Paginator(device_rows, 100)
+    paginator = Paginator(range(selected[1]) if prepared else device_rows, 100)
     page_obj = paginator.get_page(request.GET.get("page"))
     page_query = request.GET.copy()
     page_query.pop("page", None)
     page_query = page_query.urlencode()
-    device_rows = list(page_obj.object_list)
+    if prepared:
+        page_obj.object_list = device_rows
+    else:
+        device_rows = list(page_obj.object_list)
 
     populate_hudu_presentation(device_rows)
 
@@ -15690,7 +15901,7 @@ def fleet_coverage(request: HttpRequest) -> HttpResponse:
     # Computer. Load the withdrawal timestamps only for rows being rendered;
     # CSV retains the complete-detail query above.
     page_device_ids = [row["device_id"] for row in device_rows if row["device_id"]]
-    if compact_source_observations and page_device_ids:
+    if not prepared and compact_source_observations and page_device_ids:
         with transaction.atomic(), connection.cursor() as cur:
             cur.execute("SET LOCAL operations.tenant_id = 1")
             cur.execute(

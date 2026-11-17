@@ -17,8 +17,8 @@ the [release checkpoint](../records/PLAN-056-worktree-reconciliation.md). No loc
 
 ## Current checkpoint and evidence
 
-Deployed: `0891738b` / 0.144.26, 0420/0421 applied; healthy services and protected
-Software current/completed with data observed on resume. Resume via the
+Last recorded deployment: `7e8e44e5` / 0.144.28; 0420/0421 previously applied.
+This continuation did not reverify release or Software freshness. Resume via the
 [Operations checkpoint](../../operations/BLUEPRINT.md).
 [Triage](../records/PLAN-056-emergency-triage-2026-11-17.md) retains live evidence;
 [Source Records comparison](../records/PLAN-056-source-records-contract-check.md)
@@ -50,8 +50,10 @@ Home: <=1.5 s ordinary / <2 s hard maximum including cold navigation.
 
 ## Next action
 
-Push approved [Coverage .28](../records/PLAN-056-coverage-presence-selection.md)
-origin then mirror; observe rollout. [Full pass](../records/PLAN-056-page-remeasurement-2026-11-17.md):
+Validate persistent Coverage schema/access/maintenance and remaining filter edges
+before cutover; representative full-response parity passed in the disabled
+[Coverage candidate](../records/PLAN-056-coverage-reader-remediation.md).
+from the viable core. [Full pass](../records/PLAN-056-page-remeasurement-2026-11-17.md):
 Coverage 4.214 s, Home 1.378 s; Software pending without data.
 Original baseline retained; broader acceptance stays open.
 

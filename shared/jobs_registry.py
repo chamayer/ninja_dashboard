@@ -263,6 +263,15 @@ _RAW_DEFINITIONS = (
         schedule_ids=("software_classify_full_rebuild_cycle",),
     ),
     JobDefinition(
+        "coverage-read-model", "Publish Coverage facts",
+        "Maintain compact Coverage selection facts from protected current inputs.",
+        "evaluators", "coverage", "", "coverage_read_model", "operator_job_runs",
+        "ingest.coverage_read_model.refresh", run_all=False,
+        handler_version="coverage-read-model-v1", timeout_minutes=2,
+        resource_keys=("tenant:{tenant_id}:coverage-read-model",),
+        capacity_keys=("capacity:control",),
+    ),
+    JobDefinition(
         "software-overview",
         "Publish Software overview",
         "Refresh the Software overview from current local inputs.",
@@ -991,6 +1000,7 @@ _GLOBAL_ONLY = frozenset(
     }
 )
 _RESOURCE_KEYS_BY_DEFINITION: dict[str, tuple[str, ...]] = {
+    "coverage-read-model": ("tenant:{tenant_id}:coverage-read-model",),
     "source-refresh": ("tenant:{tenant_id}:source-binding:{scope_identity}",),
     "patches": ("tenant:{tenant_id}:ninja-source",),
     "ninja-enrichment": ("tenant:{tenant_id}:ninja-enrichment",),
@@ -1054,6 +1064,7 @@ for _key in ("software-classify", "software-classify-only", "software-classify-f
     _RESOURCE_KEYS_BY_DEFINITION[_key] += ("tenant:{tenant_id}:software-findings",)
 
 _CAPACITY_KEYS_BY_DEFINITION: dict[str, tuple[str, ...]] = {
+    "coverage-read-model": ("capacity:processing",),
     "source-refresh": ("capacity:external-io",),
     "patches": (),
     "ninja-enrichment": ("capacity:external-io",),
@@ -1334,6 +1345,7 @@ def schedule_definitions() -> tuple[ScheduleDefinition, ...]:
 
 _SYSTEM_SERVICE_KEYS = frozenset(
     {
+        "coverage-read-model",
         "software-overview",
         "software-catalog",
         "source-refresh",

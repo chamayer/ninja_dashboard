@@ -82,3 +82,17 @@ Compose or Dockerfile changes. Earlier 0420/0421 were confirmed applied on .26.
 Include the retained .27 measurement/diagnosis evidence and updated handoffs;
 preserve unrelated untracked recovery scripts. Next observe automatic rollout;
 performance/full-page acceptance remains open. No separate redeploy.
+
+## Deployed measurement
+
+0.144.28 / 7e8e44e5 pushed to origin and mirror; automatic deployment observed.
+On user's measurement request, ingest/worker/Operations healthy and deployed
+views.py hash matches the release. One normal configured-admin Coverage HTML
+GET at 19:22:32 UTC: 200, 4.424 seconds (headers also 4.424), 427,422 bytes.
+Exact completion marker 179395e11425e56dfab7a54b90c33998_1 confirms 200;
+logout and host/container diagnostic cleanup confirmed. Reviewed collector
+restricted to Coverage, 20-second deadline, no retries. No customer values output.
+Prior .27 sample was 4.214 seconds: this sample is 0.210 seconds higher (~5%).
+No demonstrated full-page speed improvement; workload/cache conditions differ,
+so this is not proof of a regression. Keep the exact query parity evidence;
+remaining broad reads and fleet preparation are still the optimization frontier.

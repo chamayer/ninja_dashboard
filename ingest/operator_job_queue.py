@@ -682,6 +682,9 @@ def produce_due_schedules() -> int:
         # Expiry admission opens another connection. Commit scheduled requests
         # first so that connection cannot wait on locks held by this one.
         admitted += _admit_expired_software_overview()
+        from ingest.coverage_read_model import admit_due
+
+        admitted += admit_due()
     except PoolTimeout:
         log.warning("durable Jobs schedules waiting for database capacity")
         return 0
@@ -984,6 +987,10 @@ def _execute(job_key: str, progress: V1JobProgress) -> int | JobExecutionResult 
             "Reconciling software findings",
             lambda: _software_reconcile(progress),
         ),
+        "coverage-read-model": (
+            "Publishing Coverage facts",
+            _refresh_coverage_read_model,
+        ),
         "software-overview": (
             "Publishing Software overview",
             lambda: _refresh_software_overview(progress),
@@ -1141,6 +1148,12 @@ def _refresh_software_overview(progress: V1JobProgress) -> JobExecutionResult:
 
     generation = refresh_overview_read_model(progress.job_id, progress.claim_token)
     return JobExecutionResult(rows=1, result={"overview_generation": str(generation)})
+
+
+def _refresh_coverage_read_model() -> int:
+    from ingest.coverage_read_model import refresh
+
+    return refresh()
 
 
 def _software_title_scoped_producers() -> frozenset[str]:
