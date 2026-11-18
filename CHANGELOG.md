@@ -2,6 +2,11 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.144.36] — 2026-11-18 — Explain identity matches without Computer links
+
+- Show the recorded match when both Computer names are available in the review,
+  including when one Computer cannot be opened from the comparison. No migrations.
+
 ## [0.144.35] — 2026-11-18 — Clarify source-record identity reviews
 
 - Explain which Computer the record was linked to, what matched elsewhere,

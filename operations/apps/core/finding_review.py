@@ -192,7 +192,7 @@ def _source_record_review(finding, details: dict, tenant_id: int) -> dict:
             matched = comparison.get(proposed, {})
             linked_name = linked.get("label")
             matched_name = matched.get("label")
-            if linked.get("url") and matched.get("url") and matcher:
+            if linked.get("available") and matched.get("available") and matcher:
                 source = subject.get("platform")
                 record_label = f"This {source} record" if source else "This source record"
                 link_phrase = "is still linked" if current == recorded else "was linked when flagged"
@@ -319,6 +319,7 @@ def _comparison_computers(roles: dict, candidates: dict, tenant_id: int) -> list
                 if device and device.client and device_id in owned_ids
                 else "",
                 "roles": labels,
+                "available": device is not None,
                 "families": [IDENTIFIERS[family] for family in families if family in IDENTIFIERS]
                 if isinstance(families, list)
                 else [],
