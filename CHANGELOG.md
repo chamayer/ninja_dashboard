@@ -2,6 +2,12 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.144.35] — 2026-11-18 — Clarify source-record identity reviews
+
+- Explain which Computer the record was linked to, what matched elsewhere,
+  and what to check next. Show source org or group in the comparison and in
+  Source Records. No migrations.
+
 ## [0.144.34] — 2026-11-17 — Clarify Source Records inventory
 
 - Lead with the reported name and distinguish record presence, reported

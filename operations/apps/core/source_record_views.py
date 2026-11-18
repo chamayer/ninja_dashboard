@@ -134,7 +134,18 @@ def load_subject(cur, tenant_id: int, subject_id: uuid.UUID) -> dict | None:
                meta.reported_online, meta.reported_last_contact_at,
                link.entity_id AS device_id, link.match_method,
                d.canonical_hostname AS device_name, c.slug AS client_slug,
-               c.display_name AS client_name
+               c.display_name AS client_name,
+               CASE WHEN meta.restricted IS FALSE THEN COALESCE(
+                   (SELECT min(mapping.observed_name)
+                      FROM operations.source_instances instance
+                      JOIN operations.v_client_source_mapping_effective mapping
+                        ON mapping.tenant_id = instance.tenant_id
+                       AND mapping.source_id = instance.source_id
+                     WHERE instance.tenant_id = s.tenant_id
+                       AND instance.id = s.source_instance_id
+                       AND mapping.external_id = meta.platform_group_id),
+                   meta.platform_group_id
+               ) END AS source_group
           FROM operations.source_record_subjects s
           LEFT JOIN operations.v_entity_observation_admin_metadata meta
             ON meta.tenant_id = s.tenant_id AND meta.observation_id = s.observation_id

@@ -155,11 +155,11 @@ def _source_record_review(finding, details: dict, tenant_id: int) -> dict:
             if key := _uuid(value):
                 roles.setdefault(key, []).append(label)
 
-        add_role(current, "Attached now")
-        add_role(recorded, "Attached at detection")
-        add_role(proposed, "Matched at detection")
+        add_role(current, "Linked today")
+        add_role(recorded, "Linked when flagged")
+        add_role(proposed, "Matched when flagged")
         for candidate in list(candidates)[:MAX_COMPUTERS]:
-            add_role(candidate, "Candidate at detection")
+            add_role(candidate, "Possible match when flagged")
         context["comparison_limited"] = (
             len(roles) > MAX_COMPUTERS or len(candidates) > MAX_COMPUTERS
         )
@@ -168,30 +168,64 @@ def _source_record_review(finding, details: dict, tenant_id: int) -> dict:
         context["currently_unattached"] = current is None
         if proposed:
             context["summary"] = (
-                "Strong identity evidence pointed to a different Computer from the one holding this record."
+                "This record appears to describe a different Computer from the one it was linked to."
             )
             context["explanation"] = (
-                "At last detection, another Computer matched a corroborated serial number or VM UUID. This calls the record's attachment into question; it does not prove the two Computers should be merged."
+                "When the issue was last flagged, a serial number or VM UUID matched another Computer. Check which machine the record describes before making any changes."
             )
             matcher = IDENTIFIERS.get(evidence.get("matcher"))
             if matcher:
-                context["facts"].append({"label": "Match at detection", "value": matcher})
+                context["facts"].append({"label": "What matched", "value": matcher})
         else:
             context["summary"] = (
-                "This source record's identifiers matched more than one Computer."
+                "A serial number or VM UUID on this record matched more than one Computer."
                 if candidates
-                else "This record needs identity review, but no candidate comparison was recorded."
+                else "This record was flagged for review. The issue has no saved list of possible matches."
             )
             context["explanation"] = (
-                "Compare the available source records before choosing an attachment. A shared identifier alone is not a decision to merge."
+                "Compare the records below to work out which Computer this record belongs to. Check that they describe the same physical or virtual machine before combining anything."
             )
         context["computers"] = _comparison_computers(roles, candidates, tenant_id)
-        context["steps"] = [
-            "Compare this record's serial number and VM UUID with the current source records on each Computer below. Check source names and reported machine names as supporting context.",
-            "Decide which machine the record describes. Check for an incorrect source identifier or records from different machines grouped on one Computer.",
-            "Correct incorrect identifiers in their source. An attachment correction requires a separately reviewed record move; this issue has no move or merge action on this page.",
-            "The source-record assessment closes the issue when it no longer finds an attachment contradiction or ambiguous identity match.",
-        ]
+        if proposed and recorded and proposed != recorded:
+            comparison = dict(zip(roles, context["computers"], strict=False))
+            linked = comparison.get(recorded, {})
+            matched = comparison.get(proposed, {})
+            linked_name = linked.get("label")
+            matched_name = matched.get("label")
+            if linked.get("url") and matched.get("url") and matcher:
+                source = subject.get("platform")
+                record_label = f"This {source} record" if source else "This source record"
+                link_phrase = "is still linked" if current == recorded else "was linked when flagged"
+                context["summary"] = (
+                    f"{record_label} {link_phrase} to {linked_name}, but its "
+                    f"{matcher.lower()} matched a record on another Computer, {matched_name}."
+                )
+                if linked_name.casefold() == matched_name.casefold():
+                    context["explanation"] = (
+                        "Both Computers have the same name, but Operations lists them separately. "
+                        "Check whether they are two entries for the same machine or whether "
+                        "a source reported the wrong identifier."
+                    )
+        if proposed and matcher:
+            identifier = matcher.lower()
+            source = subject.get("platform") or "the reporting source"
+            context["steps"] = [
+                f"Use Open source record to identify the entry in {source}. Verify its "
+                f"{identifier} against the machine or its management console. Use the "
+                "source org or group to pick the right record if the names are identical.",
+                f"If the {identifier} is wrong, correct it in {source}.",
+                "If the value is correct and the two entries describe the same machine, "
+                "request a duplicate Computer review. If they are different machines "
+                "and the source record belongs to the other one, request a review of its Computer link.",
+            ]
+        elif candidates:
+            context["steps"] = [
+                "Open the source record and verify its serial number or VM UUID against "
+                "the machine or its management console. Use the source org or group to "
+                "distinguish records with the same name.",
+                "If a source reported the wrong value, correct it there. If two entries "
+                "describe the same machine, request a duplicate Computer review.",
+            ]
     else:
         context["summary"] = finding.finding_type.description or finding.finding_type.display_name
         for key, label in (
@@ -226,12 +260,24 @@ def _comparison_computers(roles: dict, candidates: dict, tenant_id: int) -> list
             """
             SELECT link.entity_id AS device_id, subject.id,
                    meta.reported_name, meta.platform, meta.canonical_serial,
-                   meta.vm_uuid, meta.restricted, subject.presence
+                   meta.vm_uuid, meta.restricted, subject.presence,
+                   CASE WHEN meta.restricted IS FALSE THEN meta.platform_group_id END AS group_id,
+                   source_group.observed_name AS group_name
               FROM operations.entity_source_links link
               JOIN operations.source_record_subjects subject
                 ON subject.tenant_id = link.tenant_id AND subject.id = link.source_subject_id
               LEFT JOIN operations.v_entity_observation_admin_metadata meta
                 ON meta.tenant_id = subject.tenant_id AND meta.observation_id = subject.observation_id
+              LEFT JOIN operations.source_instances instance
+                ON instance.tenant_id = subject.tenant_id AND instance.id = subject.source_instance_id
+              LEFT JOIN LATERAL (
+                  SELECT min(mapping.observed_name) AS observed_name
+                    FROM operations.v_client_source_mapping_effective mapping
+                   WHERE meta.restricted IS FALSE
+                     AND mapping.tenant_id = subject.tenant_id
+                     AND mapping.source_id = instance.source_id
+                     AND mapping.external_id = meta.platform_group_id
+              ) source_group ON TRUE
              WHERE link.tenant_id = %s AND link.entity_class_id = 'device'
                AND link.entity_id = ANY(%s::uuid[])
              ORDER BY link.entity_id, subject.id
@@ -255,6 +301,7 @@ def _comparison_computers(roles: dict, candidates: dict, tenant_id: int) -> list
                     else record.get("reported_name") or "Unnamed record",
                     "url": reverse("source_record_detail", kwargs={"subject_id": record["id"]}),
                     "platform": "" if restricted else record.get("platform") or "",
+                    "source_group": "" if restricted else record.get("group_name") or record.get("group_id") or "",
                     "serial": "" if restricted else record.get("canonical_serial") or "",
                     "vm_uuid": "" if restricted else record.get("vm_uuid") or "",
                     "presence": record["presence"],

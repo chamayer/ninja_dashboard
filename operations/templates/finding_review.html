@@ -13,12 +13,12 @@
 </div>
 
 <div class="card">
-    <h2>What was detected</h2>
+    <h2>Why this was flagged</h2>
     <p><strong>Subject:</strong> {% if subject_url %}<a href="{{ subject_url }}">{{ subject_label }}</a>{% else %}{{ subject_label }}{% endif %}</p>
     <p>{{ review.summary }}</p>
     {% if review.explanation and review.explanation != review.summary %}<p>{{ review.explanation }}</p>{% endif %}
-    {% if review.attachment_changed %}<p><strong>The attachment has changed since detection.</strong> The comparison labels distinguish the recorded attachment from the current one. The issue may await a new assessment.</p>{% endif %}
-    {% if review.currently_unattached %}<p>This record is currently unattached.</p>{% endif %}
+    {% if review.attachment_changed %}<p><strong>The Computer link changed after this issue was flagged.</strong> The comparison below shows the old and current links.</p>{% endif %}
+    {% if review.currently_unattached %}<p>This record has no Computer link today.</p>{% endif %}
     {% if review.facts %}
     <table><tbody>
         {% for fact in review.facts %}<tr><th scope="row">{{ fact.label }}</th><td style="overflow-wrap:anywhere;">{{ fact.value }}</td></tr>{% endfor %}
@@ -34,7 +34,7 @@
 {% if review.computers %}
 <div class="card">
     <h2>Compare the Computers</h2>
-    <p class="muted">Computer roles and matching identifiers at detection are labeled below. Source records and their identifiers show the current information.</p>
+    <p class="muted">Labels under each Computer explain why it is listed. The tables show what each source reports today.</p>
     {% if review.comparison_limited %}<p>Showing up to 10 Computers. Open the source record for the rest of the investigation.</p>{% endif %}
     {% for computer in review.computers %}
     <h3>{% if computer.url %}<a href="{{ computer.url }}?tab=details#source-records">{{ computer.label }}</a>{% else %}{{ computer.label }}{% endif %}</h3>
@@ -42,9 +42,9 @@
     {% if computer.records %}
     <div style="overflow-x:auto;">
     <table>
-        <thead><tr><th>Source record</th><th>Source</th><th>Serial number</th><th>VM UUID</th><th>Presence</th></tr></thead>
+        <thead><tr><th>Source record</th><th>Source</th><th>Source org / group</th><th>Serial number</th><th>VM UUID</th><th>Presence</th></tr></thead>
         <tbody>{% for record in computer.records %}
-            <tr><td><a href="{{ record.url }}">{{ record.label }}</a></td><td>{{ record.platform|default:"—" }}</td><td style="overflow-wrap:anywhere;">{{ record.serial|default:"—" }}</td><td style="overflow-wrap:anywhere;">{{ record.vm_uuid|default:"—" }}</td><td>{{ record.presence }}</td></tr>
+            <tr><td><a href="{{ record.url }}">{{ record.label }}</a></td><td>{{ record.platform|default:"—" }}</td><td style="overflow-wrap:anywhere;">{{ record.source_group|default:"—" }}</td><td style="overflow-wrap:anywhere;">{{ record.serial|default:"—" }}</td><td style="overflow-wrap:anywhere;">{{ record.vm_uuid|default:"—" }}</td><td>{{ record.presence }}</td></tr>
         {% endfor %}</tbody>
     </table>
     </div>
@@ -69,7 +69,7 @@
 {% endif %}
 
 <div class="card">
-    <h2>How to handle this issue</h2>
+    <h2>What to check next</h2>
     <ol>{% for step in review.steps %}<li>{{ step }}</li>{% endfor %}</ol>
     {% if review.actions %}
     <form method="post" action="{% url 'findings_bulk_action' %}">

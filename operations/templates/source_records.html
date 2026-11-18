@@ -39,7 +39,7 @@
 <div class="card">
   <p class="muted" style="margin:0 0 .4rem; font-size:.85rem;">Column sorting orders this page only; use the filters above to search every record.</p>
   <table class="ops-table" data-sortable data-server-table>
-    <thead><tr><th>Reported name</th><th>State</th><th>Last seen</th><th>Attached Computer</th><th>Other relationships</th><th class="num">Issues</th></tr></thead>
+    <thead><tr><th>Reported name</th><th>Source org / group</th><th>State</th><th>Last seen</th><th>Attached Computer</th><th>Other relationships</th><th class="num">Issues</th></tr></thead>
     <tbody>{% for record in records %}
       <tr>
         <td>
@@ -50,6 +50,7 @@
           {% if record.source_url %}<a href="{{ record.source_url }}" target="_blank" rel="noopener">Open in {{ record.source_name }} ↗</a>{% endif %}
           {% if may_view_evidence and record.device_entity_id %}<a href="{% url 'entity_admin_detail' record.device_entity_id %}?observation={{ record.observation_id }}#source-identities">View evidence</a>{% endif %}
         </td>
+        <td>{% if record.restricted %}<span class="muted">Restricted</span>{% else %}{{ record.group_name|default:record.group_id|default:"Not reported" }}{% endif %}</td>
         <td>
           {% if record.active %}<span class="badge badge-low">Present</span>{% else %}<span class="badge badge-high">Withdrawn</span>{% endif %}
           <div class="muted">{% if record.reported_online == True %}Reported online{% elif record.reported_online == False %}Reported offline{% else %}Online state unknown{% endif %}</div>
@@ -64,12 +65,11 @@
         <td>
           {% if record.has_client %}<div>Client: {% if record.client_slug %}<a href="{% url 'org_index' org_slug=record.client_slug %}">{{ record.client_name|default:"Attributed" }}</a>{% else %}{{ record.client_name|default:"Attributed" }}{% endif %}</div>{% endif %}
           {% if record.has_parent %}<div>Parent record{% if not record.restricted %}: <code>{{ record.parent_external_id }}</code>{% endif %}</div>{% endif %}
-          {% if not record.restricted %}{% if record.group_name or record.group_id %}<div class="muted">Source group: {{ record.group_name|default:record.group_id }}</div>{% endif %}{% endif %}
           {% if not record.has_client and not record.has_parent %}<span class="muted">—</span>{% endif %}
         </td>
         <td class="num">{% if record.issue_count %}<a href="{% url 'findings_queue' %}?subject_id={{ record.device_id }}">{{ record.issue_count }}</a>{% if record.record_issue_count %}<br><span class="muted" style="font-size:.8rem;">{{ record.record_issue_count }} about this record</span>{% endif %}{% elif record.device_id %}<span class="muted">0</span>{% else %}<span class="muted">—</span>{% endif %}</td>
       </tr>
-    {% empty %}<tr><td colspan="6" class="muted">No source records match this filter.</td></tr>{% endfor %}</tbody>
+    {% empty %}<tr><td colspan="7" class="muted">No source records match this filter.</td></tr>{% endfor %}</tbody>
   </table>
 </div>
 

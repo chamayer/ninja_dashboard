@@ -32,6 +32,7 @@
     <h2>Reported identity</h2>
     <table>
       {% if not subject.restricted %}
+      <tr><th>Source org / group</th><td>{{ subject.source_group|default:"Not reported" }}</td></tr>
       <tr><th>External ID</th><td>{{ subject.external_id|default:"—" }}</td></tr>
       <tr><th>Serial</th><td>{{ subject.canonical_serial|default:"—" }}</td></tr>
       <tr><th>VM UUID</th><td>{{ subject.vm_uuid|default:"—" }}</td></tr>
