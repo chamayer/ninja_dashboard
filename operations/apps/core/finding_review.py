@@ -262,7 +262,8 @@ def _comparison_computers(roles: dict, candidates: dict, tenant_id: int) -> list
                    meta.reported_name, meta.platform, meta.canonical_serial,
                    meta.vm_uuid, meta.restricted, subject.presence,
                    CASE WHEN meta.restricted IS FALSE THEN meta.platform_group_id END AS group_id,
-                   source_group.observed_name AS group_name
+                   source_group.observed_name AS group_name,
+                   owner.state AS ownership_state, source_client.display_name AS source_client_name
               FROM operations.entity_source_links link
               JOIN operations.source_record_subjects subject
                 ON subject.tenant_id = link.tenant_id AND subject.id = link.source_subject_id
@@ -270,6 +271,15 @@ def _comparison_computers(roles: dict, candidates: dict, tenant_id: int) -> list
                 ON meta.tenant_id = subject.tenant_id AND meta.observation_id = subject.observation_id
               LEFT JOIN operations.source_instances instance
                 ON instance.tenant_id = subject.tenant_id AND instance.id = subject.source_instance_id
+              LEFT JOIN operations.computer_client_ownership owner
+                ON owner.tenant_id = link.tenant_id AND owner.device_id = link.entity_id
+              LEFT JOIN operations.clients source_client
+                ON source_client.tenant_id = subject.tenant_id
+               AND source_client.id = CASE WHEN meta.restricted IS FALSE THEN
+                   operations.computer_client_independent_evidence(
+                       subject.tenant_id, subject.observation_id
+                   ) END
+               AND source_client.deleted_at IS NULL
               LEFT JOIN LATERAL (
                   SELECT min(mapping.observed_name) AS observed_name
                     FROM operations.v_client_source_mapping_effective mapping
@@ -290,9 +300,11 @@ def _comparison_computers(roles: dict, candidates: dict, tenant_id: int) -> list
     for device_id, labels in roles.items():
         device = devices.get(device_id)
         rows = []
+        ownership_state = None
         for record in records[:MAX_RECORDS]:
             if str(record["device_id"]) != device_id:
                 continue
+            ownership_state = record.get("ownership_state")
             restricted = record.get("restricted") is not False
             rows.append(
                 {
@@ -302,6 +314,7 @@ def _comparison_computers(roles: dict, candidates: dict, tenant_id: int) -> list
                     "url": reverse("source_record_detail", kwargs={"subject_id": record["id"]}),
                     "platform": "" if restricted else record.get("platform") or "",
                     "source_group": "" if restricted else record.get("group_name") or record.get("group_id") or "",
+                    "source_client": "" if restricted else record.get("source_client_name") or "No client identified",
                     "serial": "" if restricted else record.get("canonical_serial") or "",
                     "vm_uuid": "" if restricted else record.get("vm_uuid") or "",
                     "presence": record["presence"],
@@ -320,6 +333,8 @@ def _comparison_computers(roles: dict, candidates: dict, tenant_id: int) -> list
                 else "",
                 "roles": labels,
                 "available": device is not None,
+                "saved_client": getattr(device.client, "display_name", "") if device else "",
+                "ownership_conflict": ownership_state == "conflict",
                 "families": [IDENTIFIERS[family] for family in families if family in IDENTIFIERS]
                 if isinstance(families, list)
                 else [],

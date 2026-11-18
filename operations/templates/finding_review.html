@@ -35,16 +35,18 @@
 <div class="card">
     <h2>Compare the Computers</h2>
     <p class="muted">Labels under each Computer explain why it is listed. The tables show what each source reports today.</p>
+    <p class="muted">The source org or group is the name in the source. “Client from this record” shows which Operations client that record points to today. Automatic linking waits when the Computer’s client is disputed.</p>
     {% if review.comparison_limited %}<p>Showing up to 10 Computers. Open the source record for the rest of the investigation.</p>{% endif %}
     {% for computer in review.computers %}
     <h3>{% if computer.url %}<a href="{{ computer.url }}?tab=details#source-records">{{ computer.label }}</a>{% else %}{{ computer.label }}{% endif %}</h3>
     <p>{{ computer.roles|join:" · " }}{% if computer.families %} · Matched by {{ computer.families|join:", " }}{% endif %}</p>
+    {% if computer.saved_client %}<p><strong>Saved client:</strong> {{ computer.saved_client }}{% if computer.ownership_conflict %} · <span class="badge badge-high">Client disputed</span>{% endif %}</p>{% endif %}
     {% if computer.records %}
     <div style="overflow-x:auto;">
     <table>
-        <thead><tr><th>Source record</th><th>Source</th><th>Source org / group</th><th>Serial number</th><th>VM UUID</th><th>Presence</th></tr></thead>
+        <thead><tr><th>Source record</th><th>Source</th><th>Source org / group</th><th>Client from this record</th><th>Serial number</th><th>VM UUID</th><th>Presence</th></tr></thead>
         <tbody>{% for record in computer.records %}
-            <tr><td><a href="{{ record.url }}">{{ record.label }}</a></td><td>{{ record.platform|default:"—" }}</td><td style="overflow-wrap:anywhere;">{{ record.source_group|default:"—" }}</td><td style="overflow-wrap:anywhere;">{{ record.serial|default:"—" }}</td><td style="overflow-wrap:anywhere;">{{ record.vm_uuid|default:"—" }}</td><td>{{ record.presence }}</td></tr>
+            <tr><td><a href="{{ record.url }}">{{ record.label }}</a></td><td>{{ record.platform|default:"—" }}</td><td style="overflow-wrap:anywhere;">{{ record.source_group|default:"—" }}</td><td>{{ record.source_client|default:"—" }}</td><td style="overflow-wrap:anywhere;">{{ record.serial|default:"—" }}</td><td style="overflow-wrap:anywhere;">{{ record.vm_uuid|default:"—" }}</td><td>{{ record.presence }}</td></tr>
         {% endfor %}</tbody>
     </table>
     </div>

@@ -2,6 +2,11 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.144.37] — 2026-11-18 — Show client evidence in identity reviews
+
+- Show which client each source record points to and the saved client and
+  disputed ownership status of each Computer. No migrations.
+
 ## [0.144.36] — 2026-11-18 — Explain identity matches without Computer links
 
 - Show the recorded match when both Computer names are available in the review,
