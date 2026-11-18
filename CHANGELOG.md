@@ -2,6 +2,12 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.144.38] — 2026-11-18 — Make identity reviews easier to act on
+
+- Give identity reviews a title that describes the reported match, separate
+  the Computers visually, and link directly to open client conflicts.
+- Keep secondary evidence under More record details. No migrations.
+
 ## [0.144.37] — 2026-11-18 — Show client evidence in identity reviews
 
 - Show which client each source record points to and the saved client and

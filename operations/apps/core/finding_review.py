@@ -10,7 +10,7 @@ from django.urls import reverse
 
 from apps.core.finding_actions import available_finding_actions
 from apps.core.computer_reads import effectively_owned_device_ids
-from apps.core.models import Device
+from apps.core.models import Device, Finding
 from apps.core.source_record_views import _rows, load_subject
 from apps.core.templatetags.human_labels import finding_detail_text
 
@@ -148,6 +148,7 @@ def _source_record_review(finding, details: dict, tenant_id: int) -> dict:
         proposed = _uuid(evidence.get("proposed_device_id"))
         recorded = _uuid(evidence.get("device_id"))
         current = _uuid(subject.get("device_id"))
+        matcher = IDENTIFIERS.get(evidence.get("matcher"))
         candidates = _object(evidence.get("candidates"))
         roles: dict[str, list[str]] = {}
 
@@ -155,11 +156,18 @@ def _source_record_review(finding, details: dict, tenant_id: int) -> dict:
             if key := _uuid(value):
                 roles.setdefault(key, []).append(label)
 
-        add_role(current, "Linked today")
-        add_role(recorded, "Linked when flagged")
-        add_role(proposed, "Matched when flagged")
+        source = subject.get("platform")
+        record_name = f"the {source} record" if source else "this source record"
+        add_role(current, f"Currently shows {record_name}")
+        if recorded != current:
+            add_role(recorded, f"Showed {record_name} when the issue started")
+        add_role(
+            proposed,
+            f"Reported the same {matcher.lower()}" if matcher else "May describe the same machine",
+        )
         for candidate in list(candidates)[:MAX_COMPUTERS]:
-            add_role(candidate, "Possible match when flagged")
+            if _uuid(candidate) not in roles:
+                add_role(candidate, "May describe the same machine")
         context["comparison_limited"] = (
             len(roles) > MAX_COMPUTERS or len(candidates) > MAX_COMPUTERS
         )
@@ -167,16 +175,22 @@ def _source_record_review(finding, details: dict, tenant_id: int) -> dict:
         context["attachment_changed"] = bool(recorded and current != recorded)
         context["currently_unattached"] = current is None
         if proposed:
+            if matcher:
+                title_source = f"A {source} record" if source else "This source record"
+                context["title"] = f"{title_source} shares a {matcher.lower()} with another Computer"
             context["summary"] = (
                 "This record appears to describe a different Computer from the one it was linked to."
             )
             context["explanation"] = (
                 "When the issue was last flagged, a serial number or VM UUID matched another Computer. Check which machine the record describes before making any changes."
             )
-            matcher = IDENTIFIERS.get(evidence.get("matcher"))
             if matcher:
                 context["facts"].append({"label": "What matched", "value": matcher})
         else:
+            if candidates:
+                context["title"] = "More than one Computer could be the same machine"
+            else:
+                context["title"] = "Check which Computer this record belongs to"
             context["summary"] = (
                 "A serial number or VM UUID on this record matched more than one Computer."
                 if candidates
@@ -186,6 +200,8 @@ def _source_record_review(finding, details: dict, tenant_id: int) -> dict:
                 "Compare the records below to work out which Computer this record belongs to. Check that they describe the same physical or virtual machine before combining anything."
             )
         context["computers"] = _comparison_computers(roles, candidates, tenant_id)
+        for computer in context["computers"]:
+            computer["comparison_heading"] = next(iter(computer.get("roles", ())), "")
         if proposed and recorded and proposed != recorded:
             comparison = dict(zip(roles, context["computers"], strict=False))
             linked = comparison.get(recorded, {})
@@ -195,28 +211,24 @@ def _source_record_review(finding, details: dict, tenant_id: int) -> dict:
             if linked.get("available") and matched.get("available") and matcher:
                 source = subject.get("platform")
                 record_label = f"This {source} record" if source else "This source record"
-                link_phrase = "is still linked" if current == recorded else "was linked when flagged"
+                link_phrase = "is still listed under" if current == recorded else "was listed under"
                 context["summary"] = (
-                    f"{record_label} {link_phrase} to {linked_name}, but its "
-                    f"{matcher.lower()} matched a record on another Computer, {matched_name}."
+                    f"{record_label} {link_phrase} {linked_name}. When this issue was raised, "
+                    f"a record on another Computer, {matched_name}, reported the same {matcher.lower()}."
                 )
                 if linked_name.casefold() == matched_name.casefold():
                     context["explanation"] = (
-                        "Both Computers have the same name, but Operations lists them separately. "
-                        "Check whether they are two entries for the same machine or whether "
-                        "a source reported the wrong identifier."
+                        "Both Computers have the same name. Operations lists them separately."
                     )
         if proposed and matcher:
             identifier = matcher.lower()
             source = subject.get("platform") or "the reporting source"
             context["steps"] = [
-                f"Use Open source record to identify the entry in {source}. Verify its "
-                f"{identifier} against the machine or its management console. Use the "
-                "source org or group to pick the right record if the names are identical.",
-                f"If the {identifier} is wrong, correct it in {source}.",
-                "If the value is correct and the two entries describe the same machine, "
-                "request a duplicate Computer review. If they are different machines "
-                "and the source record belongs to the other one, request a review of its Computer link.",
+                f"Find the record in {source} and check its {identifier}. Use the source org "
+                "or group to distinguish entries with the same name.",
+                f"Correct a wrong value in {source}. If both entries describe the same "
+                "machine, request a duplicate review. If the record belongs to the other "
+                "machine, request a correction to its Computer link.",
             ]
         elif candidates:
             context["steps"] = [
@@ -254,6 +266,18 @@ def _comparison_computers(roles: dict, candidates: dict, tenant_id: int) -> list
         .filter(id__in=effectively_owned_device_ids(tenant_id))
         .values_list("id", flat=True)
     }
+    ownership_issues = dict(
+        Finding.objects.filter(
+            tenant_id=tenant_id,
+            subject_type=Finding.SubjectType.DEVICE,
+            subject_id__in=list(devices),
+            finding_type__name="computer_client_conflict",
+            status__in=("open", "acknowledged", "investigating"),
+        )
+        .order_by("subject_id", "-last_detected_at", "id")
+        .distinct("subject_id")
+        .values_list("subject_id", "id")
+    )
     # Read from the same restricted metadata surface as the source-record page.
     with connection.cursor() as cur:
         cur.execute(
@@ -321,6 +345,7 @@ def _comparison_computers(roles: dict, candidates: dict, tenant_id: int) -> list
                 }
             )
         families = candidates.get(device_id)
+        ownership_issue = ownership_issues.get(device.id) if device else None
         result.append(
             {
                 "label": device.canonical_hostname or "Unnamed Computer"
@@ -335,6 +360,7 @@ def _comparison_computers(roles: dict, candidates: dict, tenant_id: int) -> list
                 "available": device is not None,
                 "saved_client": getattr(device.client, "display_name", "") if device else "",
                 "ownership_conflict": ownership_state == "conflict",
+                "ownership_issue_id": ownership_issue,
                 "families": [IDENTIFIERS[family] for family in families if family in IDENTIFIERS]
                 if isinstance(families, list)
                 else [],
