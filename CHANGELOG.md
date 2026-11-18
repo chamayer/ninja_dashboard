@@ -2,6 +2,12 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.144.34] — 2026-11-17 — Clarify Source Records inventory
+
+- Lead with the reported name and distinguish record presence, reported
+  availability, and Computer attachment. Group detail fields into Overview,
+  Attached Computer, and Reported identity. No migrations.
+
 ## [0.144.33] — 2026-11-17 — Fix filtered Coverage pagination
 
 - Keep agent filter display labels separate from maintained selection results

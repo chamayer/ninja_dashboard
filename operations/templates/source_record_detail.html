@@ -4,15 +4,14 @@
 {% block content %}
 <p><a href="{% url 'inventory_source_records' %}">← Source records</a></p>
 <div class="card" style="margin-bottom:1rem;">
-  <h1 style="margin:0;">{{ subject.reported_name|default:"Source record" }}</h1>
-  <p class="muted">{{ subject.platform }} · {{ subject.entity_type }} · role {{ subject.record_role }} · {% if subject.presence == "present" %}present{% else %}withdrawn{% if subject.withdrawn_at %} {{ subject.withdrawn_at|date:"Y-m-d" }}{% endif %}{% endif %}</p>
+  <h1 style="margin:0;">{% if subject.restricted %}Restricted record{% else %}{{ subject.reported_name|default:"Source record" }}{% endif %}</h1>
+  <p class="muted">{{ subject.platform }} · {{ subject.entity_type }} · {% if subject.presence == "present" %}<span class="badge badge-low">Present</span>{% else %}<span class="badge badge-high">Withdrawn</span>{% if subject.withdrawn_at %} {{ subject.withdrawn_at|date:"Y-m-d" }}{% endif %}{% endif %}</p>
   {% if subject.restricted %}<p class="muted">This record is restricted; its names and identifiers are hidden.</p>{% endif %}
-  <table>
-    <tr><th>Attached Computer</th><td>{% if subject.device_id and subject.client_slug %}<a href="{% url 'device_detail' org_slug=subject.client_slug device_id=subject.device_id %}">{{ subject.device_name|default:"(unnamed Computer)" }}</a> · {{ subject.client_name }}{% if subject.match_method %} · {{ subject.match_method }}{% endif %}{% else %}Not attached{% endif %}</td></tr>
-    {% if not subject.restricted %}
-    <tr><th>Serial</th><td>{{ subject.canonical_serial|default:"—" }}</td></tr>
-    <tr><th>VM UUID</th><td>{{ subject.vm_uuid|default:"—" }}</td></tr>
-    {% endif %}
+</div>
+<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%, 18rem),1fr));gap:1rem;margin-bottom:1rem;">
+  <section class="card">
+    <h2>Overview</h2>
+    <table>
     <tr><th>Last seen</th><td>{{ subject.last_seen_at|date:"Y-m-d H:i"|default:"—" }}</td></tr>
     {% if subject.record_role == "endpoint_agent" %}
     <tr><th>Reported state</th><td>{{ subject.reported_state_label }}</td></tr>
@@ -20,8 +19,27 @@
     {% endif %}
     <tr><th>First seen</th><td>{% if presence.first_seen %}{{ presence.first_seen.at|date:"Y-m-d H:i" }} <span class="muted">({{ presence.first_seen.basis_label }})</span>{% else %}—{% endif %}</td></tr>
     <tr><th>Managed since</th><td>{{ subject.admitted_at|date:"Y-m-d H:i" }}</td></tr>
-    <tr><th>Versions</th><td>input {{ subject.input_version }} · association {{ subject.association_version }}</td></tr>
-  </table>
+    </table>
+  </section>
+  <section class="card">
+    <h2>Attached Computer</h2>
+    {% if subject.device_id and subject.client_slug %}
+      <p><strong><a href="{% url 'device_detail' org_slug=subject.client_slug device_id=subject.device_id %}">{{ subject.device_name|default:"Unnamed Computer" }}</a></strong></p>
+      <p class="muted">{{ subject.client_name }}{% if subject.match_method %} · {{ subject.match_method }}{% endif %}</p>
+    {% else %}<p>No Computer link available.</p>{% endif %}
+  </section>
+  <section class="card">
+    <h2>Reported identity</h2>
+    <table>
+      {% if not subject.restricted %}
+      <tr><th>External ID</th><td>{{ subject.external_id|default:"—" }}</td></tr>
+      <tr><th>Serial</th><td>{{ subject.canonical_serial|default:"—" }}</td></tr>
+      <tr><th>VM UUID</th><td>{{ subject.vm_uuid|default:"—" }}</td></tr>
+      {% endif %}
+      <tr><th>Record role</th><td>{{ subject.record_role }}</td></tr>
+      <tr><th>Versions</th><td>Input {{ subject.input_version }} · Association {{ subject.association_version }}</td></tr>
+    </table>
+  </section>
 </div>
 
 {% for companion in companions %}
