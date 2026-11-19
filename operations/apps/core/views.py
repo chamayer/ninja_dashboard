@@ -871,7 +871,14 @@ def org_index(request: HttpRequest, org_slug: str) -> HttpResponse:
         mapping_scope = issue_selection.Scope(
             status="", types=issue_selection.mapping_types(), client=client.slug
         )
-        ctx["client_mapping_conflict_count"] = issue_selection.count(mapping_scope)
+        # This scoped count incurs substantial JIT compilation overhead. Keep
+        # the setting local to its savepoint and restore it for later queries.
+        with transaction.atomic(), connection.cursor() as cur:
+            cur.execute("SHOW jit")
+            previous_jit = cur.fetchone()[0]
+            cur.execute("SET LOCAL jit = off")
+            ctx["client_mapping_conflict_count"] = issue_selection.count(mapping_scope)
+            cur.execute("SELECT set_config('jit', %s, true)", [previous_jit])
         ctx["client_mapping_conflict_url"] = (
             f"{reverse('client_mappings')}?"
             + urlencode({"client_id": str(client.id)})
@@ -902,14 +909,6 @@ def org_index(request: HttpRequest, org_slug: str) -> HttpResponse:
                     [str(client.id)],
                 )
                 ctx["software_count"] = cur.fetchone()[0]
-
-        ctx["active_finding_count"] = Finding.objects.filter(
-            tenant_id=1, client=client, status__in=_FINDING_ACTIVE_STATUSES
-        ).filter(
-            ~Q(subject_type="device") | Q(subject_id__in=client_owned_device_ids(1, client.id))
-        ).filter(
-            ~Q(subject_type="source_record") | Q(id__in=source_owned_finding_ids(1))
-        ).count()
 
         # ── Client scoreboard extensions ──
         with transaction.atomic(), connection.cursor() as cur:
@@ -950,152 +949,6 @@ def org_index(request: HttpRequest, org_slug: str) -> HttpResponse:
                 "stale": r[7],
             }
 
-            # Severity breakdown of open findings for this client.
-            cur.execute(
-                """
-                SELECT severity, COUNT(*)::int
-                FROM operations.findings
-                WHERE tenant_id = 1 AND client_id = %s AND condition_namespace = 'entity'
-                  AND status IN ('open', 'acknowledged', 'investigating')
-                  AND (subject_type IS DISTINCT FROM 'device' OR EXISTS (
-                      SELECT 1 FROM operations.computer_client_ownership owner
-                       WHERE owner.tenant_id = operations.findings.tenant_id
-                         AND owner.device_id = operations.findings.subject_id
-                         AND owner.effective_client_id = operations.findings.client_id
-                         AND owner.state IN ('resolved', 'decision_protected')))
-                  AND (subject_type IS DISTINCT FROM 'source_record' OR EXISTS (
-                      SELECT 1 FROM operations.source_record_subjects subject
-                       WHERE subject.tenant_id = operations.findings.tenant_id
-                         AND subject.id = operations.findings.subject_id
-                         AND operations.findings.client_id = operations.computer_client_independent_evidence(
-                                 subject.tenant_id, subject.observation_id)))
-                GROUP BY severity
-                """,
-                [str(client.id)],
-            )
-            sev = {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0}
-            for s, c in cur.fetchall():
-                sev[s] = c
-            ctx["finding_severity"] = sev
-            ctx["severe_count"] = sev["critical"] + sev["high"]
-
-            # Top attention: severe/high open findings, most recent first.
-            cur.execute(
-                """
-                SELECT f.id, f.severity, ft.name AS ftype,
-                       COALESCE(f.finding_details->>'title',
-                                f.finding_details->>'summary') AS title,
-                       f.last_detected_at,
-                       d.id AS device_id, d.canonical_hostname
-                FROM operations.findings f
-                JOIN operations.finding_types ft ON ft.id = f.finding_type_id
-                LEFT JOIN operations.devices d
-                  ON f.subject_type = 'device'
-                 AND d.tenant_id = f.tenant_id
-                 AND d.id = f.subject_id
-                WHERE f.tenant_id = 1
-                  -- Software findings carry no client_id; this client is
-                  -- reached through the installation link instead.
-                  AND (f.client_id = %s
-                       OR f.id IN (SELECT e.finding_id
-                                     FROM operations.v_device_software_exposure e
-                                     JOIN operations.computer_client_ownership owner
-                                       ON owner.tenant_id = e.tenant_id AND owner.device_id = e.device_id
-                                      AND owner.effective_client_id = e.client_id
-                                      AND owner.state IN ('resolved', 'decision_protected')
-                                    WHERE e.tenant_id = 1 AND e.client_id = %s))
-                  AND (f.subject_type IS DISTINCT FROM 'device' OR EXISTS (
-                      SELECT 1 FROM operations.computer_client_ownership owner
-                       WHERE owner.tenant_id = f.tenant_id AND owner.device_id = f.subject_id
-                         AND owner.effective_client_id = f.client_id
-                         AND owner.state IN ('resolved', 'decision_protected')))
-                  AND (f.subject_type IS DISTINCT FROM 'source_record' OR EXISTS (
-                      SELECT 1 FROM operations.source_record_subjects subject
-                       WHERE subject.tenant_id = f.tenant_id AND subject.id = f.subject_id
-                         AND f.client_id = operations.computer_client_independent_evidence(
-                                 subject.tenant_id, subject.observation_id)))
-                  AND f.status IN ('open', 'acknowledged', 'investigating')
-                  AND f.severity IN ('critical', 'high')
-                ORDER BY CASE f.severity WHEN 'critical' THEN 0 ELSE 1 END,
-                         f.last_detected_at DESC NULLS LAST
-                LIMIT 15
-                """,
-                [str(client.id), str(client.id)],
-            )
-            ctx["attention_findings"] = [
-                {
-                    "id": row[0],
-                    "severity": row[1],
-                    "ftype": row[2],
-                    "title": row[3],
-                    "last_detected_at": row[4],
-                    "device_id": row[5],
-                    "hostname": row[6],
-                }
-                for row in cur.fetchall()
-            ]
-
-            # Offline offenders — top 10 most-severe or longest-offline.
-            # Build each severity rollup once for this client's offline
-            # population. The prior form ran the software-exposure view as a
-            # correlated subquery for every candidate device before sorting;
-            # that made an otherwise ten-row panel proportional to the whole
-            # client's inventory many times over.
-            cur.execute(
-                f"""
-                WITH offline_devices AS MATERIALIZED (
-                    SELECT v.device_id, v.canonical_hostname, v.device_role,
-                           v.os_group, v.last_contact_at
-                      FROM operations.v_device v
-                      JOIN operations.computer_client_ownership owner
-                        ON owner.tenant_id = v.tenant_id AND owner.device_id = v.device_id
-                       AND owner.effective_client_id = v.client_id
-                       AND owner.state IN ('resolved', 'decision_protected')
-                     WHERE v.tenant_id = 1 AND v.client_id = %s
-                       AND {current_computer_sql("v")}
-                       AND NOT v.is_online_any
-                ), direct_severe AS (
-                    SELECT f.subject_id AS device_id, COUNT(*)::int AS severe
-                      FROM operations.findings f
-                      JOIN offline_devices d ON d.device_id = f.subject_id
-                     WHERE f.tenant_id = 1
-                       AND f.subject_type = 'device'
-                       AND f.status IN ('open', 'acknowledged', 'investigating')
-                       AND f.severity IN ('critical', 'high')
-                     GROUP BY f.subject_id
-                ), software_severe AS (
-                    SELECT e.device_id, COUNT(DISTINCT e.finding_id)::int AS severe
-                      FROM operations.v_device_software_exposure e
-                      JOIN offline_devices d ON d.device_id = e.device_id
-                     WHERE e.tenant_id = 1
-                       AND e.status IN ('open', 'acknowledged', 'investigating')
-                       AND e.severity IN ('critical', 'high')
-                     GROUP BY e.device_id
-                )
-                SELECT d.device_id, d.canonical_hostname, d.device_role, d.os_group,
-                       d.last_contact_at,
-                       COALESCE(direct_severe.severe, 0)
-                       + COALESCE(software_severe.severe, 0) AS severe
-                  FROM offline_devices d
-             LEFT JOIN direct_severe ON direct_severe.device_id = d.device_id
-             LEFT JOIN software_severe ON software_severe.device_id = d.device_id
-                 ORDER BY severe DESC, d.last_contact_at ASC NULLS FIRST
-                LIMIT 10
-                """,
-                [str(client.id)],
-            )
-            ctx["offender_devices"] = [
-                {
-                    "id": row[0],
-                    "hostname": row[1],
-                    "role": row[2],
-                    "os_group": row[3],
-                    "last_contact_at": row[4],
-                    "severe": row[5],
-                }
-                for row in cur.fetchall()
-            ]
-
             # Decision coverage is intentionally reported directly. Counting
             # every installed title with no matching global/client decision
             # required a large correlated anti-join on every overview render.
@@ -1133,19 +986,6 @@ def org_index(request: HttpRequest, org_slug: str) -> HttpResponse:
             )
             ctx["new_24h"] = cur.fetchone()[0]
 
-        # Traffic-light health for the client header.
-        if sev["critical"] > 0:
-            ctx["client_health"] = "red"
-            ctx["client_bucket"] = "critical"
-        elif sev["high"] > 0:
-            ctx["client_health"] = "amber"
-            ctx["client_bucket"] = "degrading"
-        elif ctx["dev_overview"]["total"] == 0:
-            ctx["client_health"] = "grey"
-            ctx["client_bucket"] = "no_data"
-        else:
-            ctx["client_health"] = "green"
-            ctx["client_bucket"] = "healthy"
         ctx.update(build_client_workspace(client, ctx, device_policy=device_policy))
     else:
         # All-clients fleet view.

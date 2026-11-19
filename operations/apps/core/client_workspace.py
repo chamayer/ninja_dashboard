@@ -11,7 +11,7 @@ from django.urls import reverse
 from django.utils import timezone
 
 from . import client_domains
-from .computer_reads import client_owned_finding_ids
+from .computer_reads import client_owned_finding_ids, finding_has_current_owner
 from .device_status import get_device_status_policy
 from .models import Client, ClientSourceLink, EntityCandidate, Finding, MergeCandidate
 from .templatetags.human_labels import humanize_label
@@ -171,11 +171,15 @@ def _issue_rollup(*, client_id=None) -> tuple[dict, list[dict]]:
     }
     if client_id is not None:
         filters["client_id"] = client_id
+    owner_filter = (
+        Q(finding_has_current_owner()) if client_id is not None
+        else Q(id__in=client_owned_finding_ids(1))
+    )
     rows = list(
         Finding.objects.filter(**filters)
         .filter(
             ~Q(subject_type="device")
-            | Q(id__in=client_owned_finding_ids(1))
+            | owner_filter
         )
         # Software findings are excluded here and added below. Their subject is
         # the title or release, so they carry no client_id -- left in this
