@@ -434,9 +434,15 @@ WITH publication_state AS MATERIALIZED (
  WHERE decoded.device_id IS NOT NULL
 ), record_statuses AS MATERIALIZED (
  SELECT cell.device_id, cell.platform, cell.source_contact_at, cell.requirement_status, cell.source_status,
-        cell.rule_status, cell.status
+        cell.rule_status,
+        CASE WHEN cell.platform <> 'Hudu' AND cell.source_status = 'Offline'
+             THEN CASE WHEN cell.source_contact_at >= transaction_timestamp()
+                                 - make_interval(days => computer.offline_days)
+                       THEN 'Offline' ELSE 'Stale' END
+             ELSE cell.status END AS status
  FROM operations.coverage_cell_read_current cell
  JOIN stored ON stored.device_id = cell.device_id AND stored.tenant_id = cell.tenant_id
+ JOIN computers computer ON computer.id = cell.device_id
 )
 """.strip()
 

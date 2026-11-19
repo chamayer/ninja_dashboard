@@ -2,6 +2,13 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.144.39] — 2026-11-19 — Refresh Coverage with ingest cycles
+
+- Refresh maintained Coverage after collection and reconciliation, with a
+  five-minute recovery check instead of a 15-second check.
+- Remove the one-minute publication expiry and calculate offline-to-stale
+  status at read time. Migration 0425 updates the publication function.
+
 ## [0.144.38] — 2026-11-18 — Make identity reviews easier to act on
 
 - Give identity reviews a title that describes the reported match, separate

@@ -104,6 +104,12 @@ def _finish_child(child: _Child) -> None:
             rows=result.get("rows"),
             result=result.get("result") or {},
         )
+        if child.job_key == "coverage-read-model":
+            # Changes can arrive while a publication job is running. Check
+            # again after its ledger state is complete so they are not missed.
+            from ingest.coverage_read_model import request_after_cycle
+
+            request_after_cycle()
     else:
         operator_job_queue._finish_v1(child.run_id, child.claim_token, "failed", error=str(result.get("error", "Jobs child failed."))[:2000])
 

@@ -1,8 +1,12 @@
 """Jobs-owned Coverage publication; never invoked by an interactive GET."""
 
+import logging
+
 from ingest import db
 from ingest.config import settings
 from ingest.device_status_settings import thresholds
+
+log = logging.getLogger(__name__)
 
 
 def refresh() -> int:
@@ -48,3 +52,11 @@ def admit_due() -> int:
         request_system_job("coverage-read-model", "coverage-read-model-due")
         return 1
     return 0
+
+
+def request_after_cycle() -> None:
+    """Request a due publication without turning a successful cycle into a failure."""
+    try:
+        admit_due()
+    except Exception:
+        log.exception("Coverage refresh admission failed; recovery check will retry")

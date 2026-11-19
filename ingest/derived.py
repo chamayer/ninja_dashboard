@@ -67,6 +67,9 @@ def refresh_after_collection(reason: str) -> None:
         log.exception("Operations generic relationship projection failed — continuing")
     with db.transaction() as cur:
         cur.execute("SELECT operations.refresh_derived()")
+    from ingest.coverage_read_model import request_after_cycle
+
+    request_after_cycle()
     log.info(
         "Operations entity links synced (%s), attribute claims synced (%s), "
         "effective attributes synced (%s), generic candidates synced (%s), "

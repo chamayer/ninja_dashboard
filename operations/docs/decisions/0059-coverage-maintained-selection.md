@@ -18,6 +18,14 @@ presence/session materialized-view refresh. Time boundaries and a sixty-second
 maximum age expire a generation. Schema currently restricts publication to
 tenant 1, matching the application. Existing protected inputs remain authority.
 
+Proposed revision (2026-11-19): follow input changes and normal ingest cycles
+instead of imposing the sixty-second ceiling. Evaluate offline-to-stale status
+at selection time and retain revision fences. Request publication at collection
+and reconciliation boundaries, with a five-minute recovery check. Migration
+0425 and the selector prepare this change; input coverage, boundary parity,
+forward/reverse execution, refresh timing and sustained availability remain
+unverified release gates.
+
 Cutover requires PostgreSQL migration/rollback, role/access, concurrent-change,
 maintenance and output-parity validation plus full-request timing. Statement
 invalidation uses a shared revision row: write contention and invalidation

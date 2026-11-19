@@ -258,6 +258,9 @@ def run_identity_resolver_once(*, refresh_current: bool = True):
         log.exception("Identity resolver failed")
         failures.append(("identity resolver", exc))
     _raise_step_failures("Identity resolution", failures)
+    from ingest.coverage_read_model import request_after_cycle
+
+    request_after_cycle()
     telemetry = identity_resolver.take_telemetry()
     telemetry["seconds"] = round(time.monotonic() - started, 1)
     return operator_job_queue.JobExecutionResult(result=telemetry)
@@ -267,6 +270,9 @@ def run_computer_client_ownership_once():
     """Reconcile source-dirtied Computer ownership without a fleet sweep."""
     counts = computer_client_ownership.reconcile_dirty(tenant_id=1)
     log.info("Computer client ownership dirty reconciliation complete: %s", counts)
+    from ingest.coverage_read_model import request_after_cycle
+
+    request_after_cycle()
     return operator_job_queue.JobExecutionResult(result=counts)
 
 
@@ -274,6 +280,9 @@ def run_computer_client_ownership_sweep_once():
     """Run the lower-frequency full Computer ownership consistency sweep."""
     counts = computer_client_ownership.reconcile_cycle(tenant_id=1)
     log.info("Computer client ownership full sweep complete: %s", counts)
+    from ingest.coverage_read_model import request_after_cycle
+
+    request_after_cycle()
     return operator_job_queue.JobExecutionResult(result=counts)
 
 
@@ -1043,7 +1052,7 @@ def main() -> None:
     scheduler.add_job(
         admit_coverage_refresh,
         "interval",
-        seconds=15,
+        minutes=5,
         id="coverage_publication_admission",
         max_instances=1,
     )
