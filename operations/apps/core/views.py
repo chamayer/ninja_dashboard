@@ -1741,37 +1741,48 @@ def device_detail(request: HttpRequest, org_slug: str, device_id: str) -> HttpRe
                     "projected_at": os_installation_row[3],
                 }
 
-            cur.execute(
-                """
-                SELECT installation.canonical_name, installation.publisher,
-                       installation.version, installation.install_date,
-                       installation.last_observed_at, installation.install_location,
-                       COALESCE(evidence.evidence_state, 'withdrawn')
-                  FROM operations.software_installations_current installation
-                  LEFT JOIN LATERAL (
-                      SELECT source_evidence.evidence_state
-                        FROM operations.v_software_installation_evidence_current source_evidence
-                       WHERE source_evidence.tenant_id = installation.tenant_id
-                         AND source_evidence.device_id = installation.device_id
-                         AND source_evidence.canonical_name = installation.canonical_name
-                       ORDER BY CASE source_evidence.evidence_state
-                                    WHEN 'current' THEN 0
-                                    WHEN 'offline' THEN 1
-                                    WHEN 'stale' THEN 2
-                                    ELSE 3
-                                END,
-                                source_evidence.last_seen_at DESC
-                       LIMIT 1
-                  ) evidence ON TRUE
-                 WHERE installation.tenant_id = %s
-                   AND installation.device_id = %s
-                   AND installation.deleted_at IS NULL
-                   AND installation.stale_since IS NULL
-                 ORDER BY installation.canonical_name
-                LIMIT 300
-                """,
-                [1, str(device.id)],
-            )
+            if active_tab == "software":
+                cur.execute(
+                    """
+                    WITH chosen AS MATERIALIZED (
+                        SELECT canonical_name, publisher, version, install_date,
+                               last_observed_at, install_location
+                          FROM operations.software_installations_current
+                         WHERE tenant_id = %s AND device_id = %s
+                           AND deleted_at IS NULL AND stale_since IS NULL
+                         ORDER BY canonical_name LIMIT 300
+                    ), evidence AS MATERIALIZED (
+                        SELECT DISTINCT ON (source_evidence.canonical_name)
+                               source_evidence.canonical_name, source_evidence.evidence_state
+                          FROM operations.v_software_installation_evidence_current source_evidence
+                          JOIN chosen ON chosen.canonical_name = source_evidence.canonical_name
+                         WHERE source_evidence.tenant_id = %s AND source_evidence.device_id = %s
+                         ORDER BY source_evidence.canonical_name,
+                                  CASE source_evidence.evidence_state
+                                      WHEN 'current' THEN 0 WHEN 'offline' THEN 1
+                                      WHEN 'stale' THEN 2 ELSE 3 END,
+                                  source_evidence.last_seen_at DESC
+                    )
+                    SELECT chosen.canonical_name, chosen.publisher, chosen.version,
+                           chosen.install_date, chosen.last_observed_at, chosen.install_location,
+                           COALESCE(evidence.evidence_state, 'withdrawn')
+                      FROM chosen LEFT JOIN evidence ON evidence.canonical_name = chosen.canonical_name
+                     ORDER BY chosen.canonical_name
+                    """,
+                    [1, str(device.id), 1, str(device.id)],
+                )
+            else:
+                cur.execute(
+                    """
+                    SELECT canonical_name, publisher, version, install_date,
+                           last_observed_at, install_location, NULL::text
+                      FROM operations.software_installations_current
+                     WHERE tenant_id = %s AND device_id = %s
+                       AND deleted_at IS NULL AND stale_since IS NULL
+                     ORDER BY canonical_name LIMIT 300
+                    """,
+                    [1, str(device.id)],
+                )
             software_rows = cur.fetchall()
 
             # Programs Ninja no longer lists for this computer, newest first.
@@ -2180,7 +2191,8 @@ def device_detail(request: HttpRequest, org_slug: str, device_id: str) -> HttpRe
 
     # Software decisions map — key by canonical_name, prefer per-client
     # over global.
-    software_titles = [row[0] for row in software_rows]
+    # Other tabs use only the number of rows, not per-title labels or decisions.
+    software_titles = [row[0] for row in software_rows] if active_tab == "software" else []
     software_display_names = preferred_software_display_names(software_titles)
     software_publishers = [row[1] for row in software_rows if row[1]]
     decisions_map: dict = {}

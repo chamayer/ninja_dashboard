@@ -2,6 +2,12 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.144.42] — 2026-11-19 — Speed up client and Computer details
+
+- Reduce unnecessary client-overview calculations and scope the mapping count.
+- Batch software evidence and avoid title-detail work on other Computer tabs.
+  No migrations.
+
 ## [0.144.41] — 2026-11-19 — Reduce Clients policy lookups
 
 - Reuse the source-delay policy across the Clients directory. No migrations.
