@@ -147,8 +147,12 @@ def load_subject(cur, tenant_id: int, subject_id: uuid.UUID) -> dict | None:
                    meta.platform_group_id
                ) END AS source_group
           FROM operations.source_record_subjects s
-          LEFT JOIN operations.v_entity_observation_admin_metadata meta
-            ON meta.tenant_id = s.tenant_id AND meta.observation_id = s.observation_id
+          LEFT JOIN LATERAL (
+              SELECT meta.*
+                FROM operations.v_entity_observation_admin_metadata meta
+               WHERE meta.tenant_id = s.tenant_id AND meta.observation_id = s.observation_id
+              OFFSET 0
+          ) meta ON TRUE
           LEFT JOIN operations.entity_source_links link
             ON link.tenant_id = s.tenant_id AND link.source_instance_id = s.source_instance_id
            AND link.external_namespace = s.external_namespace

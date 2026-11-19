@@ -291,8 +291,13 @@ def _comparison_computers(roles: dict, candidates: dict, tenant_id: int) -> list
               FROM operations.entity_source_links link
               JOIN operations.source_record_subjects subject
                 ON subject.tenant_id = link.tenant_id AND subject.id = link.source_subject_id
-              LEFT JOIN operations.v_entity_observation_admin_metadata meta
-                ON meta.tenant_id = subject.tenant_id AND meta.observation_id = subject.observation_id
+              LEFT JOIN LATERAL (
+                  SELECT meta.*
+                    FROM operations.v_entity_observation_admin_metadata meta
+                   WHERE meta.tenant_id = subject.tenant_id
+                     AND meta.observation_id = subject.observation_id
+                  OFFSET 0
+              ) meta ON TRUE
               LEFT JOIN operations.source_instances instance
                 ON instance.tenant_id = subject.tenant_id AND instance.id = subject.source_instance_id
               LEFT JOIN operations.computer_client_ownership owner
