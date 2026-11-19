@@ -2,6 +2,11 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.144.40] — 2026-11-19 — Reduce Clients directory queries
+
+- Fetch source-reference counts for the Clients directory in one grouped query.
+  No migrations.
+
 ## [0.144.39] — 2026-11-19 — Refresh Coverage with ingest cycles
 
 - Refresh maintained Coverage after collection and reconciliation, with a

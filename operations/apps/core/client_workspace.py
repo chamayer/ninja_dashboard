@@ -13,7 +13,7 @@ from django.utils import timezone
 from . import client_domains
 from .computer_reads import client_owned_finding_ids
 from .device_status import get_device_status_policy
-from .models import Client, EntityCandidate, Finding, MergeCandidate
+from .models import Client, ClientSourceLink, EntityCandidate, Finding, MergeCandidate
 from .templatetags.human_labels import humanize_label
 
 ACTIVE_FINDING_STATUSES = ("open", "acknowledged", "investigating")
@@ -696,6 +696,12 @@ def build_client_directory(clients: list) -> dict:
     """Build the sortable fleet client-directory rows."""
     locations, users, health = _shared_context()
     stats_by_client, _ = _issue_rollup()
+    source_reference_counts = dict(
+        ClientSourceLink.objects.filter(tenant_id=1, client_id__in=[c.id for c in clients])
+        .values("client_id")
+        .annotate(total=Count("id"))
+        .values_list("client_id", "total")
+    )
     merge_reviews = {
         row["client_id"]: row["n"]
         for row in MergeCandidate.objects.filter(
@@ -779,7 +785,7 @@ def build_client_directory(clients: list) -> dict:
                 "data_label": data_label,
                 "data_sort": data_sort,
                 "review_count": merge_reviews.get(client.id, 0),
-                "source_reference_count": len(client.source_links.all()),
+                "source_reference_count": source_reference_counts.get(client.id, 0),
                 "needs_attention": needs_attention,
             }
         )
