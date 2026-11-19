@@ -696,6 +696,7 @@ def build_client_directory(clients: list) -> dict:
     """Build the sortable fleet client-directory rows."""
     locations, users, health = _shared_context()
     stats_by_client, _ = _issue_rollup()
+    source_delay_hours = get_device_status_policy()["source_delay_hours"]
     source_reference_counts = dict(
         ClientSourceLink.objects.filter(tenant_id=1, client_id__in=[c.id for c in clients])
         .values("client_id")
@@ -717,7 +718,7 @@ def build_client_directory(clients: list) -> dict:
     delayed_count = 0
     for client in clients:
         source_names = client.source_names
-        updates = _source_updates(source_names, health)
+        updates = _source_updates(source_names, health, source_delay_hours=source_delay_hours)
         delayed_sources = [source for source in updates if source["delayed"]]
         if not source_names:
             data_state, data_label, data_sort = "unavailable", "No data connection", 2

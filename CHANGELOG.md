@@ -2,6 +2,10 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.144.41] — 2026-11-19 — Reduce Clients policy lookups
+
+- Reuse the source-delay policy across the Clients directory. No migrations.
+
 ## [0.144.40] — 2026-11-19 — Reduce Clients directory queries
 
 - Fetch source-reference counts for the Clients directory in one grouped query.
