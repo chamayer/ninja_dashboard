@@ -18345,9 +18345,13 @@ def _device_source_records(cur, device_ids) -> dict[str, list[tuple]]:
                metadata.reported_online, metadata.reported_last_contact_at,
                lifecycle.record_lifecycle
           FROM operations.v_device_observation_current evidence
-          LEFT JOIN operations.v_device_source_record_lifecycle_current lifecycle
-            ON lifecycle.tenant_id = evidence.tenant_id
-           AND lifecycle.observation_id = evidence.observation_id
+          LEFT JOIN LATERAL (
+              SELECT lifecycle.record_lifecycle
+                FROM operations.v_device_source_record_lifecycle_current lifecycle
+               WHERE lifecycle.tenant_id = evidence.tenant_id
+                 AND lifecycle.observation_id = evidence.observation_id
+              OFFSET 0
+          ) lifecycle ON TRUE
           LEFT JOIN operations.v_entity_observation_admin_metadata metadata
             ON metadata.tenant_id = evidence.tenant_id
            AND metadata.observation_id = evidence.observation_id

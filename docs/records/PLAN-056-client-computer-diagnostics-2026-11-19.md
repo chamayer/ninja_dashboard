@@ -41,8 +41,18 @@ evidence took 0.974 s. These are isolated handler timings, not full HTTP/browser
 measurements or full output-parity proof. Connection closure and exact staging
 cleanup confirmed. User requested testing stop; no further tests or diagnostics.
 
-Local changes in `operations/apps/core/views.py` and `client_workspace.py` are
-not tested or deployed.
-Review output parity, JIT setting restoration, tenant scope, full evidence
-equivalence and production page timing before treating the work as complete.
-No local tests were run, per user instruction. No new schema is proposed.
+After explicit user authorization to verify release 0.144.42 / ade5fad5, all
+four services were healthy and deployed views/workspace hashes matched the
+release. One configured-admin loopback request per page returned complete 200:
+client overview 1.678 s and Computer overview 5.057 s. Matching server completion
+markers, logout and exact staging cleanup were confirmed. These are single HTTP
+samples, not browser performance or content-parity verification; the Software
+tab was not measured in this pass.
+
+On the deployed Computer overview, a read-only handler trace completed in
+3.781 s, including 2.105 s for source records. A candidate correlating the
+existing protected lifecycle view to each selected record returned identical
+rows for one Computer in a single snapshot, 1.197 s versus 2.297 s. JIT-off
+comparison for the same reader was inconclusive (1.830 s versus 2.154 s).
+The same reader serves merge review; broader parity and deployed timing remain
+unverified. No local tests were run, per user instruction. No schema change.

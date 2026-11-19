@@ -2,6 +2,10 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.144.43] — 2026-11-19 — Narrow Computer source-record reads
+
+- Scope lifecycle lookups to selected Computer source records. No migrations.
+
 ## [0.144.42] — 2026-11-19 — Speed up client and Computer details
 
 - Reduce unnecessary client-overview calculations and scope the mapping count.
