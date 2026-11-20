@@ -2,6 +2,10 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.144.45] — 2026-11-19 — Speed up filtered Issues
+
+- Reduce client-scoped issue summary and page lookup work. No migrations.
+
 ## [0.144.44] — 2026-11-19 — Speed up issue review evidence
 
 - Limit protected source-record metadata lookups to the records being reviewed.

@@ -4187,14 +4187,20 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
         return "?" + urlencode(params)
 
     # Fleet summary: global scope, declared as such.
-    fleet_counts = issue_selection.counts(issue_selection.Scope())
-    fleet_open = sum(n for (_t, _s, st), n in fleet_counts.items() if st == "open")
-    fleet_paused = sum(n for (_t, _s, st), n in fleet_counts.items() if st == "paused")
+    reuse_fleet_counts = (
+        status != "resolved" and base.narrowed(status="open") == issue_selection.Scope()
+    )
+    if reuse_fleet_counts:
+        fleet_counts = issue_selection.counts(issue_selection.Scope())
+        fleet_open = sum(n for (_t, _s, st), n in fleet_counts.items() if st == "open")
+        fleet_paused = sum(n for (_t, _s, st), n in fleet_counts.items() if st == "paused")
+    else:
+        fleet_open, fleet_paused = issue_selection.fleet_totals()
 
     # Header counts over the full filtered population (not the page).
     if base.related_to:
         counts = {}
-    elif status != "resolved" and base.narrowed(status="open") == issue_selection.Scope():
+    elif reuse_fleet_counts:
         counts = fleet_counts  # unfiltered: the fleet summary is the same population
     else:
         counts = issue_selection.counts(base)
@@ -4319,9 +4325,21 @@ def findings_queue(request: HttpRequest) -> HttpResponse:
     rows: list[dict] = []
     total = 0
     if leaf_types != ():
-        items, total = issue_selection.page(
-            leaf, sort=sort, direction=direction, number=page_number
-        )
+        if base.client:
+            # Client-scoped selections can spend seconds compiling these
+            # bounded queries. Restore the caller's setting after the page read.
+            with transaction.atomic(), connection.cursor() as cur:
+                cur.execute("SHOW jit")
+                previous_jit = cur.fetchone()[0]
+                cur.execute("SET LOCAL jit = off")
+                items, total = issue_selection.page(
+                    leaf, sort=sort, direction=direction, number=page_number
+                )
+                cur.execute("SELECT set_config('jit', %s, true)", [previous_jit])
+        else:
+            items, total = issue_selection.page(
+                leaf, sort=sort, direction=direction, number=page_number
+            )
         rows = _hydrate_issue_items(request, items, issue_categories, issue_type_groups)
     pages = max(1, -(-total // issue_selection.PAGE_SIZE))
     page_number = min(max(1, page_number), pages)

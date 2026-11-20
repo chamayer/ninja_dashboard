@@ -30,7 +30,7 @@ from dataclasses import dataclass, replace
 from typing import Any
 from urllib.parse import urlencode
 
-from django.db import connection
+from django.db import connection, transaction
 from django.urls import reverse
 
 from . import finding_registry
@@ -113,7 +113,7 @@ def _client_id(slug: str) -> str | None:
 
 def _items_sql(
     scope: Scope, *, covered_only: bool = False, home_compact: bool = False,
-    count_only: bool = False,
+    count_only: bool = False, batch_source_clients: bool = False,
 ) -> tuple[str, dict[str, Any]]:
     """The filtered item relation, before ranking. Columns are documented in ``_ITEM_COLUMNS``."""
     params: dict[str, Any] = {"tenant": TENANT_ID}
@@ -162,19 +162,28 @@ def _items_sql(
     candidate_action_key = "NULL::text" if home_compact else "'candidate:' || c.id::text"
     # Home reports the recorded association on selected actions. Other Issues
     # readers retain their current ownership checks for filtering and access.
+    source_client_expression = (
+        "source_client.client_id " if batch_source_clients else
+        "(SELECT operations.computer_client_independent_evidence("
+        "subject.tenant_id, subject.observation_id) "
+        "FROM operations.source_record_subjects subject "
+        "WHERE subject.tenant_id = f.tenant_id AND subject.id = f.subject_id) "
+    )
     client_expression = (
-        "f.client_id" if home_compact else
+        "f.client_id" if home_compact and not batch_source_clients else (
         "CASE WHEN f.subject_type = 'device' AND NOT EXISTS ("
         "SELECT 1 FROM operations.computer_client_ownership owner "
         "WHERE owner.tenant_id = f.tenant_id AND owner.device_id = f.subject_id "
         "AND owner.effective_client_id = f.client_id "
         "AND owner.state IN ('resolved', 'decision_protected')) THEN NULL "
         "WHEN f.subject_type = 'source_record' THEN "
-        "(SELECT operations.computer_client_independent_evidence("
-        "subject.tenant_id, subject.observation_id) "
-        "FROM operations.source_record_subjects subject "
-        "WHERE subject.tenant_id = f.tenant_id AND subject.id = f.subject_id) "
+        + source_client_expression +
         "ELSE f.client_id END"
+        )
+    )
+    source_client_join = (
+        "LEFT JOIN source_clients source_client ON f.subject_type = 'source_record' "
+        "AND source_client.subject_id = f.subject_id" if batch_source_clients else ""
     )
     sql = f"""
         SELECT 'finding'::text AS kind, f.id, f.condition_namespace::text AS namespace,
@@ -199,6 +208,7 @@ def _items_sql(
                {detail_columns}
           FROM operations.findings f
           JOIN operations.finding_types t ON t.id = f.finding_type_id
+          {source_client_join}
           LEFT JOIN {state_relation} s ON s.finding_id = f.id{state_filter}
           LEFT JOIN operations.source_bindings b
             ON t.name = 'client_unattached_group' AND b.tenant_id = f.tenant_id
@@ -239,7 +249,7 @@ _SUBJECT_LABEL_SQL = """
 
 def _filtered_sql(
     scope: Scope, *, labels: bool = False, summary: bool = False, home_compact: bool = False,
-    count_only: bool = False,
+    count_only: bool = False, batch_source_clients: bool = False,
 ) -> tuple[str, dict[str, Any]]:
     """Items after every scope filter, ranked into corrective actions.
 
@@ -254,6 +264,7 @@ def _filtered_sql(
         covered_only=summary and not scope.related_to,
         home_compact=home_compact,
         count_only=count_only,
+        batch_source_clients=batch_source_clients,
     )
     where = ["true"]
     if scope.invalid:
@@ -389,6 +400,23 @@ def _filtered_sql(
         "SELECT finding_id, attention FROM operations.finding_state "
         "WHERE attention = 'covered'), " if count_only else ""
     )
+    source_clients_cte = """
+        source_clients AS MATERIALIZED (
+            SELECT subject.id AS subject_id, clients.client_id
+              FROM operations.source_record_subjects subject
+              JOIN operations.computer_client_independent_evidence_batch(
+                %(tenant)s, ARRAY(
+                    SELECT DISTINCT s.observation_id
+                      FROM operations.findings src
+                      JOIN operations.source_record_subjects s
+                        ON s.tenant_id = src.tenant_id AND s.id = src.subject_id
+                     WHERE src.tenant_id = %(tenant)s AND src.subject_type = 'source_record'
+                       AND src.status = ANY(%(active)s)
+                )
+              ) clients ON clients.observation_id = subject.observation_id
+             WHERE subject.tenant_id = %(tenant)s
+        ),
+    """ if batch_source_clients else ""
     filtered_cte = (
         "filtered AS NOT MATERIALIZED" if count_only else
         "filtered AS MATERIALIZED" if home_compact else "filtered AS"
@@ -398,7 +426,7 @@ def _filtered_sql(
         if count_only else "i.*"
     )
     sql = f"""
-        WITH {covered_cte}{items_cte} ({items}),
+        WITH {source_clients_cte}{covered_cte}{items_cte} ({items}),
         {filtered_cte} (
             SELECT {selected_columns}, {_SEVERITY_RANK_SQL} AS severity_rank{label_columns}
               FROM items i{label_joins}
@@ -457,16 +485,41 @@ def counts(scope: Scope) -> dict[tuple[str, str, str], int]:
     """
     results: dict[tuple[str, str, str], int] = {}
     statuses = ("resolved",) if scope.status == "resolved" else ("open", "paused")
-    for status in statuses:
-        sql, params = _filtered_sql(scope.narrowed(status=status), summary=True)
-        with connection.cursor() as cursor:
+    batch_source_clients = bool(
+        scope.client and scope.client != CLIENT_UNASSIGNED
+        and scope.narrowed(status="open") == Scope(client=scope.client)
+        and scope.status != "resolved"
+    )
+    with transaction.atomic(), connection.cursor() as cursor:
+        if batch_source_clients:
+            cursor.execute("SHOW jit")
+            previous_jit = cursor.fetchone()[0]
+            cursor.execute("SET LOCAL jit = off")
+        for status in statuses:
+            sql, params = _filtered_sql(
+                scope.narrowed(status=status),
+                summary=True,
+                home_compact=batch_source_clients,
+                batch_source_clients=batch_source_clients,
+            )
             cursor.execute(
                 sql + " SELECT type_name, severity, count(*) FROM selected GROUP BY 1, 2",
                 params,
             )
             for type_name, severity, count in cursor.fetchall():
                 results[(type_name, severity, status)] = count
+        if batch_source_clients:
+            cursor.execute("SELECT set_config('jit', %s, true)", [previous_jit])
     return results
+
+
+def fleet_totals() -> tuple[int, int]:
+    """Open and paused independent actions using the existing compact reader."""
+    sql, params = _filtered_sql(Scope(status="open_paused"), summary=True, home_compact=True)
+    with connection.cursor() as cursor:
+        cursor.execute(sql + " SELECT status, count(*) FROM selected GROUP BY status", params)
+        totals = dict(cursor.fetchall())
+    return totals.get("open", 0), totals.get("paused", 0)
 
 
 def count(scope: Scope) -> int:
