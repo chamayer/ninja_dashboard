@@ -180,7 +180,7 @@ def _validate_participants(cursor, condition: Condition) -> None:
         "source_instance": ("source_instances", "id"),
         "source_binding": ("source_bindings", "id"),
         "collector_instance": ("collector_instances", "id"),
-        "software_installation": ("software_installations_current", "installation_uuid"),
+        "software_installation": ("v_installation_finding_subjects", "installation_uuid"),
     }
     for kind, (table, column) in tables.items():
         references = {item.reference for item in condition.participants if item.kind == kind}

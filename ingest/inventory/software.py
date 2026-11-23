@@ -481,6 +481,18 @@ def _apply_source_record_rows(cur: Any, rows: list[tuple], at: datetime) -> int:
         """,
         (TENANT_ID,),
     )
+    cur.execute(
+        """
+        INSERT INTO operations.software_reclassification_targets AS target
+            (tenant_id, target_key, canonical_name, source)
+        SELECT %s, left('name:' || lower(canonical_name), 300), min(canonical_name), 'inventory'
+          FROM source_software_changed
+         GROUP BY left('name:' || lower(canonical_name), 300)
+        ON CONFLICT (tenant_id, target_key, source) WHERE consumed_at IS NULL
+        DO UPDATE SET generation = target.generation + 1
+        """,
+        (TENANT_ID,),
+    )
     return material_changes
 
 
@@ -489,15 +501,15 @@ SOURCE_REMOVED_REASON = "removed from the source record's complete software list
 
 def _retire_absent_source_rows(
     cur: Any, rows: list[tuple], complete: bool, cfg: Mapping[str, Any], at: datetime
-) -> tuple[int, int]:
+) -> tuple[int, int, list[uuid.UUID]]:
     """Mark titles a source record no longer lists as stale (shrink-protected).
 
     Same contract as the Computer inventory: removals need a complete response,
     and a record whose list shrank sharply keeps its rows (``hold_reason``) until
-    a normal-sized list arrives. Returns ``(retired_rows, held_records)``.
+    a normal-sized list arrives. Returns counts and IDs with a usable listing.
     """
     if not complete or not rows:
-        return 0, 0
+        return 0, 0, []
     listed: dict[uuid.UUID, set[str]] = {}
     for row in rows:
         listed.setdefault(row[0], set()).add(row[1])
@@ -519,7 +531,7 @@ def _retire_absent_source_rows(
         else:
             allowed.append(record_id)
     if not allowed:
-        return 0, held
+        return 0, held, []
     keep_ids = [r for r in allowed for _ in listed[r]]
     keep_names = [name for r in allowed for name in sorted(listed[r])]
     cur.execute(
@@ -544,6 +556,14 @@ def _retire_absent_source_rows(
         ), queued AS (
             SELECT operations.source_record_enqueue(%s, 'source_record', source_record_id)
               FROM (SELECT DISTINCT source_record_id FROM retired) changed
+        ), queued_titles AS (
+            INSERT INTO operations.software_reclassification_targets AS target
+                (tenant_id, target_key, canonical_name, source)
+            SELECT %s, left('name:' || lower(canonical_name), 300), min(canonical_name), 'inventory'
+              FROM retired
+             GROUP BY left('name:' || lower(canonical_name), 300)
+            ON CONFLICT (tenant_id, target_key, source) WHERE consumed_at IS NULL
+            DO UPDATE SET generation = target.generation + 1
         )
         SELECT (SELECT count(*) FROM retired), (SELECT count(*) FROM queued)
         """,
@@ -558,10 +578,11 @@ def _retire_absent_source_rows(
             at,
             TENANT_ID,
             TENANT_ID,
+            TENANT_ID,
         ),
     )
     retired, _queued = cur.fetchone()
-    return int(retired), held
+    return int(retired), held, allowed
 
 
 # ── Apply ──────────────────────────────────────────────────────────
@@ -901,11 +922,67 @@ def apply(
         # Fetching and temporary-table loading above take no shared row locks.
         # Coordinate before source-record enqueueing and ownership fencing.
         guard_findings_writes(cur, TENANT_ID)
+        usable_listings = []
         if source_rows:
             result.source_changed = _apply_source_record_rows(cur, source_rows, at)
-            result.source_retired, result.source_held = _retire_absent_source_rows(
+            result.source_retired, result.source_held, usable_listings = _retire_absent_source_rows(
                 cur, source_rows, stream.complete, cfg, at
             )
+        # Source inventory can advance during repair and remains authoritative
+        # for repaired Computers after the pending projection has published.
+        # Ingest can start before the additive Operations migration applies.
+        cur.execute("SELECT to_regclass('operations.computer_repair_inventory_pending') IS NOT NULL")
+        if cur.fetchone()[0]:
+            source_ids = sorted({row[0] for row in source_rows})
+            if source_rows:
+                cur.execute(
+                    """
+                    INSERT INTO operations.source_record_software_listing_state AS state
+                        (tenant_id, source_record_id, received_at, complete)
+                    SELECT %s, item.source_record_id, %s, item.source_record_id = ANY(%s::uuid[])
+                      FROM unnest(%s::uuid[]) AS item(source_record_id)
+                    ON CONFLICT (tenant_id, source_record_id) DO UPDATE
+                        SET received_at = EXCLUDED.received_at, complete = EXCLUDED.complete
+                      WHERE state.received_at <= EXCLUDED.received_at
+                    """,
+                    (TENANT_ID, at, usable_listings, source_ids),
+                )
+            cur.execute(
+                """
+                DELETE FROM inventory_raw raw
+                 WHERE EXISTS (
+                     SELECT 1 FROM operations.computer_repair_inventory_pending pending
+                      WHERE pending.tenant_id = %s AND pending.device_id = raw.device_id
+                 ) OR EXISTS (
+                     SELECT 1 FROM operations.computer_merges repair
+                      WHERE repair.tenant_id = %s AND raw.device_id IN (repair.survivor_id, repair.absorbed_id)
+                        AND repair.evidence ->> 'inventory_projection' = 'source_record'
+                 )
+                """,
+                (TENANT_ID, TENANT_ID),
+            )
+            cur.execute(
+                """
+                SELECT pending.device_id
+                  FROM operations.computer_repair_inventory_pending pending
+                  JOIN operations.devices device
+                    ON device.tenant_id = pending.tenant_id AND device.id = pending.device_id
+                  LEFT JOIN operations.computer_client_ownership owner
+                    ON owner.tenant_id = device.tenant_id AND owner.device_id = device.id
+                 WHERE pending.tenant_id = %s
+                   AND (device.deleted_at IS NOT NULL OR (
+                       owner.state IN ('resolved', 'decision_protected')
+                       AND owner.effective_client_id = device.client_id))
+                 ORDER BY pending.queued_at, pending.device_id
+                 LIMIT 8
+                """,
+                (TENANT_ID,),
+            )
+            for (device_id,) in cur.fetchall():
+                cur.execute(
+                    "SELECT operations.publish_repair_inventory(%s, %s, %s)",
+                    (TENANT_ID, device_id, NINJA_SOURCE_BINDING_ID),
+                )
         _lock_inventory_ownership(cur, TENANT_ID)
         cur.execute(LISTING_SQL)
         cur.execute(
@@ -1140,6 +1217,7 @@ def refresh_read_models() -> None:
     certify safety built from older catalog inputs. Failures propagate to Jobs.
     """
     with db.pool.connection() as conn, conn.cursor() as cur:
+        cur.execute(_GUC)
         cur.execute("REFRESH MATERIALIZED VIEW CONCURRENTLY operations.software_title_current")
     log.info("Refreshed materialized view operations.software_title_current")
 
@@ -1170,11 +1248,26 @@ def refresh_exposure_read_model(cursor=None) -> None:
     from contextlib import nullcontext
 
     with nullcontext(cursor) if cursor is not None else db.transaction() as cur:
+        cur.execute(_GUC)
         cur.execute(
             "REFRESH MATERIALIZED VIEW CONCURRENTLY "
             "operations.device_software_exposure_current"
         )
     log.info("Refreshed operations.device_software_exposure_current")
+
+
+def refresh_installations_first_page() -> bool:
+    """Publish the Installations first page when its input snapshot changed."""
+    with db.transaction() as cur:
+        cur.execute(_GUC)
+        # Ingest and Operations deploy independently.
+        cur.execute(
+            "SELECT to_regprocedure('operations.refresh_software_installations_first_page(bigint)') IS NOT NULL"
+        )
+        if not cur.fetchone()[0]:
+            return False
+        cur.execute("SELECT operations.refresh_software_installations_first_page(%s)", (TENANT_ID,))
+        return cur.fetchone()[0]
 
 
 def refresh_overview_read_model(

@@ -53,11 +53,15 @@ from ingest import db
 from ingest import software_capabilities
 from ingest.identity import identity_entity_types
 from ingest.identity.matching import (
+    OwnershipMatchDeferred,
+    _identity_exclusions,
+    _scope_candidates,
     load_identity_match_policies,
     preview_match,
     record_name_short,
 )
 from ingest.conditions import record_assessment
+from ingest.ninja_record_supersession import plan_matched_successor
 from ingest.normalize import (
     is_junk_mac,
     is_usable_serial,
@@ -71,7 +75,7 @@ from shared.findings_contract import guard_findings_writes
 log = logging.getLogger(__name__)
 
 TENANT_ID = 1
-RULE_REVISION = 8
+RULE_REVISION = 11
 BATCH_SIZE = 200
 MAX_ATTEMPTS = 5
 _IDENTITY_ROLES = frozenset({"endpoint_agent", "virtual_machine", "virtual_host"})
@@ -254,6 +258,7 @@ def _load_records(cur: Any, tenant_id: int, subject_ids: list[uuid.UUID]) -> lis
         )
         SELECT s.id, s.input_version, s.association_version, s.record_role, s.presence,
                s.platform, s.entity_type, s.source_instance_id, s.external_id,
+               s.external_namespace, s.parent_external_namespace, s.parent_external_id,
                o.observation_id,
                operations.computer_client_independent_evidence(s.tenant_id, o.observation_id) AS client_id,
                o.canonical_data,
@@ -293,7 +298,8 @@ def _load_records(cur: Any, tenant_id: int, subject_ids: list[uuid.UUID]) -> lis
                           AND c.external_id = s.external_id
                           AND c.status = 'pending') AS candidate_pending,
                stale_ref.asset_id IS NOT NULL AS legacy_stale_reference,
-               divergent_ref.asset_id IS NOT NULL AS legacy_divergent_reference
+               divergent_ref.asset_id IS NOT NULL AS legacy_divergent_reference,
+               o.entity_key
           FROM operations.source_record_subjects s
           LEFT JOIN operations.entity_observation_current o
             ON o.tenant_id = s.tenant_id AND o.observation_id = s.observation_id
@@ -918,8 +924,7 @@ def evaluate_record(
             _result("identity.association", "unknown", missing=["computer_client_ownership"])
         )
     elif attached and attached_contradiction:
-        # A corroborated serial/VM UUID match points to exactly one other
-        # Computer: the attachment needs a decision (standing rule, 2026-11-01).
+        # The shared matcher selected a different Computer for this record.
         owner = attached_contradiction.get("owner") or ""
         results.append(
             _result(
@@ -1147,11 +1152,10 @@ _LEGACY_IDENTITY_OWNERS = (
 def _attached_contradictions(
     cur: Any, tenant_id: int, records: list[dict], deferred_subjects: set[uuid.UUID] | None = None
 ) -> dict[uuid.UUID, dict]:
-    """Attached records whose corroborated serial/VM UUID points to another Computer.
+    """Attached records whose shared matcher selects another Computer.
 
-    A cheap key pre-filter keeps the full matcher to records that share a strong
-    key with a record on a different Computer. An open legacy identity finding
-    on either Computer owns the correction.
+    The shared matcher decides which records point to another Computer. An open
+    legacy identity finding on either Computer owns the correction.
     """
     attached = {
         r["id"]: r
@@ -1164,32 +1168,10 @@ def _attached_contradictions(
     }
     if not attached:
         return {}
-    cur.execute(
-        """
-        SELECT DISTINCT mine.subject_id
-          FROM operations.source_record_lookup_keys mine
-          JOIN operations.source_record_lookup_keys other
-            ON other.tenant_id = mine.tenant_id AND other.key_family = mine.key_family
-           AND other.normalized_value = mine.normalized_value
-           AND other.subject_id <> mine.subject_id
-          JOIN operations.entity_source_links mine_link
-            ON mine_link.tenant_id = mine.tenant_id AND mine_link.source_subject_id = mine.subject_id
-           AND mine_link.entity_class_id = 'device'
-          JOIN operations.entity_source_links other_link
-            ON other_link.tenant_id = other.tenant_id
-           AND other_link.source_subject_id = other.subject_id
-           AND other_link.entity_class_id = 'device'
-           AND other_link.entity_id <> mine_link.entity_id
-         WHERE mine.tenant_id = %s AND mine.subject_id = ANY(%s::uuid[])
-           AND mine.key_family IN ('serial', 'vm_uuid')
-        """,
-        (tenant_id, list(attached)),
-    )
-    suspects = [attached[row[0]] for row in cur.fetchall()]
-    if not suspects:
-        return {}
+    suspects = list(attached.values())
     policies = load_identity_match_policies(cur, tenant_id)
     identity_types = sorted(identity_entity_types(cur))
+    exclusions = _identity_exclusions(cur, tenant_id, suspects)
     found: dict[uuid.UUID, dict] = {}
     for record in suspects:
         data = record.get("canonical_data") or {}
@@ -1197,7 +1179,7 @@ def _attached_contradictions(
             cur,
             tenant_id=tenant_id,
             source_name=record["platform"],
-            external_id=record["external_id"],
+            external_id=record.get("entity_key") or record["external_id"],
             entity_type=record["entity_type"],
             serial=data.get("serial_number"),
             vm_uuid=data.get("vm_uuid"),
@@ -1215,7 +1197,10 @@ def _attached_contradictions(
             policies=policies,
             is_online=data.get("is_online"),
             identity_types=identity_types,
-            excluded_observation_ids=(record["observation_id"],),
+            excluded_observation_ids=exclusions.get(record["id"]) or (record["observation_id"],),
+            source_identity_key=(record["external_namespace"], record["parent_external_namespace"],
+                                 record["parent_external_id"], record["external_id"]),
+            assess_globally=True,
         )
         if getattr(preview, "ownership_deferred", False):
             if deferred_subjects is not None:
@@ -1224,7 +1209,6 @@ def _attached_contradictions(
         result = preview.result
         if (
             result is not None
-            and result.matcher in ("serial", "vm_uuid")
             and result.device_id != record["device_id"]
         ):
             found[record["id"]] = {
@@ -1321,6 +1305,7 @@ def _qualified_identity_conflicts(
         return {}
     policies = load_identity_match_policies(cur, tenant_id)
     identity_types = sorted(identity_entity_types(cur))
+    exclusions = _identity_exclusions(cur, tenant_id, subjects)
     conflicts: dict[uuid.UUID, dict[uuid.UUID, set[str]]] = {}
     for record in subjects:
         data = record.get("canonical_data") or {}
@@ -1328,7 +1313,7 @@ def _qualified_identity_conflicts(
             cur,
             tenant_id=tenant_id,
             source_name=record["platform"],
-            external_id=record["external_id"],
+            external_id=record.get("entity_key") or record["external_id"],
             entity_type=record["entity_type"],
             serial=data.get("serial_number"),
             vm_uuid=data.get("vm_uuid"),
@@ -1346,24 +1331,56 @@ def _qualified_identity_conflicts(
             policies=policies,
             is_online=data.get("is_online"),
             identity_types=identity_types,
-            excluded_observation_ids=(record["observation_id"],),
+            excluded_observation_ids=exclusions.get(record["id"]) or (record["observation_id"],),
+            source_identity_key=(record["external_namespace"], record["parent_external_namespace"],
+                                 record["parent_external_id"], record["external_id"]),
+            assess_globally=True,
         )
         if getattr(preview, "ownership_deferred", False):
             if deferred_subjects is not None:
                 deferred_subjects.add(record["id"])
             continue
+        if preview.result is not None:
+            if getattr(preview, "ninja_slot_occupied", False):
+                device_id = preview.result.device_id
+                try:
+                    visible = _scope_candidates(
+                        cur, tenant_id, record["client_id"], [device_id], lock=False,
+                    )
+                except OwnershipMatchDeferred:
+                    if deferred_subjects is not None:
+                        deferred_subjects.add(record["id"])
+                    continue
+                if visible and plan_matched_successor(cur, tenant_id, device_id, record["id"]) is None:
+                    conflicts[record["id"]] = {device_id: {"ninja_successor_unresolved"}}
+            # The shared matcher already selected the eligible Computer;
+            # any remaining Ninja successor ambiguity is specific to this slot.
+            continue
         for attempt in preview.attempts:
+            if not attempt.candidates:
+                continue
+            try:
+                visible = set(_scope_candidates(
+                    cur, tenant_id, record["client_id"], list(attempt.candidates), lock=False
+                ))
+            except OwnershipMatchDeferred:
+                if deferred_subjects is not None:
+                    deferred_subjects.add(record["id"])
+                break
             established_conflict = any(
-                reason != "operator_exclusion" for reason in attempt.blockers.values()
+                reason not in {"operator_exclusion", "stale_name_evidence", "ambiguous_name_evidence"}
+                for device_id, reason in attempt.blockers.items() if device_id in visible
             )
             strong_ambiguity = (
                 attempt.matcher in {"serial", "vm_uuid", "hostname_mac"}
-                and len(attempt.usable) > 1
+                and len(visible.intersection(attempt.usable)) > 1
             )
             if not established_conflict and not strong_ambiguity:
                 continue
             conflicts[record["id"]] = defaultdict(set)
             for device_id in attempt.candidates:
+                if device_id not in visible:
+                    continue
                 conflicts[record["id"]][device_id].add(attempt.matcher)
                 if device_id in attempt.blockers:
                     conflicts[record["id"]][device_id].add(

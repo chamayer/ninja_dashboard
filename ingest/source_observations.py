@@ -39,7 +39,7 @@ from ingest.connectors import hudu, logmein, ruon, screenconnect, sentinelone
 from ingest.identity.matching import record_name_short
 from ingest.identity.naming import attachments, name_changed_attachments
 from ingest.identity import identity_entity_types
-from ingest.identity.fast_path import resolve_device_fast
+from ingest.identity.fast_path import resolve_device_fast_match
 from ingest.identity.matching import load_identity_match_policies
 from ingest.normalize import (
     extract_macs,
@@ -517,21 +517,22 @@ def write_observations(
             # A group link still needs independent provenance verification.
             canonical_data["source_client_attribution"] = attribution
 
+            match_method = None
             if entity_type in identity_entity_types(cur) and inline_client_id is not None:
-                device_id = resolve_device_fast(
+                match = resolve_device_fast_match(
                     cur,
                     _TENANT_ID,
                     source.platform,
                     entity_key,
                     entity_type=entity_type,
-                    serial=serial,
+                    serial=canonical_data.get("serial_number"),
                     vm_uuid=canonical_data.get("vm_uuid"),
                     # The one SQL normalization (ADR-0034 section 1).
                     hostname=record_name_short(
                         cur,
                         source.platform,
                         entity_type,
-                        hostname,
+                        canonical_data.get("hostname") or canonical_data.get("guest_name"),
                         canonical_data.get("domain"),
                     )
                     or None,
@@ -540,7 +541,14 @@ def write_observations(
                     policies=identity_policies,
                     is_online=canonical_data.get("is_online"),
                     source_instance_id=source_instance_id,
+                    source_seen_at=observed_at,
+                    source_identity_key=(
+                        external_namespace, parent_external_namespace,
+                        parent_external_id, external_id,
+                    ),
                 )
+                device_id = match.device_id if match else None
+                match_method = match.matcher if match else None
             elif entity_type in identity_entity_types(cur):
                 # Source attribution is checked after the observation is
                 # stored; defer identity resolution to the full resolver.
@@ -578,6 +586,7 @@ def write_observations(
                     "tenant_id": _TENANT_ID,
                     "client_id": client_id,
                     "device_id": device_id,
+                    "_match_method": match_method,
                     "collector_instance_id": _INTERNAL_COLLECTOR_INSTANCE_ID,
                     "source_binding_id": source.source_binding_id,
                     "source_instance_id": source_instance_id,

@@ -97,6 +97,38 @@ def source_owned_finding_ids(tenant_id: int) -> RawSQL:
     )
 
 
+def current_installation_finding_sql(finding_alias: str, tenant_sql: str) -> str:
+    """Check access to an installation subject using trusted query aliases."""
+    return f"""
+        EXISTS (
+            SELECT 1
+              FROM operations.v_installation_finding_subjects installation
+              JOIN operations.devices device
+                ON device.tenant_id = installation.tenant_id
+               AND device.id = installation.device_id
+              JOIN operations.computer_client_ownership owner
+                ON owner.tenant_id = device.tenant_id AND owner.device_id = device.id
+               AND owner.effective_client_id = device.client_id
+               AND owner.effective_client_id = installation.client_id
+               AND owner.state IN ('resolved', 'decision_protected')
+             WHERE installation.tenant_id = {tenant_sql}
+               AND installation.installation_uuid = {finding_alias}.subject_id
+               AND ({finding_alias}.client_id IS NULL OR installation.client_id = {finding_alias}.client_id)
+               AND installation.deleted_at IS NULL AND installation.stale_since IS NULL
+               AND device.deleted_at IS NULL AND device.lifecycle_status <> 'retired'
+        )
+        """
+
+
+def installation_finding_has_current_owner() -> RawSQL:
+    """A current installation finding follows the installation's effective client."""
+    return RawSQL(
+        current_installation_finding_sql("findings", "findings.tenant_id"),
+        [],
+        output_field=BooleanField(),
+    )
+
+
 def client_owned_computers(queryset: QuerySet[Device], tenant_id: int, client_id) -> QuerySet[Device]:
     """Only Computers whose current projection authorizes this client."""
     return queryset.filter(
@@ -129,6 +161,18 @@ def current_computer_sql(alias: str = "") -> str:
     """
     prefix = f"{alias}." if alias else ""
     return f"{prefix}lifecycle_status <> 'retired'"
+
+
+def currently_owned_installation_sql(installation_alias: str, device_alias: str) -> str:
+    """Require installation and Computer clients to agree with effective ownership."""
+    return f"""EXISTS (
+        SELECT 1 FROM operations.computer_client_ownership installation_owner
+         WHERE installation_owner.tenant_id = {installation_alias}.tenant_id
+           AND installation_owner.device_id = {installation_alias}.device_id
+           AND installation_owner.state IN ('resolved', 'decision_protected')
+           AND installation_owner.effective_client_id = {installation_alias}.client_id
+           AND installation_owner.effective_client_id = {device_alias}.client_id
+    )"""
 
 
 def home_summary(*, active_device_days: int | None = None) -> dict[str, int]:

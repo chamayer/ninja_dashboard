@@ -72,7 +72,7 @@ GROUP BY p.device_id
 
 ASSOCIATIONS_SQL = """
 WITH active AS (
- SELECT f.id, f.tenant_id, f.subject_type, f.subject_id, ft.creates_device_exposure
+ SELECT f.id, f.tenant_id, f.client_id, f.subject_type, f.subject_id, ft.creates_device_exposure
  FROM operations.findings f JOIN operations.finding_types ft ON ft.id=f.finding_type_id
  WHERE f.tenant_id=%s AND f.condition_namespace='entity'
    AND f.status IN ('open','acknowledged','investigating','suppressed','wontfix')
@@ -88,14 +88,15 @@ WITH active AS (
 )
 SELECT DISTINCT f.id::text AS row_id, s.device_id::text,
        'candidate_software_exposure' AS association_kind
-FROM versions f JOIN operations.software_installations_current s
+FROM versions f JOIN operations.v_current_source_installations s
  ON s.tenant_id=f.tenant_id AND s.software_version_id=f.version_id
 WHERE s.stale_since IS NULL AND s.deleted_at IS NULL
 UNION
 SELECT DISTINCT f.id::text, s.device_id::text, 'installation_subject'
-FROM active f JOIN operations.software_installations_current s
+FROM active f JOIN operations.v_installation_finding_subjects s
  ON s.tenant_id=f.tenant_id AND s.installation_uuid=f.subject_id
-WHERE f.subject_type='software_installation' AND s.deleted_at IS NULL
+ AND (f.client_id IS NULL OR f.client_id=s.client_id)
+WHERE f.subject_type='software_installation' AND s.deleted_at IS NULL AND s.stale_since IS NULL
 """
 
 COLLECTIONS_SQL = """

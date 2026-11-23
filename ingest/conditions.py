@@ -191,6 +191,10 @@ def _validate_participants(cur: Any, condition: Condition) -> None:
         references = {item.reference for item in condition.participants if item.kind == kind}
         if not references:
             continue
+        if kind == "software_installation":
+            cur.execute("SELECT to_regclass('operations.v_installation_finding_subjects') IS NOT NULL")
+            if cur.fetchone()[0]:
+                table = "v_installation_finding_subjects"
         cur.execute(
             f"SELECT {column}::text FROM operations.{table} "
             f"WHERE tenant_id=%s AND {column} = ANY(%s::uuid[])",

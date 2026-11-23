@@ -164,6 +164,7 @@
     <div class="dd-title">
         <div class="dd-health {{ device_health }}" title="{{ device_health|humanize_label }}"></div>
         <h1>{{ device.canonical_hostname }}</h1>
+        {% if device.created_reason == "identity_estimated" %}<span class="muted">Estimated identity</span>{% endif %}
         <span class="muted" style="font-size:0.85rem;">{{ device.device_role|humanize_label|default:"Computer" }}{% if device.os_name %} · {{ device.os_name }}{% endif %}</span>
     </div>
     <div class="dd-meta">

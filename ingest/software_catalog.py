@@ -158,6 +158,34 @@ UPDATE operations.software_installations_current target
    AND target.canonical_name = resolved_rows.canonical_name
 """
 
+_LINK_SOURCE_INSTALLATIONS = f"""
+WITH resolved_rows AS (
+    SELECT install.tenant_id, install.source_record_id, install.canonical_name,
+           version.id AS software_version_id
+      FROM operations.source_record_software_current install
+      {_RESOLVED_PUBLISHER}
+      LEFT JOIN catalog.publishers publisher
+        ON publisher.canonical_name
+         = COALESCE(resolved.canonical_publisher, NULLIF(install.publisher, ''))
+      JOIN catalog.products product
+        ON product.canonical_name = install.canonical_name
+       AND product.publisher_id IS NOT DISTINCT FROM publisher.id
+      JOIN catalog.software_versions version
+        ON version.product_id = product.id
+       AND version.version = COALESCE(install.version, '')
+     WHERE install.tenant_id = {TENANT_ID} AND install.software_version_id IS NULL
+       AND install.stale_since IS NULL
+     LIMIT {_BACKFILL_BATCH}
+     FOR UPDATE OF install SKIP LOCKED
+)
+UPDATE operations.source_record_software_current target
+   SET software_version_id = resolved_rows.software_version_id
+  FROM resolved_rows
+ WHERE target.tenant_id = resolved_rows.tenant_id
+   AND target.source_record_id = resolved_rows.source_record_id
+   AND target.canonical_name = resolved_rows.canonical_name
+"""
+
 
 def project_software_catalog() -> dict[str, int]:
     """Build the catalog and link installations to it. Safe to re-run."""
@@ -171,8 +199,11 @@ def project_software_catalog() -> dict[str, int]:
             counts["products_created"] = cur.rowcount
             cur.execute(_UPSERT_VERSIONS)
             counts["versions_created"] = cur.rowcount
+            cur.execute("SELECT to_regclass('operations.v_current_source_installations') IS NOT NULL")
+            source_projection = cur.fetchone()[0]
 
         linked = 0
+        source_linked = 0
         while True:
             # One transaction per batch, so a long backfill neither holds locks
             # nor loses completed work if it is interrupted.
@@ -180,10 +211,16 @@ def project_software_catalog() -> dict[str, int]:
                 cur.execute(_GUC)
                 cur.execute(_BACKFILL_LINKS)
                 written = cur.rowcount
+                source_written = 0
+                if source_projection:
+                    cur.execute(_LINK_SOURCE_INSTALLATIONS)
+                    source_written = cur.rowcount
             linked += written
-            if written == 0:
+            source_linked += source_written
+            if written == 0 and source_written == 0:
                 break
         counts["installations_linked"] = linked
+        counts["source_installations_linked"] = source_linked
 
         for key, value in counts.items():
             stats[key] = value

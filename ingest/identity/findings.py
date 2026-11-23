@@ -9,9 +9,8 @@ report now, with the Computer as subject:
   finding proposes which records to split off: the machine whose name is the
   Computer's name stays, otherwise the machine with the most records.
 * ``duplicate_device_records``: live Computers in one client with the same
-  name and nothing linking or separating them (no shared or differing serial
-  or VM UUID, no two records of one source online at once, and no operator
-  decision that they are separate). One finding per group, subject the most
+  name and no established contradiction (such as differing serials or VM
+  UUIDs, or an operator decision that they are separate). One finding per group, subject the most
   recently active member.
 
 Both write a measured assessment each run, so a finding clears on the first
@@ -28,7 +27,7 @@ import hashlib
 import json
 import logging
 import uuid
-from datetime import datetime, timedelta
+from datetime import UTC, datetime
 from typing import Any
 
 from ingest.condition_evidence import preserve_operator_episode
@@ -36,6 +35,10 @@ from ingest.conditions import record_assessment
 from ingest import normalize
 from ingest.identity.matching import loose_name
 from ingest.normalize import is_usable_serial
+from shared.identity_evidence import (
+    different_identity_evidence, operator_separated_pairs, split_assessment,
+    two_names_in_one_source,
+)
 from shared.conditions.contracts import (
     Condition,
     EvaluationCoverage,
@@ -51,8 +54,6 @@ DUPLICATE_COMPUTERS = "duplicate_device_records"
 NAME_COLLISION = "computer_name_collision"
 LABEL_DRIFT = "computer_name_differs_in_source"
 CLIENT_CONFLICT = "computer_client_conflict"
-_SAME_NAME_WINDOW = timedelta(days=1)
-_RECENT = timedelta(days=30)
 
 # Active records of current Computers. Agent and VM records are hardware
 # evidence; other records only make a Computer live.
@@ -61,7 +62,9 @@ SELECT d.id, d.client_id, d.canonical_hostname, d.created_at,
        eo.observation_id, eo.platform, eo.entity_type, eo.entity_key,
        -- The one SQL name normalization (ADR-0034 section 1); roaming records
        -- carry no name.
-       CASE WHEN rr.external_id IS NULL THEN coalesce(f.name_short, '') ELSE '' END,
+       CASE WHEN rr.external_id IS NULL AND coalesce(lc.record_lifecycle, '') <> 'archived'
+                 AND coalesce(f.name_key, '') <> ''
+            THEN coalesce(f.name_short, '') ELSE '' END,
        -- A roaming record (migration 0318) carries no machine's serial.
        CASE WHEN rr.external_id IS NULL THEN eo.canonical_data ->> 'serial_number' END,
        CASE WHEN rr.external_id IS NULL
@@ -77,18 +80,14 @@ SELECT d.id, d.client_id, d.canonical_hostname, d.created_at,
   LEFT JOIN operations.identity_roaming_records rr
     ON rr.tenant_id = eo.tenant_id AND rr.source_instance_id = eo.source_instance_id
    AND rr.external_id = eo.external_id
+  LEFT JOIN operations.v_device_source_record_lifecycle_current lc
+    ON lc.observation_id = eo.observation_id
  CROSS JOIN LATERAL operations.record_name_forms(
       eo.platform, eo.entity_type,
       coalesce(nullif(eo.canonical_data ->> 'hostname', ''), eo.canonical_data ->> 'guest_name'),
       eo.canonical_data ->> 'domain') f
  WHERE d.tenant_id = %s AND d.deleted_at IS NULL AND eo.active
    AND eo.entity_key NOT LIKE 'device-health:%%'
-"""
-
-_SEPARATED = """
-SELECT device_id, k.value
-  FROM operations.device_operator_decisions, jsonb_array_elements_text(value) k
- WHERE tenant_id = %s AND dimension = 'identity_separate'
 """
 
 _ACCEPTED = """
@@ -116,7 +115,7 @@ class _Computer:
         return [
             r
             for r in self.records
-            if r["entity_type"].startswith("agent.") or r["entity_type"].startswith("vm.")
+            if r["entity_type"] in _IDENTITY_RECORD_TYPES_CACHE
         ]
 
     @property
@@ -129,7 +128,7 @@ class _Computer:
 
     @property
     def online_streams(self) -> set[str]:
-        return {r["stream"] for r in self.hardware if r["online"]}
+        return {r["stream"] for r in self.hardware if r["online"] and not r.get("roaming")}
 
     @property
     def last_active(self):
@@ -194,7 +193,7 @@ def evaluate(cur: Any, tenant_id: int, now: datetime) -> int:
     ft_dup = _finding_type_id(cur, DUPLICATE_COMPUTERS)
     if ft_dup is not None:
         keys = []
-        for subject, details in duplicate_groups(owned_computers, _separated(cur, tenant_id)):
+        for subject, details in duplicate_groups(owned_computers, _separated(cur, tenant_id), now=now):
             # Keyed by the Computers, never by a name (ADR-0034 section 8).
             key = _key(
                 tenant_id, DUPLICATE_COMPUTERS, subject.client_id,
@@ -622,94 +621,24 @@ def _load(cur: Any, tenant_id: int) -> dict[uuid.UUID, _Computer]:
 
 def two_machines(computer: _Computer, now: datetime) -> dict[str, Any] | None:
     """The machines a Computer's records show, when there is more than one."""
-    records = computer.hardware
-    if len(computer.serials) > 1:
-        kind, value_of = "serial", lambda r: r["serial"]
-    elif len(computer.vm_uuids) > 1:
-        kind, value_of = "vm_uuid", lambda r: r["vm_uuid"]
-    elif _two_names_in_one_source(records, now):
-        kind, value_of = "hostname", lambda r: r["hostname"] or None
-    else:
-        return None
-    groups: dict[str, list[dict[str, Any]]] = {}
-    unplaced: list[dict[str, Any]] = []
-    for record in records:
-        value = value_of(record)
-        (groups.setdefault(value, []) if value else unplaced).append(record)
-    # A record without the dividing value joins the machine with its name.
-    for record in unplaced:
-        home = next(
-            (
-                value
-                for value, members in groups.items()
-                if record["hostname"] and any(m["hostname"] == record["hostname"] for m in members)
-            ),
-            None,
-        )
-        if home is not None:
-            groups[home].append(record)
-    own = loose_name(computer.name)
-
-    def rank(item):
-        _value, members = item
-        named = any(loose_name(m["hostname"]) == own for m in members)
-        seen = max((m["last_seen_at"] for m in members if m["last_seen_at"]), default=None)
-        return (named, len(members), seen.timestamp() if seen else 0)
-
-    keep = max(groups.items(), key=rank)[0]
-    machines = [
-        {
-            kind: value,
-            "keep": value == keep,
-            "hostnames": sorted({m["hostname"] for m in members if m["hostname"]}),
-            "records": [_record_detail(m) for m in members],
-        }
-        for value, members in sorted(groups.items(), key=lambda item: item[0] != keep)
-    ]
-    return {
-        "hostname": computer.name,
-        "divided_by": kind,
-        "machine_count": len(machines),
-        "machines": machines,
-        "proposed_split_observation_ids": [
-            str(m["observation_id"])
-            for value, members in groups.items()
-            if value != keep
-            for m in members
-        ],
-    }
+    return split_assessment(computer.name, computer.hardware, now)
 
 
 def _two_names_in_one_source(records: list[dict[str, Any]], now: datetime) -> bool:
     """Two agents of one source report different names within one day."""
-    agents = [
-        r
-        for r in records
-        if r["entity_type"].startswith("agent.")
-        and r["hostname"]
-        and r["last_seen_at"]
-        and r["last_seen_at"] > now - _RECENT
-    ]
-    for i, x in enumerate(agents):
-        for y in agents[i + 1 :]:
-            if (
-                x["stream"] == y["stream"]
-                and x["hostname"] != y["hostname"]
-                and abs(x["last_seen_at"] - y["last_seen_at"]) < _SAME_NAME_WINDOW
-                and not (x["serial"] and x["serial"] == y["serial"])
-            ):
-                return True
-    return False
+    return two_names_in_one_source(records, now)
 
 
 def duplicate_groups(
-    computers: dict[uuid.UUID, _Computer], separated: set[tuple[str, str]]
+    computers: dict[uuid.UUID, _Computer], separated: set[tuple[str, str]],
+    *, now: datetime | None = None,
 ) -> list[tuple[_Computer, dict[str, Any]]]:
     """Live Computers whose records report one name, with nothing linking or separating them.
 
     The names are what the Computers' current identity records report
     (ADR-0034 section 4), never their stored names.
     """
+    now = now or datetime.now(UTC)
     by_name: dict[tuple, list[_Computer]] = {}
     for computer in computers.values():
         names = {
@@ -720,7 +649,7 @@ def duplicate_groups(
         for name in names:
             by_name.setdefault((computer.client_id, name), []).append(computer)
     found = []
-    for members in by_name.values():
+    for (_client_id, reported_name), members in by_name.items():
         if len(members) < 2:
             continue
         # Name-only pairs, joined into groups.
@@ -733,7 +662,7 @@ def duplicate_groups(
 
         for i, a in enumerate(members):
             for b in members[i + 1 :]:
-                if _name_only_pair(a, b, separated):
+                if _name_only_pair(a, b, separated, now=now):
                     parent[root(a.id)] = root(b.id)
         components: dict[uuid.UUID, list[_Computer]] = {}
         for member in members:
@@ -754,13 +683,13 @@ def duplicate_groups(
                 [str(a.id), str(b.id)]
                 for i, a in enumerate(group)
                 for b in group[i + 1 :]
-                if _different_machines(a, b)
+                if _pair_separated(a, b, separated) or _different_machines(a, b, now=now)
             ]
             found.append(
                 (
                     group[0],
                     {
-                        "hostname": group[0].name,
+                        "hostname": reported_name,
                         "computer_count": len(group),
                         "different_machines": different,
                         "computers": [
@@ -781,24 +710,25 @@ def duplicate_groups(
     return found
 
 
-def _name_only_pair(a: _Computer, b: _Computer, separated: set[tuple[str, str]]) -> bool:
-    if (str(a.id), str(b.id)) in separated or (str(b.id), str(a.id)) in separated:
-        return False
-    # Linked (one machine, merged automatically or a shared_serial case) or
-    # proven different: either way not a name-only question.
-    if a.serials and b.serials:
-        return False
-    if a.vm_uuids and b.vm_uuids:
-        return False
-    return not (a.online_streams & b.online_streams)
+def _pair_separated(a: _Computer, b: _Computer, separated: set[tuple[str, str]]) -> bool:
+    return (str(a.id), str(b.id)) in separated or (str(b.id), str(a.id)) in separated
 
 
-def _different_machines(a: _Computer, b: _Computer) -> bool:
-    if a.serials and b.serials and not (a.serials & b.serials):
-        return True
-    if a.vm_uuids and b.vm_uuids and not (a.vm_uuids & b.vm_uuids):
-        return True
-    return bool(a.online_streams & b.online_streams)
+def _name_only_pair(
+    a: _Computer, b: _Computer, separated: set[tuple[str, str]], *, now: datetime,
+) -> bool:
+    if _pair_separated(a, b, separated):
+        return False
+    # Keep name groups reviewable while any separately proven identifier
+    # match proceeds through the merge planner.
+    return not _different_machines(a, b, now=now)
+
+
+def _different_machines(a: _Computer, b: _Computer, *, now: datetime) -> bool:
+    return different_identity_evidence(
+        a.serials, b.serials, a.vm_uuids, b.vm_uuids,
+        a.online_streams, b.online_streams,
+    ) or two_names_in_one_source([*a.hardware, *b.hardware], now)
 
 
 def _record_detail(record: dict[str, Any]) -> dict[str, Any]:
@@ -815,8 +745,7 @@ def _record_detail(record: dict[str, Any]) -> dict[str, Any]:
 
 
 def _separated(cur: Any, tenant_id: int) -> set[tuple[str, str]]:
-    cur.execute(_SEPARATED, (tenant_id,))
-    return {(str(device_id), other) for device_id, other in cur.fetchall()}
+    return {(str(device_id), str(other)) for device_id, other in operator_separated_pairs(cur, tenant_id)}
 
 
 def _finding_type_id(cur: Any, name: str) -> int | None:

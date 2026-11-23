@@ -13,7 +13,7 @@ from ingest.identity.matching import (
     IdentityMatchPolicy,
     OwnershipMatchDeferred,
     load_identity_match_policies,
-    resolve_device_by_policy,
+    resolve_match,
 )
 
 
@@ -33,11 +33,17 @@ def resolve_device_fast(
     source_instance_id: uuid.UUID | None = None,
 ) -> uuid.UUID | None:
     """Return one Computer selected by the enabled identity policy (ADR-0032)."""
+    result = resolve_device_fast_match(
+        cur, tenant_id, source_name, external_id, entity_type, serial, vm_uuid,
+        hostname, macs, client_id, policies, is_online, source_instance_id,
+    )
+    return result.device_id if result else None
+
+
+def resolve_device_fast_match(*args, **kwargs):
+    """Return match evidence for intake while retaining deferred-ownership behavior."""
     try:
-        return _resolve_device_fast(
-            cur, tenant_id, source_name, external_id, entity_type, serial, vm_uuid,
-            hostname, macs, client_id, policies, is_online, source_instance_id,
-        )
+        return _resolve_device_fast(*args, **kwargs)
     except OwnershipMatchDeferred:
         return None
 
@@ -45,8 +51,9 @@ def resolve_device_fast(
 def _resolve_device_fast(
     cur, tenant_id, source_name, external_id, entity_type, serial, vm_uuid,
     hostname, macs, client_id, policies, is_online, source_instance_id,
+    source_identity_key=None, source_seen_at=None,
 ):
-    return resolve_device_by_policy(
+    return resolve_match(
         cur,
         tenant_id=tenant_id,
         source_name=source_name,
@@ -60,4 +67,6 @@ def _resolve_device_fast(
         policies=policies or load_identity_match_policies(cur, tenant_id),
         is_online=is_online,
         source_instance_id=source_instance_id,
+        source_identity_key=source_identity_key,
+        source_seen_at=source_seen_at,
     )

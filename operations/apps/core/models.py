@@ -1943,13 +1943,6 @@ class IdentityMatchPolicy(UUIDTenantScopedModel):
                 condition=models.Q(requires_unique_candidate=True),
                 name="ck_identity_match_requires_unique_candidate",
             ),
-            models.CheckConstraint(
-                condition=(
-                    ~models.Q(matcher__in=["serial", "vm_uuid"])
-                    | models.Q(requires_independent_corroboration=True)
-                ),
-                name="ck_identity_match_hardware_corroboration",
-            ),
         )
 
     def __str__(self) -> str:

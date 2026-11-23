@@ -527,11 +527,11 @@ def _associate_resolved(cur: Any, rows: list[dict[str, Any]]) -> None:
         try:
             cur.execute(
                 "SELECT operations.associate_record("
-                "%s, %s, %s, %s, %s, %s, %s, 'intake', 'ingest.intake', false)",
+                "%s, %s, %s, %s, %s, %s, %s, %s, 'ingest.intake', false)",
                 (
                     row["tenant_id"], row["source_instance_id"], row["external_namespace"],
                     row["parent_external_namespace"], row["parent_external_id"],
-                    row["external_id"], row["device_id"],
+                    row["external_id"], row["device_id"], row.get("_match_method") or "intake",
                 ),
             )
         except Exception:  # the record stays admitted; the resolver retries

@@ -53,12 +53,10 @@ Plan lifecycle belongs to the registry; other page baselines stay open.
 
 ## PLAN-015 — Identity reconciliation
 
-Independent of PLAN-043's read-only display work. Registry remains active.
-The retained checkpoint reports a validated preview and a guard-aware 110-candidate
-follow-up; these historical counts have not been rerun for this task.
-**Next:** Verify current state and review candidates before proposing repairs.
-Any reattachment, merge or derived refresh needs its own approval.
-See the [plan](docs/plans/PLAN-015-identity-reconciliation.md) and retained checkpoint.
+Matching, reversible repair, and source-owned software read models are in the
+commit scope. [Files, rehearsal results, and open checks](docs/plans/PLAN-015-identity-reconciliation.md).
+**Next:** Review the commit for separate rollout approval covering 0426–0436
+and scheduled repairs. Use existing rehearsal evidence and keep testing light.
 
 ## PLAN-016 — Admin SQL explorer
 

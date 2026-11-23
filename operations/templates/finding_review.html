@@ -15,6 +15,7 @@
 <div class="card">
     <h2>Why this was flagged</h2>
     <p><strong>Subject:</strong> {% if subject_url %}<a href="{{ subject_url }}">{{ subject_label }}</a>{% else %}{{ subject_label }}{% endif %}</p>
+    {% if retired_installation %}<p>This installation was retired during Computer identity repair on {{ retired_installation.retired_at|date:"Y-m-d H:i" }}.{% if retired_installation.version %} Recorded version {{ retired_installation.version }}.{% endif %}</p>{% endif %}
     <p>{{ review.summary }}</p>
     {% if review.explanation and review.explanation != review.summary %}<p>{{ review.explanation }}</p>{% endif %}
     {% if review.attachment_changed %}<p><strong>The Computer link changed after this issue was flagged.</strong> The comparison below shows the old and current links.</p>{% endif %}

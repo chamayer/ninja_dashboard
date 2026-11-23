@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from psycopg import DatabaseError
 from psycopg.errors import RaiseException, UndefinedFunction
 from psycopg_pool import PoolTimeout
 
@@ -1141,10 +1142,19 @@ def _refresh_software_catalog_policy() -> int:
 
 
 def _refresh_software_overview(progress: V1JobProgress) -> JobExecutionResult:
-    from ingest.inventory.software import refresh_overview_read_model
+    from ingest.inventory.software import refresh_installations_first_page, refresh_overview_read_model
 
+    result = {}
+    try:
+        result["installations_first_page_refreshed"] = refresh_installations_first_page()
+    except DatabaseError:
+        # The independent publication can retry on the next overview run.
+        # Keep Overview's existing completion path independent.
+        log.exception("Software Installations first-page publication failed")
+        result["installations_first_page_refresh_failed"] = True
     generation = refresh_overview_read_model(progress.job_id, progress.claim_token)
-    return JobExecutionResult(rows=1, result={"overview_generation": str(generation)})
+    result["overview_generation"] = str(generation)
+    return JobExecutionResult(rows=1, result=result)
 
 
 def _refresh_coverage_read_model() -> int:

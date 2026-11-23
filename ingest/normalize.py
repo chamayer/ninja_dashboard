@@ -7,6 +7,8 @@ import re
 from datetime import datetime
 from typing import Any
 
+from shared.identity_evidence import usable_serial
+
 _log = logging.getLogger(__name__)
 
 _TRAILING_PARENS_RE = re.compile(r"\s*\(.*?\)\s*$")
@@ -129,15 +131,7 @@ def load_identity_value_rejections(cur) -> None:
 
 def is_usable_serial(serial: str | None) -> bool:
     """True when a serial is specific enough to identify one machine."""
-    if not serial:
-        return False
-    value = serial.strip().lower()
-    if len(value) < 4:
-        return False
-    # All one repeated character (e.g. '0000000', 'FFFFFFFF') is filler.
-    if len(set(value)) <= 1:
-        return False
-    return _serial_rejection_cache is not None and value not in _serial_rejection_cache
+    return usable_serial(serial, _serial_rejection_cache)
 
 
 _MAC_RE = re.compile(r"^[0-9a-f]{2}([:-][0-9a-f]{2}){5}$")

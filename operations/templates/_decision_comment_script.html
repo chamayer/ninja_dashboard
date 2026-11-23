@@ -10,12 +10,13 @@
       var form = event.target;
       var action = form.getAttribute('action') || '';
       if (!/\/software\/decisions\/(create|bulk)|\/software\/decide/.test(action)) return;
-      var decisionField = form.querySelector('[name=decision]');
+      var submitter = event.submitter;
+      var decisionField = submitter && submitter.name === 'decision'
+        ? submitter : form.querySelector('[name=decision]');
       if (!decisionField) return;
       var decision = decisionField.value;
-      var publisherLevel = false;
-      form.querySelectorAll('input[name=publisher]').forEach(function (input) {
-        if (input.value) publisherLevel = true;
+      var publisherLevel = Array.prototype.some.call(form.elements, function (input) {
+        return input.name === 'publisher' && input.value && (input.type !== 'checkbox' || input.checked);
       });
       if (!(publisherLevel || decision === 'reject')) return;
       var existing = form.querySelector('[name=reason]');

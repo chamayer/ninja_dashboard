@@ -7,6 +7,20 @@ separate authorization.
 
 ## Decision
 
+### PLAN-015 identity-rule amendment — 2026-11-19
+
+The user confirmed PLAN-015's new identity rules as the governing target. In
+particular, a unique same-client hostname without a hard conflict may establish
+an automatic attachment; this supersedes the blanket name-only prohibition in
+decision 2 below. Multiple candidates, contradictory evidence, stale or
+relayed evidence, and explicit separations remain subject to the plan's guards.
+Machine identity and effective client access are separate decisions.
+
+This is a design amendment, not a claim that all paths already enforce it.
+PLAN-015 owns the shared assessment, action-time revalidation and ownership
+transition, their validation, and the separately controlled rollout. Until those
+are implemented and verified, existing production behavior remains in effect.
+
 Every received record is a managed/evaluable native `source_record` with stable
 UUID/natural identity from intake, independent of Computer/class/client resolution.
 A comparison case is a native mechanism subject, not a canonical entity or proof

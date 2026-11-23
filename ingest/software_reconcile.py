@@ -48,6 +48,14 @@ EFFECTIVE_DECISION_JOINS = software_coverage.EFFECTIVE_DECISION_JOINS
 _TITLE_DECISION = software_coverage.TITLE_DECISION
 _PUBLISHER_DECISION = software_coverage.PUBLISHER_DECISION
 _LIVE = "i.tenant_id = %(tenant_id)s AND i.stale_since IS NULL AND i.deleted_at IS NULL"
+_LEGACY_INSTALLS = "operations.software_installations_current"
+_SOURCE_INSTALLS = "operations.v_current_source_installations"
+_FINDING_SUBJECTS = "operations.v_installation_finding_subjects"
+
+
+def _source_installations_ready(cur: Any) -> bool:
+    cur.execute("SELECT to_regclass(%s) IS NOT NULL", (_SOURCE_INSTALLS,))
+    return cur.fetchone()[0]
 
 TITLE_FACTS_SQL = f"""
 WITH installs AS (
@@ -340,6 +348,7 @@ class Context:
     # titles of each publisher are already approved here (lower-case keys).
     known_vendors: frozenset[str] = frozenset()
     publisher_approved: dict[str, int] = field(default_factory=dict)
+    source_installations: bool = False
 
 
 def _rule(ctx: Context, name: str) -> Callable[[str], bool]:
@@ -462,10 +471,11 @@ def compute_desired(ctx: Context, report: RunReport) -> dict[str, list[Desired]]
             if silenced(ft, title_decision, publisher_decision,
                         has_other_concern(title_key, "install_path_suspicious")):
                 continue
+            scope = str(client_id) if ctx.source_installations and client_id is not None else None
             desired[ft.name].append(Desired(
                 ft.name,
-                condition_key(tid, None, None, ft.id, f"{name}@{installation_uuid}"),
-                "software_installation", str(installation_uuid), None, ft.default_severity,
+                condition_key(tid, scope, None, ft.id, f"{name}@{installation_uuid}"),
+                "software_installation", str(installation_uuid), scope, ft.default_severity,
                 {"canonical_name": name, "publisher": publisher,
                  "reason": "suspicious install path", "location": location},
                 title_key=title_key, device_id=str(device_id),
@@ -645,6 +655,8 @@ def load_context(
     row = cur.fetchone()
     cfg = software_settings.effective(row[0] if row and isinstance(row[0], dict) else {})
     params = {"tenant_id": tenant_id, "titles": scope_titles}
+    source_installations = _source_installations_ready(cur)
+    installation_table = _SOURCE_INSTALLS if source_installations else _LEGACY_INSTALLS
 
     cur.execute(TYPES_SQL)
     types = {r[1]: FindingType(*r) for r in cur.fetchall()}
@@ -663,13 +675,13 @@ def load_context(
     if cur.fetchone()[0] is not None:
         cur.execute(VENDORS_SQL)
         known_vendors = frozenset(r[0] for r in cur.fetchall() if r[0])
-    cur.execute(PUBLISHER_APPROVED_SQL, params)
+    cur.execute(PUBLISHER_APPROVED_SQL.replace(_LEGACY_INSTALLS, installation_table), params)
     publisher_approved = {r[0]: int(r[1]) for r in cur.fetchall()}
 
-    cur.execute(scoped(TITLE_FACTS_SQL, scope_titles), params)
+    cur.execute(scoped(TITLE_FACTS_SQL.replace(_LEGACY_INSTALLS, installation_table), scope_titles), params)
     columns = [d[0] for d in cur.description]
     titles = {r[0]: dict(zip(columns, r)) for r in cur.fetchall()}
-    cur.execute(scoped(VERSION_FACTS_SQL, scope_titles), params)
+    cur.execute(scoped(VERSION_FACTS_SQL.replace(_LEGACY_INSTALLS, installation_table), scope_titles), params)
     versions = [(r[0], str(r[1]), r[2] or "", int(r[3])) for r in cur.fetchall()]
 
     cur.execute(scoped(VULNERABLE_SQL, scope_titles), {**params, "cvss_cutoff": float(cfg["vulnerable_software_cvss_cutoff"])})
@@ -703,11 +715,12 @@ def load_context(
     threat_hits = {key: hits for key, hits in threat_hits.items() if hits}
 
     path_rule = rules.get("install_path_suspicious", _never)
-    cur.execute(LOCATIONS_SQL, params)
+    cur.execute(LOCATIONS_SQL.replace(_LEGACY_INSTALLS, installation_table), params)
     locations = [r[0] for r in cur.fetchall() if path_rule(r[0])]
     path_installs: list[tuple] = []
     if locations:
-        cur.execute(scoped(PATH_INSTALLS_SQL, scope_titles), {**params, "locations": locations})
+        path_sql = PATH_INSTALLS_SQL.replace(_LEGACY_INSTALLS, installation_table)
+        cur.execute(scoped(path_sql, scope_titles), {**params, "locations": locations})
         path_installs = list(cur.fetchall())
 
     capabilities: dict = {}
@@ -720,13 +733,14 @@ def load_context(
         sanctioned = software_capabilities.load_sanctioned_product_identities(cur, tenant_id)
         alertable = [p for p, caps in capabilities.items() if any(c["alertable"] for c in caps)]
         if alertable:
-            cur.execute(scoped(CAPABILITY_INSTALLS_SQL, scope_titles), {**params, "products": alertable})
+            capability_sql = CAPABILITY_INSTALLS_SQL.replace(_LEGACY_INSTALLS, installation_table)
+            cur.execute(scoped(capability_sql, scope_titles), {**params, "products": alertable})
             capability_installs = list(cur.fetchall())
 
     return Context(
         tenant_id, now, cfg, types, rules, suggestion_rules, titles, versions, vulnerable,
         threat_hits, path_installs, capability_installs, capabilities, authorizations, sanctioned,
-        known_vendors, publisher_approved,
+        known_vendors, publisher_approved, source_installations,
     )
 
 
@@ -771,6 +785,22 @@ def reconcile_type(
         ((r.condition_key, r.client_id, r.subject_type, r.subject_id, r.severity,
           json.dumps(r.details, default=str)) for r in unique.values()),
     )
+    if ctx.source_installations and finding_type.name == "install_path_suspicious":
+        cur.execute(
+            """
+            DELETE FROM software_desired desired
+             WHERE NOT EXISTS (
+                 SELECT 1 FROM operations.v_current_source_installations installation
+                  WHERE installation.tenant_id = %s
+                    AND installation.canonical_name = desired.details ->> 'canonical_name'
+                    AND installation.installation_uuid = desired.subject_id
+                    AND installation.client_id = desired.client_id
+                    AND installation.stale_since IS NULL
+                    AND installation.install_location = desired.details ->> 'location'
+             )
+            """,
+            (tid,),
+        )
     active = list(ACTIVE_STATUSES)
     cur.execute(
         """
@@ -807,6 +837,27 @@ def reconcile_type(
         {"now": now, "tid": tid, "type_id": finding_type.id, "active": active},
     )
     report.opened[finding_type.name] += max(cur.rowcount, 0)
+
+    if ctx.source_installations and finding_type.name == "install_path_suspicious":
+        cur.execute(
+            """
+            UPDATE operations.findings finding
+               SET status = 'resolved', closed_at = COALESCE(finding.closed_at, %(now)s),
+                   finding_details = finding.finding_details || jsonb_build_object(
+                       'resolution', jsonb_build_object(
+                           'reason', 'client_scope_ended', 'resolved_at', %(now)s,
+                           'resolved_by', 'software_reconcile'))
+              FROM operations.v_current_source_installations installation
+             WHERE finding.tenant_id = %(tid)s AND finding.finding_type_id = %(type_id)s
+               AND finding.status = ANY(%(active)s) AND finding.subject_type = 'software_installation'
+               AND installation.tenant_id = finding.tenant_id
+               AND installation.installation_uuid = finding.subject_id
+               AND finding.client_id IS NOT NULL AND finding.client_id <> installation.client_id
+               AND (%(titles)s::text[] IS NULL OR lower(installation.canonical_name) = ANY(%(titles)s::text[]))
+            """,
+            {"now": now, "tid": tid, "type_id": finding_type.id, "active": active, "titles": titles},
+        )
+        report.resolved[finding_type.name] += max(cur.rowcount, 0)
 
     if not finding_type.auto_resolvable:
         return
@@ -898,7 +949,20 @@ SELECT finding.id::text, finding_type.id, finding_type.name, finding.condition_k
   JOIN operations.finding_types finding_type ON finding_type.id = finding.finding_type_id
   LEFT JOIN operations.software_installations_current installation
     ON finding.subject_type = 'software_installation'
+   AND installation.tenant_id = finding.tenant_id
    AND installation.installation_uuid = finding.subject_id
+   AND (finding.client_id IS NULL OR installation.client_id = finding.client_id)
+   AND installation.deleted_at IS NULL AND installation.stale_since IS NULL
+   AND EXISTS (
+       SELECT 1 FROM operations.devices device
+       JOIN operations.computer_client_ownership owner
+         ON owner.tenant_id = device.tenant_id AND owner.device_id = device.id
+        AND owner.effective_client_id = device.client_id
+        AND owner.effective_client_id = installation.client_id
+        AND owner.state IN ('resolved', 'decision_protected')
+       WHERE device.tenant_id = installation.tenant_id AND device.id = installation.device_id
+         AND device.deleted_at IS NULL AND device.lifecycle_status <> 'retired'
+   )
  WHERE finding.tenant_id = %(tid)s AND finding_type.id = ANY(%(type_ids)s)
    AND finding.status = ANY(%(active)s)
    AND (%(titles)s::text[] IS NULL OR lower(finding.finding_details->>'canonical_name') = ANY(%(titles)s::text[]))
@@ -1079,9 +1143,14 @@ def write_assessments(
               AND owned.row_kind = 'entity' AND owned.participant_kind = 'condition'
               AND owned.reevaluation_key LIKE 'software:%%')
     """ if existing_only else ""
-    cur.execute(ACTIVE_FINDINGS_SQL + owned_filter, params)
+    active_sql = ACTIVE_FINDINGS_SQL
+    exposure_sql = READY_EXPOSURE_SQL
+    if _source_installations_ready(cur):
+        active_sql = active_sql.replace(_LEGACY_INSTALLS, _FINDING_SUBJECTS)
+        exposure_sql = exposure_sql.replace(_LEGACY_INSTALLS, _SOURCE_INSTALLS)
+    cur.execute(active_sql + owned_filter, params)
     findings = cur.fetchall()
-    cur.execute(READY_EXPOSURE_SQL, params)
+    cur.execute(exposure_sql, params)
     ready = {r[0]: (r[1], r[2], int(r[3]), int(r[4])) for r in cur.fetchall()}
     cur.execute(READINESS_SQL, params)
     readiness = {(r[0], r[1]): (r[2], r[3], r[4], r[5], r[6]) for r in cur.fetchall()}
@@ -1296,7 +1365,10 @@ def pending_scope(
         versions = [row[3] for row in targets if row[3] is not None]
         version_titles: list[str] = []
         if versions and not any(row[1] == WHOLE_FLEET_KEY for row in targets):
-            cur.execute(VERSION_TITLES_SQL, {"tid": tenant_id, "versions": versions})
+            version_titles_sql = VERSION_TITLES_SQL
+            if _source_installations_ready(cur):
+                version_titles_sql = version_titles_sql.replace(_LEGACY_INSTALLS, _SOURCE_INSTALLS)
+            cur.execute(version_titles_sql, {"tid": tenant_id, "versions": versions})
             version_titles = [row[0] for row in cur.fetchall()]
     return ids, scope_from_targets(targets, version_titles)
 

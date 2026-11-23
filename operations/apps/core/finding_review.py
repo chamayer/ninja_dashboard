@@ -56,7 +56,34 @@ def review_context(finding, user, *, tenant_id: int) -> dict:
         "reason_required": any(action.requires_reason for action in actions),
         "steps": [],
     }
-    if name == "computer_client_conflict" and details.get("ownership_state"):
+    evidence_rows = details.get("evidence")
+    serial_only = (
+        isinstance(evidence_rows, list)
+        and bool(evidence_rows)
+        and all(isinstance(row, dict) and row.get("kind") == "serial" for row in evidence_rows)
+    )
+    if name == "computer_client_conflict" and serial_only:
+        context.update(
+            title="Two Computer entries under different clients report the same serial number",
+            summary="The serial number is the only reason this issue was raised. No source record on this Computer was cited as pointing to a different client.",
+            explanation="",
+            actions=[],
+            reason_required=False,
+            steps=[
+                "Compare the source records on both entries to see whether they describe the same machine.",
+                "If a source reports the wrong serial, correct it there. If both entries describe the same machine, review them as a possible duplicate before changing either client.",
+            ],
+        )
+        roles = {}
+        if finding.subject_id:
+            roles[str(finding.subject_id)] = ["Computer this issue is about"]
+        for row in evidence_rows[:MAX_COMPUTERS - 1]:
+            if device_id := _uuid(row.get("device_id")):
+                roles.setdefault(device_id, ["Reported the same serial number"])
+        context["computers"] = _comparison_computers(roles, {}, tenant_id)
+        for computer in context["computers"]:
+            computer["comparison_heading"] = next(iter(computer.get("roles", ())), "")
+    elif name == "computer_client_conflict" and details.get("ownership_state"):
         context["explanation"] = (
             "The Computer's client is determined from its current source records and any "
             "recorded client decision. Review the source records and decision before changing it."

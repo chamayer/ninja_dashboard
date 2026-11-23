@@ -116,7 +116,7 @@ def products_for_title(canonical_name: str) -> list[str]:
         cur.execute(
             """
             SELECT DISTINCT p.product_uuid::text
-              FROM operations.software_installations_current sic
+              FROM operations.v_current_source_installations sic
               JOIN catalog.software_versions sv ON sv.id = sic.software_version_id
               JOIN catalog.products p ON p.id = sv.product_id
              WHERE sic.tenant_id = 1

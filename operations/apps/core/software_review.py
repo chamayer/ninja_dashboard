@@ -82,7 +82,7 @@ def title_status_counts_sql(computer_selector: str) -> str:
     WITH current_titles AS (
         SELECT sic.tenant_id, sic.canonical_name,
                mode() WITHIN GROUP (ORDER BY sic.publisher) AS publisher
-          FROM operations.software_installations_current sic
+          FROM operations.v_current_source_installations sic
           JOIN operations.devices d
             ON d.tenant_id = sic.tenant_id AND d.id = sic.device_id
          WHERE sic.tenant_id = 1
@@ -158,11 +158,16 @@ SELECT lower(i.canonical_name), i.device_id::text,
        device.canonical_hostname, client.slug, client.display_name,
        bool_or({software_coverage.UNDECIDED}) AS undecided,
        bool_or({software_coverage.TITLE_OPEN}) AS title_open
-  FROM operations.software_installations_current i
+  FROM operations.v_current_source_installations i
   JOIN operations.devices device
     ON device.tenant_id = i.tenant_id AND device.id = i.device_id
    AND device.deleted_at IS NULL
    AND {current_computer_sql("device")}
+  JOIN operations.computer_client_ownership installation_owner
+    ON installation_owner.tenant_id = i.tenant_id AND installation_owner.device_id = i.device_id
+   AND installation_owner.state IN ('resolved', 'decision_protected')
+   AND installation_owner.effective_client_id = i.client_id
+   AND installation_owner.effective_client_id = device.client_id
   LEFT JOIN operations.clients client
     ON client.tenant_id = i.tenant_id AND client.id = i.client_id
   {software_coverage.EFFECTIVE_DECISION_JOINS}
@@ -424,7 +429,7 @@ SELECT pair.title_key, count(*) AS installs,
            WHERE COALESCE(installation.publisher, '') <> ''
              AND lower(installation.publisher) <> pair.publisher_key) AS other_names
   FROM unnest(%s::text[], %s::text[]) AS pair(title_key, publisher_key)
-  JOIN operations.software_installations_current installation
+  JOIN operations.v_current_source_installations installation
     ON installation.tenant_id = %s AND lower(installation.canonical_name) = pair.title_key
    AND installation.stale_since IS NULL AND installation.deleted_at IS NULL
  GROUP BY pair.title_key

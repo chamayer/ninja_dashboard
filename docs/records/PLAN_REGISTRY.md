@@ -656,18 +656,19 @@ do not open competing blueprints for the same work.
 - Resume gate: Complete. Commit `79088db` (0.129.4) is on both remotes; origin deployment applied migration 0357. Read-only production verification on 2026-10-28 confirmed healthy stack services, matching deployed file hashes, and zero unexplained drift. No production recalculation was triggered. Browser, stress, and representative synthetic performance checks remain unverified.
 - Last checked: 2026-10-28 (latest platform run succeeded; 79 distinct disagreements match recorded drift and are all retained by current guards, with zero requiring review or other disagreement types. Covered findings have active same-tenant/same-subject parents; 100 actionable unknown-OS findings remain within the original estimate. Evidence: docs/records/PLAN-014-acceptance-2026-10-27.md.)
 
-## PLAN-015 — One-time source-record identity reconciliation
+## PLAN-015 — Computer identity reconciliation
 
-- Scope: Read-only fleet preview of which existing source records the current resolver would attach to a different Computer, then separately reviewed and approved repairs.
+- Scope: Retain the one-time read-only preview and separately approved repairs. Consolidate machine evidence for incoming matches, reconciliation, split and merge reviews, and identity findings. Propose daily reassessment while preserving source-record relationships and keeping client ownership separate.
 - Status: active
 - Defined: 2026-10-21
 - Started: 2026-10-21
 - Completed: —
 - Blueprint: operations/BLUEPRINT.md
 - Source: operations/docs/plans/PLAN-015-identity-reconciliation.md
-- Section: PLAN-015 — One-time source-record identity reconciliation
-- Resume gate: The preview is read-only; any reattachment, merge or derived-data refresh needs its own approval. Coordinates shared identity code with PLAN-004.
-- Last checked: 2026-10-28 (registered from its plan doc, which was untracked; the status is the doc's as of 2026-10-21 and was not re-verified. The doc's next action: review the 110 guard-aware candidates).
+- Section: PLAN-015 — Computer identity reconciliation
+- Related plans: PLAN-004 and PLAN-036 supply source-record and finding contracts. PLAN-045 owns client projection. Coordinate daily scheduling and affected readers with PLAN-056 before rollout.
+- Resume gate: Local testing is paused. The user authorized maintained Software Installations state and its refresh workflow, targeting a first-page load under two seconds. Rehearse the new migration, invalidation, permissions and request timing on am-ch-01. Live production writes and rollout retain separate approvals.
+- Last checked: 2026-11-23 (Installations first page and one refresh passed. Products, Publishers, and two Finding Review comparisons passed. Seven client-scope Issues fixture cases passed. Representative installation findings and valid Computer detail and Overview rehearsal inputs remain open.)
 
 ## PLAN-016 — Admin read-only SQL explorer
 

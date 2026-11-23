@@ -3,6 +3,102 @@
 Status: Accepted 2026-10-16; not yet implemented (see the archived legacy Operations plan)
 Date: 2026-10-16
 
+## PLAN-015 clarification (2026-11-20)
+
+The user confirmed that matching usable serial numbers or VM UUIDs establish a
+match when current evidence and applicable operator decisions do not distinguish
+the records. Independent corroboration is not required. Record the reporting
+sources and identify upstream origin as unknown when it is not known. Concurrent
+online reports from the same source do not, by themselves, establish that the
+records represent different machines. Other distinguishing evidence still blocks the match. This
+clarification supersedes conflicting statements below; implementation and
+deployment are tracked in PLAN-015.
+
+For a group matched on a serial or VM UUID, every member must report the
+matched identifier and the combined evidence must be consistent. The shared
+identifier assessment enforces this in duplicate survivor selection and
+automatic merge planning.
+
+Matching, merge review and planning, and split and duplicate findings use the
+same recent-agent hostname rule. Two reports in one platform and agent-type
+stream qualify when both were seen in the last 30 days and less than a day apart,
+their normalized names differ after removing separators, and they share neither
+a usable serial nor a VM UUID. Withdrawn, roaming and archived names do not
+participate. The check uses report times and does not require an online flag.
+
+### One active Ninja record per Computer (2026-11-23)
+
+A Computer may have **at most one active Ninja record**, across all live
+processing. First establish that the records describe the same machine using
+the identity rules above. When one of those records has recent agent contact
+and the older record is offline, select the recently contacted record as
+active and keep the older Computer association in history only. Use Ninja's
+agent contact time for this decision. The time Operations received a snapshot
+only establishes when Ninja listed the record.
+
+Source presence and Computer association are separate. Ninja may keep listing
+the superseded record. Collection retains its observations and history, and
+the association authority preserves its superseded state across subsequent
+collections. A superseded record is available for historical lookup.
+It is ineligible as a current input to identity, ownership, active OS,
+software, patching, coverage, findings, notifications, and targeted refresh.
+If the evidence cannot select one active record, preserve the verified
+incumbent. An unassigned live record with independent client evidence gets
+an estimated Computer and coverage from its own sources. The resolver revisits
+the estimate as evidence changes. Client ownership must come from source
+attribution or an applicable decision.
+
+Enforce the transition through the shared association authority. A database
+uniqueness rule must limit current Ninja assignments to one per tenant and
+Computer. Live writers, projectors, and readers must consume that assignment.
+Record the succession, evidence, and reason in association history. This
+decision supersedes the earlier practice of leaving duplicate Ninja records
+active while raising an issue. Implementation is tracked in PLAN-015.
+
+### Source-owned installations during cross-client repairs
+
+An installation UUID identifies a source record and a canonical software title
+within a tenant. A Computer inherits software from its active Ninja record.
+Merge, reversal, and ownership settlement preserve source installation IDs.
+Historical source records retain their installations. Historical findings keep
+their original subject IDs and recorded client scope.
+
+The Computer's effective client controls client-scoped access and software
+policy. Database keys enforce one installation per source record and title
+and at most one current projection entry per Computer and title. Tenant
+RLS and the current active association enforce live access. This replaces
+the previous proposal to remint installation UUIDs during repairs. The
+[PLAN-015 design](../plans/PLAN-015-identity-reconciliation.md#milestone-2--reversible-cross-client-installation-projection)
+defines the transaction gates and review cases.
+
+A client-scoped finding has an episode per installation UUID, finding type,
+and client. An ownership change ends the previous client's episode. If the
+condition applies to the current client, it opens a new episode on the same
+installation UUID. Tenant-wide findings retain their scope.
+
+The resolver may reverse an automatic legacy serial merge when independent
+evidence proves separate machines and the original membership is recoverable.
+Pin current input and association versions, restore the original Computer
+anchors atomically, and keep the audit and split history. Later explicit
+decisions or reused anchors prevent automatic reversal.
+
+For a reviewed cross-client repair with two Ninja records, close the proven
+predecessor before moving any remaining memberships. Keep the predecessor's
+original Computer and both post-repair association versions in the merge audit.
+Reversal validates both versions and moves the successor back first when it
+came from the absorbed Computer, then restores the predecessor through the
+association authority. The software collector bypasses the legacy
+Computer-scoped inventory writer for these repairs. The compatibility archive
+preserves legacy finding labels and recorded scope.
+
+The unfiltered Software Installations first page may use the Software-owned
+publication of source inventory rows and filter options. The protected reader
+requires an unchanged input snapshot. Database triggers record invalidations
+in the same transaction as relevant source, association, ownership, and
+display changes. The reader applies current software decisions to the page
+rows. Filtered and later pages, CSV, and requests without a current
+publication use the live source-owned projection.
+
 ## Context
 
 A source record (a Ninja agent, a SentinelOne agent, a LogMeIn host, an R-U-ON

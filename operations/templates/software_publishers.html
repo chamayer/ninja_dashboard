@@ -7,7 +7,7 @@
 {% include "_decision_comment_script.html" %}
 {% include "_sw_style.html" %}
 <style>
-  .row-btns { display: flex; gap: 0.3rem; justify-content: flex-end; flex-wrap: wrap; }
+  .row-btns, .row-btns form { display: flex; gap: 0.3rem; justify-content: flex-end; flex-wrap: wrap; }
   .row-btns form { margin: 0; }
   .btn-allow    { background: #dcfce7; color: #166534; border: 1px solid #bbf7d0; }
   .btn-block    { background: #fee2e2; color: #991b1b; border: 1px solid #fecaca; }
@@ -19,6 +19,8 @@
   }
 </style>
 
+{% url 'software_decision_create' as create_decision_url %}
+{% with return_path=request.get_full_path %}
 <div class="sw-page-header">
     <div>
         <h1>Publishers</h1>
@@ -43,7 +45,7 @@
 
 <form method="post" action="{% url 'software_decision_bulk' %}" id="bulk-form">
     {% csrf_token %}
-    <input type="hidden" name="next" value="{{ request.get_full_path }}">
+    <input type="hidden" name="next" value="{{ return_path }}">
     <input type="hidden" name="scope" value="global">
 
     {% if publishers %}
@@ -62,7 +64,10 @@
         </select>
         <button type="submit">Apply to selected publishers</button>
     </div>
+    {% endif %}
+</form>
 
+{% if publishers %}
     <div class="sw-table-wrap">
     <table class="ops-table" data-sortable>
         <thead>
@@ -81,12 +86,13 @@
         </thead>
         <tbody>
             {% for p in publishers %}
+            {% url 'software_publisher_detail' publisher=p.publisher as publisher_url %}
             <tr>
                 <td>
-                    <input type="checkbox" class="bulk-cb" name="publisher" value="{{ p.publisher }}">
+                    <input type="checkbox" class="bulk-cb" form="bulk-form" name="publisher" value="{{ p.publisher }}">
                 </td>
                 <td class="primary-cell">
-                    <a href="{% url 'software_publisher_detail' publisher=p.publisher %}">
+                    <a href="{{ publisher_url }}">
                         <strong>{{ p.publisher|title }}</strong>
                     </a>
                 </td>
@@ -105,31 +111,16 @@
                 </td>
                 <td>
                     <div class="row-btns">
-                        <form method="post" action="{% url 'software_decision_create' %}">
+                        <form method="post" action="{{ create_decision_url }}">
                             {% csrf_token %}
                             <input type="hidden" name="publisher" value="{{ p.publisher }}">
                             <input type="hidden" name="scope" value="global">
-                            <input type="hidden" name="next" value="{{ request.get_full_path }}">
-                            <input type="hidden" name="decision" value="approve_publisher">
-                            <button type="submit" class="btn-allow" title="Approve every product from this publisher">Approve</button>
+                            <input type="hidden" name="next" value="{{ return_path }}">
+                            <button type="submit" name="decision" value="approve_publisher" class="btn-allow" title="Approve every product from this publisher">Approve</button>
+                            <button type="submit" name="decision" value="reject" class="btn-block" title="Reject every product from this publisher">Reject</button>
+                            <button type="submit" name="decision" value="investigate" class="btn-review" title="Mark this publisher for investigation">Investigate</button>
                         </form>
-                        <form method="post" action="{% url 'software_decision_create' %}">
-                            {% csrf_token %}
-                            <input type="hidden" name="publisher" value="{{ p.publisher }}">
-                            <input type="hidden" name="scope" value="global">
-                            <input type="hidden" name="next" value="{{ request.get_full_path }}">
-                            <input type="hidden" name="decision" value="reject">
-                            <button type="submit" class="btn-block" title="Reject every product from this publisher">Reject</button>
-                        </form>
-                        <form method="post" action="{% url 'software_decision_create' %}">
-                            {% csrf_token %}
-                            <input type="hidden" name="publisher" value="{{ p.publisher }}">
-                            <input type="hidden" name="scope" value="global">
-                            <input type="hidden" name="next" value="{{ request.get_full_path }}">
-                            <input type="hidden" name="decision" value="investigate">
-                            <button type="submit" class="btn-review" title="Mark this publisher for investigation">Investigate</button>
-                        </form>
-                        <a href="{% url 'software_publisher_detail' publisher=p.publisher %}#decision-scopes" class="secondary">Client/device…</a>
+                        <a href="{{ publisher_url }}#decision-scopes" class="secondary">Client/device…</a>
                     </div>
                 </td>
             </tr>
@@ -137,10 +128,10 @@
         </tbody>
     </table>
     </div>
-    {% else %}
+{% else %}
     <div class="sw-empty">No publishers match the current filter.</div>
-    {% endif %}
-</form>
+{% endif %}
+{% endwith %}
 
 <script>
   (function () {

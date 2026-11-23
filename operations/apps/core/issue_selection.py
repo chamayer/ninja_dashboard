@@ -34,6 +34,7 @@ from django.db import connection, transaction
 from django.urls import reverse
 
 from . import finding_registry
+from .computer_reads import current_installation_finding_sql
 
 TENANT_ID = 1
 SEVERITIES = ("critical", "high", "medium", "low", "info")
@@ -310,6 +311,10 @@ def _filtered_sql(
                 " AND owner.state IN ('resolved', 'decision_protected')"
                 " WHERE e.tenant_id = %(tenant)s AND e.finding_id = i.id"
                 " AND e.client_id = %(client_id)s::uuid)))"
+            )
+            where.append(
+                "(i.status = 'resolved' OR i.subject_type IS DISTINCT FROM 'software_installation'"
+                f" OR {current_installation_finding_sql('i', '%(tenant)s')})"
             )
     if scope.os or scope.computer_type:
         device_where = [

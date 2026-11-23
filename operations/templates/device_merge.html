@@ -59,6 +59,7 @@
             {% for dev in devices %}
             <div class="dm-card">
                 <h3><code>{{ dev.canonical_hostname }}</code></h3>
+                {% if cross_client_review %}<div class="dm-attr"><span class="lbl">Client</span><span class="val">{{ dev.client.display_name }}</span></div>{% endif %}
                 <div class="dm-attr"><span class="lbl">Serial</span><span class="val"><code>{{ dev.canonical_serial|default:"—" }}</code></span></div>
                 <div class="dm-attr"><span class="lbl">VM UUID</span><span class="val"><code>{{ dev.canonical_vm_uuid|default:"—" }}</code></span></div>
                 <div class="dm-attr"><span class="lbl">Type</span><span class="val">{{ dev.get_device_type_display }}</span></div>
@@ -82,6 +83,14 @@
 
         {% for device in devices %}{% include "_merge_source_records.html" %}{% endfor %}
 
+        {% if cross_client_review %}
+        <div class="dm-warn">
+            The older Computer will retain both sets of source records. Installation history stays with its original client. Current inventory will be rebuilt once ownership settles.
+        </div>
+        <input type="hidden" name="cross_client_review" value="{{ cross_client_review }}">
+        <label for="repair-reason">Reason for merging across clients</label>
+        <input id="repair-reason" type="text" name="repair_reason" maxlength="500" required>
+        {% else %}
         <div class="dm-warn">
             <strong>What happens next</strong> — the older Operations record is
             retained only as the technical anchor. The other anchor is
@@ -89,6 +98,15 @@
             combined computer. Current software inventory is moved too; matching
             software entries are reconciled rather than dropped.
         </div>
+
+        <details>
+            <summary>Override an identity review</summary>
+            <p>Use this only after reviewing conflicting or incomplete evidence. An authorized operator must provide a reason.</p>
+            <label><input type="checkbox" name="override_conflict" value="confirmed"> I reviewed the evidence and confirm these are the same computer.</label>
+            <label for="override-reason">Reason</label>
+            <input id="override-reason" type="text" name="override_reason" maxlength="500">
+        </details>
+        {% endif %}
 
         <div class="dm-actions">
             <input type="hidden" name="confirmation" value="same_computer">

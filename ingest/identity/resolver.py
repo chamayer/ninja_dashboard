@@ -33,12 +33,21 @@ from ingest.identity.naming import write_computer_names
 from ingest.identity.matching import client_record_names, invalidate_client_names
 from ingest.identity.matching import (
     IdentityMatchPolicy,
+    NinjaRecordSlotOccupied,
     OwnershipMatchDeferred,
+    _identity_exclusions,
+    _identity_mac_sql,
+    _ninja_association_guards_present,
+    _resolve_match,
     load_identity_match_policies,
     loose_name,
     record_name_short,
-    resolve_device_by_policy,
     resolve_match,
+)
+from ingest.ninja_record_supersession import (
+    prepare_estimated_ninja_merge,
+    reconcile_existing_ninja_records,
+    replace_matched_ninja_record,
 )
 from ingest.normalize import (
     form_factor_for_node_class,
@@ -48,6 +57,15 @@ from ingest.normalize import (
     os_family,
 )
 from shared.conditions.contracts import Condition, EvaluationCoverage, Participant
+from shared.identity_evidence import (
+    CONFLICT_RULE_REVISION,
+    assess_identifier_group,
+    assess_identity,
+    current_client_scopes,
+    group_has_conflict,
+    hostname_conflict,
+    operator_separated_pairs,
+)
 
 log = logging.getLogger(__name__)
 
@@ -59,6 +77,8 @@ _OWNERSHIP_DEFERRED = object()
 def _resolve_or_defer(matcher, cur, **kwargs):
     try:
         return matcher(cur, **kwargs)
+    except NinjaRecordSlotOccupied as occupied:
+        return occupied
     except OwnershipMatchDeferred:
         return _OWNERSHIP_DEFERRED
 
@@ -80,10 +100,18 @@ def _unassociated_identity_ids(limit=None):
     """Select a bounded work set without holding the tenant mutation guard."""
     with db.transaction() as cur:
         cur.execute("SET LOCAL operations.tenant_id = 1")
+        current_ninja = ""
+        if _ninja_association_guards_present(cur):
+            current_ninja = (
+                " AND (platform <> 'Ninja' OR NOT operations.ninja_record_is_superseded("
+                "tenant_id, source_instance_id, external_namespace, parent_external_namespace,"
+                " parent_external_id, external_id))"
+            )
         cur.execute(
             "SELECT observation_id FROM operations.entity_observation_current "
             "WHERE tenant_id = %s AND device_id IS NULL AND active "
-            "AND entity_type = ANY(%s) ORDER BY observed_at DESC, observation_id LIMIT %s",
+            "AND entity_type = ANY(%s)" + current_ninja
+            + " ORDER BY observed_at DESC, observation_id LIMIT %s",
             (TENANT_ID, sorted(identity_entity_types(cur)), limit),
         )
         return [row[0] for row in cur.fetchall()]
@@ -98,7 +126,8 @@ def _resolve_observation_batch(cur, observation_ids):
         """
         SELECT observation_id, entity_type, entity_key, platform,
                operations.computer_client_independent_evidence(tenant_id, observation_id),
-               observed_at, canonical_data, source_instance_id
+               observed_at, canonical_data, source_instance_id, external_namespace,
+               parent_external_namespace, parent_external_id, external_id
         FROM operations.entity_observation_current
         WHERE tenant_id = %s AND device_id IS NULL
           AND active = TRUE
@@ -114,6 +143,21 @@ def _resolve_observation_batch(cur, observation_ids):
     )
     rows = cur.fetchall()
 
+    cur.execute(
+        """
+        SELECT observation_id, id FROM operations.source_record_subjects
+         WHERE tenant_id = %s AND subject_kind = 'record'
+           AND observation_id = ANY(%s::uuid[])
+        """,
+        (TENANT_ID, [row[0] for row in rows]),
+    )
+    subjects = dict(cur.fetchall())
+    exclusions = _identity_exclusions(
+        cur, TENANT_ID,
+        [{"id": subject_id, "observation_id": obs_id}
+         for obs_id, subject_id in subjects.items()],
+    )
+
     identity_conflict_ft_id = _load_finding_type_id(cur, "identity_conflict")
 
     for (
@@ -125,7 +169,14 @@ def _resolve_observation_batch(cur, observation_ids):
         observed_at,
         canonical_data,
         source_instance_id,
+        external_namespace,
+        parent_external_namespace,
+        parent_external_id,
+        external_id,
     ) in rows:
+        subject_id = subjects.get(obs_id)
+        if subject_id is None:
+            continue
         cd = canonical_data or {}
 
         serial = cd.get("serial_number")
@@ -138,8 +189,8 @@ def _resolve_observation_batch(cur, observation_ids):
             )
             or None
         )
-        device_id = _resolve_or_defer(
-            resolve_device_by_policy,
+        match = _resolve_or_defer(
+            resolve_match,
             cur,
             tenant_id=TENANT_ID,
             source_name=platform,
@@ -153,15 +204,26 @@ def _resolve_observation_batch(cur, observation_ids):
             policies=identity_policies,
             is_online=cd.get("is_online"),
             source_instance_id=source_instance_id,
+            source_identity_key=(
+                external_namespace, parent_external_namespace,
+                parent_external_id, external_id,
+            ),
+            excluded_observation_ids=exclusions[subject_id],
         )
-        if device_id is _OWNERSHIP_DEFERRED:
+        if match is _OWNERSHIP_DEFERRED:
             continue
-        if device_id is not None:
-            _attach_observation(cur, obs_id, device_id)
-            touched.add(device_id)
+        if isinstance(match, NinjaRecordSlotOccupied):
+            if replace_matched_ninja_record(cur, TENANT_ID, match.device_id, subject_id):
+                invalidate_client_names(client_id)
+                touched.add(match.device_id)
+                resolved_count += 1
+            continue
+        if match is not None:
+            _attach_observation(cur, obs_id, match.device_id, match.matcher)
+            touched.add(match.device_id)
             resolved_count += 1
             log.debug(
-                "resolver: policy match %s → device %s", entity_key, device_id
+                "resolver: policy match %s → device %s", entity_key, match.device_id
             )
             continue
         if norm:
@@ -222,6 +284,10 @@ def drain_resolution(batch_size: int = 200, *, refresh_current: bool = True) -> 
         raise
 
     merged_count = 0
+    try:
+        _repair_legacy_ninja_identity()
+    except Exception:
+        log.exception("resolver: legacy Ninja identity repair failed — continuing")
     try:
         with db.findings_transaction(TENANT_ID) as cur:
             merged_count = merge_proven_splits(cur)
@@ -308,7 +374,9 @@ def _load_finding_type_id(cur, name: str) -> int | None:
     return row[0] if row else None
 
 
-def _attach_observation(cur, obs_id: uuid.UUID | None, device_id: uuid.UUID) -> None:
+def _attach_observation(
+    cur, obs_id: uuid.UUID | None, device_id: uuid.UUID, method: str = "resolver"
+) -> None:
     """Attach one observation to a device.
 
     Attachment authority is the confirmed link (PLAN-004 Stage B, migration
@@ -319,9 +387,9 @@ def _attach_observation(cur, obs_id: uuid.UUID | None, device_id: uuid.UUID) -> 
         # The confirmed link is the authority; the procedure projects device_id
         # (PLAN-004 Stage B). An existing Computer association is kept.
         cur.execute(
-            "SELECT operations.associate_observation(%s, %s, %s, 'resolver',"
+            "SELECT operations.associate_observation(%s, %s, %s, %s,"
             " 'ingest.identity.resolver', true)",
-            (TENANT_ID, obs_id, device_id),
+            (TENANT_ID, obs_id, device_id, method),
         )
         cur.execute(
             "SELECT client_id FROM operations.entity_observation_current"
@@ -357,7 +425,7 @@ def _maybe_create_candidate(
         for device_id in sorted(
             {
                 device_id
-                for device_id, _lifecycle, name_short, _key, is_current, _platform, _entity_key, entity_type, _source_instance_id in client_record_names(
+                for device_id, _lifecycle, name_short, _key, is_current, _platform, _entity_key, entity_type, _source_instance_id, *_source_key in client_record_names(
                     cur, TENANT_ID, client_id
                 )
                 if is_current and entity_type in types and name_short == norm
@@ -435,15 +503,19 @@ device_names AS (
     SELECT DISTINCT eo.device_id, f.name_short AS name
       FROM operations.entity_observation_current eo
       JOIN pg_temp.identity_owned_scope owner ON owner.device_id = eo.device_id
+      LEFT JOIN operations.v_device_source_record_lifecycle_current lc
+        ON lc.observation_id = eo.observation_id
      CROSS JOIN LATERAL operations.record_name_forms(
           eo.platform, eo.entity_type,
           coalesce(nullif(eo.canonical_data ->> 'hostname', ''), eo.canonical_data ->> 'guest_name'),
           eo.canonical_data ->> 'domain') f
      WHERE eo.tenant_id = nullif(current_setting('operations.tenant_id', true), '')::bigint
        AND eo.active AND eo.device_id IS NOT NULL
+       AND coalesce(lc.record_lifecycle, '') <> 'archived'
        AND eo.entity_key NOT LIKE 'device-health:%%'
        AND eo.entity_type IN (SELECT name FROM operations.entity_types WHERE is_identity_signal)
        AND f.name_short IS NOT NULL
+       AND coalesce(f.name_key, '') <> ''
        AND NOT EXISTS (SELECT 1 FROM operations.identity_roaming_records rr
                         WHERE rr.tenant_id = eo.tenant_id
                           AND rr.source_instance_id = eo.source_instance_id
@@ -497,12 +569,13 @@ ON CONFLICT (tenant_id, canonical_key) WHERE status = 'open'
 DO UPDATE SET
     member_snapshots = EXCLUDED.member_snapshots,
     match_reason = EXCLUDED.match_reason,
+    confidence = EXCLUDED.confidence,
     client_id = EXCLUDED.client_id
 """
 )
 
 
-_MERGE_CANDIDATE_CLOSE = (
+_MERGE_CANDIDATE_REVIEW_STALE = (
     "WITH "
     + _DEVICE_NAMES
     + """, current_keys AS (
@@ -516,10 +589,15 @@ _MERGE_CANDIDATE_CLOSE = (
     HAVING COUNT(*) >= %s
 )
 UPDATE operations.merge_candidates mc
-SET status = 'merged'
+SET match_reason = 'The previous matching evidence is no longer current; review this candidate.',
+    confidence = NULL
 WHERE mc.tenant_id = %s
   AND mc.status = 'open'
   AND mc.entity_type = 'device'
+  AND mc.canonical_key LIKE 'identity_conflict:%%'
+  AND (mc.match_reason IS DISTINCT FROM
+       'The previous matching evidence is no longer current; review this candidate.'
+       OR mc.confidence IS NOT NULL)
   AND jsonb_array_length(CASE WHEN jsonb_typeof(mc.member_snapshots) = 'array'
                               THEN mc.member_snapshots ELSE '[]'::jsonb END) > 0
   AND NOT EXISTS (
@@ -540,7 +618,8 @@ def project_merge_candidates(cur) -> dict[str, int]:
     of current device state, so it is projected from that. Computers collide
     when their current identity records report one name (ADR-0034); the key
     is built from the Computers, so it matches the identity_conflict finding.
-    Proposals whose collision no longer holds are closed.
+    Proposals whose collision no longer holds remain available for review;
+    a missing collision is not evidence that the Computers were merged.
     """
     owned = identity_findings._lock_owned_computers(cur, TENANT_ID)
     cur.execute(
@@ -557,13 +636,14 @@ def project_merge_candidates(cur) -> dict[str, int]:
         _MERGE_CANDIDATE_UPSERT, (TENANT_ID, _MIN_IDENTITY_CANDIDATES, TENANT_ID)
     )
     upserted = cur.rowcount or 0
-    cur.execute(_MERGE_CANDIDATE_CLOSE, (_MIN_IDENTITY_CANDIDATES, TENANT_ID))
-    closed = cur.rowcount or 0
+    cur.execute(_MERGE_CANDIDATE_REVIEW_STALE, (_MIN_IDENTITY_CANDIDATES, TENANT_ID))
+    review_updated = cur.rowcount or 0
     strong = _project_strong_identity_candidates(cur)
     findings = _project_identity_conflict_findings(cur)
     return {
         "upserted": upserted,
-        "closed": closed,
+        "closed": 0,
+        "review_updated": review_updated,
         "strong_upserted": strong["upserted"],
         "strong_closed": strong["closed"],
         "findings_upserted": findings["upserted"],
@@ -599,9 +679,18 @@ _IDENTITY_CONFLICT_COLLISIONS = (
         ON o.tenant_id = d.tenant_id
        AND o.device_id = d.id
        AND o.active
+       AND o.entity_type IN (SELECT name FROM operations.entity_types WHERE is_identity_signal)
+       AND NOT EXISTS (
+           SELECT 1 FROM operations.identity_roaming_records rr
+            WHERE rr.tenant_id = o.tenant_id AND rr.source_instance_id = o.source_instance_id
+              AND rr.external_id = o.external_id
+       )
       LEFT JOIN LATERAL jsonb_array_elements_text(
-          COALESCE(o.canonical_data -> 'macs', '[]'::jsonb)
-      ) AS mac(value) ON TRUE
+          CASE WHEN jsonb_typeof(o.canonical_data -> 'macs') = 'array'
+               THEN o.canonical_data -> 'macs' ELSE '[]'::jsonb END
+      ) AS mac(value) ON lower(mac.value) ~ '^[0-9a-f]{2}(:[0-9a-f]{2}){5}$'
+          AND lower(mac.value) NOT IN ('00:00:00:00:00:00', 'ff:ff:ff:ff:ff:ff', '02:00:4c:4f:4f:50')
+          AND lower(mac.value) NOT LIKE '00:15:5d:%%'
      WHERE d.tenant_id = %s
        AND d.deleted_at IS NULL
        AND d.client_id IS NOT NULL
@@ -874,7 +963,7 @@ def _candidate_uuid(value: Any) -> str | None:
 
 _STRONG_IDENTITY_CANDIDATE_CTE = """
 WITH policy AS (
-    SELECT confidence, blocking_signal_keys
+    SELECT confidence
       FROM operations.identity_match_policies
      WHERE tenant_id = %s AND matcher = 'hostname_mac' AND enabled = TRUE
 ), device_evidence AS (
@@ -886,11 +975,17 @@ WITH policy AS (
            d.device_type,
            d.device_role,
            d.os_name,
-           ARRAY_REMOVE(ARRAY_AGG(DISTINCT mac.value), NULL) AS macs,
+           ARRAY_REMOVE(ARRAY_AGG(DISTINCT {identity_mac}), NULL) AS macs,
            -- The names the records report, never the stored name (ADR-0034
            -- section 4); roaming records carry no name.
-           ARRAY_REMOVE(ARRAY_AGG(DISTINCT CASE WHEN rr.external_id IS NULL THEN f.name_short END),
+           ARRAY_REMOVE(ARRAY_AGG(DISTINCT CASE WHEN rr.external_id IS NULL
+               AND coalesce(lc.record_lifecycle, '') <> 'archived'
+               AND coalesce(f.name_key, '') <> '' THEN f.name_short END),
                         NULL) AS names,
+           ARRAY_REMOVE(ARRAY_AGG(DISTINCT CASE WHEN rr.external_id IS NULL
+               AND coalesce(lc.record_lifecycle, '') <> 'archived'
+               AND coalesce(f.name_key, '') <> '' THEN f.name_key END),
+                        NULL) AS name_keys,
            ARRAY_AGG(DISTINCT o.observation_id::text) AS observation_ids
       FROM operations.devices d
       JOIN pg_temp.identity_owned_scope owner ON owner.device_id = d.id
@@ -901,13 +996,17 @@ WITH policy AS (
       LEFT JOIN operations.identity_roaming_records rr
         ON rr.tenant_id = o.tenant_id AND rr.source_instance_id = o.source_instance_id
        AND rr.external_id = o.external_id
+      LEFT JOIN operations.v_device_source_record_lifecycle_current lc
+        ON lc.observation_id = o.observation_id
      CROSS JOIN LATERAL operations.record_name_forms(
           o.platform, o.entity_type,
           coalesce(nullif(o.canonical_data ->> 'hostname', ''), o.canonical_data ->> 'guest_name'),
           o.canonical_data ->> 'domain') f
       LEFT JOIN LATERAL jsonb_array_elements_text(
-          COALESCE(o.canonical_data -> 'macs', '[]'::jsonb)
-      ) AS mac(value) ON TRUE
+          CASE WHEN jsonb_typeof(o.canonical_data -> 'macs') = 'array'
+               THEN o.canonical_data -> 'macs' ELSE '[]'::jsonb END
+      ) AS mac(value) ON rr.external_id IS NULL
+          AND {identity_mac} IS NOT NULL
      WHERE d.tenant_id = %s
        AND d.deleted_at IS NULL
        AND d.client_id IS NOT NULL
@@ -918,7 +1017,8 @@ WITH policy AS (
     SELECT a.client_id,
            a.device_id AS device_a_id,
            b.device_id AS device_b_id,
-           a.canonical_hostname,
+           a.canonical_hostname AS hostname_a,
+           b.canonical_hostname AS hostname_b,
            a.canonical_serial AS serial_a,
            b.canonical_serial AS serial_b,
            a.canonical_vm_uuid AS vm_uuid_a,
@@ -937,18 +1037,14 @@ WITH policy AS (
       FROM device_evidence a
       JOIN device_evidence b
         ON b.client_id = a.client_id
-       AND a.names && b.names
+       AND (a.names && b.names OR a.name_keys && b.name_keys)
        AND a.device_id::text < b.device_id::text
        AND cardinality(a.macs) > 0
        AND cardinality(b.macs) > 0
        AND a.macs && b.macs
       JOIN policy ON TRUE
-     WHERE NOT (policy.blocking_signal_keys @> '["vm_uuid"]'::jsonb)
-        OR NULLIF(a.canonical_vm_uuid, '') IS NULL
-        OR NULLIF(b.canonical_vm_uuid, '') IS NULL
-        OR LOWER(a.canonical_vm_uuid) = LOWER(b.canonical_vm_uuid)
 )
-"""
+""".replace("{identity_mac}", _identity_mac_sql("mac.value"))
 
 
 _STRONG_MERGE_CANDIDATE_UPSERT = (
@@ -961,7 +1057,7 @@ SELECT gen_random_uuid(), 1, %s, pair.client_id, 'device', pair.canonical_key,
        jsonb_build_array(
            jsonb_build_object(
                'device_id', pair.device_a_id,
-               'hostname', pair.canonical_hostname,
+               'hostname', pair.hostname_a,
                'serial', COALESCE(pair.serial_a, ''),
                'vm_uuid', COALESCE(pair.vm_uuid_a, ''),
                'device_type', pair.device_type_a,
@@ -970,7 +1066,7 @@ SELECT gen_random_uuid(), 1, %s, pair.client_id, 'device', pair.canonical_key,
            ),
            jsonb_build_object(
                'device_id', pair.device_b_id,
-               'hostname', pair.canonical_hostname,
+               'hostname', pair.hostname_b,
                'serial', COALESCE(pair.serial_b, ''),
                'vm_uuid', COALESCE(pair.vm_uuid_b, ''),
                'device_type', pair.device_type_b,
@@ -979,9 +1075,10 @@ SELECT gen_random_uuid(), 1, %s, pair.client_id, 'device', pair.canonical_key,
            )
        ),
        to_jsonb(pair.observation_ids),
-       'Strong identity: same client, normalized hostname, and a shared MAC address.',
+       'Review candidate: same client, normalized hostname, and a shared MAC; field origin is unverified.',
        pair.confidence, 'open'
   FROM strong_pairs pair
+  JOIN pg_temp.identity_qualified_pairs qualified ON qualified.canonical_key = pair.canonical_key
 ON CONFLICT (tenant_id, canonical_key) WHERE status = 'open'
 DO UPDATE SET
     member_snapshots = EXCLUDED.member_snapshots,
@@ -993,15 +1090,19 @@ DO UPDATE SET
 )
 
 
-_STRONG_MERGE_CANDIDATE_CLOSE = (
+_STRONG_MERGE_CANDIDATE_REVIEW_STALE = (
     _STRONG_IDENTITY_CANDIDATE_CTE
     + """
 UPDATE operations.merge_candidates candidate
-   SET status = 'merged'
+   SET match_reason = 'The previous matching evidence is no longer current; review this candidate.',
+       confidence = NULL
  WHERE candidate.tenant_id = %s
    AND candidate.status = 'open'
    AND candidate.entity_type = 'device'
    AND candidate.canonical_key LIKE 'identity_strong:%%'
+   AND (candidate.match_reason IS DISTINCT FROM
+        'The previous matching evidence is no longer current; review this candidate.'
+        OR candidate.confidence IS NOT NULL)
    AND jsonb_array_length(CASE WHEN jsonb_typeof(candidate.member_snapshots) = 'array'
                                THEN candidate.member_snapshots ELSE '[]'::jsonb END) > 0
    AND NOT EXISTS (
@@ -1024,21 +1125,52 @@ def _project_strong_identity_candidates(cur) -> dict[str, int]:
 
     Attachment is deliberately sticky: moving a source observation between
     two existing devices is a merge operation with findings and software
-    consequences. This projection makes the strong proof visible in the
-    existing review queue instead of treating it as permission to move data.
+    consequences. This projection presents matching evidence for review; it
+    does not treat unverified field origin as permission to move data.
     """
     identity_types = sorted(identity_entity_types(cur))
+    cur.execute(
+        _STRONG_IDENTITY_CANDIDATE_CTE
+        + " SELECT canonical_key, device_a_id, device_b_id FROM strong_pairs",
+        (TENANT_ID, TENANT_ID, identity_types),
+    )
+    candidate_pairs = cur.fetchall()
+    device_ids = sorted({device for _, a, b in candidate_pairs for device in (a, b)}, key=str)
+    evidence = {}
+    separated = set()
+    if device_ids:
+        cur.execute(PROVEN_SPLIT_SQL, (TENANT_ID, identity_types, device_ids, device_ids))
+        evidence = {row[0]: row for row in cur.fetchall()}
+        separated = _operator_separated_pairs(cur, device_ids)
+    cur.execute("CREATE TEMP TABLE identity_qualified_pairs (canonical_key text PRIMARY KEY) ON COMMIT DROP")
+    qualified = []
+    needs_review = []
+    for key, a, b in candidate_pairs:
+        if _pair_has_no_current_conflict([evidence.get(a), evidence.get(b)], [a, b], separated):
+            qualified.append((key,))
+        else:
+            needs_review.append(key)
+    if qualified:
+        cur.executemany("INSERT INTO pg_temp.identity_qualified_pairs (canonical_key) VALUES (%s)", qualified)
+    if needs_review:
+        cur.execute(
+            "UPDATE operations.merge_candidates "
+            "SET match_reason = %s, confidence = NULL "
+            "WHERE tenant_id = %s AND status = 'open' AND canonical_key = ANY(%s::text[])",
+            ("Current identity evidence conflicts or is unavailable; review this candidate.",
+             TENANT_ID, needs_review),
+        )
     cur.execute(
         _STRONG_MERGE_CANDIDATE_UPSERT,
         (TENANT_ID, TENANT_ID, identity_types, TENANT_ID),
     )
     upserted = cur.rowcount or 0
     cur.execute(
-        _STRONG_MERGE_CANDIDATE_CLOSE,
+        _STRONG_MERGE_CANDIDATE_REVIEW_STALE,
         (TENANT_ID, TENANT_ID, identity_types, TENANT_ID),
     )
-    closed = cur.rowcount or 0
-    return {"upserted": upserted, "closed": closed}
+    review_updated = cur.rowcount or 0
+    return {"upserted": upserted, "closed": 0, "review_updated": review_updated}
 
 
 def _collapse_mac_variants(
@@ -1211,6 +1343,21 @@ def _promote_unmatched_clusters(
     unresolved = cur.fetchall()
     if not unresolved:
         return 0
+    cur.execute(
+        """
+        SELECT observation_id, id, external_namespace, parent_external_namespace,
+               parent_external_id, external_id
+          FROM operations.source_record_subjects
+         WHERE tenant_id = %s AND observation_id = ANY(%s::uuid[])
+           AND subject_kind = 'record'
+        """,
+        (TENANT_ID, [row[8] for row in unresolved]),
+    )
+    subjects = {row[0]: row[1:] for row in cur.fetchall()}
+    exclusions = _identity_exclusions(
+        cur, TENANT_ID,
+        [{"id": values[0], "observation_id": obs_id} for obs_id, values in subjects.items()],
+    )
     touched: set = set()
 
     # (client_id, norm) → source records with their exact observation IDs.
@@ -1229,6 +1376,8 @@ def _promote_unmatched_clusters(
         cd = raw_cd or {}
         hostname = cd.get("hostname") or cd.get("guest_name")
         norm = record_name_short(cur, platform, entity_type, hostname, cd.get("domain"))
+        if not norm and platform == "Ninja":
+            norm = f"ninja-{entity_key}"
         if not norm:
             continue
         clusters.setdefault((client_id, norm), []).append(
@@ -1273,8 +1422,11 @@ def _promote_unmatched_clusters(
                 )
                 or norm
             )
-            match = _resolve_or_defer(
-                resolve_match,
+            subject = subjects.get(observation_id)
+            if subject is None:
+                continue
+            match_preview = _resolve_or_defer(
+                _resolve_match,
                 cur,
                 tenant_id=TENANT_ID,
                 source_name=platform,
@@ -1288,16 +1440,28 @@ def _promote_unmatched_clusters(
                 policies=identity_policies,
                 is_online=cd.get("is_online"),
                 source_instance_id=source_instance_id,
+                source_identity_key=tuple(subject[1:]),
+                skip_source_identity=True,
+                identity_types=sorted(identity_entity_types(cur)),
+                excluded_observation_ids=exclusions[subject[0]],
+                trace=False,
+                record_attempts=True,
             )
-            if match is _OWNERSHIP_DEFERRED:
-                continue
+            ownership_deferred = match_preview is _OWNERSHIP_DEFERRED
+            occupied = isinstance(match_preview, NinjaRecordSlotOccupied)
+            match = None if occupied or ownership_deferred else match_preview.result
             if match is not None:
-                _attach_observation(cur, observation_id, match.device_id)
+                _attach_observation(cur, observation_id, match.device_id, match.matcher)
                 touched.add(match.device_id)
                 invalidate_client_names(client_id)
                 continue
+            estimated = occupied or ownership_deferred or not hostname_raw or any(
+                attempt.candidates for attempt in match_preview.attempts
+            )
+            if estimated and platform != "Ninja":
+                continue
             device_id = _create_device_for_group(
-                cur, agent_ids, client_id, record_name, [entry]
+                cur, agent_ids, client_id, record_name, [entry], identity_estimated=estimated,
             )
             touched.add(device_id)
             # Later records see the new Computer, but must independently match
@@ -1316,20 +1480,58 @@ def _promote_unmatched_clusters(
 
 MAX_AUTOMATIC_MERGES_PER_RUN = 500
 
-# One row per current Computer: the usable serials and VM UUIDs its records
-# report (active records; for a Computer with none active, what they last
-# reported), whether it is live, and its age.
+
+def _assess_merge_proof(cur, survivor, other, kind, value, identity_types):
+    """Check shared identifier reports and retain the reporting sources."""
+    field = "serial_number" if kind == "serial" else "vm_uuid"
+    cur.execute(
+        """
+        SELECT DISTINCT ON (eo.device_id) eo.device_id, eo.observation_id,
+               eo.platform, eo.source_instance_id
+          FROM operations.entity_observation_current eo
+         WHERE eo.tenant_id = %s AND eo.device_id = ANY(%s::uuid[]) AND eo.active
+           AND eo.entity_type = ANY(%s::text[])
+           AND lower(trim(eo.canonical_data ->> %s)) = %s
+           AND NOT EXISTS (
+               SELECT 1 FROM operations.identity_roaming_records rr
+                WHERE rr.tenant_id = eo.tenant_id AND rr.source_instance_id = eo.source_instance_id
+                  AND rr.external_id = eo.external_id
+           )
+         ORDER BY eo.device_id, eo.observation_id
+        """,
+        (TENANT_ID, [survivor, other], identity_types, field, value),
+    )
+    reports = cur.fetchall()
+    if {row[0] for row in reports} != {survivor, other}:
+        return assess_identity(), None
+    evidence = {
+        "identifier_reports": [
+            {"device_id": str(device_id), "observation_id": str(observation_id),
+             "reporting_source": platform, "reporting_source_instance_id": str(instance_id),
+             "field_origin": "unknown"}
+            for device_id, observation_id, platform, instance_id in reports
+        ]
+    }
+    return assess_identity(proof=kind), evidence
+
+
+# One row per current Computer: identifiers reported by active records,
+# whether it is live, and its age. Withdrawn evidence remains history only.
 PROVEN_SPLIT_SQL = """
 WITH rej AS (
     SELECT normalized_value AS v FROM operations.identity_value_rejections
      WHERE value_kind = 'serial' AND enabled
 ), recs AS (
-    -- Hardware evidence only: agent and VM records. Documentation (a CMDB
-    -- asset's typed-in serial) is never merge proof.
+    -- Only configured identity-signal records can provide merge evidence.
     SELECT d.id AS device_id, d.client_id, d.created_at, eo.active,
+           eo.platform, eo.entity_type, eo.last_seen_at,
            eo.platform || ':' || eo.entity_type AS stream,
-           coalesce((eo.canonical_data ->> 'is_online')::boolean, false) AS online,
-           lower(split_part(coalesce(eo.canonical_data ->> 'hostname', ''), '.', 1)) AS host,
+           rr.external_id IS NULL AND
+               coalesce((eo.canonical_data ->> 'is_online')::boolean, false) AS online,
+           CASE WHEN rr.external_id IS NULL AND coalesce(lc.record_lifecycle, '') <> 'archived'
+                     AND coalesce(forms.name_key, '') <> ''
+                THEN coalesce(forms.name_short, '')
+                ELSE '' END AS host,
            -- A roaming record (migration 0318) proves nothing by serial.
            CASE WHEN rr.external_id IS NULL
                 THEN lower(trim(eo.canonical_data ->> 'serial_number')) END AS sn,
@@ -1341,31 +1543,36 @@ WITH rej AS (
       LEFT JOIN operations.identity_roaming_records rr
         ON rr.tenant_id = eo.tenant_id AND rr.source_instance_id = eo.source_instance_id
        AND rr.external_id = eo.external_id
+      LEFT JOIN operations.v_device_source_record_lifecycle_current lc
+        ON lc.observation_id = eo.observation_id
+     CROSS JOIN LATERAL operations.record_name_forms(
+          eo.platform, eo.entity_type,
+          coalesce(nullif(eo.canonical_data ->> 'hostname', ''), eo.canonical_data ->> 'guest_name'),
+          eo.canonical_data ->> 'domain') forms
      WHERE d.tenant_id = %s AND d.deleted_at IS NULL
-       AND (eo.entity_type LIKE 'agent.%%' OR eo.entity_type LIKE 'vm.%%')
+       AND eo.entity_type = ANY(%s::text[])
+       AND (%s::uuid[] IS NULL OR d.id = ANY(%s::uuid[]))
        AND eo.entity_key NOT LIKE 'device-health:%%'
 ), live AS (
     SELECT device_id, bool_or(active) AS live FROM recs GROUP BY device_id
-), two_machines AS (
-    -- Two records of one source online at once under different names: two
-    -- machines already share this Computer; it is never merged further.
-    SELECT DISTINCT x.device_id
-      FROM recs x JOIN recs y
-        ON y.device_id = x.device_id AND y.stream = x.stream
-       AND x.active AND y.active AND x.online AND y.online
-       AND x.host <> '' AND y.host <> '' AND x.host < y.host
 )
 SELECT r.device_id, r.client_id, min(r.created_at) AS created_at, l.live,
        coalesce(array_agg(DISTINCT r.sn) FILTER (
            WHERE r.sn IS NOT NULL AND length(r.sn) >= 4
              AND r.sn !~ '^(.)\\1*$'
              AND r.sn NOT IN (SELECT v FROM rej)
-             AND (r.active OR NOT l.live)), '{}') AS serials,
+             AND r.active), '{}') AS serials,
        coalesce(array_agg(DISTINCT r.vu) FILTER (
-           WHERE r.vu IS NOT NULL AND (r.active OR NOT l.live)), '{}') AS vm_uuids,
+           WHERE r.vu IS NOT NULL AND r.active), '{}') AS vm_uuids,
        coalesce(array_agg(DISTINCT r.stream) FILTER (WHERE r.active AND r.online), '{}')
            AS online_streams,
-       EXISTS (SELECT 1 FROM two_machines t WHERE t.device_id = r.device_id) AS two_machines
+       coalesce(jsonb_agg(jsonb_build_array(
+           r.platform, r.entity_type, r.host,
+           CASE WHEN length(r.sn) >= 4 AND r.sn !~ '^(.)\\1*$'
+                          AND r.sn NOT IN (SELECT v FROM rej) THEN r.sn END,
+           r.vu, r.last_seen_at
+       )) FILTER (WHERE r.active AND r.host <> '' AND r.entity_type LIKE 'agent.%%'),
+       '[]'::jsonb) AS hostname_reports
   FROM recs r JOIN live l ON l.device_id = r.device_id
  GROUP BY r.device_id, r.client_id, l.live
 """
@@ -1374,14 +1581,15 @@ SELECT r.device_id, r.client_id, min(r.created_at) AS created_at, l.live,
 def planned_proven_merges(cur, *, owned: set[uuid.UUID] | None = None) -> list[tuple]:
     """Merges the resolver would make: (survivor, absorbed, kind, value).
 
-    Computers in one client that report the same usable serial or VM UUID are
-    one machine split apart (ADR-0032). A Computer is merged only when it
+    A shared usable serial or VM UUID can establish a match without an
+    independent second clue. A Computer is merged only when it
     reports exactly one serial and at most one VM UUID, so one that holds two
     machines is never merged further (it raises "two machines on one
     Computer" instead). The oldest live Computer of each group survives.
     """
     separated = _operator_separated_pairs(cur)
-    cur.execute(PROVEN_SPLIT_SQL, (TENANT_ID,))
+    identity_types = sorted(identity_entity_types(cur))
+    cur.execute(PROVEN_SPLIT_SQL, (TENANT_ID, identity_types, None, None))
     rows = cur.fetchall()
     groups: dict[tuple, list[tuple]] = {}
     for (
@@ -1392,15 +1600,15 @@ def planned_proven_merges(cur, *, owned: set[uuid.UUID] | None = None) -> list[t
         serials,
         vm_uuids,
         online_streams,
-        two_machines,
+        hostname_reports,
     ) in rows:
         if owned is not None and device_id not in owned:
             continue
-        if two_machines or len(serials) > 1 or len(vm_uuids) > 1:
+        if hostname_conflict(hostname_reports) or len(serials) > 1 or len(vm_uuids) > 1:
             continue
         for kind, values in (("serial", serials), ("vm_uuid", vm_uuids)):
             if values:
-                groups.setdefault((client_id, kind, values[0]), []).append(
+                groups.setdefault((kind, values[0]), []).append(
                     (
                         device_id,
                         created_at,
@@ -1408,76 +1616,101 @@ def planned_proven_merges(cur, *, owned: set[uuid.UUID] | None = None) -> list[t
                         tuple(serials),
                         tuple(vm_uuids),
                         frozenset(online_streams),
+                        client_id,
+                        hostname_reports,
                     )
                 )
     planned: list[tuple] = []
     absorbed: set = set()
-    for (_client_id, kind, value), members in sorted(
+    for (kind, value), members in sorted(
         groups.items(), key=lambda item: str(item[0])
     ):
         members = [member for member in members if member[0] not in absorbed]
-        if len(members) < 2 or not any(member[2] for member in members):
-            continue
-        # A serial group whose members carry different VM UUIDs (or the
-        # reverse) is not proven one machine.
-        other = 4 if kind == "serial" else 3
-        if len({member[other] for member in members if member[other]}) > 1:
-            continue
-        # Two members each online in the same source: two live installs, so
-        # two machines sharing a serial (a cloned VM), not a split.
-        seen: set = set()
-        clash = False
-        for member in members:
-            if seen & member[5]:
-                clash = True
-                break
-            seen |= member[5]
-        if clash:
-            continue
-        # An operator decision (confirmed separate, or records split off) is
-        # never undone by an automatic merge.
-        ids = [member[0] for member in members]
-        if any((a, b) in separated for a in ids for b in ids if a != b):
-            continue
-        survivor = min(
-            (member for member in members if member[2]), key=lambda m: (m[1], str(m[0]))
-        )
-        for member in members:
-            if member[0] != survivor[0]:
-                planned.append((survivor[0], member[0], kind, value))
-                absorbed.add(member[0])
+        other_index = 4 if kind == "serial" else 3
+        other_values = {member[other_index][0] for member in members if member[other_index]}
+        if len(other_values) > 1:
+            # A reused identifier must not prevent an internally consistent
+            # subgroup from converging. Records missing the distinguishing
+            # value cannot safely choose between those subgroups.
+            subgroups = [
+                [member for member in members if member[other_index] == (other_value,)]
+                for other_value in sorted(other_values)
+            ]
+        else:
+            subgroups = [members]
+        # Identity is assessed across clients. The current merge authority
+        # still acts within one client, so plan each client group separately.
+        scoped_subgroups = []
+        for machine_group in subgroups:
+            by_client: dict[uuid.UUID | None, list[tuple]] = {}
+            for member in machine_group:
+                by_client.setdefault(member[6], []).append(member)
+            scoped_subgroups.extend(by_client.values())
+        for subgroup in scoped_subgroups:
+            if len(subgroup) < 2 or not any(member[2] for member in subgroup):
+                continue
+            ids = {member[0] for member in subgroup}
+            assessment = assess_identifier_group(
+                serial_groups=[member[3] for member in subgroup],
+                vm_uuid_groups=[member[4] for member in subgroup],
+                separated=any(a != b and a in ids and b in ids for a, b in separated),
+                required_proof=kind,
+            )
+            if assessment.outcome != "same" or hostname_conflict(
+                report for member in subgroup for report in member[7]
+            ):
+                continue
+            survivor = min(
+                (member for member in subgroup if member[2]), key=lambda m: (m[1], str(m[0]))
+            )
+            for member in subgroup:
+                if member[0] == survivor[0]:
+                    continue
+                assessment, _ = _assess_merge_proof(
+                    cur, survivor[0], member[0], kind, value, identity_types
+                )
+                if assessment.outcome == "same":
+                    planned.append((survivor[0], member[0], kind, value))
+                    absorbed.add(member[0])
     return planned
 
 
-def _operator_separated_pairs(cur) -> set[tuple]:
+def _operator_separated_pairs(cur, device_ids=None) -> set[tuple]:
     """Computer pairs an operator kept apart (decisions or a split), both directions."""
-    cur.execute(
-        """
-        SELECT dec.device_id, k.value::uuid
-          FROM operations.device_operator_decisions dec,
-               jsonb_array_elements_text(dec.value) k
-         WHERE dec.tenant_id = %s AND dec.dimension = 'identity_separate'
-        UNION
-        SELECT dec.device_id, eo.device_id
-          FROM operations.device_operator_decisions dec,
-               jsonb_array_elements_text(dec.value) k
-          JOIN operations.entity_observation_current eo
-            ON eo.tenant_id = %s AND eo.platform = split_part(k.value, '|', 1)
-           AND eo.entity_key = substr(k.value, length(split_part(k.value, '|', 1)) + 2)
-         WHERE dec.tenant_id = %s AND dec.dimension = 'identity_excluded_records'
-           AND eo.device_id IS NOT NULL
-        UNION
-        -- A merge that was split is an operator decision that they differ.
-        SELECT survivor_id, absorbed_id FROM operations.computer_merges
-         WHERE tenant_id = %s AND split_at IS NOT NULL
-        """,
-        (TENANT_ID, TENANT_ID, TENANT_ID, TENANT_ID),
+    return operator_separated_pairs(cur, TENANT_ID, device_ids)
+
+
+def _current_merge_is_safe(cur, survivor, absorbed, kind, value, identity_types) -> bool:
+    """Recheck current group conflicts and separations for a planned pair."""
+    device_ids = [survivor, absorbed]
+    cur.execute(PROVEN_SPLIT_SQL, (TENANT_ID, identity_types, device_ids, device_ids))
+    rows = cur.fetchall()
+    separated = _operator_separated_pairs(cur, device_ids)
+    if not _pair_has_no_current_conflict(rows, device_ids, separated):
+        return False
+    matching_index = 4 if kind == "serial" else 5
+    if any(tuple(row[matching_index]) != (value,) for row in rows):
+        return False
+    return True
+
+
+def _pair_has_no_current_conflict(rows, device_ids, separated) -> bool:
+    """Apply shared group contradiction checks to the complete current pair."""
+    if len(rows) != 2 or any(row is None for row in rows):
+        return False
+    if {row[0] for row in rows} != set(device_ids):
+        return False
+    if any(not row[3] for row in rows) or hostname_conflict(
+        report for row in rows for report in row[7]
+    ):
+        return False
+    return not group_has_conflict(
+        identifiers=[row[4] for row in rows],
+        vm_identifiers=[row[5] for row in rows],
+        streams=[frozenset(row[6]) for row in rows],
+        device_ids=device_ids,
+        separated=separated,
     )
-    pairs: set[tuple] = set()
-    for a, b in cur.fetchall():
-        pairs.add((a, b))
-        pairs.add((b, a))
-    return pairs
 
 
 # Hourly maintenance inside the resolver. The cadence lives in the database
@@ -1661,28 +1894,62 @@ def run_shadow_naming() -> None:
 
 def merge_proven_splits(cur) -> int:
     """Merge Computers proven to be one machine; each merge is recorded."""
-    # Source updates invalidate ownership under the same row lock. Hold that
-    # lock while reading proof and merging, so an old client cannot establish
-    # that two Computers share a scope.
-    owned = identity_findings._lock_owned_computers(cur, TENANT_ID)
-    planned = planned_proven_merges(cur, owned=owned)[:MAX_AUTOMATIC_MERGES_PER_RUN]
+    # Candidate discovery is advisory. Lock and recheck each selected pair
+    # rather than retaining ownership locks for every Computer in the tenant.
+    planned = planned_proven_merges(cur)[:MAX_AUTOMATIC_MERGES_PER_RUN]
     merged = []
+    enforce_ninja_slot = _ninja_association_guards_present(cur)
     for survivor, absorbed, kind, value in planned:
         # An earlier merge in this transaction dirties its survivor. Defer any
         # remaining pair involving it until the projector has re-evaluated it.
-        cur.execute(
-            """
-            SELECT d.id, d.client_id FROM operations.devices d
-            JOIN operations.computer_client_ownership owner
-              ON owner.tenant_id = d.tenant_id AND owner.device_id = d.id
-             AND owner.effective_client_id = d.client_id
-             AND owner.state IN ('resolved', 'decision_protected')
-            WHERE d.tenant_id = %s AND d.deleted_at IS NULL AND d.id = ANY(%s::uuid[])
-            """,
-            (TENANT_ID, [survivor, absorbed]),
+        scopes = current_client_scopes(cur, TENANT_ID, [survivor, absorbed], lock=True)
+        if scopes is None or scopes[survivor] != scopes[absorbed]:
+            continue
+        estimated_id = None
+        two_ninja_slots = False
+        if enforce_ninja_slot:
+            cur.execute(
+                """
+                SELECT device.id, device.created_reason = 'identity_estimated',
+                       EXISTS (
+                           SELECT 1 FROM operations.device_operator_decisions decision
+                            WHERE decision.tenant_id = device.tenant_id AND decision.device_id = device.id
+                       ),
+                       EXISTS (
+                           SELECT 1 FROM operations.entity_observation_current observation
+                            WHERE observation.tenant_id = device.tenant_id AND observation.device_id = device.id
+                              AND observation.platform = 'Ninja'
+                              AND NOT operations.is_companion_stream(observation.tenant_id,
+                                  observation.source_instance_id, observation.external_namespace)
+                       )
+                  FROM operations.devices device
+                 WHERE device.tenant_id = %s AND device.id = ANY(%s)
+                   AND device.deleted_at IS NULL AND device.lifecycle_status <> 'retired'
+                """,
+                (TENANT_ID, [survivor, absorbed]),
+            )
+            anchors = cur.fetchall()
+            if len(anchors) != 2:
+                continue
+            estimates = [row for row in anchors if row[1]]
+            if len(estimates) == 1:
+                estimated_id, _, has_decision, _ = estimates[0]
+                if has_decision:
+                    continue
+                if survivor == estimated_id:
+                    survivor, absorbed = absorbed, survivor
+            two_ninja_slots = all(row[3] for row in anchors)
+            if two_ninja_slots and estimated_id is None:
+                continue
+        identity_types = sorted(identity_entity_types(cur))
+        if not _current_merge_is_safe(cur, survivor, absorbed, kind, value, identity_types):
+            continue
+        assessment, corroboration = _assess_merge_proof(
+            cur, survivor, absorbed, kind, value, identity_types
         )
-        current = cur.fetchall()
-        if len(current) != 2 or current[0][1] != current[1][1]:
+        if assessment.outcome != "same":
+            continue
+        if two_ninja_slots and not prepare_estimated_ninja_merge(cur, TENANT_ID, survivor, estimated_id):
             continue
         label = "serial number" if kind == "serial" else "VM UUID"
         cur.execute(
@@ -1695,7 +1962,7 @@ def merge_proven_splits(cur) -> int:
                 survivor,
                 absorbed,
                 f"Both Computers report the same {label}.",
-                Json({kind: value}),
+                Json({kind: value, "conflict_rule_revision": CONFLICT_RULE_REVISION, **corroboration}),
             ),
         )
         merged.append((survivor, absorbed))
@@ -1705,12 +1972,67 @@ def merge_proven_splits(cur) -> int:
     return len(merged)
 
 
+def _repair_legacy_ninja_identity() -> None:
+    with db.transaction() as cur:
+        cur.execute("SET LOCAL operations.tenant_id = 1")
+        if not _ninja_association_guards_present(cur):
+            return
+        cur.execute("SELECT to_regclass('operations.v_reversible_serial_merges') IS NOT NULL")
+        if not cur.fetchone()[0]:
+            return
+        cur.execute(
+            """
+            SELECT merge_id, old_id, old_input, old_association, kept_id, kept_input, kept_association, membership,
+                   survivor_id, absorbed_id
+              FROM operations.v_reversible_serial_merges
+             WHERE tenant_id = %s
+             ORDER BY merged_at, merge_id
+             LIMIT %s
+            """,
+            (TENANT_ID, RESOLUTION_TRANSACTION_ROWS),
+        )
+        reversals = cur.fetchall()
+        cur.execute(
+            """
+            SELECT observation.device_id
+              FROM operations.entity_observation_current observation
+             WHERE observation.tenant_id = %s AND observation.device_id IS NOT NULL
+               AND observation.platform = 'Ninja'
+               AND NOT operations.is_companion_stream(
+                   observation.tenant_id, observation.source_instance_id, observation.external_namespace)
+             GROUP BY observation.device_id
+            HAVING count(*) > 1 AND count(*) FILTER (
+                WHERE observation.active AND observation.canonical_data ->> 'offline' = 'false') = 1
+             ORDER BY max(observation.observed_at) DESC, observation.device_id
+             LIMIT %s
+            """,
+            (TENANT_ID, RESOLUTION_TRANSACTION_ROWS),
+        )
+        duplicates = [row[0] for row in cur.fetchall()]
+    for *arguments, membership, survivor_id, absorbed_id in reversals:
+        with db.findings_transaction(TENANT_ID) as cur:
+            cur.execute(
+                "SELECT operations.reverse_legacy_serial_merge(%s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                (TENANT_ID, *arguments, Json(membership)),
+            )
+            if cur.fetchone()[0]:
+                write_computer_names(cur, [survivor_id, absorbed_id])
+                _add_count("legacy_serial_merges_reversed", 1)
+    for computer_id in duplicates:
+        with db.findings_transaction(TENANT_ID) as cur:
+            if reconcile_existing_ninja_records(cur, TENANT_ID, computer_id):
+                write_computer_names(cur, [computer_id])
+                _add_count("legacy_ninja_successors_selected", 1)
+
+
 def _create_device_for_group(
     cur,
     agent_ids: dict[str, int],
     client_id,
     norm: str,
     group: list[tuple],
+    *,
+    identity_estimated: bool = False,
 ) -> uuid.UUID:
     """Create one Computer for a machine group no existing Computer matched."""
     # device_role is not derived here — the projector owns it. The layer
@@ -1733,7 +2055,7 @@ def _create_device_for_group(
     )
     platforms = sorted({entry[0] for entry in group})
     device_id = uuid.uuid4()
-    reason = f"auto-promoted from {', '.join(platforms)}"
+    reason = "identity_estimated" if identity_estimated else f"auto-promoted from {', '.join(platforms)}"
     _create_device_anchor(cur, device_id, client_id, reason)
     cur.execute(
         """
@@ -1786,6 +2108,8 @@ def _create_device_for_group(
             " 'ingest.identity.resolver', true)",
             (TENANT_ID, entry[7], device_id),
         )
+        if identity_estimated and not cur.fetchone()[0]:
+            raise RuntimeError("Estimated Computer could not claim its source record")
     log.info(
         "resolver: promoted device %s hostname=%s client=%s platforms=%s",
         device_id,
@@ -1799,7 +2123,7 @@ def _create_device_for_group(
 def _upsert_shared_serial_findings(cur, finding_type_id: int, *, owned=None) -> int:
     """Upsert shared-serial findings with a UUID canonical subject.
 
-    ADR-0032: the serials compared are those the active agent and VM records
+    ADR-0032: the serials compared are those the active identity records
     of current Computers report now, not the stored Computer serial (which
     missed 26 Computers). Automatic merges absorb most groups first; what
     remains is two live installs of one source (a clone) or a Computer that
@@ -1824,7 +2148,7 @@ def _upsert_shared_serial_findings(cur, finding_type_id: int, *, owned=None) -> 
                 ON eo.tenant_id = d.tenant_id AND eo.device_id = d.id
              WHERE d.tenant_id = %s AND d.deleted_at IS NULL AND eo.active
                AND d.id = ANY(%s::uuid[])
-               AND (eo.entity_type LIKE 'agent.%%' OR eo.entity_type LIKE 'vm.%%')
+               AND eo.entity_type = ANY(%s::text[])
                AND eo.entity_key NOT LIKE 'device-health:%%'
                AND NOT EXISTS (SELECT 1 FROM operations.identity_roaming_records rr
                                 WHERE rr.tenant_id = eo.tenant_id
@@ -1888,7 +2212,7 @@ def _upsert_shared_serial_findings(cur, finding_type_id: int, *, owned=None) -> 
             confidence = EXCLUDED.confidence
         RETURNING id, condition_key, subject_id
         """,
-        (TENANT_ID, list(owned), finding_type_id),
+        (TENANT_ID, list(owned), sorted(identity_entity_types(cur)), finding_type_id),
     )
     rows = cur.fetchall()
     now = datetime.now(UTC)
