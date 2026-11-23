@@ -55,8 +55,9 @@ Plan lifecycle belongs to the registry; other page baselines stay open.
 
 Matching, reversible repair, and source-owned software read models are in the
 commit scope. [Files, rehearsal results, and open checks](docs/plans/PLAN-015-identity-reconciliation.md).
-**Next:** Review the commit for separate rollout approval covering 0426–0436
-and scheduled repairs. Use existing rehearsal evidence and keep testing light.
+**Checkpoint:** Production is healthy on `95b692f1` with migrations through
+0436. Milestone 3 acceptance passed in rehearsal with the local Ninja fix.
+**Next:** Verify the 0.144.46 rollout. Daily Jobs scheduling remains Milestone 4.
 
 ## PLAN-016 — Admin SQL explorer
 

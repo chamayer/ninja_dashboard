@@ -582,6 +582,10 @@ merge, B's Computer has no current T after reversal.
 
 ## Milestone 3 — Operational continuity through identity changes
 
+**Status (2026-11-23):** Acceptance passed in the isolated PostgreSQL rehearsal
+with the resolver fix. The approved 0.144.46 rollout requires production
+verification. See the [rehearsal closeout](#milestone-3-rehearsal-closeout).
+
 - **Estimated identity:** Keep a verified assignment while supported.
   Give a reporting Ninja record with no verified home a stable working
   Computer when the matching evidence is inconclusive. Begin coverage from
@@ -971,6 +975,96 @@ the archival and supersession migrations refuse rollback with history, and
 the pending-inventory migration refuses rollback while publication is pending.
 This review used tracked and worktree files only. It did not verify current
 production state, apply migrations, schedule jobs, or rerun the tests.
+
+The approved PLAN-015 commit, `95b692f1`, was pushed to `origin/master` and
+then to `a-m-rose/master`. Both remote branches were verified at that commit.
+Release metadata remains 0.144.45 per the approved commit. The repository
+instructions identify the push as the automatic Portainer trigger, and the
+older operations guide still describes a separate invocation. No separate
+invocation was issued. Live service health and migration state were not checked.
+
+Post-deployment validation on 2026-11-23 used the shared workstation helper
+for Docker status, HTTP health endpoints, file hashes, and read-only SQL.
+All four production containers were healthy with zero restarts. Operations
+reported `ok`, ingest reported `ready`, and the installed version was
+`0.144.45`. The Django ledger contained all eleven migrations, 0426–0436.
+The deployed resolver and 0436 migration file hashes matched `95b692f1`.
+The production audit contained zero Ninja supersessions, automatic legacy
+serial reversals, and installation findings closed for an ended client
+scope. No Jobs or repairs were triggered. Milestone 3 still needs scoped
+end-to-end evidence for the reimaged Ninja successor, automatic legacy
+reversal, and installation ownership transition. Reuse the existing
+rehearsal evidence and cover these gaps in one authorized rehearsal.
+
+Scoped 0436 rehearsal used the existing isolated database on am-ch-01.
+The automatic reversal function executed as `ninja_ingest` with the real
+tenant guard and association writer. It restored both Computers and all four
+current links, kept the fifth observation as history, and returned false on
+identical retry. The first attempt hit the 12-second statement cap. The retry
+passed within a 45-second cap. The split audit was verified before rollback.
+
+The Ninja successor handler applied one eligible case, retained exactly one
+current Ninja link, wrote supersession history, and did nothing on retry.
+An earlier candidate passed the Python planner but the SQL writer rejected
+its predecessor with `NoDataFound`. The restricted `ninja_ingest` role also
+could not read `operations.evaluator_config` when planning. The successful
+handler check used the rehearsal database login. The transaction rolled back.
+Estimate consolidation and replay of a complete listing remain open.
+
+Follow-up reproduced the rejected case with three Ninja records. Retiring the
+first predecessor advanced the second predecessor's source input version
+inside the same transaction, leaving the original plan stale for the second
+write. Its association version and SQL activity checks still matched. A
+rolled-back prototype reran the planner before the second write, required
+the same successor and remaining membership, and then used the refreshed
+input versions. It retired both predecessors, retained one active link and
+the supersession history, and left the result unchanged on retry. Production
+ingest and Jobs worker are configured to use the standard database login,
+which can read the evaluator configuration. The restricted-role failure is
+separate from this production execution path.
+
+The resolver fix now replans between predecessor writes within the existing
+guarded transaction. It requires the same successor, remaining membership,
+association versions, and eligibility facts before accepting refreshed input
+versions. Audit entries retain the original reviewed digest. On the same 0436
+rehearsal database, the patched module retired both predecessors, retained one
+active link and both audit rows, and left the result unchanged on retry. A
+simulated successor change during revalidation rolled back the first retirement.
+Both checks used the isolated rehearsal and left its baseline intact. The
+patch is local.
+
+### Milestone 3 rehearsal closeout
+
+On 2026-11-23, a synthetic client-scoped Ninja source in the isolated 0436
+rehearsal exercised the normal observation writer, identity promotion,
+Computer ownership projector, and merge writer. After the first complete
+listing, promotion created a verified Computer for the older record and an
+estimated Computer for the new record whose evidence was inconclusive. After
+the second listing supplied matching hardware and current contact evidence, the
+scoped resolver merged the estimate into the verified Computer, moved the
+current Ninja record, and recorded the predecessor's supersession.
+Two more complete listings included both records. Each accepted the
+predecessor as reporting source evidence and left its Computer association
+closed. The successor remained the only current Ninja association.
+
+The rehearsal used an isolated source and scoped merge candidates to the two
+synthetic Computers. It did not call the vendor or admit production Jobs. A
+read-only follow-up confirmed the synthetic source, snapshot runs, and
+supersession rows were absent after rollback. Together with the scoped
+automatic legacy reversal and installation ownership checks, this
+closes the Milestone 3 PostgreSQL acceptance cases. Release 0.144.46 packages
+the Ninja fix without additional migrations. Milestone 4 owns daily Jobs
+scheduling.
+
+The ownership rehearsal applied one scoped ownership choice and ran the
+real ownership projector and software finding reconciliation on a prepared
+suspicious-path input. The installation UUID stayed stable, the new client
+became the effective owner, the old episode closed with
+`client_scope_ended`, and a distinct open episode appeared in the new
+scope. The transaction rolled back. This check exercised the producer and
+reconciler directly, without Jobs admission or a client-facing request.
+
+### Earlier implementation notes
 
 The revised Milestone 2 design governs new work. Migrations 0428–0431 and
 the reviewed repair action remain local drafts built against the earlier

@@ -667,8 +667,8 @@ do not open competing blueprints for the same work.
 - Source: operations/docs/plans/PLAN-015-identity-reconciliation.md
 - Section: PLAN-015 — Computer identity reconciliation
 - Related plans: PLAN-004 and PLAN-036 supply source-record and finding contracts. PLAN-045 owns client projection. Coordinate daily scheduling and affected readers with PLAN-056 before rollout.
-- Resume gate: Local testing is paused. The user authorized maintained Software Installations state and its refresh workflow, targeting a first-page load under two seconds. Rehearse the new migration, invalidation, permissions and request timing on am-ch-01. Live production writes and rollout retain separate approvals.
-- Last checked: 2026-11-23 (Installations first page and one refresh passed. Products, Publishers, and two Finding Review comparisons passed. Seven client-scope Issues fixture cases passed. Representative installation findings and valid Computer detail and Overview rehearsal inputs remain open.)
+- Resume gate: Milestone 3 acceptance is complete in rehearsal. Verify the approved 0.144.46 rollout before resuming Milestone 4 daily Jobs scheduling.
+- Last checked: 2026-11-23 (production rollout and 0426–0436 confirmed. Scoped rehearsal verified automatic reversal, installation ownership, Ninja supersession, estimated Computer consolidation, and two complete listing replays. The fixture rolled back.)
 
 ## PLAN-016 — Admin read-only SQL explorer
 

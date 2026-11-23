@@ -170,10 +170,31 @@ def prepare_estimated_ninja_merge(cur, tenant_id: int, computer_id: UUID, estima
 
 
 def _apply(cur, tenant_id: int, computer_id: UUID, plan: dict, digest: str) -> dict:
-    selected = next(row for row in plan["records"] if row["subject_id"] == plan["selected_subject_id"])
-    for older in plan["records"]:
-        if older is selected:
-            continue
+    selected_id = plan["selected_subject_id"]
+    remaining = {row["subject_id"]: row for row in plan["records"]}
+    selected = remaining[selected_id]
+    candidate_id = UUID(selected_id) if selected["device_id"] is None else None
+    estimated_id = UUID(plan["estimated_id"]) if plan["estimated_id"] else None
+    predecessors = [subject_id for subject_id in remaining if subject_id != selected_id]
+    for index, predecessor_id in enumerate(predecessors):
+        if index:
+            # Retiring a predecessor can invalidate the remaining source input
+            # versions. Reprove the same successor before using fresh versions.
+            current = _plan(cur, tenant_id, computer_id, candidate_id, estimated_id=estimated_id)
+            records = {row["subject_id"]: row for row in current["records"]}
+            if (
+                current["selected_subject_id"] != selected_id
+                or records.keys() != remaining.keys()
+                or any(
+                    row != (remaining[subject_id] | {"input_version": row["input_version"]})
+                    for subject_id, row in records.items()
+                )
+            ):
+                raise SuccessorNeedsReview("Ninja successor evidence changed during supersession")
+            remaining = records
+            selected = remaining[selected_id]
+
+        older = remaining.pop(predecessor_id)
         evidence = {
             "computer_id": str(computer_id), "machine_outcome": plan["machine_outcome"],
             "machine_reason": plan["machine_reason"], "selection_digest": digest,
@@ -213,8 +234,8 @@ def _apply(cur, tenant_id: int, computer_id: UUID, plan: dict, digest: str) -> d
         row = cur.fetchone()
         if not row or row[0] != selected["association_version"] + 1:
             raise ValueError("The selected Ninja record was not attached. No change was saved.")
-    return {"computer_id": str(computer_id), "selected_subject_id": selected["subject_id"],
-            "superseded_count": len(plan["records"]) - 1}
+    return {"computer_id": str(computer_id), "selected_subject_id": selected_id,
+            "superseded_count": len(predecessors)}
 
 
 def run(tenant_id: int, computer_id: UUID, candidate_id: UUID | None, reviewed_digest: str | None) -> dict:

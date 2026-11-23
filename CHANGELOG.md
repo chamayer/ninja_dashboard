@@ -2,6 +2,12 @@
 
 All notable changes in this project follow [Semantic Versioning](https://semver.org/).
 
+## [0.144.46] — 2026-11-23 — Fix Ninja record supersession
+
+- Revalidate the remaining Ninja records between predecessor retirements so
+  one Computer can keep its current Ninja record and preserve multiple older
+  records in association history. This change adds no migrations.
+
 ## [0.144.45] — 2026-11-19 — Speed up filtered Issues
 
 - Reduce client-scoped issue summary and page lookup work. No migrations.

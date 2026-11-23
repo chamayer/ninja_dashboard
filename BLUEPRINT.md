@@ -34,7 +34,7 @@ validation results, or completed-plan summaries here.
   (deploy-interrupted runs) is implemented locally; ship it with the next
   approved release and verify after a deploy. See the
   [plan](docs/plans/PLAN-037-source-failures.md).
-- **PLAN-015 — active.** Next: review the scoped commit for separate rollout approval.
+- **PLAN-015 — active.** Next: verify the Ninja fix rollout, then resume Milestone 4.
   See the [Operations checkpoint](operations/BLUEPRINT.md).
 - **PLAN-016 — active.** Next: implement the bounded, tenant-scoped,
   read-only explorer and focused tests. See the [plan](operations/docs/plans/PLAN-016-admin-sql-explorer.md)
